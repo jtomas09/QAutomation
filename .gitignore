@@ -1,5 +1,49 @@
-# Project exclude paths
-/.gradle/
-/build/
-/build/classes/
-/build/classes/java/test/
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- IntelliJ / Android Studio ---
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# --- Gradle ---
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# --- Logs / artifacts ---
+logs/
+*.log
+
+# --- Allure (NO subir resultados ni reportes generados) ---
+allure-results/
+allure-report/
+allure-results-history/
+**/allure-results/
+**/allure-report/
+
+# --- Evidence / reports (si generas PDFs, screenshots, etc.) ---
+screenshots/
+evidence/
+reports/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# --- Local env / secrets ---
+.env
+*.secret
+*secrets*
+smtp-config.json
+**/smtp-config.json
+
+# --- Node (si algún día usas scripts) ---
+node_modules/
+
+# --- Appium local artifacts (si los generas) ---
+appium.log
