@@ -1,0 +1,50 @@
+name: Tests + Allure
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "gradle"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # Variables (si las necesitas)
+      - name: Export SMTP env (optional)
+        run: |
+          echo "SMTP_HOST=${{ secrets.SMTP_HOST }}" >> $GITHUB_ENV
+          echo "SMTP_PORT=${{ secrets.SMTP_PORT }}" >> $GITHUB_ENV
+          echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> $GITHUB_ENV
+          echo "SMTP_PASS=${{ secrets.SMTP_PASS }}" >> $GITHUB_ENV
+          echo "SMTP_FROM=${{ secrets.SMTP_FROM }}" >> $GITHUB_ENV
+          echo "SMTP_TO=${{ secrets.SMTP_TO }}" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: ./gradlew clean test
+
+      - name: Generate Allure report
+        if: always()
+        run: ./gradlew allureReport
+
+      - name: Upload Allure report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: build/reports/allure-report
