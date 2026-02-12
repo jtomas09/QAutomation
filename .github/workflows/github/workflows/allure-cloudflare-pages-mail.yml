@@ -1,0 +1,52 @@
+name: Allure -> Cloudflare Pages -> Email
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  run_deploy_email:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # 1) Ejecutar tests y generar allureReport (Gradle)
+      - name: Run tests + Allure report
+        run: |
+          chmod +x ./gradlew
+          ./gradlew clean test allureReport
+
+      # 2) Deploy a Cloudflare Pages (carpeta del reporte Allure)
+      - name: Deploy to Cloudflare Pages
+        id: cf
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ secrets.CF_PAGES_PROJECT_NAME }}
+          directory: build/reports/allure-report/allureReport
+
+      # 3) (Opción 1) Enviar el correo con TU CÓDIGO Java
+      #    Para esto necesitas tener un task Gradle tipo JavaExec que ejecute utils.AllureMailRunner.
+      - name: Send email using your Java sender
+        run: |
+          echo "Allure URL: ${{ steps.cf.outputs.url }}"
+          chmod +x ./gradlew
+          ./gradlew runAllureMailRunner \
+            -Dallure.public.url="${{ steps.cf.outputs.url }}" \
+            -Dmail.smtp.host="${{ secrets.SMTP_HOST }}" \
+            -Dmail.smtp.port="${{ secrets.SMTP_PORT }}" \
+            -Dmail.smtp.user="${{ secrets.SMTP_USER }}" \
+            -Dmail.smtp.pass="${{ secrets.SMTP_PASS }}" \
+            -Dmail.from="${{ secrets.EMAIL_FROM }}" \
+            -Dmail.to="${{ secrets.EMAIL_TO }}"

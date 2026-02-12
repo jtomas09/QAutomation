@@ -1,0 +1,78 @@
+plugins {
+    id 'java'
+    id 'io.qameta.allure' version '2.11.2'
+}
+
+group = 'qa.cinema'
+version = '1.0.0'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(17) }
+}
+
+repositories { mavenCentral() }
+
+ext {
+    junitVersion = '5.10.2'
+    seleniumVersion = '4.23.0'
+    appiumJavaClientVersion = '9.2.2'
+    assertjVersion = '3.26.3'
+    webDriverManagerVersion = '5.9.2'
+}
+
+dependencies {
+    implementation "io.appium:java-client:${appiumJavaClientVersion}"
+
+    testImplementation "org.seleniumhq.selenium:selenium-java:${seleniumVersion}"
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+    testImplementation "io.qameta.allure:allure-junit5:2.29.0"
+    testImplementation "org.assertj:assertj-core:${assertjVersion}"
+    testImplementation "io.github.bonigarcia:webdrivermanager:${webDriverManagerVersion}"
+    testImplementation "org.junit.platform:junit-platform-suite:1.10.2"
+
+    implementation "com.sun.mail:jakarta.mail:2.0.1"
+    implementation "org.apache.pdfbox:pdfbox:2.0.28"
+}
+
+// ---------- ALLURE ----------
+allure {
+    version = '2.29.0'
+    adapter {
+        aspectjWeaver.set(true)
+        frameworks {
+            junit5 { enabled = true }
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+    systemProperties System.getProperties()
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = true
+        exceptionFormat "full"
+    }
+
+    // ✅ IMPORTANTE:
+    // NO mandar correo desde Gradle.
+    // El correo se manda SOLO desde JUnit Extension (PdfReportExtension/SuiteMailer)
+    // cuando corres desde Android Studio.
+}
+// ---------- RUNNER PARA ENVIAR CORREO DESDE CI ----------
+tasks.register('runAllureMailRunner', JavaExec) {
+    group = "reporting"
+    description = "Envía correo final (HTML + PDF) desde CI"
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "utils.AllureMailRunner"
+    systemProperties System.getProperties()
+}
+
+tasks.register('ciAllureEmail') {
+    group = "reporting"
+    description = "Tests + Allure Report + Email"
+    dependsOn "test", "allureReport", "runAllureMailRunner"
+}
+
+
