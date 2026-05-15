@@ -5,25 +5,33 @@ import io.qameta.allure.Allure;
 import org.junit.jupiter.api.Assertions;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
+import org.opentest4j.TestAbortedException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
 public class TestSteps {
 
-    // Carpeta donde se guardan las evidencias (imágenes) para el PDF
+    private static final Logger log = LoggerFactory.getLogger(TestSteps.class);
+
+    /** Set to false via -DcaptureEvidence=false to skip screenshot capture and speed up execution. */
+    private static final boolean CAPTURE_EVIDENCE_ENABLED =
+            Boolean.parseBoolean(System.getProperty("captureEvidence", "true"));
+
     private static final Path EVIDENCE_DIR = Paths.get("build", "evidencias");
 
-    // Lista de pasos por hilo/test
     private static final ThreadLocal<List<StepResult>> steps =
             ThreadLocal.withInitial(ArrayList::new);
 
-    // Nombre del test actual (para nombrar archivos)
     private static final ThreadLocal<String> currentTestName = new ThreadLocal<>();
 
     public static void startScenario(String testName) {
@@ -33,43 +41,49 @@ public class TestSteps {
 
     public static List<StepResult> finishScenario() {
         List<StepResult> copy = new ArrayList<>(steps.get());
-        steps.remove();              // 🔥 libera ThreadLocal
+        steps.remove();
         currentTestName.remove();
         return copy;
     }
 
     public static void run(String name, Runnable action, AndroidDriver driver) {
+        final String[] ref = {null};
         try {
-            // Ejecutar el paso como step de Allure
-            Allure.step(name, action::run);
+            Allure.step(name, () -> {
+                action.run();
+                if (CAPTURE_EVIDENCE_ENABLED) {
+                    ref[0] = captureEvidence(driver, name, name + " - OK");
+                }
+            });
+            steps.get().add(new StepResult(name, "OK", ref[0]));
 
-            // Screenshot de paso OK
-            String screenshotPath = captureEvidence(driver, name, name + " - OK");
+        } catch (TestAbortedException aborted) {
+            String screenshotPath = null;
+            if (CAPTURE_EVIDENCE_ENABLED) {
+                screenshotPath = captureEvidence(driver, name + "_SKIPPED", "Screenshot on skipped");
+            }
 
-            // Guardar resultado del paso para el PDF (OK)
-            steps.get().add(new StepResult(name, "OK", screenshotPath));
+            try {
+                Allure.addAttachment("Motivo SKIPPED", "text/plain",
+                        String.valueOf(aborted.getMessage()));
+            } catch (Exception ignored) {}
 
-        } catch (Throwable t) { // ✅ atrapa también AssertionError y cualquier fallo real
+            steps.get().add(new StepResult(name, "SKIPPED", screenshotPath));
+            throw aborted;
 
-            // Screenshot en error
+        } catch (Throwable t) {
             String screenshotPath = captureEvidence(driver, name + "_ERROR", "Screenshot on error");
 
-            // Stacktrace completo a Allure
             StringWriter sw = new StringWriter();
             t.printStackTrace(new PrintWriter(sw));
             Allure.addAttachment("Stacktrace completo", "text/plain", sw.toString());
 
-            // Guardar resultado del paso (ERROR) para el PDF
             steps.get().add(new StepResult(name, "ERROR", screenshotPath));
 
-            // ✅ Falla el test conservando la causa
-            Assertions.fail("❌ " + name + " falló.", t);
+            log.error("[TestSteps] Step failed: {}", name, t);
+            Assertions.fail(name + " failed.", t);
         }
     }
-
-    // ======================================================
-    // MÉTODOS USADOS TAMBIÉN POR PdfReportExtension
-    // ======================================================
 
     public static String captureEvidence(AndroidDriver driver, String stepName, String allureName) {
         try {
@@ -95,8 +109,6 @@ public class TestSteps {
         return steps.get();
     }
 
-    // ================== MÉTODOS PRIVADOS ==================
-
     private static String takeScreenshot(AndroidDriver driver, String stepName) throws IOException {
         byte[] bytes = ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
 
@@ -114,4 +126,3 @@ public class TestSteps {
         return text.replaceAll("[^a-zA-Z0-9-_]", "_");
     }
 }
-

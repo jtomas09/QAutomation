@@ -3,6 +3,8 @@ package utils;
 import static utils.PdfReportGenerator.EXECUTOR;
 
 import jakarta.mail.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import jakarta.mail.internet.*;
 
 import java.io.BufferedReader;
@@ -14,11 +16,13 @@ import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 // HTTP server
 import com.sun.net.httpserver.HttpExchange;
@@ -39,42 +43,61 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 // PDF merge
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
 
+// ✅ Tu loader JSON
+import utils.config.ConfigLoader;
+import utils.config.SmtpConfig;
+
 public class AllureReportSender {
 
-    // ======================================================
-    //                CONFIG MAIL
-    // ======================================================
-    private static final String SMTP_HOST = System.getProperty("mail.smtp.host", "email-smtp.us-east-1.amazonaws.com");
-    private static final String SMTP_PORT = System.getProperty("mail.smtp.port", "587");
-    private static final String SMTP_USER = System.getProperty("mail.smtp.user", "");
-    private static final String SMTP_PASS = System.getProperty("mail.smtp.pass", "");
-    private static final String FROM_ADDRESS = System.getProperty("mail.from", "automation_android@ia.com.mx");
+    private static final Logger log = LoggerFactory.getLogger(AllureReportSender.class);
 
-    // ✅ URL pública del reporte Allure (Cloudflare Pages / GitHub Pages / etc.)
-    // Pásala en CI con: -Dallure.public.url="https://<proyecto>.pages.dev"
-    private static final String ALLURE_PUBLIC_URL =
-            System.getProperty("allure.public.url", System.getenv().getOrDefault("ALLURE_PUBLIC_URL", "")).trim();
+    /** Set -DsendMail=true to enable email delivery after each suite run. */
+    private static final boolean IS_MAIL_ENABLED = Boolean.parseBoolean(System.getProperty("sendMail", "false"));
 
-    private static final String[] TO_ADDRESSES = System.getProperty("mail.to", "").split(",");
-    private static final String TO_ADDRESS = Stream.of(TO_ADDRESSES)
-            .map(String::trim)
-            .filter(s -> s != null && !s.trim().isEmpty())
-            .reduce((a, b) -> a.trim() + "," + b.trim())
-            .orElse("");
+    private static final Path FINAL_MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
+    private static final Path MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
 
-    // Envío por test (solo si activas)
-    private static final boolean SEND_PER_TEST = Boolean.parseBoolean(System.getProperty("SEND_PER_TEST", "false"));
+    private static boolean isFinalMailAlreadySent() {
+        return Files.exists(FINAL_MAIL_LOCK);
+    }
 
-    // Ruta local de Chrome
+    /**
+     * Deletes the mail-sent lock so the next run is allowed to send a new email.
+     * Call this at the start of each test plan execution.
+     */
+    public static void resetMailLock() {
+        try {
+            if (Files.deleteIfExists(MAIL_LOCK)) {
+                log.info("[AllureReportSender] Mail lock cleared: {}", MAIL_LOCK.toAbsolutePath());
+            }
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] Could not clear mail lock: {}", e.getMessage());
+        }
+    }
+
+    private static void markFinalMailSent() {
+        try {
+            Files.createDirectories(FINAL_MAIL_LOCK.getParent());
+            if (!Files.exists(FINAL_MAIL_LOCK)) {
+                Files.writeString(FINAL_MAIL_LOCK, "sent", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+            }
+            log.info("[AllureReportSender] Mail lock written: {}", FINAL_MAIL_LOCK.toAbsolutePath());
+        } catch (FileAlreadyExistsException e) {
+            log.debug("[AllureReportSender] Mail lock already exists: {}", FINAL_MAIL_LOCK.toAbsolutePath());
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] Could not write mail lock: {}", e.getMessage());
+        }
+    }
+
     private static final String CHROME_PATH = System.getenv().getOrDefault(
             "CHROME_PATH",
             "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe"
     );
 
-    // ======================================================
-    // ✅ FINAL DE SUITE (1 SOLO CORREO)
-    //    - Adjunta SOLO 1 PDF: Allure_Overview_Behaviors.pdf
-    // ======================================================
+    /**
+     * Sends a single final suite report email with the Allure PDF attached.
+     * Guarded by a lock file so it fires only once per run regardless of how many callbacks invoke it.
+     */
     public static void sendFinalSuiteReport(
             String suiteName,
             int totalTests,
@@ -85,170 +108,248 @@ public class AllureReportSender {
             String mergedPdfName
     ) throws Exception {
 
-        System.out.println("[SES] (FINAL) Enviando reporte FINAL de suite (una sola vez).");
-
-        Path allurePdf = generateAllureOverviewPdf();
-
-        sendInternalAllureOnly(
-                allurePdf,
-                suiteName,
-                totalTests,
-                passedTests,
-                failedTests,
-                durationMillis,
-                executedTests
-        );
-    }
-
-    // ======================================================
-    // ❌ Envío por test (solo si tú lo activas con -DSEND_PER_TEST=true)
-    // ======================================================
-    public static void sendEvidenceAndAllure(
-            String suiteName,
-            int totalTests,
-            int passedTests,
-            int failedTests,
-            long durationMillis,
-            String executedTests
-    ) throws Exception {
-
-        if (!SEND_PER_TEST) {
-            System.out.println("[SES] (SKIP) SEND_PER_TEST=false -> NO se envía por test.");
+        if (!IS_MAIL_ENABLED) {
+            log.info("[AllureReportSender] Email delivery disabled (-DsendMail=false). Skipping.");
             return;
         }
 
-        System.out.println("[SES] (PER-TEST) SEND_PER_TEST=true -> enviando por test (solo Allure PDF).");
+        if (isFinalMailAlreadySent()) {
+            log.info("[AllureReportSender] Skipping: mail lock already exists at {}",
+                    FINAL_MAIL_LOCK.toAbsolutePath());
+            return;
+        }
+
+        String reportUrl = AllureUrlStore.readUrl();
+        log.info("[AllureReportSender] Allure URL (from store): {}", reportUrl);
+
+        if (reportUrl == null || reportUrl.trim().isEmpty()) {
+            try {
+                log.info("[AllureReportSender] No stored URL found. Publishing to Netlify...");
+                reportUrl = AllureAutoPublisher.generateAndPublish();
+                log.info("[AllureReportSender] Netlify URL: {}", reportUrl);
+            } catch (Exception e) {
+                log.warn("[AllureReportSender] Netlify publish failed: {}", e.getMessage());
+                reportUrl = "";
+            }
+        }
+
+        log.info("[AllureReportSender] Sending final suite email...");
 
         Path allurePdf = generateAllureOverviewPdf();
 
-        sendInternalAllureOnly(
+        boolean sent = sendInternalAllureOnly(
                 allurePdf,
                 suiteName,
                 totalTests,
                 passedTests,
                 failedTests,
                 durationMillis,
-                executedTests
+                executedTests,
+                reportUrl
         );
+
+        if (sent) {
+            markFinalMailSent();
+        } else {
+            log.warn("[AllureReportSender] Email was not sent; mail lock will not be written.");
+        }
     }
 
     // ======================================================
     //            ENVÍO DE CORREO (SOLO ALLURE 1 PDF)
     // ======================================================
-    private static void sendInternalAllureOnly(
+    private static boolean sendInternalAllureOnly(
             Path allurePdf,
             String suiteName,
             int totalTests,
             int passedTests,
             int failedTests,
             long durationMillis,
-            String executedTests
+            String executedTests,
+            String reportUrl
     ) throws Exception {
 
         if (allurePdf == null || !Files.exists(allurePdf)) {
-            System.err.println("[SES] ERROR: No existe el PDF de Allure: " + allurePdf);
-            return;
+            log.error("[AllureReportSender] Allure PDF not found: {}", allurePdf);
+            return false;
         }
 
-        if (SMTP_PASS == null || SMTP_PASS.isBlank()) {
-            System.err.println("[SES] ERROR: Falta SMTP_PASS (contraseña de SES). No se enviará el correo.");
-            return;
+        SmtpConfig cfg;
+        try {
+            cfg = ConfigLoader.getSmtpConfig();
+        } catch (Exception e) {
+            log.error("[AllureReportSender] Failed to read smtp-config.json: {}", e.getMessage());
+            return false;
         }
 
-        if (TO_ADDRESS.isBlank()) {
-            System.err.println("[SES] ERROR: No hay destinatarios (CFG.mail.to vacío o solo vacíos).");
-            return;
+        String smtpHost = safe(cfg.smtp.host, "email-smtp.us-east-1.amazonaws.com");
+        String smtpPort = safe(cfg.smtp.port, "587");
+        String smtpUser = safe(cfg.smtp.user, "");
+        String smtpPass = safe(cfg.smtp.pass, "");
+        String from = safe(cfg.mail.from, "automation_android@ia.com.mx");
+
+        String to = "";
+        try {
+            if (cfg.mail.to != null && !cfg.mail.to.isEmpty()) {
+                to = cfg.mail.to.stream()
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .reduce((a, b) -> a + "," + b)
+                        .orElse("");
+            }
+        } catch (Exception ignored) {}
+
+        if (smtpPass.isBlank()) {
+            log.error("[AllureReportSender] smtp.pass is missing in smtp-config.json; email will not be sent.");
+            return false;
+        }
+        if (to.isBlank()) {
+            log.error("[AllureReportSender] No recipients configured in smtp-config.json (mail.to).");
+            return false;
         }
 
-        System.out.println("[SES] Preparando envío SMTP a: " + TO_ADDRESS);
-        System.out.println("[SES] SMTP_HOST = " + SMTP_HOST + ", SMTP_PORT = " + SMTP_PORT);
-        System.out.println("[SES] SMTP_USER = " + SMTP_USER);
-        System.out.println("[SES] Adjuntando SOLO Allure PDF: " + allurePdf.toAbsolutePath());
+        log.info("[AllureReportSender] Sending via SMTP. host={} port={} from={} to={}", smtpHost, smtpPort, from, to);
+        log.info("[AllureReportSender] Attaching PDF: {}", allurePdf.toAbsolutePath());
+        log.info("[AllureReportSender] Interactive link: {}", reportUrl);
 
         Properties props = new Properties();
         props.put("mail.smtp.starttls.enable", "true");
-        props.put("mail.smtp.host", SMTP_HOST);
-        props.put("mail.smtp.port", SMTP_PORT);
+        props.put("mail.smtp.host", smtpHost);
+        props.put("mail.smtp.port", smtpPort);
         props.put("mail.smtp.auth", "true");
-        props.put("mail.smtp.ssl.trust", SMTP_HOST);
+        props.put("mail.smtp.ssl.trust", smtpHost);
 
         Session session = Session.getInstance(props, new Authenticator() {
             @Override
             protected PasswordAuthentication getPasswordAuthentication() {
-                return new PasswordAuthentication(SMTP_USER.trim(), SMTP_PASS.trim());
+                return new PasswordAuthentication(smtpUser.trim(), smtpPass.trim());
             }
         });
 
         MimeMessage message = new MimeMessage(session);
-        message.setFrom(new InternetAddress(FROM_ADDRESS));
-        message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(TO_ADDRESS));
+        message.setFrom(new InternetAddress(from));
+        message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
 
-        // ======================================================
-        // ✅ SOLUCIÓN A: Resumen basado en Allure (summary.json)
-        //    Evita discrepancias vs Gradle/JUnit/Allure UI
-        // ======================================================
         try {
             AllureSummaryReader.Stats stats = AllureSummaryReader.readAuto();
-
             totalTests = stats.total;
             passedTests = stats.passed;
-
-            // Para negocio: fallados = failed + broken (Allure separa ambos)
             failedTests = stats.failed + stats.broken;
+            if (stats.durationMs > 0) durationMillis = stats.durationMs;
 
-            // Duración real del reporte Allure (ms). Si no viene, conserva la que te pasaron.
-            if (stats.durationMs > 0) {
-                durationMillis = stats.durationMs;
-            }
-
-            System.out.println("[AllureReportSender] Resumen(Allure): total=" + totalTests +
-                    ", passed=" + passedTests +
-                    ", failed=" + failedTests +
-                    ", durationMs=" + durationMillis);
+            log.info("[AllureReportSender] Stats from summary.json: total={} passed={} failed={} durationMs={}",
+                    totalTests, passedTests, failedTests, durationMillis);
         } catch (Exception e) {
-            System.out.println("[AllureReportSender] WARNING: No se pudo leer summary.json, usando contadores recibidos. " + e.getMessage());
+            log.warn("[AllureReportSender] Could not read summary.json; using fallback values: {}", e.getMessage());
+        }
+
+        int total = totalTests;
+        int passed = passedTests;
+        int failed = failedTests;
+        int skipped = Math.max(0, total - passed - failed);
+        String durationPretty = formatDurationPretty(durationMillis);
+
+        // ✅ Bloque estético del link (recomendado: "card" + botón)
+        String interactiveBlock = "";
+        if (reportUrl != null && !reportUrl.isBlank()
+                && (reportUrl.startsWith("http://") || reportUrl.startsWith("https://"))) {
+
+            String safeUrl = escapeHtml(reportUrl);
+
+            interactiveBlock =
+                    "    <div style='background:#111827;border:1px solid #22304a;border-radius:16px;padding:18px;margin-top:16px;'>"
+                            + "      <div style='font-size:14px;font-weight:700;color:#c9d1d9;margin-bottom:10px;'>🔗 Reporte Allure interactivo (navegable):</div>"
+                            + "      <a href='" + safeUrl + "' target='_blank' rel='noopener noreferrer' "
+                            + "         style='display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;"
+                            + "                padding:12px 18px;border-radius:10px;font-weight:700;'>"
+                            + "        Abrir reporte interactivo"
+                            + "      </a>"
+                            + "      <div style='margin-top:10px;font-size:12px;color:#8b949e;word-break:break-all;'>"
+                            +        safeUrl
+                            + "      </div>"
+                            + "    </div>";
         }
 
         String projectName = pickProjectName(suiteName);
         String subject = buildSubject(projectName, failedTests);
         message.setSubject(subject, "UTF-8");
 
+        // ✅ Lista de tests ejecutados (ya lo tenías)
         String executedHtml = "";
         if (executedTests != null && !executedTests.trim().isEmpty()) {
 
-            // ✅ Elimina duplicados conservando el orden
-            List<String> uniqueTests = Arrays.stream(executedTests.split("\\s*\\|\\s*"))
+            Set<String> executedMenus = Arrays.stream(executedTests.split("\\s*\\|\\s*"))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
-                    .distinct()
-                    .toList();
+                    .map(t -> {
+                        // Ej: MenuCoffeTree_test01 → MenuCoffeTree
+                        int idx = t.indexOf("_");
+                        return idx > 0 ? t.substring(0, idx) : t;
+                    })
+                    .filter(t -> t.startsWith("Menu"))
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
 
-            StringBuilder sb = new StringBuilder();
-            sb.append("<p><b>Tests ejecutados:</b><br>");
-            for (String t : uniqueTests) {
-                sb.append("• ").append(escapeHtml(t)).append("<br>");
+            if (!executedMenus.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("<p style='margin:12px 0 0 0;'><b>Menús ejecutados:</b><br>");
+                for (String menu : executedMenus) {
+                    sb.append("• ").append(escapeHtml(menu)).append("<br>");
+                }
+                sb.append("</p>");
+                executedHtml = sb.toString();
             }
-            sb.append("</p>");
-
-            executedHtml = sb.toString();
         }
 
+        String generatedAt = LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("dd/MM/yyyy, hh:mm:ss a"));
+
+        String executorName = safe(EXECUTOR, "");
+
+        // ✅ HTML (solo estética; lógica intacta)
         String html =
-                "<html><body style='font-family:Arial;background:#222;color:#eee;font-size:13px'>" +
-                        "<h2 style='color:#66aaff'>Reporte de pruebas automatizadas</h2>" +
-                        "<p><b>Proyecto:</b> " + escapeHtml(projectName) + "<br>" +
-                        "<b>Ejecutor:</b> " + escapeHtml(EXECUTOR) + "</p>" +
-                        executedHtml +
-                        buildInteractiveAllureBlock(ALLURE_PUBLIC_URL) +
-                        "<table border='1' cellpadding='6' cellspacing='0' " +
-                        "style='border-collapse:collapse;background:#111;border:1px solid #666'>" +
-                        "  <tr style='background:#333'><th colspan='2'>Resumen</th></tr>" +
-                        "  <tr><td>Total</td><td>" + totalTests + "</td></tr>" +
-                        "  <tr><td>Pasados</td><td style='color:#00cc00'>" + passedTests + "</td></tr>" +
-                        "  <tr><td>Fallados</td><td style='color:#ff4444'>" + failedTests + "</td></tr>" +
-                        "  <tr><td>Duración</td><td>" + formatDuration(durationMillis) + "</td></tr>" +
-                        "</table>" +
-                        "</body></html>";
+                "<html><body style='margin:0;padding:0;background:#0b0f14;font-family:Arial,Helvetica,sans-serif;color:#e6edf3;'>"
+                        + "  <div style='max-width:760px;margin:0 auto;padding:24px;'>"
+
+                        + "    <div style='display:flex;align-items:center;gap:12px;margin-bottom:18px;'>"
+                        + "      <div style='font-size:34px;line-height:1;'>🤖</div>"
+                        + "      <div>"
+                        + "        <div style='font-size:26px;font-weight:800;color:#c9d1d9;'>Reporte de pruebas automatizadas</div>"
+                        + "        <div style='font-size:12px;color:#8b949e;margin-top:4px;'>Generado: " + escapeHtml(generatedAt) + "</div>"
+                        + "      </div>"
+                        + "    </div>"
+
+                        + "    <div style='background:#111827;border:1px solid #22304a;border-radius:16px;padding:18px;margin-bottom:16px;'>"
+                        + "      <div style='font-size:14px;color:#c9d1d9;line-height:1.6;'>"
+                        + "        <div><b>Proyecto:</b> " + escapeHtml(projectName) + "</div>"
+                        + "        <div><b>Ejecutor:</b> " + escapeHtml(executorName) + "</div>"
+                        + "      </div>"
+                        +        executedHtml
+                        + "    </div>"
+
+                        +      interactiveBlock
+
+                        + "    <div style='background:#111827;border:1px solid #22304a;border-radius:16px;padding:18px;margin-top:16px;'>"
+                        + "      <div style='font-size:18px;font-weight:800;color:#c9d1d9;margin-bottom:12px;'>📊 Resumen de Ejecución</div>"
+                        + "      <table cellpadding='0' cellspacing='0' style='border-collapse:collapse;width:360px;border:1px solid #22304a;border-radius:12px;overflow:hidden;'>"
+                        + "        <tr><td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#c9d1d9;'>Total de tests</td>"
+                        + "            <td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#c9d1d9;text-align:center;'><b>" + total + "</b></td></tr>"
+                        + "        <tr><td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#c9d1d9;'>Tests pasados ✅</td>"
+                        + "            <td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#2ea043;text-align:center;'><b>" + passed + "</b></td></tr>"
+                        + "        <tr><td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#c9d1d9;'>Tests skipped ⏭️</td>"
+                        + "            <td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#d29922;text-align:center;'><b>" + skipped + "</b></td></tr>"
+                        + "        <tr><td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#c9d1d9;'>Tests fallados ❌</td>"
+                        + "            <td style='padding:10px 12px;border-bottom:1px solid #22304a;background:#0b1220;color:#f85149;text-align:center;'><b>" + failed + "</b></td></tr>"
+                        + "        <tr><td style='padding:10px 12px;background:#0b1220;color:#c9d1d9;'>Tiempo total</td>"
+                        + "            <td style='padding:10px 12px;background:#0b1220;color:#c9d1d9;text-align:center;'><b>" + escapeHtml(durationPretty) + "</b></td></tr>"
+                        + "      </table>"
+                        + "    </div>"
+
+                        + "    <div style='margin-top:14px;font-size:12px;color:#8b949e;'>"
+                        + "      Se adjunta el PDF con el resumen detallado de ejecución (Dashboard Allure: Overview + Suites)."
+                        + "    </div>"
+
+                        + "  </div>"
+                        + "</body></html>";
 
         MimeBodyPart htmlPart = new MimeBodyPart();
         htmlPart.setContent(html, "text/html; charset=UTF-8");
@@ -256,7 +357,6 @@ public class AllureReportSender {
         Multipart multipart = new MimeMultipart();
         multipart.addBodyPart(htmlPart);
 
-        // ✅ SOLO 1 adjunto: Allure PDF
         MimeBodyPart allurePart = new MimeBodyPart();
         allurePart.attachFile(allurePdf.toFile());
         allurePart.setFileName("Reporte_Allure_" + sanitizeFileName(projectName) + ".pdf");
@@ -264,61 +364,52 @@ public class AllureReportSender {
 
         message.setContent(multipart);
 
-        System.out.println("[SES] Enviando correo vía " + SMTP_HOST + "...");
+        log.info("[AllureReportSender] Sending via {}...", smtpHost);
         try {
             Transport.send(message);
-            System.out.println("[SES] ✔ Correo enviado correctamente a: " + TO_ADDRESS);
+            log.info("[AllureReportSender] Email sent successfully to: {}", to);
+            return true;
         } catch (Throwable e) {
-            System.err.println("[SES] ERROR enviando correo (Throwable): " + e.getClass().getName() + " -> " + e.getMessage());
-            e.printStackTrace();
+            log.error("[AllureReportSender] Email send failed: {} -> {}", e.getClass().getName(), e.getMessage(), e);
+            return false;
         }
     }
 
-    // ======================================================
-    //      PDF / CHROME / MERGE (Allure)
-    // ======================================================
     public static Path generateAllureOverviewPdf() {
         HttpServer server = null;
         try {
-            // 1) Genera allureReport (estático)
             try {
                 String projectDir = System.getProperty("user.dir");
-                System.out.println("[AllureReportSender] Ejecutando gradlew allureReport en: " + projectDir);
+                log.info("[AllureReportSender] Running gradlew allureReport --clean in: {}", projectDir);
 
-                ProcessBuilder pbAllure = new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport");
-                pbAllure.directory(new java.io.File(projectDir));
+                ProcessBuilder pbAllure = new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport", "--clean");
+                pbAllure.directory(new File(projectDir));
                 pbAllure.redirectErrorStream(true);
 
                 Process pAllure = pbAllure.start();
-
                 try (BufferedReader r = new BufferedReader(
                         new InputStreamReader(pAllure.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
-                    while ((line = r.readLine()) != null) {
-                        System.out.println("[gradlew allureReport] " + line);
-                    }
+                    while ((line = r.readLine()) != null) log.debug("[gradlew allureReport] {}", line);
                 }
 
-                pAllure.waitFor(120, TimeUnit.SECONDS);
+                pAllure.waitFor(180, TimeUnit.SECONDS);
                 if (pAllure.exitValue() != 0) {
-                    System.err.println("[AllureReportSender] gradlew allureReport terminó con código != 0");
+                    log.warn("[AllureReportSender] gradlew allureReport exited with non-zero code.");
                 } else {
-                    System.out.println("[AllureReportSender] gradlew allureReport OK");
+                    log.info("[AllureReportSender] gradlew allureReport completed successfully.");
                 }
-
             } catch (Exception e) {
-                System.err.println("[AllureReportSender] No se pudo ejecutar gradlew: " + e.getMessage());
+                log.warn("[AllureReportSender] Could not run gradlew allureReport: {}", e.getMessage());
             }
 
             Path reportDir = Paths.get("build", "reports", "allure-report", "allureReport");
             Path indexHtml = reportDir.resolve("index.html");
-
             if (!Files.exists(indexHtml)) {
-                System.err.println("[AllureReportSender] No se encontró index.html en: " + indexHtml);
+                log.error("[AllureReportSender] index.html not found at: {}", indexHtml);
                 return null;
             }
 
-            // 2) Servidor local para assets del reporte
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             int port = server.getAddress().getPort();
             Path finalReportDir = reportDir;
@@ -330,16 +421,11 @@ public class AllureReportSender {
                         URI uri = exchange.getRequestURI();
                         String path = uri.getPath();
 
-                        if (path == null || path.equals("/") || path.isEmpty()) {
-                            path = "index.html";
-                        } else if (path.startsWith("/")) {
-                            path = path.substring(1);
-                        }
+                        if (path == null || path.equals("/") || path.isEmpty()) path = "index.html";
+                        else if (path.startsWith("/")) path = path.substring(1);
 
                         Path requested = finalReportDir.resolve(path).normalize();
-                        if (!requested.startsWith(finalReportDir) ||
-                                !Files.exists(requested) ||
-                                Files.isDirectory(requested)) {
+                        if (!requested.startsWith(finalReportDir) || !Files.exists(requested) || Files.isDirectory(requested)) {
                             exchange.sendResponseHeaders(404, -1);
                             exchange.close();
                             return;
@@ -354,10 +440,7 @@ public class AllureReportSender {
                         exchange.getResponseBody().write(data);
                         exchange.close();
                     } catch (Exception e) {
-                        try {
-                            exchange.sendResponseHeaders(500, -1);
-                        } catch (Exception ignored) {
-                        }
+                        try { exchange.sendResponseHeaders(500, -1); } catch (Exception ignored) {}
                         exchange.close();
                     }
                 }
@@ -365,8 +448,6 @@ public class AllureReportSender {
 
             server.start();
 
-            // 3) Chrome headless imprime Overview
-            String chromeExe = CHROME_PATH;
             String urlOverview = "http://127.0.0.1:" + port + "/index.html";
 
             Path overviewPdf = reportDir.resolve("Allure_Overview.pdf");
@@ -374,14 +455,11 @@ public class AllureReportSender {
             Path finalPdf = reportDir.resolve("Allure_Overview_Behaviors.pdf");
 
             for (Path p : Arrays.asList(overviewPdf, behaviorsPdf, finalPdf)) {
-                try {
-                    Files.deleteIfExists(p);
-                } catch (Exception ignored) {
-                }
+                try { Files.deleteIfExists(p); } catch (Exception ignored) {}
             }
 
             ProcessBuilder pbOverview = new ProcessBuilder(
-                    chromeExe,
+                    CHROME_PATH,
                     "--headless",
                     "--disable-gpu",
                     "--no-sandbox",
@@ -395,27 +473,22 @@ public class AllureReportSender {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(pOverview.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println("[Chrome Overview] " + line);
-                }
+                while ((line = reader.readLine()) != null) log.debug("[Chrome Overview] {}", line);
             }
 
             pOverview.waitFor(60, TimeUnit.SECONDS);
 
-            // 4) Behaviors con Selenium + screenshot -> PDF
             generateBehaviorsPdfWithSelenium(reportDir, port, behaviorsPdf);
-
-            // 5) Merge Overview + Behaviors
             mergePdfs(Arrays.asList(overviewPdf, behaviorsPdf), finalPdf);
 
             if (Files.exists(finalPdf)) {
-                System.out.println("[AllureReportSender] Final PDF generado: " + finalPdf.toAbsolutePath());
+                log.info("[AllureReportSender] Final PDF generated: {}", finalPdf.toAbsolutePath());
                 return finalPdf;
             }
             return null;
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("[AllureReportSender] Failed to generate Allure overview PDF", e);
             return null;
         } finally {
             if (server != null) server.stop(0);
@@ -424,10 +497,7 @@ public class AllureReportSender {
 
     private static void generateBehaviorsPdfWithSelenium(Path reportDir, int port, Path behaviorsPdf) {
         Path behaviorsPng = reportDir.resolve("Allure_Behaviors.png");
-        try {
-            Files.deleteIfExists(behaviorsPng);
-        } catch (Exception ignored) {
-        }
+        try { Files.deleteIfExists(behaviorsPng); } catch (Exception ignored) {}
 
         WebDriverManager.chromedriver().setup();
 
@@ -445,7 +515,6 @@ public class AllureReportSender {
 
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(25));
             wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("body")));
-
             wait.until(ExpectedConditions.presenceOfElementLocated(
                     By.cssSelector(".tree, .tree__content, .node__title, .node__name")
             ));
@@ -456,12 +525,9 @@ public class AllureReportSender {
             PdfReportGenerator.createPdfFromImage(behaviorsPng.toFile(), behaviorsPdf.toFile());
 
         } catch (Exception e) {
-            System.err.println("[AllureReportSender] ERROR generando Behaviors PDF: " + e.getMessage());
+            log.error("[AllureReportSender] Failed to generate Behaviors PDF: {}", e.getMessage(), e);
         } finally {
-            try {
-                driver.quit();
-            } catch (Exception ignored) {
-            }
+            try { driver.quit(); } catch (Exception ignored) {}
         }
     }
 
@@ -470,9 +536,7 @@ public class AllureReportSender {
         merger.setDestinationFileName(out.toAbsolutePath().toString());
 
         for (Path p : pdfs) {
-            if (p != null && Files.exists(p)) {
-                merger.addSource(p.toFile());
-            }
+            if (p != null && Files.exists(p)) merger.addSource(p.toFile());
         }
         merger.mergeDocuments(null);
     }
@@ -487,38 +551,21 @@ public class AllureReportSender {
         return prefix + " - Reporte " + projectName;
     }
 
-    private static String formatDuration(long millis) {
+    /** Formato estilo screenshot: 02m 46s / 13m 36s / 1h 02m 05s */
+    private static String formatDurationPretty(long millis) {
         if (millis <= 0) return "-";
         long seconds = millis / 1000;
         long h = seconds / 3600;
         long m = (seconds % 3600) / 60;
         long s = (seconds % 60);
-        return h + "h " + m + "m " + s + "s";
+
+        if (h > 0) return String.format("%dh %02dm %02ds", h, m, s);
+        return String.format("%02dm %02ds", m, s);
     }
 
     private static String sanitizeFileName(String s) {
         if (s == null) return "Reporte";
         return s.replaceAll("[^a-zA-Z0-9._-]", "_");
-    }
-
-
-    private static String buildInteractiveAllureBlock(String url) {
-        if (url == null || url.trim().isEmpty()) return "";
-        String u = escapeHtml(url.trim());
-
-        return ""
-                + "<div style='margin-top:18px;padding:16px;border:1px solid #2b2f36;border-radius:10px;background:#111827'>"
-                + "  <div style='font-size:14px;color:#e5e7eb;margin-bottom:10px;'>"
-                + "    🔗 <b>Reporte Allure interactivo (navegable):</b>"
-                + "  </div>"
-                + "  <a href='" + u + "' style='display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;"
-                + "     padding:12px 18px;border-radius:8px;font-weight:bold;'>"
-                + "    Abrir reporte interactivo"
-                + "  </a>"
-                + "  <div style='margin-top:10px;font-size:12px;'>"
-                + "    <a href='" + u + "' style='color:#a78bfa;text-decoration:underline;'>" + u + "</a>"
-                + "  </div>"
-                + "</div>";
     }
 
     private static String escapeHtml(String s) {
@@ -529,4 +576,12 @@ public class AllureReportSender {
                 .replace("\"", "&quot;")
                 .replace("'", "&#39;");
     }
+
+    private static String safe(String v, String def) {
+        if (v == null) return def;
+        String t = v.trim();
+        return t.isEmpty() ? def : t;
+    }
 }
+
+

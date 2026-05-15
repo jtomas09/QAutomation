@@ -1,5 +1,8 @@
 package utils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
@@ -7,6 +10,8 @@ import java.nio.file.*;
 import java.util.Properties;
 
 public class AllureMailRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(AllureMailRunner.class);
 
     private static final Path REPORT_DIR = Paths.get("build", "reportes-pdf");
     private static final Path METRICS_PATH = REPORT_DIR.resolve("suite-metrics.properties");
@@ -16,18 +21,16 @@ public class AllureMailRunner {
 
         Files.createDirectories(REPORT_DIR);
 
-        // ✅ 1) Leer URL pública de Allure (Cloudflare Pages) y guardarla como System Property
         String allurePublicUrl = System.getProperty("allure.public.url",
                 System.getenv().getOrDefault("ALLURE_PUBLIC_URL", "")).trim();
 
         if (!allurePublicUrl.isBlank()) {
             System.setProperty("allure.public.url", allurePublicUrl);
-            System.out.println("[INFO] Allure public URL: " + allurePublicUrl);
+            log.info("[AllureMailRunner] Allure public URL: {}", allurePublicUrl);
         } else {
-            System.out.println("[WARN] No Allure public URL provided (interactive link will not be added)");
+            log.warn("[AllureMailRunner] No Allure public URL provided; interactive link will not be included.");
         }
 
-        // ✅ Evitar duplicados
         try (FileChannel channel = FileChannel.open(
                 MAIL_LOCK_PATH,
                 StandardOpenOption.CREATE,
@@ -35,13 +38,14 @@ public class AllureMailRunner {
         )) {
             FileLock lock = channel.tryLock();
             if (lock == null) {
-                System.out.println("[AllureMailRunner] (SKIP) Ya existe un envío en curso o ya se envió (lock activo).");
+                log.info("[AllureMailRunner] Skipping: email already sent or another process holds the lock.");
                 return;
             }
 
             try {
                 if (!Files.exists(METRICS_PATH)) {
-                    System.out.println("[AllureMailRunner] ERROR: No existe suite-metrics.properties en: " + METRICS_PATH.toAbsolutePath());
+                    log.error("[AllureMailRunner] suite-metrics.properties not found at: {}",
+                            METRICS_PATH.toAbsolutePath());
                     return;
                 }
 
@@ -58,11 +62,9 @@ public class AllureMailRunner {
                 String executedTests = props.getProperty("executedTests", "");
                 String mergedPdfName = props.getProperty("mergedPdfName", "");
 
-                System.out.println("[AllureMailRunner] Enviando correo FINAL (una sola vez).");
-                System.out.println("  suiteName=" + suiteName);
-                System.out.println("  Total=" + totalTests + ", Passed=" + passedTests + ", Failed=" + failedTests);
+                log.info("[AllureMailRunner] Sending final suite email. suiteName={} total={} passed={} failed={}",
+                        suiteName, totalTests, passedTests, failedTests);
 
-                // ✅ Método correcto (ya existe)
                 AllureReportSender.sendFinalSuiteReport(
                         suiteName,
                         totalTests,
@@ -74,7 +76,7 @@ public class AllureMailRunner {
                 );
 
                 channel.write(StandardCharsets.UTF_8.encode("SENT"));
-                System.out.println("[AllureMailRunner] ✔ Correo enviado. (lock escrito)");
+                log.info("[AllureMailRunner] Suite email sent successfully.");
 
             } finally {
                 try { lock.release(); } catch (Exception ignored) {}

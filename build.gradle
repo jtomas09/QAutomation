@@ -1,6 +1,8 @@
 plugins {
     id 'java'
     id 'io.qameta.allure' version '2.11.2'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'edu.sc.seis.launch4j' version '3.0.5'
 }
 
 group = 'qa.cinema'
@@ -9,6 +11,9 @@ version = '1.0.0'
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(17) }
 }
+
+compileJava.options.encoding   = 'UTF-8'
+compileTestJava.options.encoding = 'UTF-8'
 
 repositories { mavenCentral() }
 
@@ -22,16 +27,25 @@ ext {
 
 dependencies {
     implementation "io.appium:java-client:${appiumJavaClientVersion}"
+    implementation "org.json:json:20240303"
 
+    // Necesario para compilar Main.java (menu launcher ejecutable)
+    // JUnit Platform está en testImplementation pero Main.java vive en src/main/java
+    implementation "org.junit.platform:junit-platform-launcher:1.10.2"
+    implementation "org.junit.platform:junit-platform-engine:1.10.2"
+    implementation "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"
+    testImplementation "com.fasterxml.jackson.core:jackson-databind:2.17.2"
     testImplementation "org.seleniumhq.selenium:selenium-java:${seleniumVersion}"
     testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
     testImplementation "io.qameta.allure:allure-junit5:2.29.0"
     testImplementation "org.assertj:assertj-core:${assertjVersion}"
     testImplementation "io.github.bonigarcia:webdrivermanager:${webDriverManagerVersion}"
     testImplementation "org.junit.platform:junit-platform-suite:1.10.2"
-
+    testImplementation "org.junit.platform:junit-platform-launcher:1.10.2"
+    testImplementation "ch.qos.logback:logback-classic:1.4.14"
     implementation "com.sun.mail:jakarta.mail:2.0.1"
     implementation "org.apache.pdfbox:pdfbox:2.0.28"
+    implementation "com.formdev:flatlaf:3.4.1"
 }
 
 // ---------- ALLURE ----------
@@ -48,7 +62,7 @@ allure {
 test {
     useJUnitPlatform()
     systemProperties System.getProperties()
-
+    systemProperty "SEND_PER_TEST", "false"
     testLogging {
         events "passed", "skipped", "failed"
         showStandardStreams = true
@@ -60,6 +74,138 @@ test {
     // El correo se manda SOLO desde JUnit Extension (PdfReportExtension/SuiteMailer)
     // cuando corres desde Android Studio.
 }
+// Fuerza recompilación completa en cada build (evita UP-TO-DATE con clases viejas)
+tasks.named('compileJava')     { outputs.upToDateWhen { false } }
+tasks.named('compileTestJava') { outputs.upToDateWhen { false } }
+
+// ---------- FAT JAR EJECUTABLE ----------
+shadowJar {
+    archiveBaseName.set('cinepolis-tests')
+    archiveClassifier.set('')
+    archiveVersion.set('')
+
+    manifest {
+        attributes 'Main-Class': 'launcher.Main'
+    }
+
+    // Incluir clases del launcher (Main.java) y recursos de test
+    from sourceSets.main.output
+    from sourceSets.test.output
+
+    // Incluir todas las dependencias (implementation + testImplementation)
+    configurations = [project.configurations.testRuntimeClasspath]
+
+    // Fusionar META-INF/services/ para que JUnit Engine y Allure listeners
+    // se registren correctamente dentro del JAR
+    mergeServiceFiles()
+
+    // Excluir firmas digitales que rompen el JAR combinado
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    exclude 'module-info.class'
+
+    // ✅ Siempre reemplaza el JAR existente (nunca queda UP-TO-DATE)
+    outputs.upToDateWhen { false }
+
+    // ✅ Borra el JAR anterior antes de generar el nuevo
+    doFirst {
+        delete layout.buildDirectory.file('libs/cinepolis-tests.jar')
+    }
+}
+
+// Copia appium.properties a build/libs/ junto al JAR
+tasks.register('copyAppiumProps', Copy) {
+    from 'src/test/resources/appium.properties'
+    into layout.buildDirectory.dir('libs')
+    // ✅ Siempre sobreescribe el archivo de configuración
+    outputs.upToDateWhen { false }
+}
+
+// Tarea corta: .\gradlew.bat buildJar
+// Actualiza JAR + config. El EXE stub (dontWrapJar) NO se reconstruye si ya existe —
+// basta con actualizar el JAR porque el stub lo carga en cada ejecución.
+// Para generar el EXE stub por primera vez (con el launcher cerrado): .\gradlew.bat buildDist
+tasks.register('buildJar') {
+    group = 'build'
+    description = 'Regenera EXE (fat, JAR embebido) + config en build/launch4j/'
+    dependsOn 'createExe'
+
+    doLast {
+        copy {
+            from 'src/test/resources/appium.properties'
+            into layout.buildDirectory.dir('launch4j')
+        }
+        copy {
+            from 'src/test/resources/mexico-cinema.txt'
+            into layout.buildDirectory.dir('launch4j')
+        }
+
+        println ""
+        println "  =============================================="
+        println "  Distribucion lista en build/launch4j/"
+        println "  =============================================="
+        println "    cinepolis-tests.exe     <- fat EXE (JAR embebido)"
+        println "    appium.properties       <- config del dispositivo"
+        println "    mexico-cinema.txt       <- cine por defecto Mexico"
+        println "  =============================================="
+        println ""
+    }
+}
+
+// ---------- .EXE CON ÍCONO (Launch4j) ----------
+launch4j {
+    mainClassName = 'launcher.Main'
+    outfile       = 'cinepolis-tests.exe'
+    dontWrapJar   = false   // Fat EXE — JAR embebido dentro del EXE
+    jreMinVersion = '17'
+    headerType    = 'console'
+}
+
+tasks.named('createExe') {
+    dependsOn shadowJar
+    outputs.upToDateWhen { false }
+    setJarTask(shadowJar)
+}
+
+// ✅ Genera distribución completa: .exe + .jar + appium.properties en build/launch4j/
+tasks.register('buildDist') {
+    group = 'build'
+    description = 'Genera .exe con icono + JAR + config en build/launch4j/'
+    dependsOn 'createExe'
+
+    doLast {
+        copy {
+            from layout.buildDirectory.file('libs/cinepolis-tests.jar')
+            into layout.buildDirectory.dir('launch4j')
+        }
+        // El EXE stub usa lib/cinepolis-tests.jar (ver createExe.xml)
+        copy {
+            from layout.buildDirectory.file('libs/cinepolis-tests.jar')
+            into layout.buildDirectory.dir('launch4j/lib')
+        }
+        copy {
+            from 'src/test/resources/appium.properties'
+            into layout.buildDirectory.dir('launch4j')
+        }
+        copy {
+            from 'src/test/resources/mexico-cinema.txt'
+            into layout.buildDirectory.dir('launch4j')
+        }
+
+        println ""
+        println "  =============================================="
+        println "  Distribucion lista en build/launch4j/"
+        println "  =============================================="
+        println "    cinepolis-tests.exe     <- doble click (requiere Java 17+)"
+        println "    lib/cinepolis-tests.jar <- cargado por el EXE"
+        println "    appium.properties       <- editar con datos del dispositivo"
+        println "    mexico-cinema.txt       <- cine por defecto México"
+        println "  =============================================="
+        println ""
+    }
+}
+
 // ---------- RUNNER PARA ENVIAR CORREO DESDE CI ----------
 tasks.register('runAllureMailRunner', JavaExec) {
     group = "reporting"

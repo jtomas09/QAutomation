@@ -1,0 +1,39 @@
+image: gradle:8.7-jdk17
+
+pipelines:
+  branches:
+    master:
+      - step:
+          name: Tests + Allure + Deploy Pages + Mail
+          caches:
+            - gradle
+          script:
+            # 1) Tests + Allure
+            - chmod +x gradlew || true
+            - ./gradlew clean test
+            - ./gradlew allureReport
+
+            # 2) Instalar Node + Wrangler (para deploy a Cloudflare Pages)
+            - apt-get update && apt-get install -y nodejs npm
+            - npm i -g wrangler
+
+            # 3) Deploy a Cloudflare Pages (Direct Upload)
+            # Cambia el path si tu reporte está en otra ruta:
+            - REPORT_DIR="build/reports/allure-report"
+            - |
+              DEPLOY_OUT=$(wrangler pages deploy "$REPORT_DIR" \
+                --project-name "$CF_PAGES_PROJECT" \
+                --branch "$BITBUCKET_BRANCH" 2>&1 | tee deploy.log)
+
+            # 4) Extraer URL (Wrangler normalmente la imprime)
+            - REPORT_URL=$(grep -oE 'https://[^ ]+pages.dev[^ ]*' deploy.log | tail -1)
+            - echo "REPORT_URL=$REPORT_URL"
+
+            # 5) Enviar correo (usa tu Java AllureMailRunner / AllureReportSender)
+            # Ajusta el comando según tu proyecto (mainClass/gradle task).
+            - export REPORT_URL
+            - ./gradlew runMail -Dreport.url="$REPORT_URL" || true
+
+definitions:
+  caches:
+    gradle: ~/.gradle/caches

@@ -1,0 +1,19 @@
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Fase 4: redirige /api/* al backend Spring Boot en Railway
+[[redirects]]
+  from   = "/api/*"
+  to     = ":VITE_API_URL/api/:splat"
+  status = 200
+
+# SPA fallback (React Router)
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

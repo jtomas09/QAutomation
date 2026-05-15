@@ -1,525 +1,282 @@
 package pages.common;
-
-import static org.openqa.selenium.support.ui.Quotes.escape;
-
+import org.openqa.selenium.interactions.Pause;
+import org.opentest4j.TestAbortedException;
 import io.appium.java_client.AppiumBy;
-import io.appium.java_client.TouchAction;
 import io.appium.java_client.android.AndroidDriver;
 import io.qameta.allure.Attachment;
-import org.openqa.selenium.By;
-import org.openqa.selenium.Dimension;
-import org.openqa.selenium.OutputType;
-import org.openqa.selenium.WebElement;
+import org.junit.jupiter.api.Assertions;
+import org.openqa.selenium.*;
+import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.interactions.PointerInput;
+import org.openqa.selenium.interactions.PointerInput.Kind;
+import org.openqa.selenium.interactions.PointerInput.MouseButton;
+import org.openqa.selenium.interactions.PointerInput.Origin;
 import org.openqa.selenium.interactions.Sequence;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
+import org.openqa.selenium.support.ui.*;
+import io.qameta.allure.Allure;
+import org.junit.jupiter.api.Assumptions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import datos.Constantes;
+import utils.Reintento;
 import utils.Waits;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static io.appium.java_client.touch.WaitOptions.waitOptions;
-import static io.appium.java_client.touch.offset.PointOption.point;
+import static org.openqa.selenium.interactions.PointerInput.Kind;
+import static org.openqa.selenium.interactions.PointerInput.MouseButton;
+import static org.openqa.selenium.interactions.PointerInput.Origin;
 
-/**
- * BasePage con utilidades comunes: click seguro, screenshots, waits.
- * ✅ Optimizada para reducir tiempos SIN quitar tu lógica.
- * ✅ Controla intentos vertical/horizontal con presupuesto total (anti-bucles).
- * ✅ App Guard: si la app se cierra, recupera o falla rápido (evita taps fuera de la app).
- */
 public class BasePage {
 
-    private static long LAST_APP_RECOVER_MS = 2;
-    private static final long APP_RECOVER_COOLDOWN_MS = 2 ;
-    protected AndroidDriver driver;
-    protected Waits waits;
+    private static final Logger log = LoggerFactory.getLogger(BasePage.class);
 
-    // =========================
-    // ✅ CONFIG APP (CAMBIA ESTO)
-    // =========================
-    private static final String APP_PACKAGE = "com.cinepolis.go"; // <-- CAMBIA a tu appPackage real
+    // ✅ No tragarse SKIPPED (TestAbortedException) en catch(Exception)
+    protected static void rethrowIfAborted(Throwable t) {
+        if (t instanceof org.opentest4j.TestAbortedException) {
+            throw (org.opentest4j.TestAbortedException) t;
+        }
+    }
+    protected static final AtomicInteger AGOTADOS_SKIPPED_COUNT =
+            new AtomicInteger(0);
+    // ====== ESTRUCTURA "BasePage" (driver final + waits centralizados) ======
+    protected final AndroidDriver driver;
+    protected final WebDriverWait wait;
+    protected final FluentWait<AndroidDriver> fluentWait;
+
+    // Mantengo tu Waits custom porque tu lógica lo usa (waitClickableFast/waitClickable)
+    protected final Waits waits;
+
+    // ====== TIMEOUTS BASE (estilo BasePage.txt) ======
+    private static final Duration DEFAULT_WAIT_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration SCROLL_WAIT_TIMEOUT  = Duration.ofSeconds(30);
+    private static final Duration POLLING_INTERVAL     = Duration.ofMillis(500);
+
+    // ====== CONSTANTES / CONFIG ======
+    private static final String APP_PACKAGE = Constantes.APP_PACKAGE;
     private static final int APP_GUARD_TIMEOUT_SEC = 8;
+
+    private static long LAST_APP_RECOVER_MS = 2L;
+    private static final long APP_RECOVER_COOLDOWN_MS = 2L;
 
     private static final By FIRST_VISIBLE_TEXTVIEW =
             By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[1]");
 
-    // ✅ Activa fast-fail (solo 1 intento) cuando NO se encuentre
-    private static final boolean FAST_FAIL_FIRST_ATTEMPT_ONLY = true;
-
-    // -------------------------------------------------------------------------
-    // ✅ EVIDENCIA (optimización fuerte)
-    // -------------------------------------------------------------------------
-    private static final boolean CAPTURE_SCREENSHOT_EACH_ACTION = false;
-    private static final boolean CAPTURE_SCREENSHOT_ON_FAILURE = true;
-
-    // -------------------------------------------------------------------------
-    // ✅ SWIPES (más despacio vertical)
-    // -------------------------------------------------------------------------
-    private static final int SLOW_SWIPE_WAIT_MS = 580;
-    private static final int SLOW_SWIPE_SLEEP_MS = 80;
-
-    // (se mantiene por compatibilidad)
-    private static final int FAST_FAIL_MAX_SWIPES = 30;
-
-    private static final int FAST_SWIPE_WAIT_MS = 270;
+    // Fast/slow swipes — valores centralizados en Constantes
+    private static final int SLOW_SWIPE_WAIT_MS = Constantes.SWIPE_LENTO_MS;
+    private static final int SLOW_SWIPE_SLEEP_MS = Constantes.PAUSA_POST_SWIPE_MS;
+    private static final int FAST_SWIPE_WAIT_MS = Constantes.SWIPE_RAPIDO_MS;
     private static final int FAST_SWIPE_SLEEP_MS = 30;
 
-    // -------------------------------------------------------------------------
-    // ✅ LIMITES REALES (ANTI-BUCLES V/H)
-    // -------------------------------------------------------------------------
-    private static final boolean LIMIT_TOTAL_SWIPE_BUDGET = true;
-
-    // Presupuesto TOTAL (no por fila)
-    private static final int TOTAL_VERTICAL_SWIPE_BUDGET = 20;     // ✅ 20 swipes
-    private static final int TOTAL_HORIZONTAL_SWIPE_BUDGET = 20;
-
-    // Para sabores: en fast-fail evita rondas múltiples
-    private static final boolean FAST_FAIL_FLAVORS_ONE_ROUND = true;
+    // Presupuestos centralizados en Constantes
+    private static final int TOTAL_VERTICAL_SWIPE_BUDGET   = Constantes.SWIPES_VERTICAL_MAX;
+    private static final int TOTAL_HORIZONTAL_SWIPE_BUDGET = Constantes.SWIPES_HORIZONTAL_MAX;
 
     public BasePage(AndroidDriver driver) {
         this.driver = driver;
+
+        // Esperas como BasePage.txt
+        this.wait = new WebDriverWait(driver, DEFAULT_WAIT_TIMEOUT);
+        this.fluentWait = new FluentWait<>(driver)
+                .withTimeout(SCROLL_WAIT_TIMEOUT)
+                .pollingEvery(POLLING_INTERVAL)
+                .ignoring(NoSuchElementException.class);
+
+        // Waits custom como BasePage2
         this.waits = new Waits(driver);
     }
+
+    // =========================================================
+    // =============== REINTENTOS (anti-fragilidad) =============
+    // =========================================================
+
+    /**
+     * Ejecuta la acción con reintentos automáticos.
+     * Los SKIP (TestAbortedException) se propagan sin reintentar.
+     *
+     * Ejemplo:
+     *   conReintento(3, () -> click(BTN_AGREGAR));
+     */
+    protected void conReintento(int intentos, Runnable accion) {
+        Reintento.intentar(intentos, accion);
+    }
+
+    /**
+     * Ejecuta la acción con reintentos y pausa configurable entre intentos.
+     */
+    protected void conReintento(int intentos, long pausaMs, Runnable accion) {
+        Reintento.conPausa(intentos, pausaMs).ejecutar(accion);
+    }
+
+    /**
+     * Click con reintento automático. Útil para elementos que tardan en aparecer
+     * o que pueden ser stale entre la localización y el clic.
+     */
+    protected void clickConReintento(By locator) {
+        conReintento(Constantes.REINTENTOS_CLICK, () -> click(locator));
+    }
+
+    /**
+     * Espera a que un elemento sea visible; reintenta si la condición no se cumple.
+     * Devuelve true si el elemento fue encontrado antes de agotar los intentos.
+     */
+    protected boolean esperarVisible(By locator, int intentos) {
+        return Reintento.hasta(intentos,
+            () -> isVisibleQuick(locator));
+    }
+
+    // =========================================================
+    // =============== GUARD / RECOVERY (BasePage2) =============
+    // =========================================================
 
     protected void ensureAppIsInForegroundOrRecover() {
         try {
             driver.getSessionId();
 
             String currentPackage = null;
-            try { currentPackage = driver.getCurrentPackage(); } catch (Exception ignored) {}
+            try { currentPackage = driver.getCurrentPackage(); } catch (Exception ignore) {}
 
-            // ✅ si ya está en la app correcta → salir
-            if (APP_PACKAGE.equals(currentPackage)) {
-                return;
+            if (!APP_PACKAGE.equals(currentPackage)) {
+                long now = System.currentTimeMillis();
+
+                if (now - LAST_APP_RECOVER_MS < APP_RECOVER_COOLDOWN_MS) {
+                    log.debug("[GUARD] Recuperación de app ignorada (cooldown activo)");
+                    return;
+                }
+
+                LAST_APP_RECOVER_MS = now;
+
+                try { driver.activateApp(APP_PACKAGE); } catch (Exception ignore) {}
+
+                long end = System.currentTimeMillis() + (APP_GUARD_TIMEOUT_SEC * 1000L);
+
+                // En BasePage2 venía como "if", aquí lo dejo como loop (misma intención: esperar a que vuelva)
+                while (System.currentTimeMillis() < end) {
+                    try {
+                        String p = driver.getCurrentPackage();
+                        if (APP_PACKAGE.equals(p)) return;
+                    } catch (Exception ignore) {}
+
+                    try { driver.terminateApp(APP_PACKAGE); } catch (Exception ignore) {}
+                    try { driver.activateApp(APP_PACKAGE); } catch (Exception ignore) {}
+
+                    sleep(400L);
+                }
             }
-
-            long now = System.currentTimeMillis();
-
-            // 🔒 fusible anti-loop
-            if (now - LAST_APP_RECOVER_MS < APP_RECOVER_COOLDOWN_MS) {
-                System.out.println("[GUARD] Recuperación de app ignorada (cooldown activo)");
-                return;
-            }
-            LAST_APP_RECOVER_MS = now;
-
-            // intento suave
-            try { driver.activateApp(APP_PACKAGE); } catch (Exception ignored) {}
-
-            long end = System.currentTimeMillis() + (APP_GUARD_TIMEOUT_SEC * 1000L);
-            while (System.currentTimeMillis() < end) {
-                try {
-                    String p = driver.getCurrentPackage();
-                    if (APP_PACKAGE.equals(p)) return;
-                } catch (Exception ignored) {}
-
-                // ❗ SOLO relanza UNA VEZ
-                try { driver.terminateApp(APP_PACKAGE); } catch (Exception ignored) {}
-                try { driver.activateApp(APP_PACKAGE); } catch (Exception ignored) {}
-
-                sleep(400);
-                break; // ⛔ rompe loop
-            }
-
         } catch (Exception e) {
             takeScreenshotOnFailure();
             throw new AssertionError("App no estable / posible crash.", e);
         }
     }
 
+    // =========================================================
+    // ================== SCREENSHOTS (Allure) =================
+    // =========================================================
+
     @Attachment(value = "Screenshot", type = "image/png")
     protected byte[] takeScreenshot() {
-        if (!CAPTURE_SCREENSHOT_EACH_ACTION) return new byte[0];
         try {
             return driver.getScreenshotAs(OutputType.BYTES);
-        } catch (Exception e) {
+        } catch (Exception ignore) {
             return new byte[0];
         }
     }
 
     protected void takeScreenshotOnFailure() {
-        if (!CAPTURE_SCREENSHOT_ON_FAILURE) return;
+        try { driver.getScreenshotAs(OutputType.BYTES); } catch (Exception ignore) {}
+    }
+
+    // =========================================================
+    // =================== WAITS / VISIBILITY ==================
+    // =========================================================
+
+    protected WebElement waitForVisibility(By locator) {
+        ensureAppIsInForegroundOrRecover();
+        return wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
+    }
+    public void waitAndClick(By locator, int timeoutSeconds) {
         try {
-            driver.getScreenshotAs(OutputType.BYTES);
-        } catch (Exception ignored) {}
+            WebDriverWait wait = new WebDriverWait(this.driver, Duration.ofSeconds(timeoutSeconds));
+            // Espera a que el elemento sea visible y esté habilitado
+            WebElement element = wait.until(ExpectedConditions.elementToBeClickable(locator));
+            element.click();
+        } catch (Exception e) {
+            // Si el clic normal falla, intentamos un clic por coordenadas (W3C Tap)
+            // Esto es muy útil en elementos de Compose o listas rebeldes
+            WebElement element = this.driver.findElement(locator);
+            this.tapCenterW3C(element);
+        }
+    }
+    public void verificarYAbortarSiAgotado(String nombreProducto) {
+        // 1. XPath más robusto para capturar el contenedor en Compose (usando View)
+        // Buscamos el ancestro que agrupa la tarjeta del producto
+        String xpathEstado = "//*[@text='" + nombreProducto + "']/ancestor::android.view.View[1]//*[contains(@text, 'Agotado') or contains(@text, 'No disponible')]";
+
+        try {
+            // 2. Verificación por texto visual (Lo más confiable en tu App)
+            if (this.isVisibleQuick(By.xpath(xpathEstado))) {
+                log.debug("DEBUG: Producto {} detectado como AGOTADO visualmente.", nombreProducto);
+                throw new org.opentest4j.TestAbortedException("El alimento \"" + nombreProducto + "\" se encuentra agotado o no disponible");
+            }
+
+            // 3. Verificación por atributos en el contenedor REAL (el padre del texto)
+            // En Compose, el TextView casi siempre tiene clickable=false, por eso no debemos usarlo para abortar
+            String xpathContenedor = "//*[@text='" + nombreProducto + "']/..";
+            WebElement contenedor = this.driver.findElement(By.xpath(xpathContenedor));
+
+            // Solo abortamos si 'enabled' es false. Ignoramos 'clickable' porque en Compose suele ser false por defecto en textos.
+            if ("false".equals(contenedor.getAttribute("enabled"))) {
+                throw new org.opentest4j.TestAbortedException("El alimento \"" + nombreProducto + "\" está deshabilitado en el sistema.");
+            }
+
+        } catch (org.openqa.selenium.NoSuchElementException e) {
+            // Es normal que no encuentre el texto "Agotado", el test debe seguir.
+        } catch (org.opentest4j.TestAbortedException e) {
+            // RE-LANZAMOS la excepción de aborto.
+            // Si no haces esto, el catch genérico de arriba o del método que lo llama podría consumirla.
+            throw e;
+        }
+    }
+
+    public void validarElementoVisible(By locator) {
+        try {
+            waitForVisibility(locator);
+        } catch (Exception e) {
+            Assertions.fail("No se pudo encontrar o validar la visibilidad del elemento: " + locator, e);
+        }
     }
 
     protected WebElement waitAndGet(By locator) {
+        ensureAppIsInForegroundOrRecover();
         try {
             return waits.waitClickableFast(locator);
-        } catch (Exception ignored) {
+        } catch (Exception ignore) {
             return waits.waitClickable(locator);
         }
     }
-
-    protected void click(By locator) {
-        ensureAppIsInForegroundOrRecover();
-        WebElement el = waitAndGet(locator);
-        el.click();
-        takeScreenshot();
-    }
-
-    /**
-     * Hace clic solo si el elemento está presente y visible.
-     * No lanza excepción si no está.
-     */
-    protected boolean clickIfPresent(By locator) {
-        ensureAppIsInForegroundOrRecover();
-        try {
-            List<WebElement> elements = driver.findElements(locator);
-            if (elements != null && !elements.isEmpty()) {
-                WebElement el = elements.get(0);
-                if (safeDisplayed(el) && el.isEnabled()) {
-                    el.click();
-                    takeScreenshot();
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {}
-        return false;
-    }
-
-    // -------------------------------------------------------------------------
-    // ✅ VISIBILIDAD
-    // -------------------------------------------------------------------------
-    protected boolean isVisibleQuick(By locator) {
-        try {
-            List<WebElement> els = driver.findElements(locator);
-            return els != null && !els.isEmpty() && safeDisplayed(els.get(0));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean isVisible(By locator) {
-        return isVisibleQuick(locator);
-    }
-
-    private boolean safeDisplayed(WebElement el) {
-        try {
-            return el.isDisplayed();
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    protected void scrollToDescriptionAndClick(String partialDesc) {
-        ensureAppIsInForegroundOrRecover();
-
-        String uiScrollable =
-                "new UiScrollable(new UiSelector().scrollable(true))" +
-                        ".scrollIntoView(new UiSelector().descriptionContains(\"" + escape(partialDesc) + "\"))";
-
-        WebElement el = driver.findElement(AppiumBy.androidUIAutomator(uiScrollable));
-        new WebDriverWait(driver, Duration.ofSeconds(15))
-                .until(ExpectedConditions.elementToBeClickable(el))
-                .click();
-
-        takeScreenshot();
-    }
-
-    // -------------------------------------------------------------------------
-    // ✅ SCROLL / SWIPES (TU LÓGICA SE QUEDA)
-    // -------------------------------------------------------------------------
-    protected void sleep(long ms) {
-        if (ms <= 0) return;
-        try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
-    }
-
-    protected void slowSwipeUp() { // baja (contenido sube)
-        ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int x = size.getWidth() / 2;
-        int startY = (int) (size.getHeight() * 0.70);
-        int endY   = (int) (size.getHeight() * 0.45);
-
-        new TouchAction<>(driver)
-                .press(point(x, startY))
-                .waitAction(waitOptions(Duration.ofMillis(SLOW_SWIPE_WAIT_MS)))
-                .moveTo(point(x, endY))
-                .release()
-                .perform();
-
-        sleep(SLOW_SWIPE_SLEEP_MS);
-    }
-
-    protected void slowSwipeDown() { // sube (contenido baja)
-        ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int x = size.getWidth() / 2;
-        int startY = (int) (size.getHeight() * 0.45);
-        int endY   = (int) (size.getHeight() * 0.70);
-
-        new TouchAction<>(driver)
-                .press(point(x, startY))
-                .waitAction(waitOptions(Duration.ofMillis(SLOW_SWIPE_WAIT_MS)))
-                .moveTo(point(x, endY))
-                .release()
-                .perform();
-
-        sleep(SLOW_SWIPE_SLEEP_MS);
-    }
-
-    protected void slowSwipeLeft() {
-        ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int width = size.getWidth();
-        int height = size.getHeight();
-
-        int y = (int) (height * 0.70);
-        int startX = (int) (width * 0.70);
-        int endX   = (int) (width * 0.35);
-
-        new TouchAction<>(driver)
-                .press(point(startX, y))
-                .waitAction(waitOptions(Duration.ofMillis(SLOW_SWIPE_WAIT_MS)))
-                .moveTo(point(endX, y))
-                .release()
-                .perform();
-
-        sleep(SLOW_SWIPE_SLEEP_MS);
-    }
-
-    protected void fastSwipeLeftAtY(int y) {
-        ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int width = size.getWidth();
-
-        int startX = (int) (width * 0.78);
-        int endX   = (int) (width * 0.36);
-
-        new TouchAction<>(driver)
-                .press(point(startX, y))
-                .waitAction(waitOptions(Duration.ofMillis(FAST_SWIPE_WAIT_MS)))
-                .moveTo(point(endX, y))
-                .release()
-                .perform();
-
-        sleep(FAST_SWIPE_SLEEP_MS);
-    }
-
-    protected void fastSwipeRightAtY(int y) {
-        ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int width = size.getWidth();
-
-        int startX = (int) (width * 0.36);
-        int endX   = (int) (width * 0.78);
-
-        new TouchAction<>(driver)
-                .press(point(startX, y))
-                .waitAction(waitOptions(Duration.ofMillis(FAST_SWIPE_WAIT_MS)))
-                .moveTo(point(endX, y))
-                .release()
-                .perform();
-
-        sleep(FAST_SWIPE_SLEEP_MS);
-    }
-
-    protected boolean sweepCatalogRightFromAnchorY(By target, int anchorCenterY, int maxSwipes) {
-        for (int i = 0; i < maxSwipes; i++) {
-            if (isVisible(target)) return true;
-            fastSwipeLeftAtY(anchorCenterY);
-        }
-        return isVisible(target);
-    }
-
     protected void resetCarouselFromAnchorY(int anchorCenterY, int swipes) {
-        for (int i = 0; i < swipes; i++) {
-            fastSwipeRightAtY(anchorCenterY);
+        for(int i = 0; i < swipes; ++i) {
+            this.fastSwipeRightAtY(anchorCenterY);
         }
+
     }
-
-    private String viewportFingerPrint() {
-        try {
-            List<WebElement> texts = driver.findElements(
-                    By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]")
-            );
-
-            if (texts == null || texts.isEmpty()) return "EMPTY";
-
-            StringBuilder sb = new StringBuilder();
-            for (WebElement el : texts) {
-                try { sb.append(el.getText().trim()).append("|"); }
-                catch (Exception ignored) {}
+    protected boolean sweepCatalogRightFromAnchorY(By target, int anchorCenterY, int maxSwipes) {
+        for(int i = 0; i < maxSwipes; ++i) {
+            if (this.isVisible(target)) {
+                return true;
             }
-            return sb.toString();
 
-        } catch (Exception e) {
-            return "ERR";
+            this.fastSwipeLeftAtY(anchorCenterY);
         }
+
+        return this.isVisible(target);
     }
-
-    // -------------------------------------------------------------------------
-    // ✅ TU MÉTODO ROBUSTO (se queda igual)
-    // -------------------------------------------------------------------------
-    protected boolean ensureVisibleByXpathNoClickDownThenUpIfEnd(String xpath,
-                                                                 int maxDownSwipes,
-                                                                 int maxUpSwipes) {
-        By locator = By.xpath(xpath);
-
-        if (isVisible(locator)) return true;
-
-        int down = maxDownSwipes;
-        int up   = maxUpSwipes;
-
-        String lastFinger = "";
-        boolean reachedEnd = false;
-
-        for (int i = 0; i < down; i++) {
-            if (isVisible(locator)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeUp();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) {
-                reachedEnd = true;
-                break;
-            }
-            lastFinger = after;
-        }
-
-        if (!reachedEnd) return false;
-
-        lastFinger = "";
-        for (int i = 0; i < up; i++) {
-            if (isVisible(locator)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeDown();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
-        }
-
-        return isVisible(locator);
-    }
-
-    // -------------------------------------------------------------------------
-    // ✅ ONE-SHOT helpers (ADAPTADOS)
-    // -------------------------------------------------------------------------
-    private boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
-        if (isVisible(locator)) return true;
-
-        String lastFinger = "";
-        int allowed = LIMIT_TOTAL_SWIPE_BUDGET
-                ? Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET)
-                : maxDownSwipes;
-
-        for (int i = 0; i < allowed; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeUp();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) {
-                break; // ya no avanza
-            }
-            lastFinger = after;
-        }
-
-        return isVisible(locator);
-    }
-
-    private boolean oneShotHorizontalSearch(By locator, int maxRightSwipes) {
-        return oneShotHorizontalSearch(locator, maxRightSwipes, null);
-    }
-
-    private boolean oneShotHorizontalSearch(By locator, int maxRightSwipes, int[] budgetH) {
-        if (isVisible(locator)) return true;
-
-        String lastFinger = "";
-        int allowed = maxRightSwipes;
-
-        if (LIMIT_TOTAL_SWIPE_BUDGET && budgetH != null) {
-            allowed = Math.min(allowed, budgetH[0]);
-            if (allowed <= 0) return isVisible(locator);
-        }
-
-        for (int i = 0; i < allowed; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeLeft();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
-
-            if (LIMIT_TOTAL_SWIPE_BUDGET && budgetH != null) {
-                budgetH[0]--;
-                if (budgetH[0] <= 0) break;
-            }
-        }
-
-        return isVisible(locator);
-    }
-
-    private boolean oneShotVerticalAndHorizontal(By locator, int maxDownSwipes, int maxRightSwipesPerRow) {
-        if (isVisible(locator)) return true;
-
-        String lastFinger = "";
-
-        int allowedV = LIMIT_TOTAL_SWIPE_BUDGET
-                ? Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET)
-                : maxDownSwipes;
-
-        int[] budgetH = new int[]{
-                LIMIT_TOTAL_SWIPE_BUDGET ? TOTAL_HORIZONTAL_SWIPE_BUDGET : Integer.MAX_VALUE
-        };
-
-        for (int i = 0; i < allowedV; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
-
-            if (oneShotHorizontalSearch(locator, maxRightSwipesPerRow, budgetH)) return true;
-
-            if (LIMIT_TOTAL_SWIPE_BUDGET && budgetH[0] <= 0) break;
-
-            String before = viewportFingerPrint();
-            slowSwipeUp();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
-        }
-
-        return isVisible(locator);
-    }
-
-    // -------------------------------------------------------------------------
-    // ✅ Buscadores con scroll (ADAPTADOS: 1 pasada y STOP)
-    // -------------------------------------------------------------------------
-    protected void findVisibleOrScrollToXpathAndClick(String xpath, int maxSwipesEachDirection) {
-        ensureAppIsInForegroundOrRecover();
-
-        By locator = By.xpath(xpath);
-
-        if (clickIfPresent(locator)) return;
-
-        boolean found;
-        if (FAST_FAIL_FIRST_ATTEMPT_ONLY) {
-            found = oneShotVerticalSearch(locator, maxSwipesEachDirection);
-        } else {
-            found = scrollSlowDownThenUpUntilVisible(locator, maxSwipesEachDirection);
-        }
-
-        if (!found) {
-            takeScreenshotOnFailure();
-            throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada. XPath: " + xpath);
-        }
-
-        click(locator);
-    }
-
+    // =========================================================
+    // ===================== CLICKS (compat) ====================
+    // =========================================================
     protected boolean scrollSlowDownThenUpUntilVisible(By locator, int maxSwipesEachDirection) {
         if (isVisible(locator)) return true;
 
@@ -549,139 +306,214 @@ public class BasePage {
 
         return isVisible(locator);
     }
+    protected void click(By locator) {
+        ensureAppIsInForegroundOrRecover();
+        WebElement el = waitAndGet(locator);
+        el.click();
+        takeScreenshot();
+    }
 
-    protected void findVisibleOrScrollDownAndRightSlowToXpathAndClick(String xpath,
-                                                                      int maxVerticalSwipesEachDirection,
-                                                                      int maxRightSwipesPerRow) {
+    protected boolean clickIfPresent(By locator) {
+        ensureAppIsInForegroundOrRecover();
+        try {
+            List<WebElement> elements = driver.findElements(locator);
+            if (elements != null && !elements.isEmpty()) {
+                WebElement el = elements.get(0);
+                if (safeDisplayed(el) && el.isEnabled()) {
+                    el.click();
+                    takeScreenshot();
+                    return true;
+                }
+            }
+        } catch (Exception ignore) {}
+        return false;
+    }
+
+    protected boolean isVisibleQuick(By locator) {
+        try {
+            List<WebElement> els = driver.findElements(locator);
+            return els != null && !els.isEmpty() && safeDisplayed(els.get(0));
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
+    private boolean isVisible(By locator) {
+        return isVisibleQuick(locator);
+    }
+
+    private boolean safeDisplayed(WebElement el) {
+        try { return el.isDisplayed(); } catch (Exception ignore) { return false; }
+    }
+
+    // =========================================================
+    // ================= SCROLL UIAUTOMATOR2 ====================
+    // =========================================================
+
+    protected void scrollToDescriptionAndClick(String partialDesc) {
         ensureAppIsInForegroundOrRecover();
 
-        By locator = By.xpath(xpath);
+        String uiScrollable =
+                "new UiScrollable(new UiSelector().scrollable(true))" +
+                        ".scrollIntoView(new UiSelector().descriptionContains(\"" +
+                        Quotes.escape(partialDesc) + "\"))";
 
-        if (clickIfPresent(locator)) return;
+        WebElement el = driver.findElement(AppiumBy.androidUIAutomator(uiScrollable));
+        new WebDriverWait(driver, DEFAULT_WAIT_TIMEOUT)
+                .until(ExpectedConditions.elementToBeClickable(el))
+                .click();
 
-        boolean found;
-        if (FAST_FAIL_FIRST_ATTEMPT_ONLY) {
-            found = oneShotVerticalAndHorizontal(locator, maxVerticalSwipesEachDirection, maxRightSwipesPerRow);
-        } else {
-            found = scrollDownUpAndRightSweepUntilVisible(locator, maxVerticalSwipesEachDirection, maxRightSwipesPerRow);
-        }
-
-        if (!found) {
-            takeScreenshotOnFailure();
-            throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada (V/H). XPath: " + xpath);
-        }
-
-        click(locator);
+        takeScreenshot();
     }
 
-    protected boolean scrollDownUpAndRightSweepUntilVisible(By locator,
-                                                            int maxVerticalSwipesEachDirection,
-                                                            int maxRightSwipesPerRow) {
-        if (isVisible(locator)) return true;
+    // =========================================================
+    // ================== W3C TAP / SWIPE ======================
+    // =========================================================
 
-        String lastFinger = "";
-        for (int i = 0; i < maxVerticalSwipesEachDirection; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
-
-            if (sweepRightUntilVisible(locator, maxRightSwipesPerRow)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeUp();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
-        }
-
-        lastFinger = "";
-        for (int i = 0; i < maxVerticalSwipesEachDirection; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
-
-            if (sweepRightUntilVisible(locator, maxRightSwipesPerRow)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeDown();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
-        }
-
-        return isVisible(locator);
-    }
-
-    protected boolean sweepRightUntilVisible(By locator, int maxRightSwipes) {
-        if (isVisible(locator)) return true;
-
-        String lastFinger = "";
-        for (int i = 0; i < maxRightSwipes; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
-
-            String before = viewportFingerPrint();
-            slowSwipeLeft();
-            String after = viewportFingerPrint();
-
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
-        }
-
-        return isVisible(locator);
-    }
-
-    // -------------------------------------------------------------------------
-    // ✅ TAP Compose-friendly: W3C
-    // -------------------------------------------------------------------------
-    protected void tapW3C(int x, int y) {
-        ensureAppIsInForegroundOrRecover();
+    public void tapW3C(int x, int y) {
+ensureAppIsInForegroundOrRecover();
+        Dimension screen = driver.manage().window().getSize();
+        int safeX = Math.max(1, Math.min(x, screen.width  - 1));
+        int safeY = Math.max(1, Math.min(y, screen.height - 1));
 
         PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
         Sequence tap = new Sequence(finger, 1);
 
         tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), x, y));
         tap.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
+        tap.addAction(new Pause(finger, Duration.ofMillis(120)));
         tap.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
 
         driver.perform(Collections.singletonList(tap));
     }
 
+    protected void swipeW3C(int startX, int startY, int endX, int endY, long durationMs) {
+        ensureAppIsInForegroundOrRecover();
+        PointerInput finger = new PointerInput(Kind.TOUCH, "finger");
+        Sequence swipe = new Sequence(finger, 1);
+        swipe.addAction(finger.createPointerMove(Duration.ZERO, Origin.viewport(), startX, startY));
+        swipe.addAction(finger.createPointerDown(MouseButton.LEFT.asArg()));
+        swipe.addAction(finger.createPointerMove(Duration.ofMillis(Math.max(0, durationMs)), Origin.viewport(), endX, endY));
+        swipe.addAction(finger.createPointerUp(MouseButton.LEFT.asArg()));
+        driver.perform(Collections.singletonList(swipe));
+    }
+
+    // Firma "BasePage.txt"
+    protected void swipe(int startX, int startY, int endX, int endY) {
+        swipeW3C(startX, startY, endX, endY, 700L);
+    }
+
+    protected void swipeUp() {
+        Dimension size = driver.manage().window().getSize();
+        int startY = (int) (size.height * 0.8);
+        int endY   = (int) (size.height * 0.2);
+        int startX = size.width / 2;
+        swipe(startX, startY, startX, endY);
+    }
+
+    // Swipes “slow” como BasePage2
+    protected void slowSwipeUp() {
+        ensureAppIsInForegroundOrRecover();
+        Dimension size = driver.manage().window().getSize();
+        int x = size.getWidth() / 2;
+        int startY = (int) (size.getHeight() * 0.70);
+        int endY   = (int) (size.getHeight() * 0.45);
+        swipeW3C(x, startY, x, endY, SLOW_SWIPE_WAIT_MS);
+        sleep(SLOW_SWIPE_SLEEP_MS);
+    }
+
+    protected void slowSwipeDown() {
+        ensureAppIsInForegroundOrRecover();
+        Dimension size = driver.manage().window().getSize();
+        int x = size.getWidth() / 2;
+        int startY = (int) (size.getHeight() * 0.45);
+        int endY   = (int) (size.getHeight() * 0.70);
+        swipeW3C(x, startY, x, endY, SLOW_SWIPE_WAIT_MS);
+        sleep(SLOW_SWIPE_SLEEP_MS);
+    }
+
+    protected void slowSwipeLeft() {
+        ensureAppIsInForegroundOrRecover();
+        Dimension size = driver.manage().window().getSize();
+        int width  = size.getWidth();
+        int height = size.getHeight();
+        int y      = (int) (height * 0.70);
+        int startX = (int) (width  * 0.70);
+        int endX   = (int) (width  * 0.35);
+        swipeW3C(startX, y, endX, y, SLOW_SWIPE_WAIT_MS);
+        sleep(SLOW_SWIPE_SLEEP_MS);
+    }
+
+    protected void fastSwipeLeftAtY(int y) {
+        ensureAppIsInForegroundOrRecover();
+        Dimension size = driver.manage().window().getSize();
+        int width  = size.getWidth();
+        int startX = (int) (width * 0.78);
+        int endX   = (int) (width * 0.36);
+        swipeW3C(startX, y, endX, y, FAST_SWIPE_WAIT_MS);
+        sleep(FAST_SWIPE_SLEEP_MS);
+    }
+
+    protected void fastSwipeRightAtY(int y) {
+        ensureAppIsInForegroundOrRecover();
+        Dimension size = driver.manage().window().getSize();
+        int width  = size.getWidth();
+        int startX = (int) (width * 0.36);
+        int endX   = (int) (width * 0.78);
+        swipeW3C(startX, y, endX, y, FAST_SWIPE_WAIT_MS);
+        sleep(FAST_SWIPE_SLEEP_MS);
+    }
+
     protected void tapCenterW3C(WebElement el) {
         ensureAppIsInForegroundOrRecover();
-
         int cx = el.getLocation().getX() + el.getSize().getWidth() / 2;
         int cy = el.getLocation().getY() + el.getSize().getHeight() / 2;
         tapW3C(cx, cy - 12);
         takeScreenshot();
     }
+protected List<WebElement> safeFindElements(By locator) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return driver.findElements(locator);
+            } catch (org.openqa.selenium.WebDriverException e) {
+                if (attempt < 2
+                        && e.getMessage() != null
+                        && e.getMessage().contains("socket hang up")) {
+                    System.out.println("[safeFindElements] socket hang up detectado, reintento "
+                            + (attempt + 1) + "/2 en " + (2 * (attempt + 1)) + "s");
+                    sleep(2000L * (attempt + 1));
+                    continue;
+                }
+                throw e;
+            }
+        }
+        return java.util.Collections.emptyList();
+    }
+    // =========================================================
+    // ==================== CLICK SMART =========================
+    // =========================================================
 
     protected void clickOrTapByXpath(String xpath, int timeoutSeconds) {
         ensureAppIsInForegroundOrRecover();
-
         By by = By.xpath(xpath);
 
         try {
             WebDriverWait w = new WebDriverWait(driver, Duration.ofSeconds(timeoutSeconds));
             WebElement el = w.until(ExpectedConditions.visibilityOfElementLocated(by));
-
             try {
                 el.click();
                 takeScreenshot();
-                return;
-            } catch (Exception ignore) {}
-
-            tapCenterW3C(el);
-
+            } catch (Exception ignore) {
+                tapCenterW3C(el);
+            }
         } catch (Exception e) {
             takeScreenshotOnFailure();
             throw new RuntimeException("No se pudo click/tap por xpath: " + xpath, e);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // ✅ clickSmart (TU LÓGICA SE QUEDA)
-    // -------------------------------------------------------------------------
     protected void clickSmart(String xpath, int timeoutSeconds) {
         ensureAppIsInForegroundOrRecover();
-
         By by = By.xpath(xpath);
 
         WebElement base;
@@ -707,13 +539,11 @@ public class BasePage {
         WebElement p = base;
         for (int i = 0; i < 3; i++) {
             try {
-                p = p.findElement(By.xpath(".."));
+                p = p.findElement(By.xpath("..")); // en BasePage2 venía mal; aquí es el parent real
                 if (tryClickElement(p)) return;
                 if (tryTapElement(p)) return;
                 if (tryClickGestureElement(p)) return;
-            } catch (Exception ignored) {
-                break;
-            }
+            } catch (Exception ignore) {}
         }
 
         takeScreenshotOnFailure();
@@ -725,7 +555,7 @@ public class BasePage {
             el.click();
             takeScreenshot();
             return true;
-        } catch (Exception ignored) {
+        } catch (Exception ignore) {
             return false;
         }
     }
@@ -734,123 +564,431 @@ public class BasePage {
         try {
             tapCenterW3C(el);
             return true;
-        } catch (Exception ignored) {
+        } catch (Exception ignore) {
             return false;
         }
     }
 
     private boolean tryClickGestureElement(WebElement el) {
         try {
-            int cx = el.getLocation().getX() + (el.getSize().getWidth() / 2);
-            int cy = el.getLocation().getY() + (el.getSize().getHeight() / 2);
-
-            java.util.Map<String, Object> args = new java.util.HashMap<>();
+            int cx = el.getLocation().getX() + el.getSize().getWidth() / 2;
+            int cy = el.getLocation().getY() + el.getSize().getHeight() / 2;
+            Map<String, Object> args = new HashMap<>();
             args.put("x", cx);
             args.put("y", cy);
-
             driver.executeScript("mobile: clickGesture", args);
             takeScreenshot();
             return true;
-        } catch (Exception ignored) {
+        } catch (Exception ignore) {
             return false;
         }
     }
 
-    // -------------------------------------------------------------------------
-    // ✅ Intento rápido (para otros flows)
-    // -------------------------------------------------------------------------
     protected boolean tryClickIfAlreadyVisible(By locator, int timeoutSeconds) {
         ensureAppIsInForegroundOrRecover();
-
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(timeoutSeconds));
-            WebElement el = wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
+            WebDriverWait w = new WebDriverWait(driver, Duration.ofSeconds(timeoutSeconds));
+            WebElement el = w.until(ExpectedConditions.visibilityOfElementLocated(locator));
+            try {
+                el.click();
+                takeScreenshot();
+            } catch (Exception ignore) {
+                tapCenterW3C(el);
+            }
+            return true;
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
+    // =========================================================
+    // ============ PRODUCTOS: DETECTAR INHABILITADO ============
+    // =========================================================
+
+    /**
+     * Variante de tryClickIfAlreadyVisible para PRODUCTOS.
+     * Si encuentra el elemento pero está INHABILITADO / AGOTADO / NO DISPONIBLE:
+     *  - adjunta evidencia en Allure
+     *  - marca el test como SKIPPED (Assumptions.abort)
+     */
+    protected boolean tryClickIfAlreadyVisibleProducto(By locator, int timeoutSeconds, String nombreProducto) {
+        ensureAppIsInForegroundOrRecover();
+        try {
+            WebDriverWait w = new WebDriverWait(driver, Duration.ofSeconds(timeoutSeconds));
+            WebElement el = w.until(ExpectedConditions.visibilityOfElementLocated(locator));
+
+            // ✅ Si el producto está deshabilitado, aborta como SKIPPED
+            abortIfProductoNoDisponible(el, nombreProducto);
 
             try {
                 el.click();
                 takeScreenshot();
-                return true;
-            } catch (Exception ignored) {}
-
-            tapCenterW3C(el);
+            } catch (Exception ignore) {
+                tapCenterW3C(el);
+            }
             return true;
 
-        } catch (Exception e) {
+        } catch (org.opentest4j.TestAbortedException aborted) {
+            throw aborted; // deja pasar SKIPPED
+        } catch (Exception ignore) {
             return false;
         }
     }
 
-    protected void scrollDownSmall() {
+    /**
+     * Variante de findVisibleOrScrollToXpathAndClick para PRODUCTOS.
+     * Mantiene tu lógica FAST-FAIL de 1 pasada, pero si encuentra el card y está inhabilitado -> SKIPPED.
+     */
+    protected void findVisibleOrScrollToXpathAndClickProducto(String xpath, int maxSwipesEachDirection, String nombreProducto) {
         ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int startX = size.width / 2;
-        int startY = (int) (size.height * 0.70);
-        int endY   = (int) (size.height * 0.50);
-
-        new TouchAction<>(driver)
-                .press(point(startX, startY))
-                .waitAction(waitOptions(Duration.ofMillis(200)))
-                .moveTo(point(startX, endY))
-                .release()
-                .perform();
-    }
-
-    protected void scrollUpSmall() {
-        ensureAppIsInForegroundOrRecover();
-
-        Dimension size = driver.manage().window().getSize();
-        int startX = size.width / 2;
-        int startY = (int) (size.height * 0.50);
-        int endY   = (int) (size.height * 0.70);
-
-        new TouchAction<>(driver)
-                .press(point(startX, startY))
-                .waitAction(waitOptions(Duration.ofMillis(200)))
-                .moveTo(point(startX, endY))
-                .release()
-                .perform();
-    }
-
-    protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipesEachDirection) {
-        ensureAppIsInForegroundOrRecover();
-
         By locator = By.xpath(xpath);
 
-        if (isVisible(locator)) return true;
+        if (!clickIfPresent(locator)) {
+            boolean found = oneShotVerticalSearch(locator, maxSwipesEachDirection);
+            if (!found) {
+                takeScreenshotOnFailure();
 
-        if (FAST_FAIL_FIRST_ATTEMPT_ONLY) {
-            return oneShotVerticalSearch(locator, maxVerticalSwipesEachDirection);
+                // ✅ Si NO se encontró el elemento, pero el producto aparece como AGOTADO en pantalla, entonces SKIP.
+                try {
+                    if (isAgotadoOnScreenApprox(nombreProducto)) {
+                        abortProductoAgotado(nombreProducto, "FAST-FAIL (no encontrado) pero se detectó 'Agotado' en pantalla.");
+                    }
+                } catch (org.opentest4j.TestAbortedException aborted) {
+                    throw aborted;
+                } catch (Exception ignored) {
+                    rethrowIfAborted(ignored);
+                }
+
+                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada. XPath: " + xpath);
+            }
+
+            WebElement el = driver.findElement(locator);
+            abortIfProductoNoDisponible(el, nombreProducto);
+
+            // ✅ Click directo para evitar waitClickable (producto puede venir clickable=false)
+            try {
+                el.click();
+            } catch (Exception ignore) {
+                tapCenterW3C(el);
+            }
+            try { takeScreenshot(); } catch (Exception ignored) {}
+
+        } else {
+            // Si ya estaba presente y clickIfPresent hizo click, al menos valida estado (si aún es visible)
+            try {
+                WebElement el = driver.findElement(locator);
+                abortIfProductoNoDisponible(el, nombreProducto);
+            } catch (Exception ignored) {}
         }
-
-        return scrollSlowDownThenUpUntilVisible(locator, maxVerticalSwipesEachDirection);
     }
 
-    // -------------------------------------------------------------------------
-    // ✅ TU MÉTODO DE SABORES (SE QUEDA)
-    // -------------------------------------------------------------------------
+    /**
+     * Variante de findVisibleOrScrollDownAndRightSlowToXpathAndClick para PRODUCTOS.
+     * Mantiene tu lógica FAST-FAIL de 1 pasada V/H, pero si encuentra el card y está inhabilitado -> SKIPPED.
+     */
+    protected void findVisibleOrScrollDownAndRightSlowToXpathAndClickProducto(String xpath, int maxVerticalSwipes, int maxRightSwipesPerRow, String nombreProducto) {
+        ensureAppIsInForegroundOrRecover();
+        By locator = By.xpath(xpath);
+
+        if (!clickIfPresent(locator)) {
+            boolean found = oneShotVerticalAndHorizontal(locator, maxVerticalSwipes, maxRightSwipesPerRow);
+            if (!found) {
+                takeScreenshotOnFailure();
+
+                // ✅ Si NO se encontró el elemento, pero el producto aparece como AGOTADO en pantalla, entonces SKIP.
+                try {
+                    if (isAgotadoOnScreenApprox(nombreProducto)) {
+                        abortProductoAgotado(nombreProducto, "FAST-FAIL (V/H no encontrado) pero se detectó 'Agotado' en pantalla.");
+                    }
+                } catch (org.opentest4j.TestAbortedException aborted) {
+                    throw aborted;
+                } catch (Exception ignored) {
+                    rethrowIfAborted(ignored);
+                }
+
+                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada (V/H). XPath: " + xpath);
+            }
+
+            WebElement el = driver.findElement(locator);
+            abortIfProductoNoDisponible(el, nombreProducto);
+
+            // ✅ Click directo para evitar waitClickable (producto puede venir clickable=false)
+            try {
+                el.click();
+            } catch (Exception ignore) {
+                tapCenterW3C(el);
+            }
+            try { takeScreenshot(); } catch (Exception ignored) {}
+
+        } else {
+            try {
+                WebElement el = driver.findElement(locator);
+                abortIfProductoNoDisponible(el, nombreProducto);
+            } catch (Exception ignored) {}
+        }
+    }
+
+
+    protected void abortIfProductoNoDisponible(WebElement el, String nombreProducto) {
+        try {
+            // Revisamos el elemento y varios ancestros (Compose suele poner estado en el contenedor)
+            WebElement node = el;
+
+            String enabledBest = null;
+            String clickableBest = null;
+            String focusableBest = null;
+
+            for (int i = 0; i < 5; i++) { // elemento + padres
+                String enabled = safeGetAttr(node, "enabled");
+                String clickable = safeGetAttr(node, "clickable");
+                String focusable = safeGetAttr(node, "focusable");
+
+                if ("false".equalsIgnoreCase(enabled)) enabledBest = enabled;
+                if ("false".equalsIgnoreCase(clickable)) clickableBest = clickable;
+                if ("false".equalsIgnoreCase(focusable)) focusableBest = focusable;
+
+                try {
+                    node = node.findElement(By.xpath(".."));
+                } catch (Exception e) {
+                    break;
+                }
+            }
+
+            if (enabledBest == null) enabledBest = safeGetAttr(el, "enabled");
+            if (clickableBest == null) clickableBest = safeGetAttr(el, "clickable");
+            if (focusableBest == null) focusableBest = safeGetAttr(el, "focusable");
+
+            boolean disabled =
+                    "false".equalsIgnoreCase(enabledBest)
+                            || "false".equalsIgnoreCase(clickableBest)
+                            || "false".equalsIgnoreCase(focusableBest);
+
+            // 🔎 Badge SOLO dentro de la card (helper que ya tenías)
+            String badge = detectBadgeEnCard(el);
+
+            // 📎 Adjuntar estado UI a Allure
+            try {
+                io.qameta.allure.Allure.addAttachment(
+                        "Estado UI - " + nombreProducto,
+                        "enabled=" + enabledBest
+                                + "\nclickable=" + clickableBest
+                                + "\nfocusable=" + focusableBest
+                                + "\nbadge=" + (badge == null ? "N/A" : badge)
+                );
+            } catch (Exception ignored) {}
+
+            // ✅ SKIP inmediato si está agotado / no disponible
+            if (disabled || badge != null) {
+                try { takeScreenshot(); } catch (Exception ignored) {}
+
+                org.junit.jupiter.api.Assumptions.abort(
+                        "Falló en seleccionar producto '" + nombreProducto + "' porque se encuentra AGOTADO"
+                                + (badge != null ? (" (Estado detectado: " + badge + ")") : "")
+                );
+            }
+
+        } catch (org.opentest4j.TestAbortedException aborted) {
+            throw aborted; // deja pasar SKIPPED
+        } catch (Exception ignored) {
+            // no rompe el flujo si falla la detección
+        }
+    }
+    // ✅ Helper local con nombre distinto para evitar el conflicto de safeGetAttr duplicado
+    private String safeGetAttr2(WebElement el, String attr) {
+        try { return el.getAttribute(attr); } catch (Exception e) { return "N/A"; }
+    }
+
+    private String safeGetAttr(WebElement el, String attr) {
+        try { return el.getAttribute(attr); } catch (Exception e) { return "N/A"; }
+    }
+    private String detectBadgeEnCard(WebElement el) {
+        String[] keywords = new String[]{"Agotado", "Inhabilitado", "No disponible", "Próximamente", "Proximamente"};
+        try {
+            // Intentamos subir a contenedor inmediato (card)
+            WebElement container = el;
+            try { container = el.findElement(By.xpath("..")); } catch (Exception ignored) {}
+
+            for (String k : keywords) {
+                try {
+                    // Buscamos SOLO dentro de la card (evita falsos positivos en pantalla)
+                    if (!container.findElements(By.xpath(".//*[contains(@text,'" + k + "') or contains(@content-desc,'" + k + "')]")).isEmpty()) {
+                        return k;
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+
+
+
+    // =========================================================
+    // =========== VIEWPORT FINGERPRINT (BasePage2) ============
+    // =========================================================
+
+    private String viewportFingerPrint() {
+        try {
+            List<WebElement> texts = driver.findElements(
+                    By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]")
+            );
+            if (texts == null || texts.isEmpty()) return "EMPTY";
+
+            StringBuilder sb = new StringBuilder();
+            for (WebElement el : texts) {
+                try { sb.append(el.getText().trim()).append("|"); } catch (Exception ignore) {}
+            }
+            return sb.toString();
+        } catch (Exception ignore) {
+            return "ERR";
+        }
+    }
+
+    public String viewportFingerPrintPublic() {
+        try {
+            List<WebElement> texts = driver.findElements(
+                    By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]")
+            );
+            StringBuilder sb = new StringBuilder();
+            for (WebElement el : texts) {
+                try { sb.append(el.getText().trim()).append("|"); } catch (Exception ignore) {}
+            }
+            return sb.toString();
+        } catch (Exception ignore) {
+            return "";
+        }
+    }
+
+    // =========================================================
+    // =========== BÚSQUEDAS “ONE SHOT” (FAST-FAIL) =============
+    // =========================================================
+
+    protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipes) {
+        ensureAppIsInForegroundOrRecover();
+        By locator = By.xpath(xpath);
+        return isVisible(locator) || oneShotVerticalSearch(locator, maxVerticalSwipes);
+    }
+
+    private boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
+        if (isVisible(locator)) return true;
+
+        String lastFinger = "";
+        int allowed = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
+
+        for (int i = 0; i < allowed; i++) {
+            if (i % 2 == 0 && isVisible(locator)) return true;
+
+            String before = viewportFingerPrint();
+            slowSwipeUp();
+            String after = viewportFingerPrint();
+
+            if (after.equals(before) || after.equals(lastFinger)) break;
+            lastFinger = after;
+        }
+        return isVisible(locator);
+    }
+
+    private boolean oneShotHorizontalSearch(By locator, int maxRightSwipes, int[] budgetH) {
+        if (isVisible(locator)) return true;
+
+        String lastFinger = "";
+        int allowed = maxRightSwipes;
+
+        if (budgetH != null) {
+            allowed = Math.min(maxRightSwipes, budgetH[0]);
+            if (allowed <= 0) return isVisible(locator);
+        }
+
+        for (int i = 0; i < allowed; i++) {
+            if (i % 2 == 0 && isVisible(locator)) return true;
+
+            String before = viewportFingerPrint();
+            slowSwipeLeft();
+            String after = viewportFingerPrint();
+
+            if (after.equals(before) || after.equals(lastFinger)) break;
+            lastFinger = after;
+
+            if (budgetH != null) {
+                budgetH[0]--;
+                if (budgetH[0] <= 0) break;
+            }
+        }
+        return isVisible(locator);
+    }
+
+    private boolean oneShotVerticalAndHorizontal(By locator, int maxDownSwipes, int maxRightSwipesPerRow) {
+        if (isVisible(locator)) return true;
+
+        String lastFinger = "";
+        int allowedV = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
+        int[] budgetH = new int[]{TOTAL_HORIZONTAL_SWIPE_BUDGET};
+
+        for (int i = 0; i < allowedV; i++) {
+            if (i % 2 == 0 && isVisible(locator)) return true;
+
+            if (oneShotHorizontalSearch(locator, maxRightSwipesPerRow, budgetH)) return true;
+            if (budgetH[0] <= 0) break;
+
+            String before = viewportFingerPrint();
+            slowSwipeUp();
+            String after = viewportFingerPrint();
+
+            if (after.equals(before) || after.equals(lastFinger)) break;
+            lastFinger = after;
+        }
+        return isVisible(locator);
+    }
+
+    protected void findVisibleOrScrollToXpathAndClick(String xpath, int maxSwipesEachDirection) {
+        ensureAppIsInForegroundOrRecover();
+        By locator = By.xpath(xpath);
+
+        if (!clickIfPresent(locator)) {
+            boolean found = oneShotVerticalSearch(locator, maxSwipesEachDirection);
+            if (!found) {
+                takeScreenshotOnFailure();
+                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada. XPath: " + xpath);
+            }
+            click(locator);
+        }
+    }
+
+    protected void findVisibleOrScrollDownAndRightSlowToXpathAndClick(String xpath, int maxVerticalSwipes, int maxRightSwipesPerRow) {
+        ensureAppIsInForegroundOrRecover();
+        By locator = By.xpath(xpath);
+
+        if (!clickIfPresent(locator)) {
+            boolean found = oneShotVerticalAndHorizontal(locator, maxVerticalSwipes, maxRightSwipesPerRow);
+            if (!found) {
+                takeScreenshotOnFailure();
+                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada (V/H). XPath: " + xpath);
+            }
+            click(locator);
+        }
+    }
+
+    // =========================================================
+    // ============ FLAVORS / CONTENT-DESC CONTROLADO ===========
+    // =========================================================
+
     public void seleccionarSaborPorContentDesc2(String contentDesc) {
         ensureAppIsInForegroundOrRecover();
 
         String xpath = "//android.view.View[@content-desc=\"" + contentDesc + "\"]";
         By locator = By.xpath(xpath);
 
-        int maxRounds = 12;
-        int scrollsPerRound = 2;
-
-        if (FAST_FAIL_FIRST_ATTEMPT_ONLY && FAST_FAIL_FLAVORS_ONE_ROUND) {
-            maxRounds = 1;
-        }
+        // Conserva la intención de BasePage2 (búsqueda controlada y luego clickSmart)
+        final int maxRounds = 1;
+        final int scrollsPerRound = 2;
 
         String lastFinger = "";
 
         for (int round = 0; round < maxRounds; round++) {
-
             for (int s = 0; s < scrollsPerRound; s++) {
                 String before = viewportFingerPrintPublic();
                 slowSwipeUp();
-                String after  = viewportFingerPrintPublic();
-
+                String after = viewportFingerPrintPublic();
                 if (after.equals(before) || after.equals(lastFinger)) break;
                 lastFinger = after;
             }
@@ -866,42 +1004,284 @@ public class BasePage {
         } catch (Exception e) {
             takeScreenshotOnFailure();
             throw new RuntimeException(
-                    "No se encontró el sabor con content-desc: '" + contentDesc +
-                            "' tras búsqueda controlada. XPath: " + xpath, e
+                    "No se encontró el sabor con content-desc: '" + contentDesc + "' tras búsqueda controlada. XPath: " + xpath,
+                    e
             );
         }
     }
-
-    public String viewportFingerPrintPublic() {
+    public void clickProductoOskip(String nombreProducto) {
+        // 1) Encontrar elemento por accessibilityId (rápido si existe)
+        WebElement el = null;
         try {
-            List<WebElement> texts = driver.findElements(
-                    By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]")
-            );
+            el = driver.findElement(io.appium.java_client.AppiumBy.accessibilityId(nombreProducto));
+        } catch (Exception ignored) {}
 
-            StringBuilder sb = new StringBuilder();
-            for (WebElement el : texts) {
-                try { sb.append(el.getText().trim()).append("|"); } catch (Exception ignored) {}
+        // 2) Fallback por texto/content-desc en cualquier View/TextView (Compose friendly)
+        if (el == null) {
+            List<WebElement> candidates = driver.findElements(By.xpath(
+                    "//*[(@text='" + escapeXpath(nombreProducto) + "') or (@content-desc='" + escapeXpath(nombreProducto) + "')]"
+            ));
+            if (!candidates.isEmpty()) el = candidates.get(0);
+        }
+
+        // Si no se encontró -> aquí tú decides: fallar o skip.
+        if (el == null) {
+            takeScreenshot("NO_ENCONTRADO - " + nombreProducto);
+            Assumptions.abort("SKIPPED: No se encontró el producto '" + nombreProducto + "' en pantalla.");
+            return;
+        }
+
+        // 3) Detectar inhabilitado por atributos
+        String enabled = safeAttr(el, "enabled");
+        String clickable = safeAttr(el, "clickable");
+        String focusable = safeAttr(el, "focusable");
+
+        boolean disabled =
+                "false".equalsIgnoreCase(enabled)
+                        || "false".equalsIgnoreCase(clickable)
+                        || "false".equalsIgnoreCase(focusable);
+
+        // 4) Detectar badges/labels comunes (Agotado, Próximamente, No disponible...)
+        String badge = detectarBadgeNoDisponible();
+
+        Allure.addAttachment("Estado UI - " + nombreProducto,
+                "enabled=" + enabled +
+                        "\nclickable=" + clickable +
+                        "\nfocusable=" + focusable +
+                        "\nbadgeDetectado=" + (badge == null ? "N/A" : badge)
+        );
+
+        if (disabled || badge != null) {
+            takeScreenshot("ITEM_INHABILITADO - " + nombreProducto);
+            Assumptions.abort("SKIPPED: '" + nombreProducto + "' está INHABILITADO/NO DISPONIBLE. " +
+                    (badge != null ? ("Badge: " + badge) : ""));
+            return;
+        }
+
+        // 5) Si está disponible -> click normal
+        el.click();
+    }
+
+    private String detectarBadgeNoDisponible() {
+        // Agrega aquí todas las palabras que tu app use en diferentes módulos
+        String[] keywords = new String[]{
+                "Agotado", "Inhabilitado", "No disponible", "Próximamente", "Proximamente"
+        };
+
+        for (String k : keywords) {
+            try {
+                List<WebElement> hits = driver.findElements(By.xpath(
+                        "//*[contains(@text,'" + k + "') or contains(@content-desc,'" + k + "')]"
+                ));
+                if (!hits.isEmpty()) return k;
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+    public void takeScreenshot(String nombre) {
+        try {
+            // ✅ Reutiliza tu método actual sin parámetros
+            byte[] bytes = takeScreenshot();
+
+            // ✅ Adjunta el screenshot con nombre en Allure
+            if (bytes != null) {
+                Allure.getLifecycle().addAttachment(
+                        nombre,
+                        "image/png",
+                        "png",
+                        bytes
+                );
             }
-            return sb.toString();
-
         } catch (Exception e) {
-            return "";
+            log.warn("[BasePage] No se pudo adjuntar screenshot: {}", e.getMessage());
+        }
+    }
+
+    private String safeAttr(WebElement el, String attr) {
+        try { return el.getAttribute(attr); } catch (Exception e) { return "N/A"; }
+    }
+
+    private String escapeXpath(String s) {
+        // Simple escape para comillas simples en XPath
+        return s.replace("'", "\\'");
+    }
+
+
+    protected void ensureVisibleNoClick(By locator, int timeoutSeconds) {
+        try {
+            new WebDriverWait(driver, Duration.ofSeconds(timeoutSeconds))
+                    .until(ExpectedConditions.visibilityOfElementLocated(locator));
+        } catch (Exception e) {
+            takeScreenshotOnFailure();
+            throw new AssertionError("Elemento no visible tras " + timeoutSeconds + "s: " + locator, e);
+        }
+    }
+
+    protected void verificarSinErrorApp() {
+        ensureAppIsInForegroundOrRecover();
+        By[] errorLocators = {
+            By.xpath("//*[contains(@text,'Algo salió mal') or contains(@text,'Ocurrió un error') or contains(@text,'Error inesperado') or contains(@text,'Sin conexión')]"),
+            By.xpath("//*[contains(@text,'something went wrong') or contains(@text,'error')][@clickable='false']")
+        };
+        for (By loc : errorLocators) {
+            try {
+                List<WebElement> found = driver.findElements(loc);
+                if (found != null && !found.isEmpty() && safeDisplayed(found.get(0))) {
+                    takeScreenshotOnFailure();
+                    throw new AssertionError("Error detectado en la app: " + found.get(0).getText());
+                }
+            } catch (AssertionError ae) {
+                throw ae;
+            } catch (Exception ignored) {}
+        }
+    }
+
+    protected void sleep(long ms) {
+        if (ms <= 0) return;
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignore) {
+            Thread.currentThread().interrupt();
         }
     }
 
     private WebElement findBestCardContainer(WebElement base) {
         try {
             return base.findElement(By.xpath("./ancestor::*[@clickable='true'][1]"));
-        } catch (Exception ignored) {}
-
-        try {
-            return base.findElement(By.xpath("./ancestor::android.view.View[2]"));
-        } catch (Exception ignored) {}
-
-        try {
-            return base.findElement(By.xpath("./ancestor::android.view.View[3]"));
-        } catch (Exception ignored) {}
-
-        return base;
+        } catch (Exception ignore) {
+            try {
+                return base.findElement(By.xpath("./ancestor::android.view.View[2]"));
+            } catch (Exception ignore2) {
+                try {
+                    return base.findElement(By.xpath("./ancestor::android.view.View[3]"));
+                } catch (Exception ignore3) {
+                    return base;
+                }
+            }
+        }
     }
+
+    // =========================================================
+    // ============== AGOTADO: DETECCIÓN EN PANTALLA ============
+    // =========================================================
+
+    /**
+     * Extrae el valor de @text="..." de un xpath (si existe).
+     * Útil para cuando solo tienes el xpath y necesitas el nombre del producto para SKIP.
+     */
+    protected String extractTextFromXpath(String xpath) {
+        try {
+            if (xpath == null) return null;
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("@text\\s*=\\s*\"([^\"]+)\"");
+            java.util.regex.Matcher m = p.matcher(xpath);
+            return m.find() ? m.group(1) : null;
+        } catch (Exception e) {
+            rethrowIfAborted(e);
+            return null;
+        }
+    }
+
+    /**
+     * Detecta si el producto (por nombre) está marcado como "Agotado" en pantalla.
+     * Funciona con Compose subiendo ancestros y buscando el label "Agotado".
+     */
+    protected boolean isAgotadoOnScreenApprox(String nombreProducto) {
+        try {
+            if (nombreProducto == null || nombreProducto.trim().isEmpty()) return false;
+
+            String n = nombreProducto.trim().replace("®", "").replace("™", "");
+
+            String xpName = "//android.widget.TextView[" +
+                    "normalize-space(@text)=\"" + n + "\" or contains(@text,\"" + n + "\")" +
+                    "]";
+
+            List<WebElement> names = driver.findElements(By.xpath(xpName));
+            if (names == null || names.isEmpty()) return false;
+
+            By byAgotado = By.xpath(".//android.widget.TextView[contains(@text,'Agotado') or normalize-space(@text)='Agotado']");
+
+            for (WebElement nameEl : names) {
+                WebElement node = nameEl;
+                for (int i = 0; i < 12; i++) {
+                    try {
+                        List<WebElement> ag = node.findElements(byAgotado);
+                        if (ag != null && !ag.isEmpty()) return true;
+                        node = node.findElement(By.xpath(".."));
+                    } catch (Exception ex) {
+                        rethrowIfAborted(ex);
+                        break;
+                    }
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            rethrowIfAborted(e);
+            return false;
+        }
+    }
+    // ===============================
+// ALLURE LABELS
+// ===============================
+    protected void addAllureLabelAgotado() {
+        try {
+            io.qameta.allure.Allure.getLifecycle().updateTestCase(tc -> {
+                tc.getLabels().add(
+                        new io.qameta.allure.model.Label()
+                                .setName("tag")
+                                .setValue("agotado")
+                );
+            });
+        } catch (Exception ignored) {
+            rethrowIfAborted(ignored);
+        }
+    }
+    /**
+     * Marca el caso como SKIPPED (Allure/JUnit) con el mensaje exacto requerido.
+     * NO cambia tu lógica; solo convierte a SKIPPED cuando se confirma "Agotado".
+     */
+    protected void abortProductoAgotado(String nombreProducto, String debugReason) {
+        final String msg = "El producto \"" + nombreProducto + "\" se encuentra agotado";
+
+        try {
+            try { takeScreenshot(); } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+            try { io.qameta.allure.Allure.step(msg); } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+            try {
+                io.qameta.allure.Allure.addAttachment(
+                        "Agotado - debug",
+                        "text/plain",
+                        (debugReason == null ? "" : debugReason)
+                );
+            } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+            try { AGOTADOS_SKIPPED_COUNT.incrementAndGet(); } catch (Exception ignored) { rethrowIfAborted(ignored); }
+            try { addAllureLabelAgotado(); } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+        } finally {
+            org.junit.jupiter.api.Assumptions.abort(msg);
+        }
+    }
+
+    protected void abortNoHayMasHorariosEnAsientos(String debugReason) {
+        final String msg = "No hay más horarios disponibles para cambiar en la pantalla de asientos";
+
+        try {
+            try { takeScreenshot(); } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+            try { io.qameta.allure.Allure.step(msg); } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+            try {
+                io.qameta.allure.Allure.addAttachment(
+                        "Sin más horarios - debug",
+                        "text/plain",
+                        (debugReason == null ? "" : debugReason)
+                );
+            } catch (Exception ignored) { rethrowIfAborted(ignored); }
+
+        } finally {
+            org.junit.jupiter.api.Assumptions.abort(msg);
+        }
+    }
+
 }

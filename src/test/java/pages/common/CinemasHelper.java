@@ -1,21 +1,28 @@
 package pages.common;
 
-import io.appium.java_client.TouchAction;
 import io.appium.java_client.android.AndroidDriver;
 import io.appium.java_client.AppiumBy;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.remote.RemoteWebElement;
+import org.openqa.selenium.interactions.PointerInput;
+import org.openqa.selenium.interactions.Sequence;
+import org.openqa.selenium.interactions.Pause;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Collections;
 
 import java.text.Normalizer;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
-import static io.appium.java_client.touch.WaitOptions.waitOptions;
-import static io.appium.java_client.touch.offset.PointOption.point;
 
 public class CinemasHelper extends BasePage {
+
+    private static final Logger log = LoggerFactory.getLogger(CinemasHelper.class);
 
     // ==========================
     // ✅ TAB ALIMENTOS
@@ -36,9 +43,9 @@ public class CinemasHelper extends BasePage {
     // ✅ GUARD: PANTALLA CLUB CINÉPOLIS (LOGIN)
     // ==========================
     private static final By CLUB_LOGIN_TITLE =
-            By.xpath("//*[contains(@text,'Inicia sesión') or contains(@text,'Inicia sesion')]");
+            By.xpath("//*[contains(@text,'Inicia sesi\u00f3n') or contains(@text,'Inicia sesion')]");
     private static final By CLUB_LOGIN_LOGO =
-            By.xpath("//*[contains(@text,'CLUB') and (contains(@text,'cinépolis') or contains(@text,'cinepolis'))]");
+            By.xpath("//*[contains(@text,'CLUB') and (contains(@text,'cin\u00e9polis') or contains(@text,'cinepolis'))]");
     // Flecha/back de la pantalla (puede variar por device)
     private static final By CLUB_BACK_BUTTON_A11Y =
             By.xpath("//android.widget.ImageButton[contains(@content-desc,'Atrás') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]" +
@@ -95,8 +102,54 @@ public class CinemasHelper extends BasePage {
     private static final By SEARCH_INNER_VIEW =
             By.xpath("//android.widget.EditText/android.view.View[2]");
 
+    // TextView inside button (clickable=false) — used only to find the real Button
+    private static final By BTN_APLICAR_SELECCION_LABEL =
+            By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']");
+
+    // Sibling Button right next to the label (Compose layout)
+    private static final By BTN_APLICAR_SELECCION_SIBLING =
+            By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']"
+                   + "/following-sibling::android.widget.Button"
+                   + " | //android.widget.TextView[@text='Aplicar seleccion']"
+                   + "/following-sibling::android.widget.Button");
+
+    // Clickable ancestor of the label (catches any wrapper View)
+    private static final By BTN_APLICAR_SELECCION_ANCESTOR =
+            By.xpath("(//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion'])"
+                   + "/ancestor::*[@clickable='true'][1]");
+
+    // UiAutomator fallback — finds any clickable element whose text matches
+    private static final String UA_APLICAR_SELECCION =
+            "new UiSelector().clickable(true).textContains(\"Aplicar\")";
+
+    // kept for backward compat (label-only, used as last resort)
     private static final By BTN_APLICAR_SELECCION =
             By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']");
+
+    // ==========================
+    // ✅ DETECCIÓN CINE NO SELECCIONADO (México)
+    // ==========================
+    private static final By CINES_SIN_SELECCION = By.xpath(
+            "//android.widget.TextView[@text='Selecciona uno o más cines']" +
+            " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]");
+
+    // Ancestro clickable del chip (android.view.View clickable=true que envuelve el TextView)
+    private static final By CINES_CHIP_CLICKABLE = By.xpath(
+            "//android.widget.TextView[@text='Selecciona uno o más cines']/ancestor::android.view.View[@clickable='true'][1]" +
+            " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]/ancestor::android.view.View[@clickable='true'][1]");
+
+    private static final String MEXICO_CINEMA_CONFIG = "mexico-cinema.txt";
+
+    // ==========================
+    // ✅ POPUP CAMBIO DE ZONA/UBICACIÓN (aparece al inicio, no siempre)
+    // ==========================
+    private static final By POPUP_ZONA_DETECTION = By.xpath(
+            "//*[contains(@text,'lejos de') or contains(@text,'cambiar tu cartelera') " +
+            "or contains(@text,'cambiar la cartelera') or contains(@text,'Cambiar zona')]");
+
+    private static final By BTN_NO_CAMBIAR = By.xpath(
+            "//android.widget.TextView[@text='No cambiar']" +
+            " | //android.widget.Button[@text='No cambiar']");
 
     // ==========================
     // ✅ Alertas
@@ -126,8 +179,44 @@ public class CinemasHelper extends BasePage {
         super(driver);
     }
 
+    /**
+     * Toca "Aplicar selección" de forma robusta.
+     * El TextView tiene clickable=false en Compose; el Button real es hermano o ancestro.
+     */
+    private boolean clickAplicarSeleccion() {
+        // 1. Sibling Button (layout Compose más común)
+        if (tapIfPresent(BTN_APLICAR_SELECCION_SIBLING)) {
+            log.info("[CinemasHelper] Aplicar selección → sibling Button OK");
+            return true;
+        }
+        // 2. Ancestro clickable del label
+        if (tapIfPresent(BTN_APLICAR_SELECCION_ANCESTOR)) {
+            log.info("[CinemasHelper] Aplicar selección → clickable ancestor OK");
+            return true;
+        }
+        // 3. UiAutomator: clickable + texto "Aplicar"
+        try {
+            WebElement btn = driver.findElement(AppiumBy.androidUIAutomator(UA_APLICAR_SELECCION));
+            tapCenter(btn);
+            log.info("[CinemasHelper] Aplicar selección → UiAutomator OK");
+            return true;
+        } catch (Exception ignored) {}
+        // 4. Tap por coordenadas del label (funciona aunque no sea clickable)
+        try {
+            WebElement label = firstOrNull(BTN_APLICAR_SELECCION_LABEL);
+            if (label != null) {
+                tapCenter(label);
+                log.info("[CinemasHelper] Aplicar selección → tap label center OK");
+                return true;
+            }
+        } catch (Exception ignored) {}
+        // 5. Último recurso: el locator original
+        log.warn("[CinemasHelper] Aplicar selección → fallback original locator");
+        return tapIfPresent(BTN_APLICAR_SELECCION) || clickIfPresent(BTN_APLICAR_SELECCION);
+    }
+
     public void ensureCinemaSelectedFromAlimentos(String targetCinema) {
-        System.out.println("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> " + targetCinema);
+        log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> {}", targetCinema);
 
         goToAlimentosTab();
         openSelectorFromAlimentosIfNeeded();
@@ -139,14 +228,14 @@ public class CinemasHelper extends BasePage {
         pickCinemaFromResults(targetCinema);
         acceptAlertsIfPresent();
 
-        clickIfPresent(BTN_APLICAR_SELECCION);
+        clickAplicarSeleccion();
         acceptAlertsIfPresent();
 
         // ✅ Si después de aplicar aparece Club Cinépolis, ciérralo y regresa a Alimentos
         dismissClubLoginIfPresent();
         goToAlimentosTab();
 
-        System.out.println("[CinemasHelper] Cine seleccionado OK -> " + targetCinema);
+        log.info("[CinemasHelper] Cine seleccionado OK -> {}", targetCinema);
     }
 
     private void goToAlimentosTab() {
@@ -180,7 +269,7 @@ public class CinemasHelper extends BasePage {
 
         // 🚨 Si aún vemos Cartelera/Horarios, NO logramos cambiar a Alimentos. Reintentamos una vez más con un tap fuerte.
         if (isVisibleNow(TAB_CARTELERA) || isVisibleNow(TAB_HORARIOS)) {
-            System.out.println("[CinemasHelper] WARNING: No se logró cambiar a Alimentos; aún estamos en Películas. Forzando tap final...");
+            log.warn("[CinemasHelper] WARNING: No se logró cambiar a Alimentos; aún estamos en Películas. Forzando tap final...");
             try {
                 WebElement alimentos = driver.findElement(AppiumBy.androidUIAutomator(
                         "new UiSelector().textContains(\"Alimentos\")"
@@ -207,7 +296,7 @@ public class CinemasHelper extends BasePage {
 
     private void openCinesIconWithRetries() {
         for (int i = 1; i <= 5; i++) {
-            System.out.println("[CinemasHelper] Tap icono Cines intento: " + i);
+            log.debug("[CinemasHelper] Tap icono Cines intento: {}", i);
 
             if (tapIfPresent(CINES_ICON_VIEW)) { sleep(450); }
             if (isAfterCinesTapScreenOpen()) return;
@@ -276,7 +365,7 @@ public class CinemasHelper extends BasePage {
         if (desired.isEmpty()) return;
 
         for (int attempt = 1; attempt <= 6; attempt++) {
-            System.out.println("[CinemasHelper] typeInSearchBoxULTRA intento " + attempt);
+            log.debug("[CinemasHelper] typeInSearchBoxULTRA intento {}", attempt);
 
             tapIfPresent(SEARCH_PARENT_ROUNDED);
             sleep(200);
@@ -295,7 +384,7 @@ public class CinemasHelper extends BasePage {
                 sleep(550);
 
                 if (looksTypedOrFiltered(desired)) {
-                    System.out.println("[CinemasHelper] Texto escrito OK (ADB safe)");
+                    log.info("[CinemasHelper] Texto escrito OK (ADB safe)");
                     return;
                 }
             }
@@ -311,12 +400,12 @@ public class CinemasHelper extends BasePage {
                     sleep(500);
 
                     if (looksTypedOrFiltered(desired)) {
-                        System.out.println("[CinemasHelper] Texto escrito OK (sendKeys)");
+                        log.info("[CinemasHelper] Texto escrito OK (sendKeys)");
                         return;
                     }
                 }
             } catch (Exception e) {
-                System.out.println("[CinemasHelper] fallback sendKeys falló: " + e.getMessage());
+                log.warn("[CinemasHelper] fallback sendKeys falló: {}", e.getMessage());
             }
 
             // ✅ 3) Clipboard paste (muy confiable en Compose cuando input text falla)
@@ -329,13 +418,13 @@ public class CinemasHelper extends BasePage {
                     if (pasteFromClipboardKeyEvent()) {
                         sleep(450);
                         if (looksTypedOrFiltered(desired)) {
-                            System.out.println("[CinemasHelper] Texto escrito OK (clipboard paste)");
+                            log.info("[CinemasHelper] Texto escrito OK (clipboard paste)");
                             return;
                         }
                     }
                 }
             } catch (Exception e) {
-                System.out.println("[CinemasHelper] clipboard fallback falló: " + e.getMessage());
+                log.warn("[CinemasHelper] clipboard fallback falló: {}", e.getMessage());
             }
 
             sleep(250);
@@ -351,7 +440,7 @@ public class CinemasHelper extends BasePage {
                 mobileShell("input", new String[]{"keyevent", "67"});
             }
         } catch (Exception e) {
-            System.out.println("[CinemasHelper] adbClearText warning: " + e.getMessage());
+            log.warn("[CinemasHelper] adbClearText warning: {}", e.getMessage());
         }
     }
 
@@ -362,7 +451,7 @@ public class CinemasHelper extends BasePage {
             mobileShell("input", new String[]{"text", escapeForAdbInput(safe)});
             return true;
         } catch (Exception e) {
-            System.out.println("[CinemasHelper] ADB input falló: " + e.getMessage());
+            log.warn("[CinemasHelper] ADB input falló: {}", e.getMessage());
             return false;
         }
     }
@@ -406,7 +495,7 @@ public class CinemasHelper extends BasePage {
             driver.setClipboardText(text);
             return true;
         } catch (Exception e) {
-            System.out.println("[CinemasHelper] setClipboardText falló: " + e.getMessage());
+            log.warn("[CinemasHelper] setClipboardText falló: {}", e.getMessage());
             return false;
         }
     }
@@ -417,7 +506,7 @@ public class CinemasHelper extends BasePage {
             mobileShell("input", new String[]{"keyevent", "279"});
             return true;
         } catch (Exception e) {
-            System.out.println("[CinemasHelper] paste keyevent 279 falló: " + e.getMessage());
+            log.warn("[CinemasHelper] paste keyevent 279 falló: {}", e.getMessage());
             return false;
         }
     }
@@ -476,21 +565,64 @@ public class CinemasHelper extends BasePage {
 
         if (!tapIfPresent(contains)) click(contains);
     }
+    public void dismissClubLoginGuard() {
+        dismissClubLoginGuard("unknown");
+    }
 
+    // ✅ Guard con logs para verificar que sí se ejecuta y qué hizo
+    public void dismissClubLoginGuard(String where) {
+        try {
+            log.info("[CinemasHelper][ClubGuard] ENTER where={}", where);
+
+            // Espera única de 600ms para que la pantalla de Club aparezca si va a aparecer
+            safeSleep(600);
+            boolean visible = isClubLoginVisible();
+
+            if (!visible) {
+                log.debug("[CinemasHelper][ClubGuard] No visible -> SKIP where={}", where);
+                return;
+            }
+
+            log.info("[CinemasHelper][ClubGuard] Visible -> attempting dismiss...");
+            boolean closedReturn = dismissClubLoginIfPresent(); // ✅ tu lógica existente
+            boolean stillVisible = isClubLoginVisible();
+
+            log.info("[CinemasHelper][ClubGuard] closedReturn={} stillVisible={}", closedReturn, stillVisible);
+
+            if (stillVisible) {
+                // Último recurso: tap directo al botón "back" del UI de Club (ya existe en tu clase)
+                log.warn("[CinemasHelper][ClubGuard] STILL visible -> last resort tapBackFromClubUI()");
+                try {
+                    tapBackFromClubUI();
+                    safeSleep(700);
+                } catch (Exception ignored) {}
+                log.debug("[CinemasHelper][ClubGuard] after last resort stillVisible={}", isClubLoginVisible());
+            }
+
+            log.info("[CinemasHelper][ClubGuard] EXIT where={}", where);
+
+        } catch (Exception e) {
+            log.error("[CinemasHelper][ClubGuard] ERROR where={} msg={}", where, e.getMessage());
+        }
+    }
+
+    private static void safeSleep(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
     private void acceptAlertsIfPresent() {
         long end = System.currentTimeMillis() + 4500;
 
         while (System.currentTimeMillis() < end) {
 
             if (isVisibleNow(ALERT_CAMBIAR_CIUDAD_TITLE)) {
-                System.out.println("[CinemasHelper] Alerta ciudad -> Aceptar (last())");
+                log.info("[CinemasHelper] Alerta ciudad -> Aceptar (last())");
                 if (!tapIfPresent(ALERT_ACEPTAR_LAST)) clickIfPresent(ALERT_ACEPTAR_LAST);
                 sleep(450);
                 return;
             }
 
             if (isVisibleNow(ALERT_CAMBIAR_CINE_TITLE)) {
-                System.out.println("[CinemasHelper] Alerta cambiar cine -> Sí, cambiar de cine (CLICKABLE ANCESTOR)");
+                log.info("[CinemasHelper] Alerta cambiar cine -> Sí, cambiar de cine (CLICKABLE ANCESTOR)");
 
                 if (tapIfPresent(BTN_SI_CAMBIAR_CINE_CLICKABLE_ANCESTOR)) { sleep(650); return; }
                 if (tapIfPresent(BTN_SI_CAMBIAR_CINE_TEXT)) { sleep(650); return; }
@@ -529,11 +661,7 @@ public class CinemasHelper extends BasePage {
                 int cx = el.getLocation().getX() + (el.getSize().getWidth() / 2);
                 int cy = el.getLocation().getY() + (el.getSize().getHeight() / 2);
 
-                new TouchAction(driver)
-                        .press(point(cx, cy))
-                        .waitAction(waitOptions(Duration.ofMillis(140)))
-                        .release()
-                        .perform();
+                w3cTap(cx, cy, 140);
                 return true;
             } catch (Exception ignored) {}
 
@@ -559,16 +687,25 @@ public class CinemasHelper extends BasePage {
         }
     }
 
+    // ✅ W3C tap (reemplaza TouchAction para Appium 2 / Selenium 4)
+    private void w3cTap(int x, int y, long holdMs) {
+        try {
+            PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
+            Sequence seq = new Sequence(finger, 1);
+            seq.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), x, y));
+            seq.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
+            seq.addAction(new Pause(finger, Duration.ofMillis(Math.max(0, holdMs))));
+            seq.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
+            driver.perform(Collections.singletonList(seq));
+        } catch (Exception ignored) {}
+    }
+
     public void tapCenter(WebElement el) {
         try {
             int cx = el.getLocation().getX() + (el.getSize().getWidth() / 2);
             int cy = el.getLocation().getY() + (el.getSize().getHeight() / 2);
 
-            new TouchAction(driver)
-                    .press(point(cx, cy))
-                    .waitAction(waitOptions(Duration.ofMillis(140)))
-                    .release()
-                    .perform();
+            w3cTap(cx, cy, 140);
         } catch (Exception ignored) {}
     }
 
@@ -607,18 +744,37 @@ public class CinemasHelper extends BasePage {
     // ==========================
     // ✅ CLUB CINÉPOLIS GUARD
     // ==========================
-    private boolean isClubLoginVisible() {
-        return exists(CLUB_LOGIN_TITLE, 1) || exists(CLUB_LOGIN_LOGO, 1);
+
+    /** Verificación rápida (sin espera) — usar solo cuando ya esperamos antes de llamar. */
+    public boolean isClubLoginVisible() {
+        if (isVisibleNow(CLUB_LOGIN_TITLE)) return true;
+        if (isVisibleNow(CLUB_LOGIN_LOGO))  return true;
+
+        // Fallbacks: patrones sin acento para resistir cambios de encoding o de texto en la app
+        try {
+            List<WebElement> els = driver.findElements(By.xpath(
+                "//*[contains(@text,'Inicia sesi')" +
+                " or contains(@text,'CLUB Cin')" +
+                " or contains(@text,'Club Cin')" +
+                " or contains(@text,'Correo electr')" +
+                " or contains(@text,'Contrase')]"
+            ));
+            for (WebElement el : els) {
+                try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+
+        return false;
     }
 
     /**
      * Cierra la pantalla de Club Cinépolis SIN usar BACK del sistema (porque puede cerrar la app).
      * Usa: botón back de la UI (si existe) y fallback por coordenadas (top-left).
      */
-    private boolean dismissClubLoginIfPresent() {
+    public boolean dismissClubLoginIfPresent() {
         if (!isClubLoginVisible()) return false;
 
-        System.out.println("[CinemasHelper] Detectada pantalla Club Cinépolis. Intentando cerrarla...");
+        log.info("[CinemasHelper] Detectada pantalla Club Cinépolis. Intentando cerrarla...");
 
         for (int i = 1; i <= 3; i++) {
             try {
@@ -636,7 +792,7 @@ public class CinemasHelper extends BasePage {
                 // (si tu app re-renderiza rápido y la pantalla ya cambió).
 
                 if (!isClubLoginVisible()) {
-                    System.out.println("[CinemasHelper] Pantalla Club cerrada OK.");
+                    log.info("[CinemasHelper] Pantalla Club cerrada OK.");
                     return true;
                 }
             } catch (Exception e) {
@@ -644,8 +800,177 @@ public class CinemasHelper extends BasePage {
             }
         }
 
-        System.out.println("[CinemasHelper] No se pudo cerrar Club Cinépolis en reintentos; se continúa flujo.");
+        log.warn("[CinemasHelper] No se pudo cerrar Club Cinépolis en reintentos; se continúa flujo.");
         return false;
+    }
+    private boolean isMarioPromoVisible() {
+        try {
+            // ✅ SOLO si existe el CTA específico de la promo
+            return !driver.findElements(By.xpath(
+                    "//*[normalize-space(@text)='CONSULTA CARTELERA' or contains(@text,'CONSULTA CARTELERA')]"
+            )).isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    private void dismissMarioPromoIfPresent() {
+        try {
+            if (!isMarioPromoVisible()) {
+                return;
+            }
+
+            log.info("[CinemasHelper] Promo Mario detectada. Cerrando...");
+
+            // Intento 1: tap al CTA "CONSULTA CARTELERA"
+            List<WebElement> ctas = driver.findElements(By.xpath(
+                    "//*[contains(@text,'CONSULTA CARTELERA')]"
+            ));
+            if (!ctas.isEmpty()) {
+                ctas.get(0).click();
+                Thread.sleep(800);
+                return;
+            }
+
+            // Intento 2: back (fallback)
+            driver.navigate().back();
+            Thread.sleep(600);
+
+        } catch (Exception e) {
+            log.warn("[CinemasHelper] No se pudo cerrar promo Mario (safe ignore)");
+        }
+    }
+    public void dismissTransientPromosGuard() {
+        dismissTransientPromosGuard("unknown");
+    }
+
+    // Guard con logs (Club + Promos tipo Mario + Popup zona/ubicación)
+    // Corre en loop hasta que el bottom nav sea accesible o se alcancen los intentos máximos.
+    public void dismissTransientPromosGuard(String where) {
+        log.info("[CinemasHelper][PromosGuard] ENTER where={}", where);
+
+        for (int pass = 1; pass <= 5; pass++) {
+            boolean dismissed = false;
+
+            try {
+                if (isClubLoginVisible()) {
+                    log.info("[CinemasHelper][PromosGuard] pass={} Club visible -> dismiss", pass);
+                    dismissClubLoginGuard(where + ":club");
+                    dismissed = true;
+                }
+            } catch (Exception e) {
+                log.error("[CinemasHelper][PromosGuard] Club guard error: {}", e.getMessage());
+            }
+
+            try {
+                if (isMarioPromoVisible()) {
+                    log.info("[CinemasHelper][PromosGuard] pass={} Mario visible -> dismiss", pass);
+                    dismissMarioPromoIfPresent();
+                    dismissed = true;
+                }
+            } catch (Exception e) {
+                log.error("[CinemasHelper][PromosGuard] Mario guard error: {}", e.getMessage());
+            }
+
+            try {
+                if (isLocationChangePopupVisible()) {
+                    log.info("[CinemasHelper][PromosGuard] pass={} Zona visible -> dismiss", pass);
+                    dismissLocationChangePopupIfPresent(where + ":zona");
+                    dismissed = true;
+                    safeSleep(700); // espera a que la app asiente tras cerrar el popup de zona
+                }
+            } catch (Exception e) {
+                log.error("[CinemasHelper][PromosGuard] Zona guard error: {}", e.getMessage());
+            }
+
+            // Si el bottom nav ya es visible, el guard terminó
+            if (isMainNavVisible()) {
+                log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={}", pass, where);
+                return;
+            }
+
+            // Si no se cerró nada y el nav aún no aparece, intento genérico de dismiss
+            if (!dismissed) {
+                log.debug("[CinemasHelper][PromosGuard] pass={} nada cerrado, prueba dismiss genérico", pass);
+                tryGenericOverlayDismiss();
+            }
+
+            safeSleep(500);
+        }
+
+        log.warn("[CinemasHelper][PromosGuard] Max passes alcanzados, nav={} where={}", isMainNavVisible(), where);
+        log.info("[CinemasHelper][PromosGuard] EXIT where={}", where);
+    }
+
+    /** Devuelve true si el bottom nav principal es accesible (Cartelera o Alimentos visible). */
+    private boolean isMainNavVisible() {
+        return isVisibleNow(TAB_CARTELERA)
+            || isVisibleNow(TAB_HORARIOS)
+            || isVisibleNow(TAB_ALIMENTOS)
+            || isVisibleNow(TAB_ALIMENTOS_ALT);
+    }
+
+    /** Intenta cerrar cualquier overlay desconocido usando patrones comunes de dismiss. */
+    private void tryGenericOverlayDismiss() {
+        // Botones de cierre más comunes en promos/modales de Cinépolis
+        By[] dismissLocators = {
+            By.xpath("//*[@content-desc='Close' or @content-desc='Cerrar' or @content-desc='close']"),
+            By.xpath("//android.widget.Button[@text='Cerrar' or @text='No gracias' or @text='Omitir' or @text='Saltar']"),
+            By.xpath("//android.widget.TextView[@text='Cerrar' or @text='No gracias' or @text='Omitir' or @text='Saltar']"),
+            By.xpath("//android.widget.ImageButton[@content-desc='Atrás' or @content-desc='Atras' or @content-desc='Navigate up']"),
+        };
+        for (By loc : dismissLocators) {
+            if (tapIfPresent(loc)) {
+                log.info("[CinemasHelper][PromosGuard] Overlay genérico cerrado con: {}", loc);
+                safeSleep(500);
+                return;
+            }
+        }
+    }
+
+    private boolean isLocationChangePopupVisible() {
+        try {
+            List<WebElement> els = driver.findElements(POPUP_ZONA_DETECTION);
+            for (WebElement el : els) {
+                try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void dismissLocationChangePopupIfPresent(String where) {
+        if (!isLocationChangePopupVisible()) {
+            log.debug("[CinemasHelper][ZonaGuard] Popup zona no visible -> SKIP where={}", where);
+            return;
+        }
+
+        log.info("[CinemasHelper][ZonaGuard] Popup cambio de zona detectado -> tap 'No cambiar' where={}", where);
+
+        for (int i = 1; i <= 3; i++) {
+            // Intento 1: tap directo por locator
+            if (tapIfPresent(BTN_NO_CAMBIAR)) {
+                safeSleep(600);
+                if (!isLocationChangePopupVisible()) {
+                    log.info("[CinemasHelper][ZonaGuard] Popup cerrado OK (tapIfPresent) intento={}", i);
+                    return;
+                }
+            }
+
+            // Intento 2: UiAutomator (más robusto con Compose)
+            try {
+                WebElement btn = driver.findElement(
+                        AppiumBy.androidUIAutomator("new UiSelector().text(\"No cambiar\")"));
+                tapCenter(btn);
+                safeSleep(600);
+                if (!isLocationChangePopupVisible()) {
+                    log.info("[CinemasHelper][ZonaGuard] Popup cerrado OK (UiAutomator) intento={}", i);
+                    return;
+                }
+            } catch (Exception ignored) {}
+
+            safeSleep(300);
+        }
+
+        log.warn("[CinemasHelper][ZonaGuard] No se pudo cerrar popup de zona; se continúa flujo.");
     }
 
     /**
@@ -679,10 +1004,7 @@ public class CinemasHelper extends BasePage {
                         continue;
                     }
 
-                    new TouchAction(driver)
-                            .tap(point(cx, cy))
-                            .waitAction(waitOptions(Duration.ofMillis(120)))
-                            .perform();
+                    w3cTap(cx, cy, 120);
                     return true;
                 } catch (Exception ignored) {}
             }
@@ -718,6 +1040,143 @@ public class CinemasHelper extends BasePage {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // ==========================
+    // ✅ SELECCIÓN DE CINE PARA MÉXICO (data-driven desde archivo)
+    // ==========================
+
+    /**
+     * Escenario 1: "Selecciona uno o más cines" visible → no hay cine → selecciona desde config.
+     * Escenario 2: cine ya seleccionado → no hace nada.
+     * Flujo: navega a Horarios → toca el chip "Selecciona uno o más cines" → busca → aplica.
+     */
+    public void ensureMexicoCinemaSelected() {
+        log.info("[CinemasHelper][MxCinema] Verificando cine seleccionado para México...");
+
+        // Navegar a Horarios donde vive el chip de selección de cines
+        tapIfPresent(TAB_HORARIOS);
+        sleep(600);
+
+        if (isMexicoCinemaPreSelected()) {
+            log.info("[CinemasHelper][MxCinema] Escenario 2: cine ya seleccionado -> continua con tests.");
+            return;
+        }
+
+        log.info("[CinemasHelper][MxCinema] Escenario 1: sin cine seleccionado -> leyendo config...");
+        String cinemaName = readMexicoCinemaFromConfig();
+
+        if (cinemaName == null || cinemaName.isBlank()) {
+            log.warn("[CinemasHelper][MxCinema] Archivo '{}' vacío o no encontrado -> se omite selección.",
+                    MEXICO_CINEMA_CONFIG);
+            return;
+        }
+
+        log.info("[CinemasHelper][MxCinema] Seleccionando cine: '{}'", cinemaName);
+        try {
+            tapCinesChipToOpenSelector();
+            waitSelectorScreenOrThrow();
+            typeInSearchBoxULTRA(cinemaName);
+            pickCinemaFromResults(cinemaName);
+            acceptAlertsIfPresent();
+            clickAplicarSeleccion();
+            acceptAlertsIfPresent();
+            log.info("[CinemasHelper][MxCinema] Cine '{}' seleccionado exitosamente.", cinemaName);
+        } catch (Exception e) {
+            log.error("[CinemasHelper][MxCinema] Error al seleccionar cine '{}': {}", cinemaName, e.getMessage());
+        }
+    }
+
+    /** Toca el chip "Selecciona uno o más cines" en la tab de Horarios para abrir el selector. */
+    private void tapCinesChipToOpenSelector() {
+        if (isSelectorOpen()) return;
+
+        for (int i = 1; i <= 4; i++) {
+            log.debug("[CinemasHelper][MxCinema] Tap chip cines intento {}", i);
+
+            // 1) Ancestro clickable del chip (android.view.View clickable=true)
+            if (tapIfPresent(CINES_CHIP_CLICKABLE)) { sleep(700); }
+            if (isSelectorOpen()) return;
+
+            // 2) Tap directo al TextView del chip
+            if (tapIfPresent(CINES_SIN_SELECCION)) { sleep(700); }
+            if (isSelectorOpen()) return;
+
+            // 3) UiAutomator fallback (ignora acentos para compatibilidad)
+            try {
+                WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
+                        "new UiSelector().textContains(\"Selecciona uno o\")"));
+                tapCenter(el);
+                sleep(700);
+            } catch (Exception ignored) {}
+            if (isSelectorOpen()) return;
+
+            sleep(400);
+        }
+    }
+
+    /** Devuelve true si ya hay un cine seleccionado (chip "Selecciona uno o más cines" NO visible). */
+    public boolean isMexicoCinemaPreSelected() {
+        boolean sinSeleccion = exists(CINES_SIN_SELECCION, 1);
+        log.debug("[CinemasHelper][MxCinema] isCinemaPreSelected: sinSeleccionVisible={} -> preSelected={}",
+                sinSeleccion, !sinSeleccion);
+        return !sinSeleccion;
+    }
+
+    /** Lee la primera línea no vacía y no comentada del archivo de config. */
+    private String readMexicoCinemaFromConfig() {
+        // 1. Directorio de trabajo del ejecutable (build/launch4j/ cuando corre el .exe)
+        java.io.File exeDir = new java.io.File(System.getProperty("user.dir"), MEXICO_CINEMA_CONFIG);
+        log.debug("[CinemasHelper][MxCinema] Buscando config en: {}", exeDir.getAbsolutePath());
+        if (exeDir.exists()) {
+            String name = readFirstNonBlankLine(exeDir);
+            if (name != null) {
+                log.info("[CinemasHelper][MxCinema] Cine leído desde directorio launcher: '{}'", name);
+                return name;
+            }
+        }
+
+        // 2. Classpath (cuando corre desde IDE con el archivo en src/test/resources/)
+        try (java.io.InputStream is = CinemasHelper.class.getClassLoader()
+                .getResourceAsStream(MEXICO_CINEMA_CONFIG)) {
+            if (is != null) {
+                String raw = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                String name = firstNonBlankLine(raw);
+                if (name != null) {
+                    log.info("[CinemasHelper][MxCinema] Cine leído desde classpath: '{}'", name);
+                    return name;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CinemasHelper][MxCinema] Error leyendo classpath resource: {}", e.getMessage());
+        }
+
+        log.warn("[CinemasHelper][MxCinema] No se encontró '{}' en '{}' ni en classpath.",
+                MEXICO_CINEMA_CONFIG, System.getProperty("user.dir"));
+        return null;
+    }
+
+    private String readFirstNonBlankLine(java.io.File file) {
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.FileReader(file, java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (!line.isEmpty() && !line.startsWith("#")) return line;
+            }
+        } catch (Exception e) {
+            log.warn("[CinemasHelper][MxCinema] Error leyendo archivo {}: {}", file.getAbsolutePath(), e.getMessage());
+        }
+        return null;
+    }
+
+    private String firstNonBlankLine(String content) {
+        if (content == null) return null;
+        for (String line : content.split("\\r?\\n")) {
+            line = line.trim();
+            if (!line.isEmpty() && !line.startsWith("#")) return line;
+        }
+        return null;
     }
 
 }

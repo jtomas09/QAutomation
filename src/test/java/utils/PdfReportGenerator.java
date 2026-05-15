@@ -7,7 +7,6 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
-import utils.BaseTestStatusRegistry;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -20,8 +19,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import javax.imageio.ImageIO;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PdfReportGenerator {
+
+    private static final Logger log = LoggerFactory.getLogger(PdfReportGenerator.class);
 
     private static final Path REPORT_DIR = Paths.get("build", "reportes-pdf");
 
@@ -29,9 +32,9 @@ public class PdfReportGenerator {
     private static final String LOGO_PATH = "src/test/resources/Cinepolis.png";
 
     // Datos de encabezado
-    private static final String REPORT_TITLE = "Reporte de Prueba Automatizada Alimentos";
+    private static final String REPORT_TITLE = "Reporte de Prueba Automatizadas";
     public static final String EXECUTOR = "Jairo Tomás Baza";
-    public static final String PROJECT = "Cinépolis Alimentos";
+    public static final String PROJECT = "Cinépolis";
 
     // Colores claros
     private static final float[] COLOR_BG_LIGHT = {1f, 1f, 1f};
@@ -41,10 +44,11 @@ public class PdfReportGenerator {
     private static final float[] COLOR_TEXT_WHITE = {1f, 1f, 1f};
     private static final float[] COLOR_OK = {0.0f, 0.6f, 0.0f};
     private static final float[] COLOR_FAIL = {0.8f, 0.1f, 0.1f};
+    private static final float[] COLOR_SKIP = {0.85f, 0.55f, 0.0f};
 
     public static void generate(String testName, List<StepResult> steps) {
         if (steps == null || steps.isEmpty()) {
-            System.out.println("[PDF] No hay pasos para el test: " + testName);
+            log.info("[PdfReportGenerator] No steps found for test: {}", testName);
             return;
         }
 
@@ -71,7 +75,16 @@ public class PdfReportGenerator {
                 float yAfterHeader = drawHeader(content, doc, pageWidth, yStart);
 
 // ======= RESUMEN DE TESTS =======
-                float yAfterSummary = drawTestSummaryBox(content, margin, yAfterHeader - 10);
+                boolean testFailed = steps.stream()
+                        .anyMatch(s -> "ERROR".equalsIgnoreCase(s.getStatus())
+                                    || "FAIL".equalsIgnoreCase(s.getStatus()));
+                boolean testSkipped = steps.stream()
+                        .anyMatch(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()));
+                int skippedCount = (int) steps.stream()
+                        .filter(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()))
+                        .count();
+                float yAfterSummary = drawTestSummaryBox(content, margin, yAfterHeader - 10,
+                        1, testFailed ? 0 : (testSkipped ? 0 : 1), testFailed ? 1 : 0, skippedCount);
 
 // ======= Nombre del test =======
                 content.beginText();
@@ -130,10 +143,12 @@ public class PdfReportGenerator {
                     content.showText(step.getStepName());
                     content.endText();
 
-                    // Resultado (OK / ERROR)
+                    // Resultado (OK / SKIPPED / ERROR)
                     content.beginText();
                     if (step.getStatus().equalsIgnoreCase("OK")) {
                         setNonStrokingColor(content, COLOR_OK);
+                    } else if (step.getStatus().equalsIgnoreCase("SKIPPED")) {
+                        setNonStrokingColor(content, COLOR_SKIP);
                     } else {
                         setNonStrokingColor(content, COLOR_FAIL);
                     }
@@ -171,7 +186,7 @@ public class PdfReportGenerator {
 
             Path pdfFile = REPORT_DIR.resolve(sanitize(testName) + ".pdf");
             doc.save(pdfFile.toFile());
-            System.out.println("[PDF] Generado en modo CLARO → " + pdfFile.toAbsolutePath());
+            log.info("[PdfReportGenerator] PDF generated: {}", pdfFile.toAbsolutePath());
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -276,16 +291,13 @@ public class PdfReportGenerator {
         }
     }
     // ================= HEADER DE TABLA =================
-    private static float drawTestSummaryBox(PDPageContentStream content, float x, float yTop) throws IOException {
-
-        int total = BaseTestStatusRegistry.getTotal();
-        int passed = BaseTestStatusRegistry.getPassed();
-        int failed = BaseTestStatusRegistry.getFailed();
+    private static float drawTestSummaryBox(PDPageContentStream content, float x, float yTop,
+                                             int total, int passed, int failed, int skipped) throws IOException {
 
         float boxW = 220;
         float headerH = 20;
         float rowH = 18;
-        float boxH = headerH + rowH * 3;
+        float boxH = headerH + rowH * 4;
 
         // Borde
         setStrokingColor(content, COLOR_BORDER);
@@ -313,6 +325,9 @@ public class PdfReportGenerator {
         y -= rowH;
 
         drawSummaryRow(content, x, y, boxW, "Fallados", String.valueOf(failed), COLOR_FAIL);
+        y -= rowH;
+
+        drawSummaryRow(content, x, y, boxW, "Omitidos", String.valueOf(skipped), COLOR_SKIP);
 
         return yTop - boxH;
     }
@@ -393,7 +408,10 @@ public class PdfReportGenerator {
         int ok = (int) steps.stream()
                 .filter(s -> "OK".equalsIgnoreCase(s.getStatus()))
                 .count();
-        int fail = total - ok;
+        int skipped = (int) steps.stream()
+                .filter(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()))
+                .count();
+        int fail = total - ok - skipped;
 
         content.setFont(PDType1Font.HELVETICA_BOLD, 12);
         content.beginText();
@@ -428,13 +446,22 @@ public class PdfReportGenerator {
         content.showText("Pasos fallidos: " + fail);
         content.endText();
 
-        // Mensaje final (sin emojis para evitar el error de fuente)
-        lineY -= 18;
+        // Pasos omitidos
+        lineY -= 14;
+        content.beginText();
+        setNonStrokingColor(content, COLOR_SKIP);
+        content.newLineAtOffset(x, lineY);
+        content.showText("Pasos omitidos: " + skipped);
+        content.endText();
 
+        // Mensaje final
+        lineY -= 18;
         content.beginText();
         setNonStrokingColor(content, COLOR_TEXT_BLACK);
         content.newLineAtOffset(x, lineY);
-        if (fail > 0) {
+        if (skipped > 0 && fail == 0) {
+            content.showText("No se encontro filtro 3D para este cine, intenta con otro.");
+        } else if (fail > 0) {
             content.showText("Se encontraron errores. Revisar los pasos fallidos.");
         } else {
             content.showText("No se encontraron errores en la ejecución.");

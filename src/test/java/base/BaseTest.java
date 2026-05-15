@@ -1,7 +1,6 @@
 package base;
 
 import config.DriverFactory;
-import io.appium.java_client.TouchAction;
 import io.appium.java_client.android.AndroidDriver;
 import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
@@ -9,25 +8,29 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Dimension;
 import org.openqa.selenium.WebElement;
+import org.openqa.selenium.interactions.PointerInput;
+import org.openqa.selenium.interactions.Sequence;
+import org.openqa.selenium.interactions.Pause;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import pages.alimentos.SelectorPage;
-import pages.common.BasePage;
+import pages.common.CinemasHelper;
 import utils.*;
 
 import java.io.OutputStream;
 import java.nio.file.*;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static io.appium.java_client.touch.WaitOptions.waitOptions;
-import static io.appium.java_client.touch.offset.PointOption.point;
-
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @ExtendWith(PdfReportExtension.class)
 public class BaseTest {
+
+    private static final Logger log = LoggerFactory.getLogger(BaseTest.class);
 
     protected AndroidDriver driver;
     private static volatile boolean envWritten = false;
@@ -67,18 +70,14 @@ public class BaseTest {
                     System.getenv().getOrDefault("AUTO_SCROLL_ALIMENTOS_WAIT_SECONDS", "3"))
     );
 
-    // ✅ Se limpia una sola vez por ejecución completa
-    private static final AtomicBoolean RUN_INIT_DONE = new AtomicBoolean(false);
+    private static final AtomicBoolean RUN_INIT_DONE         = new AtomicBoolean(false);
+    private static final AtomicBoolean MEXICO_CINEMA_CHECKED = new AtomicBoolean(false);
 
     @BeforeAll
     public static void beforeAllSuite() {
-
-        // ✅ Este bloque corre SOLO 1 vez por toda la ejecución (aunque haya varias clases)
         if (RUN_INIT_DONE.compareAndSet(false, true)) {
-
             suiteStart = System.currentTimeMillis();
 
-            // reset contadores/listas por corrida real
             totalTests = 0;
             passedTests = 0;
             failedTests = 0;
@@ -87,16 +86,16 @@ public class BaseTest {
 
             envWritten = false;
             driverCreatedOnce = false;
+            MEXICO_CINEMA_CHECKED.set(false);
 
-            // ✅ OJO: esto ya NO se repetirá por cada clase
             try { clearDirectory(Paths.get("build", "reportes-pdf")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "reports", "allure-report")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "allure-results")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "evidencias")); } catch (Exception ignored) {}
 
-            System.out.println("[BaseTest] (INIT) Limpieza de carpetas ejecutada SOLO una vez.");
+            log.info("[BaseTest] Run initialized; output directories cleared.");
         } else {
-            System.out.println("[BaseTest] (INIT) Limpieza ya realizada en esta ejecución. (OK)");
+            log.debug("[BaseTest] Run already initialized; skipping directory cleanup.");
         }
     }
 
@@ -111,9 +110,6 @@ public class BaseTest {
                 });
     }
 
-    // ============================================================
-    // ✅ RECOVERY: asegurar app viva entre tests cuando REUSE_DRIVER=true
-    // ============================================================
     private String getAppPackageSafe() {
         try {
             String p = System.getProperty("appPackage");
@@ -142,7 +138,6 @@ public class BaseTest {
             try { driver.terminateApp(appPackage); } catch (Exception ignored) {}
             try { driver.activateApp(appPackage); } catch (Exception ignored) {}
 
-            // mini-pausa para tomar foreground estable
             try { Thread.sleep(300); } catch (InterruptedException ignored) {}
         } catch (Exception ignored) {}
     }
@@ -161,24 +156,23 @@ public class BaseTest {
         } catch (Exception ignored) {}
     }
 
-    // ============================================================
-    // Swipe / auto-scroll (misma lógica)
-    // ============================================================
     private void quickSwipeUp(AndroidDriver driver) {
         Dimension size = driver.manage().window().getSize();
-        int width = size.getWidth();
+        int width  = size.getWidth();
         int height = size.getHeight();
 
-        int x = width / 2;
+        int x      = width / 2;
         int startY = (int) (height * 0.78);
         int endY   = (int) (height * 0.32);
 
-        new TouchAction(driver)
-                .press(point(x, startY))
-                .waitAction(waitOptions(Duration.ofMillis(180)))
-                .moveTo(point(x, endY))
-                .release()
-                .perform();
+        PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
+        Sequence swipe = new Sequence(finger, 1);
+        swipe.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), x, startY));
+        swipe.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
+        swipe.addAction(new Pause(finger, Duration.ofMillis(180)));
+        swipe.addAction(finger.createPointerMove(Duration.ofMillis(300), PointerInput.Origin.viewport(), x, endY));
+        swipe.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
+        driver.perform(Collections.singletonList(swipe));
 
         try { Thread.sleep(60); } catch (InterruptedException ignored) {}
     }
@@ -210,7 +204,7 @@ public class BaseTest {
             try { Thread.sleep(250); } catch (InterruptedException ignored) {}
 
             if (!isAlimentosScreenVisible(driver)) {
-                System.out.println("[BaseTest] Auto-scroll NO ejecutado: no se detectó pantalla Alimentos.");
+                log.debug("[BaseTest] Auto-scroll skipped: Alimentos screen not detected.");
                 return;
             }
 
@@ -218,35 +212,64 @@ public class BaseTest {
                 quickSwipeUp(driver);
             }
 
-            System.out.println("[BaseTest] Auto-scroll ejecutado en pantalla Alimentos. Swipes=" + AUTO_SCROLL_SWIPES);
+            log.info("[BaseTest] Auto-scroll performed on Alimentos screen. swipes={}", AUTO_SCROLL_SWIPES);
 
         } catch (Exception e) {
-            System.err.println("[BaseTest] No se pudo auto-scroll al abrir: " + e.getMessage());
+            log.warn("[BaseTest] Auto-scroll failed: {}", e.getMessage());
         }
     }
 
     @BeforeEach
     public void setUp(TestInfo testInfo) {
-//        BasePage.resetPerTestGuards();          // reset anti-loop por test
-//        new BasePage(driver).dismissClubLoginIfPresent();  // intenta cerrarla al inicio
         if (!REUSE_DRIVER) {
-            driver = DriverFactory.getDriver();
-            System.out.println("[BaseTest] Driver creado: " + driver);
+            try {
+                driver = DriverFactory.getDriver();
+            } catch (Exception e) {
+                log.error("[BaseTest] Driver creation FAILED — verifica que Appium esté corriendo y el dispositivo conectado. Causa: {}", e.getMessage(), e);
+                throw e;
+            }
+            log.info("[BaseTest] Driver created: {}", driver);
             autoScrollOnAppOpen(driver);
+            log.debug("[BaseTest] Invoking PromosGuard after auto-scroll...");
+            new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach");
+            log.debug("[BaseTest] PromosGuard finished.");
+            ensureAppRunning();
+            log.debug("[BaseTest] ensureAppRunning after PromosGuard (REUSE_DRIVER=false).");
+            new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach:reactivate");
+            log.debug("[BaseTest] Second PromosGuard finished.");
 
         } else {
             if (!driverCreatedOnce || driver == null) {
-                driver = DriverFactory.getDriver();
+                try {
+                    driver = DriverFactory.getDriver();
+                } catch (Exception e) {
+                    log.error("[BaseTest] Driver creation FAILED — verifica que Appium esté corriendo y el dispositivo conectado. Causa: {}", e.getMessage(), e);
+                    throw e;
+                }
                 driverCreatedOnce = true;
-                System.out.println("[BaseTest] Driver creado (REUSE_DRIVER): " + driver);
+                log.info("[BaseTest] Driver created (REUSE_DRIVER=true): {}", driver);
             } else {
-                System.out.println("[BaseTest] Driver reutilizado (REUSE_DRIVER): " + driver);
+                log.debug("[BaseTest] Driver reused (REUSE_DRIVER=true): {}", driver);
             }
 
-            // ✅ FIX: garantiza que la app esté viva al inicio de cada test (sin reinstalar)
             ensureAppRunning();
 
             autoScrollOnAppOpen(driver);
+            log.debug("[BaseTest] Invoking PromosGuard after auto-scroll...");
+            new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach");
+            log.debug("[BaseTest] PromosGuard finished.");
+        }
+
+        // ── Escenario México: selecciona cine si no hay uno pre-seleccionado (solo 1 vez por suite)
+        String testClass = testInfo.getTestClass().map(Class::getName).orElse("");
+        if ((testClass.contains("México") || testClass.contains("Mexico"))
+                && MEXICO_CINEMA_CHECKED.compareAndSet(false, true)) {
+            log.info("[BaseTest] Test México detectado -> verificando selección de cine...");
+            try {
+                new CinemasHelper(driver).ensureMexicoCinemaSelected();
+            } catch (Exception e) {
+                log.warn("[BaseTest] ensureMexicoCinemaSelected falló (no bloquea): {}", e.getMessage());
+            }
         }
 
         TestSteps.startScenario(testInfo.getDisplayName());
@@ -272,12 +295,12 @@ public class BaseTest {
                     if (!envWritten) {
                         AllureEnvironmentWriter.crearEnvironmentProperties(driver);
                         envWritten = true;
-                        System.out.println("[BaseTest] environment.properties creado.");
+                        log.info("[BaseTest] environment.properties created.");
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("[BaseTest] Error creando environment.properties: " + e.getMessage());
+            log.error("[BaseTest] Failed to create environment.properties: {}", e.getMessage());
         }
     }
 
@@ -310,34 +333,39 @@ public class BaseTest {
                     .anyMatch(r -> "FAIL".equalsIgnoreCase(r.getStatus())
                             || "ERROR".equalsIgnoreCase(r.getStatus()));
 
-            boolean finalFailed = junitFailed || stepsFailed;
+            // Si el driver es null aquí significa que setUp() falló antes de crearlo
+            boolean setupFailed = (driver == null && !REUSE_DRIVER)
+                    || (REUSE_DRIVER && !driverCreatedOnce);
+
+            boolean finalFailed = junitFailed || stepsFailed || setupFailed;
+
+            if (setupFailed) {
+                log.error("[BaseTest] TEST FAILED (setUp falló — driver no creado): {}", testInfo.getDisplayName());
+            }
 
             if (finalFailed) {
                 failedTests++;
-                System.out.println("[BaseTest] TEST FAILED: " + testInfo.getDisplayName());
+                log.warn("[BaseTest] TEST FAILED: {}", testInfo.getDisplayName());
 
-                // ✅ FIX: si el test falló y estás reusando driver, relanza app para que el siguiente test arranque bien
                 if (REUSE_DRIVER) {
-                    System.out.println("[BaseTest] (RECOVERY) Relanzando app por fallo del test...");
+                    log.info("[BaseTest] Relaunching app after test failure...");
                     relaunchAppSafe();
                 }
 
             } else {
                 passedTests++;
-                System.out.println("[BaseTest] TEST PASSED: " + testInfo.getDisplayName());
+                log.info("[BaseTest] TEST PASSED: {}", testInfo.getDisplayName());
             }
 
             BaseTestStatusRegistry.clear(testKey);
 
         } catch (Exception e) {
             failedTests++;
-            System.err.println("[BaseTest] Error en tearDown: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[BaseTest] Error in tearDown: {}", e.getMessage(), e);
 
-            // ✅ Si truena el teardown y REUSE_DRIVER, igual recupera para el siguiente test
             if (REUSE_DRIVER) {
                 try {
-                    System.out.println("[BaseTest] (RECOVERY) Relanzando app por excepción en tearDown...");
+                    log.info("[BaseTest] Relaunching app after tearDown exception...");
                     relaunchAppSafe();
                 } catch (Exception ignored) {}
             }
@@ -358,7 +386,7 @@ public class BaseTest {
 
             String suiteName = System.getProperty("executionName");
             if (suiteName == null || suiteName.isBlank()) suiteName = System.getenv("EXECUTION_NAME");
-            if (suiteName == null || suiteName.isBlank()) suiteName = "Cinépolis Alimentos";
+            if (suiteName == null || suiteName.isBlank()) suiteName = "Cinépolis";
 
             String executed = executedTests.isEmpty() ? "" : String.join(" | ", executedTests);
 
@@ -368,7 +396,7 @@ public class BaseTest {
             try {
                 PdfSuiteMerger.mergeReports(reportDir, mergedPdfName);
             } catch (Exception e) {
-                System.out.println("[BaseTest] (Info) No se pudo hacer merge de evidencias (ok): " + e.getMessage());
+                log.info("[BaseTest] PDF merge skipped: {}", e.getMessage());
             }
 
             try {
@@ -389,11 +417,11 @@ public class BaseTest {
                         StandardOpenOption.CREATE,
                         StandardOpenOption.TRUNCATE_EXISTING
                 )) {
-                    props.store(out, "Metrics de ejecución de la suite");
+                    props.store(out, "Suite execution metrics");
                 }
 
             } catch (Exception e) {
-                e.printStackTrace();
+                log.error("[BaseTest] Failed to write suite-metrics.properties", e);
             }
 
         } finally {

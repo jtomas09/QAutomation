@@ -1,0 +1,14 @@
+{
+  "smtp": {
+    "host": "email-smtp.us-east-1.amazonaws.com",
+    "port": "587",
+    "user": "",
+    "pass": ""
+  },
+  "mail": {
+    "from": "automation@tudominio.com",
+    "to": [
+      "destinatario1@tudominio.com"
+    ]
+  }
+}

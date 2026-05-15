@@ -1,0 +1,102 @@
+.card {
+  position: relative;
+  width: 365px;
+  height: 215px;
+  background: #0c1226;
+  border-radius: 22px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 14px;
+  flex-shrink: 0;
+  transition: box-shadow .2s;
+  cursor: default;
+  /* top highlight */
+  background-image: linear-gradient(180deg,
+    rgba(255,255,255,.06) 0%,
+    rgba(255,255,255,0)   28%
+  );
+}
+.card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,.055);
+  pointer-events: none;
+}
+.cardActive { outline: 2px solid var(--accent); }
+
+/* Glows */
+.glow, .glowTop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Main horizontal layout */
+.main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+
+/* Icon */
+.iconWrap { position: relative; flex-shrink: 0; }
+.iconHalo {
+  position: absolute;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+.icon {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Text */
+.text  { flex: 1; overflow: hidden; }
+.title { font-size: 17px; font-weight: 700; color: var(--text-pri); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desc  { font-size: 12px; color: var(--text-dim); margin-top: 5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Wave */
+.waveWrap {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 42%;
+  pointer-events: none;
+}
+.wave {
+  width: 100%; height: 100%;
+  display: block;
+}
+
+/* Footer */
+.footer {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+}
+.execBtn {
+  padding: 6px 18px;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 138px;
+  text-align: center;
+  transition: filter .15s, transform .1s;
+}
+.execBtn:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+.execBtn:active:not(:disabled) { transform: translateY(0); }
+.execBtn:disabled { opacity: .45; cursor: not-allowed; }

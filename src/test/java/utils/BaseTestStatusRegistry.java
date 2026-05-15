@@ -18,7 +18,7 @@ public final class BaseTestStatusRegistry {
     private static final AtomicInteger FAILED = new AtomicInteger(0);
 
     // Nombre de ejecución/proyecto (para PDF + email)
-    private static volatile String executionName = "Cinépolis Alimentos";
+    private static volatile String executionName = "Cinépolis";
 
     // =========================
     // Inicialización / reset
@@ -30,7 +30,7 @@ public final class BaseTestStatusRegistry {
         PASSED.set(0);
         FAILED.set(0);
         executionName = (executionNameFromCaller == null || executionNameFromCaller.isBlank())
-                ? "Cinépolis Alimentos"
+                ? "Cinépolis"
                 : executionNameFromCaller.trim();
     }
 

@@ -1,32 +1,39 @@
-# --- OS ---
+# Archivos y carpetas generadas por Android Studio y Gradle
+.gradle/
+build/
+captures/
+.idea/
+*.iml
+local.properties
+
+# Archivos del sistema operativo
 .DS_Store
 Thumbs.db
 
-# --- IntelliJ / Android Studio ---
-.idea/
-*.iml
-*.ipr
-*.iws
-out/
+# Claves de firma (¡NUNCA SUBIR A UN REPOSITORIO!)
+*.jks
+*.keystore
+.env
+*.secret
+*secrets*
+smtp-config.json
+**/smtp-config.json
 
-# --- Gradle ---
-.gradle/
-build/
-**/build/
-!gradle/wrapper/gradle-wrapper.jar
+# Configuración local con credenciales — usar variables de entorno en Railway/CI
+appium.properties
+**/appium.properties
 
-# --- Logs / artifacts ---
-logs/
-*.log
+# Archivos de la máquina virtual de Java/Dalvik
+*.class
+*.dex
+hs_err_pid*
 
-# --- Allure (NO subir resultados ni reportes generados) ---
+# Reportes y resultados de pruebas
 allure-results/
-allure-report/
-allure-results-history/
-**/allure-results/
-**/allure-report/
-
-# --- Evidence / reports (si generas PDFs, screenshots, etc.) ---
+test-reports/
+build/reports/
+build/test-results/
+build/outputs/
 screenshots/
 evidence/
 reports/
@@ -35,15 +42,13 @@ reports/
 *.jpg
 *.jpeg
 
-# --- Local env / secrets ---
-.env
-*.secret
-*secrets*
-smtp-config.json
-**/smtp-config.json
-
-# --- Node (si algún día usas scripts) ---
-node_modules/
-
-# --- Appium local artifacts (si los generas) ---
+# Logs de Appium
 appium.log
+*.xcresult
+DerivedData/
+
+# Configuraciones locales de Appium Desktop
+.appium/
+
+# Ficheros de log genéricos
+*.log
