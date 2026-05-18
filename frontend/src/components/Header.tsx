@@ -1,6 +1,7 @@
 import React from 'react'
 import { ENVIRONMENTS, DEVICES, SUITES } from '../data'
 import type { RunStatus } from '../types'
+import { useBackendHealth } from '../hooks/useBackendHealth'
 import s from './Header.module.css'
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
 
 export default function Header({ env, onEnvChange, device, onDeviceChange, suite, onSuiteChange, status, onRun, onStop }: Props) {
   const running = status === 'running'
+  const backend = useBackendHealth()
 
   return (
     <header className={s.header}>
@@ -24,6 +26,13 @@ export default function Header({ env, onEnvChange, device, onDeviceChange, suite
       </div>
 
       <div className={s.right}>
+        <div className={`${s.backendBadge} ${s[`backend_${backend.status}`]}`} title={backend.message}>
+          <span className={s.backendDot} />
+          <span className={s.backendText}>
+            {backend.status === 'checking' ? 'Conectando…' : backend.status === 'online' ? 'Backend Online' : 'Backend Offline'}
+          </span>
+        </div>
+
         <div className={s.status}>
           <span className={`${s.dot} ${running ? s.dotRunning : s.dotReady}`} />
           <span className={s.statusText}>{running ? 'Ejecutando…' : 'Ready'}</span>

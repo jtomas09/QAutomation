@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import type { RunState, LogLevel, LogEntry } from '../types'
-import { apiRunTest } from '../api'
+import { apiRunTest, ApiError } from '../api'
 
 const initState: RunState = {
   status: 'idle',
@@ -38,15 +38,22 @@ export function useTestRunner() {
     }))
     addLog('INFO', `▶ Ejecutando suite: ${suiteId}  |  Env: ${env}  |  Device: ${device}`)
 
-    const result = await apiRunTest(suiteId, env, device, addLog, () => abortRef.current)
-
-    setState(prev => ({
-      ...prev,
-      status: 'finished',
-      ...result,
-      lastRun: new Date().toLocaleString('es-MX'),
-      activeSuite: null,
-    }))
+    try {
+      const result = await apiRunTest(suiteId, env, device, addLog, () => abortRef.current)
+      setState(prev => ({
+        ...prev,
+        status: 'finished',
+        ...result,
+        lastRun: new Date().toLocaleString('es-MX'),
+        activeSuite: null,
+      }))
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? `Error ${err.status}: ${err.message}`
+        : err instanceof Error ? err.message : 'Error desconocido'
+      addLog('ERROR', `❌ Error en la ejecución: ${msg}`)
+      setState(prev => ({ ...prev, status: 'idle', activeSuite: null }))
+    }
   }, [addLog])
 
   const stopTest = useCallback(() => {

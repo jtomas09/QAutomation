@@ -1,105 +1,159 @@
 /**
- * api.ts — Capa de abstracción de API.
+ * api.ts — Cliente HTTP para QAutomation Backend (Spring Boot / Railway)
  *
- * FASE 1 (actual): implementación mock — todo local, sin red.
- * FASE 4: cambiar USE_REAL_API = true y configurar VITE_API_URL en .env.
+ * Variable de entorno requerida:
+ *   VITE_API_URL=https://qautomation-production.up.railway.app
+ *
+ * Endpoints:
+ *   GET  /health          → "QAutomation Backend Online 🚀"
+ *   GET  /api/status      → { running: boolean }
+ *   GET  /api/config      → { environments, suites, devices }
+ *   GET  /api/run?...     → SSE stream de logs
+ *   DELETE /api/run       → aborta ejecución en curso
  */
 
 import type { LogLevel } from './types'
 
+// ─── Base URL ─────────────────────────────────────────────────────────────────
+
+const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+
+if (!API_URL) {
+  console.warn('[api] VITE_API_URL no está definida. Las llamadas al backend fallarán.')
+}
+
+// ─── Error tipado ─────────────────────────────────────────────────────────────
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+// ─── Helpers internos ─────────────────────────────────────────────────────────
+
+async function httpGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `GET ${path} → ${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+  }
+  const ct = res.headers.get('content-type') ?? ''
+  return ct.includes('application/json')
+    ? (res.json() as Promise<T>)
+    : (res.text() as unknown as Promise<T>)
+}
+
+async function httpDelete(path: string): Promise<void> {
+  const res = await fetch(`${API_URL}${path}`, { method: 'DELETE' })
+  if (!res.ok) throw new ApiError(res.status, `DELETE ${path} → ${res.status}`)
+}
+
+// ─── Health ──────────────────────────────────────────────────────────────────
+
+/** Verifica que el backend esté activo. Devuelve el mensaje de bienvenida. */
+export async function getHealth(): Promise<string> {
+  return httpGet<string>('/health')
+}
+
+/** Estado actual de ejecución de tests. */
+export async function getStatus(): Promise<{ running: boolean }> {
+  return httpGet<{ running: boolean }>('/api/status')
+}
+
+// ─── Configuración ───────────────────────────────────────────────────────────
+
+export interface BackendConfig {
+  environments: string[]
+  suites: string[]
+  devices: string[]
+}
+
+/** Catálogos de entornos, suites y dispositivos desde el backend. */
+export async function getConfig(): Promise<BackendConfig> {
+  return httpGet<BackendConfig>('/api/config')
+}
+
+// ─── Ejecución de tests (SSE) ─────────────────────────────────────────────────
+
 type AddLog    = (level: LogLevel, message: string) => void
 type IsAborted = () => boolean
 
-// ─── Toggle FASE 1 ↔ FASE 4 ────────────────────────────────────────────────
-const USE_REAL_API = import.meta.env.VITE_API_URL !== undefined
-const BASE_URL     = import.meta.env.VITE_API_URL ?? ''
+export interface RunResult {
+  passed: number
+  failed: number
+  skipped: number
+  total: number
+}
 
-// ─── Interfaz pública ────────────────────────────────────────────────────────
-
+/**
+ * Ejecuta una suite de tests y transmite los logs en tiempo real via SSE.
+ * El backend responde con eventos `log` y finaliza con `done`.
+ */
 export async function apiRunTest(
   suiteId: string,
   env: string,
   device: string,
   addLog: AddLog,
   isAborted: IsAborted,
-): Promise<{ passed: number; failed: number; skipped: number; total: number }> {
-  return USE_REAL_API
-    ? realRunTest(suiteId, env, device, addLog, isAborted)
-    : mockRunTest(suiteId, env, device, addLog, isAborted)
-}
-
-export async function apiStop(): Promise<void> {
-  if (USE_REAL_API) {
-    await fetch(`${BASE_URL}/api/run`, { method: 'DELETE' })
+): Promise<RunResult> {
+  if (!API_URL) {
+    addLog('ERROR', '❌ VITE_API_URL no configurada. Agrega la variable de entorno y recarga.')
+    return { passed: 0, failed: 0, skipped: 0, total: 0 }
   }
-}
 
-// ─── FASE 4: ejecución real via SSE ─────────────────────────────────────────
+  return new Promise<RunResult>((resolve, reject) => {
+    const params = new URLSearchParams({ suite: suiteId, env, device })
+    const url    = `${API_URL}/api/run?${params}`
 
-async function realRunTest(
-  suiteId: string,
-  env: string,
-  device: string,
-  addLog: AddLog,
-  isAborted: IsAborted,
-): Promise<{ passed: number; failed: number; skipped: number; total: number }> {
-  return new Promise((resolve) => {
-    const url = `${BASE_URL}/api/run?suite=${suiteId}&env=${env}&device=${device}`
+    addLog('INFO', `🔌 Conectando con el backend: ${API_URL}`)
+
     const es = new EventSource(url)
-
     let passed = 0, failed = 0, skipped = 0, total = 0
+    let settled = false
 
-    es.addEventListener('log', (e) => {
-      if (isAborted()) { es.close(); resolve({ passed, failed, skipped, total }); return }
-      const { level, message } = JSON.parse(e.data) as { level: LogLevel; message: string }
-      addLog(level, message)
-      if (level === 'PASS') { passed++; total++ }
-      if (level === 'FAIL') { failed++; total++ }
+    function finish(result: RunResult) {
+      if (settled) return
+      settled = true
+      es.close()
+      resolve(result)
+    }
+
+    es.addEventListener('log', (e: MessageEvent) => {
+      if (isAborted()) { finish({ passed, failed, skipped, total }); return }
+      try {
+        const { level, message } = JSON.parse(e.data) as { level: LogLevel; message: string }
+        addLog(level, message)
+        if (level === 'PASS') { passed++; total++ }
+        if (level === 'FAIL') { failed++; total++ }
+        if (level === 'SKIP') { skipped++; total++ }
+      } catch {
+        addLog('WARN', `Evento inesperado del servidor: ${e.data}`)
+      }
     })
 
-    es.addEventListener('done', (e) => {
-      es.close()
-      resolve({ passed, failed, skipped, total })
+    es.addEventListener('done', () => {
+      addLog('INFO', `✅ Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)
+      finish({ passed, failed, skipped, total })
     })
 
     es.onerror = () => {
+      if (settled) return
+      addLog('ERROR', `❌ Conexión SSE perdida con ${API_URL}. Verifica que Railway esté activo.`)
+      settled = true
       es.close()
-      addLog('ERROR', 'Conexión con el backend perdida')
-      resolve({ passed, failed, skipped, total })
+      reject(new ApiError(0, 'SSE connection failed'))
     }
   })
 }
 
-// ─── FASE 1: mock local ──────────────────────────────────────────────────────
-
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
-
-async function mockRunTest(
-  suiteId: string,
-  env: string,
-  device: string,
-  addLog: AddLog,
-  isAborted: IsAborted,
-): Promise<{ passed: number; failed: number; skipped: number; total: number }> {
-  const steps: { delay: number; level: LogLevel; msg: string }[] = [
-    { delay: 700,  level: 'INFO', msg: 'Conectando al servidor Appium...' },
-    { delay: 1100, level: 'INFO', msg: `Appium: http://127.0.0.1:4723  |  mode=${env}` },
-    { delay: 600,  level: 'INFO', msg: `Suite [${suiteId}] — device: ${device}` },
-    { delay: 900,  level: 'INFO', msg: 'Instalando UiAutomator2 en el dispositivo...' },
-    { delay: 1300, level: 'PASS', msg: '✓ Verificar pantalla principal (1.4s)' },
-    { delay: 1000, level: 'PASS', msg: '✓ Login con cuenta registrada (2.1s)' },
-    { delay: 1200, level: 'PASS', msg: '✓ Selección de película disponible (1.9s)' },
-    { delay: 800,  level: 'WARN', msg: '⚠ Tiempo de respuesta elevado en selector de horarios (3.2s)' },
-    { delay: 1100, level: 'PASS', msg: '✓ Selección y validación de asientos (2.3s)' },
-    { delay: 700,  level: 'INFO', msg: 'Generando reporte Allure...' },
-    { delay: 500,  level: 'INFO', msg: '✅ Suite completada — 4 PASSED · 0 FAILED · 1 SKIPPED' },
-  ]
-
-  for (const s of steps) {
-    if (isAborted()) break
-    await sleep(s.delay)
-    addLog(s.level, s.msg)
+/** Aborta la ejecución activa en el backend. */
+export async function apiStop(): Promise<void> {
+  if (!API_URL) return
+  try {
+    await httpDelete('/api/run')
+  } catch (e) {
+    console.warn('[api] apiStop error:', e)
   }
-
-  return { passed: 4, failed: 0, skipped: 1, total: 5 }
 }

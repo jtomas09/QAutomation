@@ -15,7 +15,7 @@ export interface Country {
 
 export type RunStatus = 'idle' | 'running' | 'finished';
 
-export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'PASS' | 'FAIL';
+export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'PASS' | 'FAIL' | 'SKIP';
 
 export interface LogEntry {
   id: string;
