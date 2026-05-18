@@ -52,3 +52,7 @@ DerivedData/
 
 # Ficheros de log genéricos
 *.log
+
+# Frontend — artefactos de build y dependencias
+frontend/node_modules/
+frontend/dist/
