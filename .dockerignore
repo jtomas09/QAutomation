@@ -1,0 +1,14 @@
+# Excluir todo lo que no necesita el Dockerfile
+frontend/
+src/
+bin/
+build/
+.gradle/
+.idea/
+.vscode/
+*.md
+*.pdf
+*.png
+*.jpg
+appium.properties
+smtp-config.json
