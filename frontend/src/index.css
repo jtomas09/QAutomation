@@ -2,56 +2,47 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 :root{
-  --bg:#050816;
-  --panel:#0b1020cc;
-  --border:#1f2a44;
+  --bg:#060816;
+  --panel:#0f172a;
+  --panel2:#111c34;
+  --border:rgba(255,255,255,.08);
   --primary:#5b8cff;
-  --success:#00d084;
-  --danger:#ff4d6d;
-  --warning:#ffcc00;
-  --text:#eaf1ff;
+  --text:#eef4ff;
   --muted:#94a3b8;
-  --glow:0 0 35px rgba(91,140,255,.25);
 }
 
 *{
-  margin:0;
-  padding:0;
   box-sizing:border-box;
 }
 
-body{
-  font-family:'Inter',sans-serif;
+html,body,#root{
+  margin:0;
+  min-height:100%;
   background:
-    radial-gradient(circle at top left,#13203f 0%,transparent 30%),
-    radial-gradient(circle at top right,#1f1245 0%,transparent 25%),
-    linear-gradient(180deg,#050816 0%,#030611 100%);
+    radial-gradient(circle at top left, rgba(91,140,255,.12), transparent 25%),
+    radial-gradient(circle at top right, rgba(124,92,255,.10), transparent 25%),
+    #060816;
   color:var(--text);
-  min-height:100vh;
-}
-
-#root{
-  min-height:100vh;
-}
-
-.enterprise-card{
-  background:var(--panel);
-  backdrop-filter:blur(18px);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:22px;
-  box-shadow:
-    0 10px 40px rgba(0,0,0,.45),
-    inset 0 1px 0 rgba(255,255,255,.05);
-}
-
-.glow{
-  box-shadow:var(--glow);
+  font-family:'Inter',sans-serif;
 }
 
 button{
-  transition:all .25s ease;
+  transition:all .2s ease;
 }
 
 button:hover{
-  transform:translateY(-2px);
+  transform:translateY(-1px);
+}
+
+.enterprise-card{
+  background:linear-gradient(180deg,#10192d,#0b1220);
+  border:1px solid var(--border);
+  border-radius:18px;
+  box-shadow:
+    0 10px 30px rgba(0,0,0,.35),
+    inset 0 1px 0 rgba(255,255,255,.03);
+}
+
+.glow-primary{
+  box-shadow:0 0 25px rgba(91,140,255,.25);
 }
