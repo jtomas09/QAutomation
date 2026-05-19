@@ -1,0 +1,152 @@
+.card {
+  background: var(--bg-card);
+  border: 1px solid #131d38;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #131d38;
+}
+.title    { font-size: 15px; font-weight: 700; color: var(--text-pri); }
+.subtitle { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+.headerActions { display: flex; gap: 6px; }
+.iconBtn {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: #131d38; border: 1px solid #1e2d55;
+  color: var(--text-dim); font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.iconBtn:hover { background: #1c2d5a; color: var(--text-pri); }
+
+.body {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.formArea {
+  flex: 1;
+  padding: 16px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Field */
+.field       { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+.fieldLabel  { font-size: 11px; font-weight: 600; color: var(--text-dim); letter-spacing: .02em; }
+
+.row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* Select */
+.selectWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.select {
+  width: 100%;
+  background: #0a0f24;
+  border: 1px solid #1e2d55;
+  border-radius: 8px;
+  color: var(--text-pri);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 28px 7px 10px;
+  height: 34px;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237888b4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px;
+  transition: border-color .15s;
+}
+.select:hover, .select:focus { border-color: var(--accent-indigo); }
+.selectPadded { padding-left: 30px; }
+.flagPrefix {
+  position: absolute;
+  left: 10px; z-index: 1; font-size: 14px; pointer-events: none;
+}
+
+/* Advanced */
+.advancedToggle {
+  font-size: 11px; color: var(--text-dim); text-align: left;
+  margin-bottom: 8px; padding: 2px 0;
+  transition: color .15s;
+}
+.advancedToggle:hover { color: var(--text-lbl); }
+.advancedContent {
+  display: flex; gap: 12px; margin-bottom: 10px;
+}
+
+/* Buttons */
+.runBtn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; padding: 11px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .04em;
+  box-shadow: 0 4px 15px rgba(99,102,241,.35);
+  transition: filter .15s, transform .1s;
+  margin-top: auto;
+}
+.runBtn:hover   { filter: brightness(1.1); transform: translateY(-1px); }
+.runBtn:active  { transform: translateY(0); }
+
+.stopBtn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; padding: 11px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .04em;
+  box-shadow: 0 4px 15px rgba(239,68,68,.3);
+  margin-top: auto;
+}
+
+.caption {
+  text-align: center; font-size: 11px; color: var(--text-dim);
+  margin-top: 6px;
+}
+
+/* Rocket */
+.rocket {
+  width: 140px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  position: relative;
+  border-left: 1px solid #131d38;
+  background: radial-gradient(ellipse at 50% 60%, rgba(99,102,241,.08) 0%, transparent 70%);
+  flex-shrink: 0;
+}
+.rocketEmoji {
+  font-size: 64px;
+  filter: drop-shadow(0 0 20px rgba(99,102,241,.5));
+  animation: float 3s ease-in-out infinite;
+}
+.rocketGlow {
+  position: absolute;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  width: 60px; height: 20px;
+  background: radial-gradient(ellipse, rgba(99,102,241,.4), transparent);
+  border-radius: 50%;
+  filter: blur(8px);
+}
+@keyframes float {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}

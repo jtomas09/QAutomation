@@ -4,9 +4,13 @@
   --bg-main:     #040816;
   --bg-panel:    #070c1c;
   --bg-card:     #0c1226;
-  --bg-hover:    #1c2d5a;
-  --accent:      #3b82f6;
-  --purple:      #9333ea;
+  --bg-hover:      #1c2d5a;
+  --sidebar-bg:    #05091a;
+  --sidebar-w:     224px;
+  --topbar-h:      60px;
+  --accent:        #3b82f6;
+  --accent-indigo: #6366f1;
+  --purple:        #9333ea;
   --orange:      #f97316;
   --green:       #22c55e;
   --teal:        #14b8a6;

@@ -1,0 +1,104 @@
+.bar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 28px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid #131d38;
+  flex-shrink: 0;
+}
+
+/* Search */
+.searchWrap {
+  flex: 1;
+  max-width: 460px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0c1226;
+  border: 1px solid #1e2d55;
+  border-radius: 10px;
+  padding: 0 12px;
+  height: 36px;
+  transition: border-color .15s;
+}
+.searchWrap:focus-within { border-color: var(--accent-indigo); }
+.searchIcon  { font-size: 13px; opacity: .5; flex-shrink: 0; }
+.searchInput {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text-pri); font-size: 13px;
+}
+.searchInput::placeholder { color: var(--text-dim); }
+.searchHint {
+  font-size: 11px; color: var(--text-dim);
+  background: #131d38; border-radius: 4px; padding: 1px 5px;
+  border: 1px solid #1e2d55; flex-shrink: 0;
+}
+
+/* Right */
+.right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.sep   { width: 1px; height: 20px; background: #1e2d55; }
+
+/* Status pill */
+.pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 20px;
+  font-size: 11px; border: 1px solid transparent;
+}
+.pillDot   { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.pillLabel { font-weight: 700; color: var(--text-dim); margin-right: 2px; }
+.pillStatus{ font-weight: 600; }
+
+.pillOnline   { background: rgba(34,197,94,.1);  border-color: rgba(34,197,94,.25); }
+.pillOnline   .pillDot    { background: #22c55e; box-shadow: 0 0 5px #22c55e; }
+.pillOnline   .pillStatus { color: #22c55e; }
+
+.pillOffline  { background: rgba(239,68,68,.1);  border-color: rgba(239,68,68,.25); }
+.pillOffline  .pillDot    { background: #ef4444; }
+.pillOffline  .pillStatus { color: #ef4444; }
+
+.pillChecking { background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.2); }
+.pillChecking .pillDot    { background: #fbbf24; animation: blink 1.2s infinite; }
+.pillChecking .pillStatus { color: #fbbf24; }
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* Icon buttons */
+.iconBtn {
+  width: 34px; height: 34px;
+  border-radius: 8px; border: 1px solid #1e2d55;
+  background: #0c1226;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+  position: relative;
+  transition: background .15s;
+}
+.iconBtn:hover { background: #1c2d5a; }
+.notifBadge {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--color-fail); color: #fff;
+  font-size: 9px; font-weight: 700;
+  border-radius: 10px; padding: 1px 4px; min-width: 14px; text-align: center;
+}
+
+/* User */
+.user {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 10px; border: 1px solid #1e2d55;
+  background: #0c1226; cursor: pointer;
+  transition: background .15s;
+}
+.user:hover { background: #1c2d5a; }
+.avatar {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; color: #fff;
+  flex-shrink: 0;
+}
+.userInfo    { display: flex; flex-direction: column; }
+.userName    { font-size: 12px; font-weight: 700; color: var(--text-pri); line-height: 1.2; }
+.userRole    { font-size: 10px; color: var(--text-dim); }
+.userChevron { font-size: 11px; color: var(--text-dim); }

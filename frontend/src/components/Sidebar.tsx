@@ -1,19 +1,47 @@
 import React from 'react'
-import type { Country } from '../types'
-import { COUNTRIES } from '../data'
 import s from './Sidebar.module.css'
 
+export type Page =
+  | 'dashboard' | 'execute' | 'executions' | 'suites' | 'devices' | 'environments' | 'settings'
+  | 'reports' | 'metrics' | 'history' | 'trends'
+  | 'docs' | 'videos' | 'support'
+
+interface NavItem { id: Page; label: string; icon: string; hasBadge?: boolean }
+
+const MAIN_NAV: NavItem[] = [
+  { id: 'dashboard',    label: 'Dashboard',        icon: '⊞' },
+  { id: 'execute',      label: 'Ejecutar Pruebas', icon: '▶', hasBadge: true },
+  { id: 'executions',   label: 'Ejecuciones',      icon: '≡' },
+  { id: 'suites',       label: 'Suites',           icon: '◫' },
+  { id: 'devices',      label: 'Dispositivos',     icon: '◻' },
+  { id: 'environments', label: 'Ambientes',         icon: '🌐' },
+  { id: 'settings',     label: 'Configuración',    icon: '⚙' },
+]
+
+const ANALYTICS_NAV: NavItem[] = [
+  { id: 'reports', label: 'Reportes',   icon: '📊' },
+  { id: 'metrics', label: 'Métricas',   icon: '📈' },
+  { id: 'history', label: 'Historial',  icon: '📋' },
+  { id: 'trends',  label: 'Tendencias', icon: '📉' },
+]
+
+const RESOURCES_NAV: NavItem[] = [
+  { id: 'docs',    label: 'Documentación', icon: '📄' },
+  { id: 'videos',  label: 'Videos',        icon: '🎬' },
+  { id: 'support', label: 'Soporte',       icon: '💬' },
+]
+
 interface Props {
-  selected: string
-  onSelect: (id: string) => void
+  page:         Page
+  onPageChange: (p: Page) => void
+  runningCount?: number
 }
 
-export default function Sidebar({ selected, onSelect }: Props) {
+export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props) {
   return (
     <aside className={s.sidebar}>
-      {/* Brand */}
       <div className={s.brand}>
-        <div className={s.brandIcon}>C</div>
+        <div className={s.brandIcon}>QA</div>
         <div>
           <div className={s.brandName}>AUTOMATION QA</div>
           <div className={s.brandSub}>Test Launcher</div>
@@ -22,39 +50,46 @@ export default function Sidebar({ selected, onSelect }: Props) {
 
       <div className={s.divider} />
 
-      {/* Country list */}
-      <div className={s.section}>
-        <div className={s.sectionLabel}>SELECCIONA UN PAÍS</div>
-        <ul className={s.list}>
-          {COUNTRIES.map((c: Country) => (
-            <li key={c.id}>
-              <button
-                className={`${s.item} ${selected === c.id ? s.itemActive : ''}`}
-                onClick={() => onSelect(c.id)}
-              >
-                <span className={s.flag}>{c.flag}</span>
-                <span className={s.itemName}>{c.name}</span>
-                {c.hasSubMenu && <span className={s.chevron}>›</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <nav className={s.nav}>
+        <Group items={MAIN_NAV}      activePage={page} onSelect={onPageChange} runningCount={runningCount} />
+        <div className={s.divider} />
+        <div className={s.groupLabel}>ANALYTICS</div>
+        <Group items={ANALYTICS_NAV} activePage={page} onSelect={onPageChange} />
+        <div className={s.divider} />
+        <div className={s.groupLabel}>RECURSOS</div>
+        <Group items={RESOURCES_NAV} activePage={page} onSelect={onPageChange} />
+      </nav>
 
-      {/* Bottom */}
-      <div className={s.bottom}>
-        <div className={s.divider} />
-        <div className={s.infoRow}>
-          <span className={s.infoIcon}>⚡</span>
-          <div>
-            <div className={s.infoTitle}>Ejecución inteligente</div>
-            <div className={s.infoSub}>Automatiza, valida y entrega mejores experiencias.</div>
-          </div>
-        </div>
-        <div className={s.divider} />
-        <div className={s.verLabel}>INFORMACIÓN DEL ENTORNO</div>
-        <div className={s.version}>Versión: 1.0.0</div>
+      <div className={s.divider} />
+      <div className={s.planCard}>
+        <div className={s.planBadge}>🔥 Plan Enterprise</div>
+        <div className={s.planName}>Plan Enterprise</div>
+        <div className={s.planStatus}><span>●</span>Activo</div>
+        <div className={s.planExpiry}>Vence el 25/12/2025</div>
+        <button className={s.planBtn}>Gestionar Plan</button>
       </div>
     </aside>
+  )
+}
+
+function Group({ items, activePage, onSelect, runningCount = 0 }: {
+  items: NavItem[]; activePage: Page; onSelect: (p: Page) => void; runningCount?: number
+}) {
+  return (
+    <div className={s.group}>
+      {items.map(item => (
+        <button
+          key={item.id}
+          className={`${s.item} ${activePage === item.id ? s.itemActive : ''}`}
+          onClick={() => onSelect(item.id)}
+        >
+          <span className={s.itemIcon}>{item.icon}</span>
+          <span className={s.itemLabel}>{item.label}</span>
+          {item.hasBadge && runningCount > 0 && (
+            <span className={s.badge}>{runningCount}</span>
+          )}
+        </button>
+      ))}
+    </div>
   )
 }
