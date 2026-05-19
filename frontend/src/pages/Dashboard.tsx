@@ -1,4 +1,6 @@
 import React from 'react'
+import { motion } from 'framer-motion'
+import { Plus, Calendar } from 'lucide-react'
 import type { RunState } from '../types'
 import StatsCards       from '../components/dashboard/StatsCards'
 import RunTestsPanel    from '../components/dashboard/RunTestsPanel'
@@ -7,7 +9,6 @@ import ActivityLog      from '../components/dashboard/ActivityLog'
 import ResultsDonut     from '../components/dashboard/ResultsDonut'
 import DailyChart       from '../components/dashboard/DailyChart'
 import ConnectedDevices from '../components/dashboard/ConnectedDevices'
-import s from './Dashboard.module.css'
 
 interface Props {
   state:           RunState
@@ -31,26 +32,62 @@ export default function Dashboard({
   onRun, onStop, onClearLog, onViewAll,
 }: Props) {
   return (
-    <div className={s.page}>
-      {/* Welcome bar */}
-      <div className={s.welcome}>
-        <div>
-          <h1 className={s.welcomeTitle}>¡Bienvenido de vuelta, Jairo! 👋</h1>
-          <p className={s.welcomeSub}>Aquí tienes un resumen de la actividad de pruebas automatizadas</p>
-        </div>
-        <div className={s.welcomeActions}>
-          <select className={s.dateFilter}>
-            <option>📅 7 días</option>
-            <option>📅 14 días</option>
-            <option>📅 30 días</option>
-          </select>
-          <button className={s.newExecBtn} onClick={onRun}>
-            + Nueva Ejecución
-          </button>
-        </div>
-      </div>
+    <div className="flex flex-col gap-5 p-6 min-h-0">
 
-      {/* Stats cards */}
+      {/* Welcome bar */}
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="flex items-start justify-between gap-4"
+      >
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-100 leading-tight">
+            ¡Bienvenido de vuelta, Jairo! 👋
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Aquí tienes un resumen de la actividad de pruebas automatizadas
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          {/* Date filter */}
+          <div className="relative flex items-center">
+            <Calendar size={13} className="absolute left-3 text-slate-500 pointer-events-none" />
+            <select
+              className="appearance-none pl-8 pr-8 py-2 rounded-xl text-xs font-semibold text-slate-300 outline-none"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E\")",
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 8px center',
+              }}
+            >
+              <option>Últimos 7 días</option>
+              <option>Últimos 14 días</option>
+              <option>Últimos 30 días</option>
+            </select>
+          </div>
+
+          {/* New execution button */}
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={onRun}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white"
+            style={{
+              background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
+              boxShadow: '0 4px 14px rgba(99,102,241,0.4)',
+            }}
+          >
+            <Plus size={14} />
+            Nueva Ejecución
+          </motion.button>
+        </div>
+      </motion.div>
+
+      {/* Stats cards row */}
       <StatsCards
         passed={state.passed}
         failed={state.failed}
@@ -58,49 +95,36 @@ export default function Dashboard({
         total={state.total}
       />
 
-      {/* Run panel + Recent executions */}
-      <div className={s.row2}>
-        <div className={s.runPanel}>
-          <RunTestsPanel
-            suite={suite}           env={env}
-            device={device}         country={country}
-            status={state.status}   executionId={state.executionId ?? null}
-            onSuiteChange={onSuiteChange}     onEnvChange={onEnvChange}
-            onDeviceChange={onDeviceChange}   onCountryChange={onCountryChange}
-            onRun={onRun}           onStop={onStop}
-          />
-        </div>
-        <div className={s.recentPanel}>
-          <RecentExecutions onViewAll={onViewAll} />
-        </div>
+      {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '380px 1fr', height: 340 }}>
+        <RunTestsPanel
+          suite={suite}           env={env}
+          device={device}         country={country}
+          status={state.status}   executionId={state.executionId ?? null}
+          onSuiteChange={onSuiteChange}     onEnvChange={onEnvChange}
+          onDeviceChange={onDeviceChange}   onCountryChange={onCountryChange}
+          onRun={onRun}           onStop={onStop}
+        />
+        <RecentExecutions onViewAll={onViewAll} />
       </div>
 
-      {/* Activity log + Donut + Daily chart */}
-      <div className={s.row3}>
-        <div className={s.activityPanel}>
-          <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
-        </div>
-        <div className={s.donutPanel}>
-          <ResultsDonut
-            passed={state.passed}
-            failed={state.failed}
-            skipped={state.skipped}
-          />
-        </div>
-        <div className={s.chartPanel}>
-          <DailyChart />
-        </div>
+      {/* Row 3: Activity log + Donut + Daily chart */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 220px 1fr', height: 290 }}>
+        <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
+        <ResultsDonut
+          passed={state.passed}
+          failed={state.failed}
+          skipped={state.skipped}
+        />
+        <DailyChart />
       </div>
 
-      {/* Devices + Quick Access */}
-      <div className={s.row4}>
-        <div className={s.devicesPanel}>
-          <ConnectedDevices />
-        </div>
-        <div className={s.quickPanel}>
-          <QuickAccess />
-        </div>
+      {/* Row 4: Devices + Quick Access */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 340px' }}>
+        <ConnectedDevices />
+        <QuickAccess />
       </div>
+
     </div>
   )
 }
@@ -108,42 +132,58 @@ export default function Dashboard({
 // ── Quick Access ─────────────────────────────────────────────────────────────
 
 const QUICK = [
-  { icon: '📊', label: 'Ver Reportes',   sub: 'Allure Reports', color: '#22c55e' },
+  { icon: '📊', label: 'Ver Reportes',  sub: 'Allure Reports',  color: '#10b981' },
   { icon: '📄', label: 'Documentación', sub: 'Guías y API',     color: '#3b82f6' },
-  { icon: '🎬', label: 'Videos',         sub: 'Tutoriales',     color: '#6366f1' },
-  { icon: '💬', label: 'Soporte',        sub: '¿Necesitas ayuda?', color: '#f97316' },
+  { icon: '🎬', label: 'Videos',        sub: 'Tutoriales',      color: '#6366f1' },
+  { icon: '💬', label: 'Soporte',       sub: '¿Necesitas ayuda?', color: '#f97316' },
 ]
 
 function QuickAccess() {
   return (
-    <div style={{
-      background: 'var(--bg-card)', border: '1px solid #131d38',
-      borderRadius: 'var(--radius-card)', overflow: 'hidden',
-    }}>
-      <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid #131d38' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-pri)' }}>Accesos Rápidos</div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Herramientas y recursos</div>
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="overflow-hidden rounded-2xl"
+      style={{
+        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+      }}
+    >
+      <div className="px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="text-sm font-bold text-slate-100">Accesos Rápidos</div>
+        <div className="text-xs text-slate-500 mt-0.5">Herramientas y recursos</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, padding: 16 }}>
-        {QUICK.map(q => (
-          <button key={q.label} style={{
-            background: '#0a0f24', border: '1px solid #1e2d55', borderRadius: 10,
-            padding: '14px 10px', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', gap: 6, cursor: 'pointer',
-            transition: 'border-color .15s, background .15s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.borderColor = q.color)}
-          onMouseLeave={e => (e.currentTarget.style.borderColor = '#1e2d55')}>
-            <div style={{
-              width: 36, height: 36, borderRadius: 9, fontSize: 18,
-              background: `${q.color}20`, display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-            }}>{q.icon}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-pri)', textAlign: 'center', lineHeight: 1.3 }}>{q.label}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{q.sub}</div>
-          </button>
+
+      <div className="grid grid-cols-2 gap-3 p-4">
+        {QUICK.map((q, i) => (
+          <motion.button
+            key={q.label}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: i * 0.07, duration: 0.3 }}
+            whileHover={{ scale: 1.03, transition: { duration: 0.15 } }}
+            whileTap={{ scale: 0.97 }}
+            className="flex flex-col items-center gap-2 p-4 rounded-xl transition-colors"
+            style={{
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.07)',
+            }}
+            onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.borderColor = `${q.color}44`)}
+            onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.07)')}
+          >
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
+              style={{ background: `${q.color}20`, boxShadow: `0 0 12px ${q.color}20` }}
+            >
+              {q.icon}
+            </div>
+            <div className="text-xs font-bold text-slate-200 text-center leading-tight">{q.label}</div>
+            <div className="text-[10px] text-slate-600">{q.sub}</div>
+          </motion.button>
         ))}
       </div>
-    </div>
+    </motion.div>
   )
 }

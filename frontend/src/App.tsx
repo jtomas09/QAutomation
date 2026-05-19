@@ -25,20 +25,20 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      {/* Left sidebar — navigation */}
+    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg-main)' }}>
+      {/* Sidebar */}
       <Sidebar page={page} onPageChange={setPage} runningCount={runningCount} />
 
-      {/* Right: topbar + main content */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+      {/* Main column */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar
           backendHealth={backendHealth}
           runnerOnline={runnerOnline}
           onNewExecution={handleRun}
         />
 
-        {/* Scrollable content */}
-        <main style={{ flex: 1, overflowY: 'auto', background: 'var(--bg-main)' }}>
+        {/* Scrollable page content */}
+        <main className="flex-1 overflow-y-auto" style={{ background: 'var(--bg-main)' }}>
           {page === 'dashboard' && (
             <Dashboard
               state={state}
@@ -51,11 +51,11 @@ export default function App() {
           )}
 
           {page === 'execute' && (
-            <div style={{ padding: '24px 28px' }}>
-              <div style={{ marginBottom: 20, fontSize: 12, fontWeight: 700, letterSpacing: '.08em', color: 'var(--text-dim)' }}>
-                ≡≡ SELECCIONA LA PRUEBA QUE DESEAS EJECUTAR
+            <div className="p-7">
+              <div className="text-[11px] font-bold tracking-widest text-slate-600 uppercase mb-5">
+                Selecciona la prueba que deseas ejecutar
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18 }}>
+              <div className="flex flex-wrap gap-5">
                 {TEST_SUITES.map(s => (
                   <TestCard
                     key={s.id} suite={s}
@@ -69,14 +69,17 @@ export default function App() {
           )}
 
           {(page === 'executions' || page === 'history') && (
-            <div style={{ padding: '24px 28px' }}>
+            <div className="p-7">
               <ExecutionHistory />
             </div>
           )}
 
           {!['dashboard','execute','executions','history'].includes(page) && (
-            <div style={{ padding: '48px 28px', color: 'var(--text-dim)', fontSize: 14 }}>
-              Esta sección estará disponible próximamente.
+            <div className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <div className="text-4xl mb-4 opacity-30">🚧</div>
+                <div className="text-sm font-semibold text-slate-500">Esta sección estará disponible próximamente</div>
+              </div>
             </div>
           )}
         </main>
