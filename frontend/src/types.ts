@@ -36,7 +36,22 @@ export interface RunState {
   executionId: string | null;
 }
 
-export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'ABORTED';
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'ABORTED'
+
+export interface DeviceConfig {
+  id:              string
+  name:            string
+  platform:        'android' | 'ios'
+  platformVersion: string
+  deviceName:      string
+  udid:            string
+  automationName:  'UiAutomator2' | 'XCUITest' | 'Espresso'
+  hub:             'local' | 'browserstack' | 'aws-device-farm' | 'genymotion'
+  appPackage:      string
+  appActivity:     string
+  status:          'available' | 'inuse' | 'offline'
+  isActive:        boolean
+};
 
 export interface ExecutionSummary {
   executionId: string;
