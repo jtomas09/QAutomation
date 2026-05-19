@@ -40,9 +40,9 @@ export default function Dashboard({
         </div>
         <div className={s.welcomeActions}>
           <select className={s.dateFilter}>
-            <option>7 días</option>
-            <option>14 días</option>
-            <option>30 días</option>
+            <option>📅 7 días</option>
+            <option>📅 14 días</option>
+            <option>📅 30 días</option>
           </select>
           <button className={s.newExecBtn} onClick={onRun}>
             + Nueva Ejecución
@@ -124,7 +124,7 @@ function QuickAccess() {
         <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-pri)' }}>Accesos Rápidos</div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Herramientas y recursos</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, padding: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, padding: 16 }}>
         {QUICK.map(q => (
           <button key={q.label} style={{
             background: '#0a0f24', border: '1px solid #1e2d55', borderRadius: 10,

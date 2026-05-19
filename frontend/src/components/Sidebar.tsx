@@ -51,6 +51,7 @@ export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props)
       <div className={s.divider} />
 
       <nav className={s.nav}>
+        <div className={s.groupLabel}>NAVEGACIÓN</div>
         <Group items={MAIN_NAV}      activePage={page} onSelect={onPageChange} runningCount={runningCount} />
         <div className={s.divider} />
         <div className={s.groupLabel}>ANALYTICS</div>
