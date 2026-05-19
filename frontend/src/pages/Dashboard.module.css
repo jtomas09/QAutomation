@@ -1,85 +1,118 @@
-.page {
-  padding: 24px 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-height: 0;
+
+.container{
+  display:grid;
+  grid-template-columns:260px 1fr;
+  min-height:100vh;
+  background:transparent;
 }
 
-/* Welcome */
-.welcome {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+.content{
+  padding:24px;
+  display:flex;
+  flex-direction:column;
+  gap:24px;
 }
-.welcomeTitle {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--text-pri);
-  line-height: 1.2;
-}
-.welcomeSub {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin-top: 4px;
-}
-.welcomeActions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-.dateFilter {
-  background: var(--bg-card);
-  border: 1px solid #1e2d55;
-  border-radius: 8px;
-  color: var(--text-pri);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 7px 28px 7px 12px;
-  height: 34px;
-  outline: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237888b4'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  cursor: pointer;
+.hero{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:28px;
+  border-radius:28px;
+  background:linear-gradient(135deg,#111c36,#0c1023);
+  border:1px solid rgba(255,255,255,.08);
+  box-shadow:0 20px 60px rgba(0,0,0,.4);
 }
-.newExecBtn {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 18px; border-radius: 9px;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
-  color: #fff; font-size: 13px; font-weight: 700;
-  box-shadow: 0 4px 14px rgba(99,102,241,.35);
-  transition: filter .15s, transform .1s;
-  white-space: nowrap;
-}
-.newExecBtn:hover  { filter: brightness(1.1); transform: translateY(-1px); }
-.newExecBtn:active { transform: translateY(0); }
 
-/* Row 2: Run panel + Recent */
-.row2 {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: 18px;
-  height: 340px;
+.title{
+  font-size:38px;
+  font-weight:800;
 }
-.runPanel    { height: 100%; }
-.recentPanel { height: 100%; overflow: hidden; }
 
-/* Row 3: Activity log + Donut + Chart */
-.row3 {
-  display: grid;
-  grid-template-columns: 1fr 230px 1fr;
-  gap: 18px;
-  height: 280px;
+.subtitle{
+  margin-top:8px;
+  color:#94a3b8;
 }
-.activityPanel { height: 100%; overflow: hidden; }
-.donutPanel    { height: 100%; }
-.chartPanel    { height: 100%; }
 
-/* Row 4: Devices + Quick Access */
-.row4 {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 18px;
+.kpis{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:18px;
 }
-.devicesPanel {}
-.quickPanel   {}
+
+.kpi{
+  padding:24px;
+  border-radius:24px;
+  background:linear-gradient(180deg,#10182f,#0a1020);
+  border:1px solid rgba(255,255,255,.07);
+  position:relative;
+  overflow:hidden;
+}
+
+.kpi::before{
+  content:'';
+  position:absolute;
+  inset:0;
+  background:radial-gradient(circle at top right,rgba(91,140,255,.2),transparent 45%);
+}
+
+.kpi h3{
+  color:#8fa3c7;
+  font-size:14px;
+}
+
+.kpi strong{
+  display:block;
+  margin-top:14px;
+  font-size:42px;
+  font-weight:800;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:1.1fr .9fr;
+  gap:20px;
+}
+
+.panel{
+  padding:24px;
+  border-radius:24px;
+  background:rgba(11,16,32,.85);
+  border:1px solid rgba(255,255,255,.08);
+  backdrop-filter:blur(18px);
+}
+
+.logs{
+  height:320px;
+  overflow:auto;
+  background:#040816;
+  border-radius:18px;
+  padding:18px;
+  font-family:monospace;
+  color:#00ff95;
+  margin-top:16px;
+}
+
+.devices{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:16px;
+}
+
+.device{
+  padding:18px;
+  border-radius:20px;
+  background:linear-gradient(180deg,#10182f,#0c1020);
+  border:1px solid rgba(255,255,255,.06);
+}
+
+.cta{
+  padding:14px 22px;
+  border:none;
+  border-radius:14px;
+  background:linear-gradient(90deg,#5b8cff,#7c5cff);
+  color:white;
+  font-weight:700;
+  cursor:pointer;
+  box-shadow:0 0 30px rgba(91,140,255,.35);
+}
