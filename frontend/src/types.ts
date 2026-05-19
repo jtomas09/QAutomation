@@ -33,4 +33,23 @@ export interface RunState {
   lastRun: string | null;
   logs: LogEntry[];
   activeSuite: string | null;
+  executionId: string | null;
+}
+
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'ABORTED';
+
+export interface ExecutionSummary {
+  executionId: string;
+  suite: string;
+  env: string;
+  device: string;
+  country: string;
+  status: ExecutionStatus;
+  startTime: string;
+  endTime: string | null;
+  passed: number;
+  failed: number;
+  skipped: number;
+  total: number;
+  allureUrl: string | null;
 }

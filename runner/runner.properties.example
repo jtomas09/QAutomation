@@ -1,0 +1,20 @@
+# Copia este archivo a runner.properties y ajusta los valores
+# También puedes exportar como variables de entorno
+
+# URL del backend Railway
+BACKEND_URL=https://qautomation-production.up.railway.app
+
+# Token compartido (debe coincidir con RUNNER_TOKEN en Railway)
+RUNNER_TOKEN=runner-local-token
+
+# Milisegundos entre polls al backend (5000 = 5 segundos)
+POLL_INTERVAL_MS=5000
+
+# Directorio raíz del proyecto de tests
+WORK_DIR=..
+
+# Comando para ejecutar los tests (en Windows usa gradlew.bat)
+TEST_COMMAND=./gradlew test
+
+# (Opcional) URL base para reportes Allure publicados
+# ALLURE_BASE_URL=https://allure.tusitio.com

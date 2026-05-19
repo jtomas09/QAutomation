@@ -1,69 +1,73 @@
 package qa.cinepolis.backend.controller;
 
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.server.ResponseStatusException;
+import qa.cinepolis.backend.model.Execution;
 import qa.cinepolis.backend.model.RunRequest;
-import qa.cinepolis.backend.service.TestRunnerService;
+import qa.cinepolis.backend.service.ExecutionService;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
 public class TestController {
 
-    private final TestRunnerService runner;
+    private final ExecutionService execService;
 
-    public TestController(TestRunnerService runner) {
-        this.runner = runner;
+    public TestController(ExecutionService execService) {
+        this.execService = execService;
     }
 
     /**
-     * GET /api/status — estado actual de ejecución.
-     * Usado por el frontend para saber si hay algo corriendo al cargar.
+     * POST /api/run
+     * Enqueues a new execution and returns {executionId, status} immediately.
+     * Frontend subscribes to GET /api/run/{id}/stream for live SSE logs.
      */
+    @PostMapping("/run")
+    public Map<String, String> startRun(@RequestBody RunRequest req) {
+        Execution exec = execService.create(req.suite(), req.env(), req.device(), req.country());
+        return Map.of(
+                "executionId", exec.getExecutionId(),
+                "status",      exec.getStatus().name()
+        );
+    }
+
+    /** DELETE /api/run/{id} — aborts a pending or running execution. */
+    @DeleteMapping("/run/{id}")
+    public Map<String, String> abortRun(@PathVariable String id) {
+        execService.abort(id);
+        return Map.of("result", "aborted", "executionId", id);
+    }
+
+    /** GET /api/status — whether any execution is currently running. */
     @GetMapping("/status")
     public Map<String, Object> status() {
-        return Map.of("running", runner.isRunning());
+        return Map.of("running", execService.isRunning());
     }
 
-    /**
-     * POST /api/run — inicia ejecución, responde con SSE stream.
-     * El frontend usa EventSource para escuchar los logs en tiempo real.
-     *
-     * FASE 4: React reemplaza mockRunTest() por:
-     *   const es = new EventSource(`/api/run?suite=...&env=...&device=...`);
-     *   es.addEventListener('log',  e => addLog(JSON.parse(e.data)));
-     *   es.addEventListener('done', () => es.close());
-     */
-    @GetMapping(value = "/run", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter run(
-        @RequestParam String suite,
-        @RequestParam String env,
-        @RequestParam String device,
-        @RequestParam(defaultValue = "mexico") String country
-    ) {
-        return runner.run(new RunRequest(suite, env, device, country));
-    }
-
-    /**
-     * DELETE /api/run — aborta la ejecución en curso.
-     */
-    @DeleteMapping("/run")
-    public Map<String, String> stop() {
-        runner.stop();
-        return Map.of("result", "stopped");
-    }
-
-    /**
-     * GET /api/config — devuelve catálogos para que el frontend no los hardcodee.
-     */
+    /** GET /api/config — option catalogs for the frontend selectors. */
     @GetMapping("/config")
     public Map<String, Object> config() {
         return Map.of(
-            "environments", new String[]{"QA", "PROD", "STG"},
-            "suites",       new String[]{"Smoke Tests", "Full Suite", "Regresión", "Sanity"},
-            "devices",      new String[]{"Galaxy A56 5G", "Galaxy S23", "Pixel 7", "BrowserStack"}
+                "environments", new String[]{"QA", "PROD", "STG"},
+                "suites",       new String[]{"Smoke Tests", "Full Suite", "Regresión", "Sanity"},
+                "devices",      new String[]{"Galaxy A56 5G", "Galaxy S23", "Pixel 7", "BrowserStack"}
         );
+    }
+
+    /** GET /api/executions — full execution history, newest first. */
+    @GetMapping("/executions")
+    public List<Execution> executions() {
+        return execService.findAll();
+    }
+
+    /** GET /api/executions/{id} — detail of one execution including log lines. */
+    @GetMapping("/executions/{id}")
+    public Execution execution(@PathVariable String id) {
+        return execService.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Execution not found: " + id));
     }
 }
