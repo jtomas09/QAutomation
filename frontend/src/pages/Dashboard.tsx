@@ -32,7 +32,7 @@ export default function Dashboard({
   onRun, onStop, onClearLog, onViewAll,
 }: Props) {
   return (
-    <div className="flex flex-col gap-5 p-6 min-h-0">
+    <div className="flex flex-col gap-5 p-6 pb-8">
 
       {/* Welcome bar */}
       <motion.div
@@ -96,7 +96,7 @@ export default function Dashboard({
       />
 
       {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '380px 1fr', height: 340 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', minHeight: 420 }}>
         <RunTestsPanel
           suite={suite}           env={env}
           device={device}         country={country}
@@ -109,7 +109,7 @@ export default function Dashboard({
       </div>
 
       {/* Row 3: Activity log + Donut + Daily chart */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 220px 1fr', height: 290 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', minHeight: 300 }}>
         <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
         <ResultsDonut
           passed={state.passed}
@@ -120,7 +120,7 @@ export default function Dashboard({
       </div>
 
       {/* Row 4: Devices + Quick Access */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 340px' }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
         <ConnectedDevices />
         <QuickAccess />
       </div>
@@ -165,22 +165,23 @@ function QuickAccess() {
             transition={{ delay: i * 0.07, duration: 0.3 }}
             whileHover={{ scale: 1.03, transition: { duration: 0.15 } }}
             whileTap={{ scale: 0.97 }}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl transition-colors"
+            className="flex flex-col items-center gap-2.5 py-5 px-3 rounded-xl transition-colors"
             style={{
               background: 'rgba(255,255,255,0.03)',
               border: '1px solid rgba(255,255,255,0.07)',
+              minHeight: 110,
             }}
             onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.borderColor = `${q.color}44`)}
             onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.07)')}
           >
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
-              style={{ background: `${q.color}20`, boxShadow: `0 0 12px ${q.color}20` }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+              style={{ background: `${q.color}20`, boxShadow: `0 0 14px ${q.color}25` }}
             >
               {q.icon}
             </div>
             <div className="text-xs font-bold text-slate-200 text-center leading-tight">{q.label}</div>
-            <div className="text-[10px] text-slate-600">{q.sub}</div>
+            <div className="text-[10px] text-slate-600 text-center">{q.sub}</div>
           </motion.button>
         ))}
       </div>
