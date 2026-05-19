@@ -18,6 +18,8 @@ import type { LogLevel } from './types'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
+console.log('[api] API_URL:', API_URL)
+
 if (!API_URL) {
   console.warn('[api] VITE_API_URL no está definida. Las llamadas al backend fallarán.')
 }
