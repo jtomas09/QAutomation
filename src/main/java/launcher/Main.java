@@ -8,6 +8,15 @@ import org.junit.platform.launcher.listeners.SummaryGeneratingListener;
 import org.junit.platform.launcher.listeners.TestExecutionSummary;
 
 import com.formdev.flatlaf.FlatDarkLaf;
+import launcher.theme.Colors;
+import launcher.theme.Fonts;
+import launcher.components.GradientPanel;
+import launcher.ui.DeviceCardsPanel;
+import launcher.ui.KpiCardsPanel;
+import launcher.ui.LogsPanel;
+import launcher.ui.SidebarPanel;
+import launcher.ui.TopNavbar;
+
 import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.plaf.basic.BasicSplitPaneDivider;
@@ -132,6 +141,16 @@ private static final Color BORDER     = new Color(25, 35, 65);
 
     private static int statPassed = 0, statFailed = 0, statSkipped = 0, statTotal = 0;
 
+    // ─── Enterprise UI panels ─────────────────────────────────────
+    private static TopNavbar      topNavbar;
+    private static SidebarPanel   sidebarPanel;
+    private static KpiCardsPanel  kpiPanel;
+    private static LogsPanel      logsPanel;
+
+    // ─── Main content CardLayout (page switcher) ──────────────────
+    private static CardLayout mainCardLayout;
+    private static JPanel     mainCardPanel;
+
     // ─── Entry point ──────────────────────────────────────────────
     public static void main(String[] args) {
         if (GraphicsEnvironment.isHeadless()) runConsole();
@@ -143,31 +162,34 @@ private static final Color BORDER     = new Color(25, 35, 65);
     // ══════════════════════════════════════════════════════════════
 
     private static void buildGui() {
+        // ── FlatLaf + global UI defaults ──────────────────────────
         if (!FlatDarkLaf.setup()) {
             try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
             catch (Exception ignored) {}
         }
-        UIManager.put("defaultFont",                  new Font("Segoe UI", Font.PLAIN, 13));
+        UIManager.put("defaultFont",                  new Font(Fonts.UI_FAMILY, Font.PLAIN, 13));
         UIManager.put("Component.arc",                8);
         UIManager.put("Button.arc",                   8);
         UIManager.put("TextComponent.arc",            6);
-        UIManager.put("ScrollBar.width",              8);
+        UIManager.put("ScrollBar.width",              6);
         UIManager.put("ScrollBar.thumbArc",           999);
         UIManager.put("ScrollBar.thumbInsets",        new Insets(2, 2, 2, 2));
-        UIManager.put("ScrollBar.track",              BG_PANEL);
+        UIManager.put("ScrollBar.track",              Colors.BG_PANEL);
         UIManager.put("ScrollBar.thumb",              new Color(59, 130, 246, 90));
-        UIManager.put("ScrollBar.hoverThumbColor",    ACCENT);
-        UIManager.put("Panel.background",             BG_MAIN);
-        UIManager.put("ComboBox.background",          BG_CARD);
-        UIManager.put("ComboBox.foreground",          TEXT_PRI);
-        UIManager.put("ComboBox.buttonBackground",    BG_CARD);
+        UIManager.put("ScrollBar.hoverThumbColor",    Colors.ACCENT);
+        UIManager.put("Panel.background",             Colors.BG_MAIN);
+        UIManager.put("ComboBox.background",          Colors.BG_CARD);
+        UIManager.put("ComboBox.foreground",          Colors.TEXT_PRI);
+        UIManager.put("ComboBox.buttonBackground",    Colors.BG_CARD);
         UIManager.put("ComboBox.selectionBackground", new Color(59, 130, 246, 90));
         UIManager.put("ComboBox.selectionForeground", Color.WHITE);
-        UIManager.put("TextField.background",         BG_CARD);
-        UIManager.put("TextField.foreground",         TEXT_PRI);
-        UIManager.put("PasswordField.background",     BG_CARD);
-        UIManager.put("SplitPane.background",         BG_MAIN);
-        UIManager.put("SplitPaneDivider.background",  BG_MAIN);
+        UIManager.put("TextField.background",         Colors.BG_CARD);
+        UIManager.put("TextField.foreground",         Colors.TEXT_PRI);
+        UIManager.put("PasswordField.background",     Colors.BG_CARD);
+        UIManager.put("SplitPane.background",         Colors.BG_MAIN);
+        UIManager.put("SplitPaneDivider.background",  Colors.BG_MAIN);
+
+        // ── Frame ─────────────────────────────────────────────────
         JFrame frame = new JFrame("Cinépolis · Automation QA");
         java.util.List<java.awt.Image> frameIcons = new ArrayList<>();
         for (int sz : new int[]{16, 32, 48, 64}) {
@@ -177,48 +199,190 @@ private static final Color BORDER     = new Color(25, 35, 65);
         }
         if (!frameIcons.isEmpty()) frame.setIconImages(frameIcons);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setSize(1450, 900);
-        frame.setMinimumSize(new Dimension(1000, 660));
+        frame.setSize(1480, 920);
+        frame.setMinimumSize(new Dimension(1100, 700));
         frame.setLocationRelativeTo(null);
-        JPanel root = new JPanel(new BorderLayout()) {
-            @Override protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                int w = getWidth(), h = getHeight();
-                // Base gradient
-                g2.setPaint(new GradientPaint(0, 0, new Color(6, 10, 30), 0, h, BG_MAIN));
-                g2.fillRect(0, 0, w, h);
-                // Top-center blue atmospheric halo
-                g2.setPaint(new RadialGradientPaint(new Point2D.Float(w * 0.5f, 0f), w * 0.65f,
-                    new float[]{0f, 0.55f, 1f},
-                    new Color[]{new Color(59, 130, 246, 28), new Color(59, 130, 246, 9), new Color(59, 130, 246, 0)}));
-                g2.fillRect(0, 0, w, h / 2);
-                // Top-left accent radial (sidebar side)
-                g2.setPaint(new RadialGradientPaint(new Point2D.Float(w * 0.13f, h * 0.06f), w * 0.38f,
-                    new float[]{0f, 1f},
-                    new Color[]{new Color(59, 130, 246, 35), new Color(0, 0, 0, 0)}));
-                g2.fillRect(0, 0, w / 2, h / 3);
-                // Bottom-right purple ambient
-                g2.setPaint(new RadialGradientPaint(new Point2D.Float(w * 0.88f, h * 0.94f), w * 0.42f,
-                    new float[]{0f, 1f},
-                    new Color[]{new Color(147, 51, 234, 22), new Color(0, 0, 0, 0)}));
-                g2.fillRect(w / 2, h * 2 / 3, w, h);
-                // Vignette (darker edges for depth)
-                g2.setPaint(new RadialGradientPaint(new Point2D.Float(w * 0.5f, h * 0.5f),
-                    (float) Math.max(w, h) * 0.75f,
-                    new float[]{0.35f, 1f},
-                    new Color[]{new Color(0, 0, 0, 0), new Color(0, 0, 0, 65)}));
-                g2.fillRect(0, 0, w, h);
-                g2.dispose();
+
+        // ── Root: atmospheric gradient background ─────────────────
+        GradientPanel root = new GradientPanel(GradientPanel.Preset.MAIN);
+        root.setLayout(new BorderLayout());
+
+        // ── TOP NAVBAR ────────────────────────────────────────────
+        topNavbar = new TopNavbar("Jairo", "QA Engineer", Main::onMainBtnClick, () -> showConfigDialog(frame));
+        root.add(topNavbar, BorderLayout.NORTH);
+
+        // ── BODY: sidebar + content ───────────────────────────────
+        JPanel body = new JPanel(new BorderLayout());
+        body.setOpaque(false);
+
+        // Enterprise sidebar
+        sidebarPanel = new SidebarPanel(new SidebarPanel.NavListener() {
+            @Override public void onPage(String key)      { showPage(key); }
+            @Override public void onCountry(String name)  { selectCountry(name); }
+        });
+        body.add(sidebarPanel, BorderLayout.WEST);
+
+        // Right content area: pages on top, log at bottom
+        JPanel rightContent = new JPanel(new BorderLayout());
+        rightContent.setOpaque(false);
+
+        // Page card switcher
+        mainCardLayout = new CardLayout();
+        mainCardPanel  = new JPanel(mainCardLayout);
+        mainCardPanel.setOpaque(false);
+
+        // 1. Dashboard page (new enterprise view)
+        mainCardPanel.add(buildDashboardPage(), "dashboard");
+
+        // 2. Execute page (existing country/test-card flow)
+        JScrollPane topScroll = new JScrollPane(buildRightAreaInner());
+        topScroll.setBorder(null);
+        topScroll.setOpaque(false);
+        topScroll.getViewport().setOpaque(false);
+        topScroll.getVerticalScrollBar().setUnitIncrement(12);
+        mainCardPanel.add(topScroll, "execute");
+
+        // 3. Devices page
+        mainCardPanel.add(new DeviceCardsPanel(), "devices");
+
+        // 4. Coming-soon placeholder
+        mainCardPanel.add(buildComingSoonPlaceholder(), "coming-soon");
+
+        rightContent.add(mainCardPanel, BorderLayout.CENTER);
+
+        // Persistent bottom split: summary + log/IA tabs
+        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+            rightContent, buildBottomArea());
+        vSplit.setResizeWeight(0.60);
+        vSplit.setDividerSize(4);
+        vSplit.setBorder(null);
+        vSplit.setUI(new BasicSplitPaneUI() {
+            @Override public BasicSplitPaneDivider createDefaultDivider() {
+                return new BasicSplitPaneDivider(this) {
+                    @Override public void paint(Graphics g) {
+                        Graphics2D g2 = (Graphics2D) g.create();
+                        g2.setColor(Colors.BG_MAIN);
+                        g2.fillRect(0, 0, getWidth(), getHeight());
+                        g2.setColor(Colors.BORDER);
+                        g2.fillRect(0, getHeight() / 2, getWidth(), 1);
+                        g2.dispose();
+                    }
+                };
             }
-        };
-        root.setOpaque(true);
-        root.add(buildHeader(),     BorderLayout.NORTH);
-        root.add(buildCenter(),     BorderLayout.CENTER);
-        root.add(buildFooter(),     BorderLayout.SOUTH);
+        });
+
+        body.add(vSplit, BorderLayout.CENTER);
+        root.add(body, BorderLayout.CENTER);
+        root.add(buildFooter(), BorderLayout.SOUTH);
+
         frame.setContentPane(root);
         frame.setVisible(true);
+
+        // Start on dashboard
+        showPage("dashboard");
         redirectOutput();
+    }
+
+    // ── Page switcher ─────────────────────────────────────────────
+
+    private static void showPage(String key) {
+        SwingUtilities.invokeLater(() -> {
+            String cardKey = switch (key) {
+                case "execute", "executions", "suites", "environments" -> "execute";
+                case "devices" -> "devices";
+                case "dashboard" -> "dashboard";
+                default -> "coming-soon";
+            };
+            mainCardLayout.show(mainCardPanel, cardKey);
+            if (sidebarPanel != null) sidebarPanel.setActivePage(key);
+        });
+    }
+
+    // ── Dashboard page ────────────────────────────────────────────
+
+    private static JPanel buildDashboardPage() {
+        JPanel page = new JPanel(new BorderLayout(0, 16));
+        page.setOpaque(false);
+        page.setBorder(new EmptyBorder(20, 22, 0, 22));
+
+        // Welcome row
+        JPanel welcome = new JPanel(new BorderLayout());
+        welcome.setOpaque(false);
+        JPanel welcomeLeft = new JPanel();
+        welcomeLeft.setLayout(new BoxLayout(welcomeLeft, BoxLayout.Y_AXIS));
+        welcomeLeft.setOpaque(false);
+        JLabel wTitle = new JLabel("¡Bienvenido de vuelta, Jairo! 👋");
+        wTitle.setFont(new Font(Fonts.UI_FAMILY, Font.BOLD, 22));
+        wTitle.setForeground(Colors.TEXT_PRI);
+        JLabel wSub = new JLabel("Resumen de actividad de pruebas automatizadas");
+        wSub.setFont(Fonts.UI_SUBTITLE);
+        wSub.setForeground(Colors.TEXT_DIM);
+        welcomeLeft.add(wTitle);
+        welcomeLeft.add(wSub);
+        welcome.add(welcomeLeft, BorderLayout.WEST);
+
+        // KPI cards (initialized here; updateStats/resetStats delegate to it)
+        kpiPanel = new KpiCardsPanel();
+
+        // Navigation hint — country/test cards are in the Execute page
+        JPanel hint = new JPanel(new GridBagLayout());
+        hint.setOpaque(false);
+        JLabel hintLbl = new JLabel(
+            "<html><div style='text-align:center;color:#6875a8'>"
+            + "<span style='font-size:24px'>▶</span><br/><br/>"
+            + "<b style='font-size:13px;color:#a0afcc'>Selecciona un País en el menú lateral</b><br/><br/>"
+            + "<span style='font-size:11px'>para ver y ejecutar las suites de prueba disponibles.</span>"
+            + "</div></html>");
+        hint.add(hintLbl);
+
+        JPanel center = new JPanel(new BorderLayout(0, 14));
+        center.setOpaque(false);
+        center.add(kpiPanel, BorderLayout.NORTH);
+        center.add(hint,     BorderLayout.CENTER);
+
+        page.add(welcome, BorderLayout.NORTH);
+        page.add(center,  BorderLayout.CENTER);
+        return page;
+    }
+
+    private static JPanel buildComingSoonPlaceholder() {
+        JPanel p = new JPanel(new GridBagLayout());
+        p.setOpaque(false);
+        JLabel lbl = new JLabel(
+            "<html><div style='text-align:center;color:#6875a8'>"
+            + "<span style='font-size:32px'>🚀</span><br/><br/>"
+            + "<b style='font-size:15px;color:#dce1f0'>Próximamente</b><br/><br/>"
+            + "Esta sección estará disponible en futuras versiones.</div></html>");
+        p.add(lbl);
+        return p;
+    }
+
+    // ── Extract inner right-area (existing country/card flow) ─────
+
+    private static JPanel buildRightAreaInner() {
+        // Reuse the existing rightCardPanel built by buildRightArea,
+        // stripping the outer JSplitPane so only the top panel returns.
+        rightCardLayout = new CardLayout();
+        rightCardPanel  = new JPanel(rightCardLayout);
+        rightCardPanel.setBackground(BG_MAIN);
+
+        rightCardPanel.add(buildWelcomePanel(),                                       "none");
+        rightCardPanel.add(buildCountryPanel("México", mexicoCards()),               "México");
+        rightCardPanel.add(buildAsientosDetailPanel(),                               "México-Asientos");
+        rightCardPanel.add(buildFlujosDetailPanel(),                                 "México-E2E");
+        rightCardPanel.add(buildAlimentosDetailPanel(),                              "México-Alimentos");
+        rightCardPanel.add(buildCarritoDetailPanel(),                                "México-Carrito");
+        rightCardPanel.add(buildCheckoutDetailPanel(),                               "México-Checkout");
+        rightCardPanel.add(buildArgentinaPanel(),                                    "Argentina");
+        rightCardPanel.add(buildChilePanel(),                                        "Chile");
+        for (String[] c : COUNTRIES) {
+            String n = c[2];
+            if (!n.equals("México") && !n.equals("Argentina") && !n.equals("Chile"))
+                rightCardPanel.add(buildComingSoonPanel(c[0], n), n);
+        }
+        rightCardLayout.show(rightCardPanel, "none");
+        loadCustomSuites();
+        return rightCardPanel;
     }
 
     // ── Header ────────────────────────────────────────────────────
@@ -2160,11 +2324,12 @@ private static final Color BORDER     = new Color(25, 35, 65);
         statTotal    = statPassed + statFailed + statSkipped;
         String t     = TS.format(new Date());
         SwingUtilities.invokeLater(() -> {
-            passedVal.setText(String.valueOf(statPassed));
-            failedVal.setText(String.valueOf(statFailed));
-            skippedVal.setText(String.valueOf(statSkipped));
-            totalVal.setText(String.valueOf(statTotal));
-            timeVal.setText(t);
+            if (passedVal  != null) passedVal.setText(String.valueOf(statPassed));
+            if (failedVal  != null) failedVal.setText(String.valueOf(statFailed));
+            if (skippedVal != null) skippedVal.setText(String.valueOf(statSkipped));
+            if (totalVal   != null) totalVal.setText(String.valueOf(statTotal));
+            if (timeVal    != null) timeVal.setText(t);
+            if (kpiPanel   != null) kpiPanel.updateStats(statTotal, statPassed, statFailed, statSkipped, t);
         });
     }
 
@@ -2271,22 +2436,15 @@ private static final Color BORDER     = new Color(25, 35, 65);
     }
 
     private static void setRunningUi(boolean on) {
-        if (on) {
-            mainBtn.setText("■  DETENER");
-            mainBtn.setAccent(new Color(185, 28, 28));
-            statusDot.setForeground(COLOR_SKIP);
-            statusText.setForeground(COLOR_SKIP);
-            statusText.setText("Ejecutando...");
-        } else {
-            mainBtn.setText("▶  EJECUTAR PRUEBAS");
-            mainBtn.setAccent(ACCENT);
-            statusDot.setForeground(COLOR_OK);
-            statusText.setForeground(COLOR_OK);
-            statusText.setText("Ready");
+        if (topNavbar != null) topNavbar.setRunning(on);
+        if (mainBtn != null) {
+            mainBtn.setText(on ? "■  DETENER" : "▶  EJECUTAR PRUEBAS");
+            mainBtn.setAccent(on ? new Color(185, 28, 28) : ACCENT);
+            mainBtn.repaint();
         }
-        mainBtn.repaint();
-        abortBtn.setVisible(on);
-        abortBtn.getParent().revalidate();
+        if (statusDot  != null) statusDot.setForeground(on ? COLOR_SKIP : COLOR_OK);
+        if (statusText != null) { statusText.setForeground(on ? COLOR_SKIP : COLOR_OK); statusText.setText(on ? "Ejecutando..." : "Ready"); }
+        if (abortBtn   != null) { abortBtn.setVisible(on); if (abortBtn.getParent() != null) abortBtn.getParent().revalidate(); }
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -2661,9 +2819,12 @@ private static final Color BORDER     = new Color(25, 35, 65);
     private static void resetStats() {
         statPassed = 0; statFailed = 0; statSkipped = 0; statTotal = 0;
         SwingUtilities.invokeLater(() -> {
-            passedVal.setText("0"); failedVal.setText("0");
-            skippedVal.setText("0"); totalVal.setText("0");
-            timeVal.setText("--");
+            if (passedVal  != null) passedVal.setText("0");
+            if (failedVal  != null) failedVal.setText("0");
+            if (skippedVal != null) skippedVal.setText("0");
+            if (totalVal   != null) totalVal.setText("0");
+            if (timeVal    != null) timeVal.setText("--");
+            if (kpiPanel   != null) kpiPanel.resetStats();
         });
     }
 
