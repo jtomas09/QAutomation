@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 400" fill="none">
+  <defs>
+    <linearGradient id="a56-body" x1="0" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#1a2744"/>
+      <stop offset="40%"  stop-color="#223060"/>
+      <stop offset="100%" stop-color="#131d38"/>
+    </linearGradient>
+    <linearGradient id="a56-frame" x1="0" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#3a4f8a"/>
+      <stop offset="50%"  stop-color="#5a72b0"/>
+      <stop offset="100%" stop-color="#2e4070"/>
+    </linearGradient>
+    <linearGradient id="a56-screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#121b30"/>
+      <stop offset="100%" stop-color="#09111e"/>
+    </linearGradient>
+    <linearGradient id="a56-reflect" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="rgba(255,255,255,0.06)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+    <filter id="a56-shadow">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="rgba(99,102,241,0.35)" flood-opacity="1"/>
+    </filter>
+  </defs>
+
+  <!-- Ambient glow -->
+  <rect x="10" y="6" width="180" height="388" rx="30" fill="rgba(99,102,241,0.07)" filter="url(#a56-shadow)"/>
+
+  <!-- Frame — navy blue aluminum -->
+  <rect x="8" y="8" width="184" height="384" rx="30" fill="url(#a56-frame)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+
+  <!-- Glass back (navy) -->
+  <rect x="10" y="10" width="180" height="380" rx="28" fill="url(#a56-body)"/>
+
+  <!-- Edge shimmer -->
+  <rect x="10" y="50" width="5" height="300" fill="rgba(255,255,255,0.08)" rx="2"/>
+  <rect x="185" y="50" width="5" height="300" fill="rgba(255,255,255,0.04)" rx="2"/>
+
+  <!-- Camera module top-left (rectangular) -->
+  <rect x="18" y="22" width="64" height="64" rx="18" fill="rgba(0,0,0,0.5)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <!-- Main lens -->
+  <circle cx="40" cy="42" r="16" fill="#060809" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <circle cx="40" cy="42" r="12" fill="#0a0c0f"/>
+  <circle cx="40" cy="42" r="8"  fill="#050607"/>
+  <circle cx="37" cy="39" r="3"  fill="rgba(255,255,255,0.14)"/>
+  <!-- Ultrawide -->
+  <circle cx="66" cy="42" r="11" fill="#060809" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <circle cx="66" cy="42" r="7"  fill="#0a0c0f"/>
+  <circle cx="64" cy="40" r="2"  fill="rgba(255,255,255,0.1)"/>
+  <!-- Macro -->
+  <circle cx="40" cy="70" r="9"  fill="#060809" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+  <circle cx="40" cy="70" r="6"  fill="#0a0c0f"/>
+  <!-- Flash -->
+  <circle cx="66" cy="68" r="5"  fill="#c8961a" opacity="0.6"/>
+  <circle cx="66" cy="68" r="3"  fill="#e5b020" opacity="0.8"/>
+
+  <!-- Screen bezel -->
+  <rect x="12" y="12" width="176" height="376" rx="26" fill="#0d0e10"/>
+
+  <!-- Screen -->
+  <rect x="14" y="14" width="172" height="372" rx="24" fill="url(#a56-screen)"/>
+  <rect x="14" y="14" width="172" height="372" rx="24" fill="url(#a56-reflect)"/>
+
+  <!-- Punch-hole camera (center top) -->
+  <circle cx="100" cy="34" r="6"  fill="#000"/>
+  <circle cx="100" cy="34" r="4"  fill="#080808"/>
+  <circle cx="98.5" cy="32.5" r="1.5" fill="rgba(255,255,255,0.12)"/>
+
+  <!-- Status bar -->
+  <rect x="22" y="27" width="20" height="4" rx="2" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- Samsung One UI elements -->
+  <!-- App grid row 1 -->
+  <rect x="24" y="68" width="30" height="30" rx="8" fill="rgba(99,102,241,0.45)"/>
+  <rect x="66" y="68" width="30" height="30" rx="8" fill="rgba(16,185,129,0.45)"/>
+  <rect x="108" y="68" width="30" height="30" rx="8" fill="rgba(244,63,94,0.45)"/>
+  <rect x="150" y="68" width="30" height="30" rx="8" fill="rgba(245,158,11,0.45)"/>
+
+  <!-- App grid row 2 -->
+  <rect x="24"  y="110" width="30" height="30" rx="8" fill="rgba(56,189,248,0.35)"/>
+  <rect x="66"  y="110" width="30" height="30" rx="8" fill="rgba(124,58,237,0.35)"/>
+  <rect x="108" y="110" width="30" height="30" rx="8" fill="rgba(249,115,22,0.35)"/>
+  <rect x="150" y="110" width="30" height="30" rx="8" fill="rgba(20,184,166,0.35)"/>
+
+  <!-- Galaxy AI widget -->
+  <rect x="24" y="158" width="152" height="72" rx="16" fill="rgba(99,102,241,0.08)" stroke="rgba(99,102,241,0.2)" stroke-width="1"/>
+  <rect x="38" y="174" width="50" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
+  <rect x="38" y="188" width="30" height="4" rx="2" fill="rgba(99,102,241,0.6)"/>
+  <!-- Galaxy AI logo hint -->
+  <circle cx="158" cy="182" r="10" fill="rgba(99,102,241,0.25)" stroke="rgba(99,102,241,0.3)" stroke-width="1"/>
+  <path d="M154 182 Q158 176 162 182 Q158 188 154 182Z" fill="rgba(99,102,241,0.8)"/>
+  <!-- Mini bar chart -->
+  <rect x="38" y="198" width="8"  height="20" rx="2" fill="rgba(99,102,241,0.4)"/>
+  <rect x="50" y="192" width="8"  height="26" rx="2" fill="rgba(99,102,241,0.5)"/>
+  <rect x="62" y="202" width="8"  height="16" rx="2" fill="rgba(99,102,241,0.35)"/>
+  <rect x="74" y="196" width="8"  height="22" rx="2" fill="rgba(99,102,241,0.45)"/>
+  <rect x="86" y="194" width="8"  height="24" rx="2" fill="rgba(99,102,241,0.55)"/>
+
+  <!-- App grid row 3 -->
+  <rect x="24"  y="252" width="30" height="30" rx="8" fill="rgba(234,67,53,0.3)"/>
+  <rect x="66"  y="252" width="30" height="30" rx="8" fill="rgba(52,168,83,0.3)"/>
+  <rect x="108" y="252" width="30" height="30" rx="8" fill="rgba(66,133,244,0.3)"/>
+  <rect x="150" y="252" width="30" height="30" rx="8" fill="rgba(251,188,4,0.3)"/>
+
+  <!-- Dock -->
+  <rect x="24" y="302" width="152" height="48" rx="22" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+  <circle cx="52"  cy="326" r="13" fill="rgba(99,102,241,0.5)"/>
+  <circle cx="84"  cy="326" r="13" fill="rgba(16,185,129,0.5)"/>
+  <circle cx="116" cy="326" r="13" fill="rgba(244,63,94,0.5)"/>
+  <circle cx="148" cy="326" r="13" fill="rgba(56,189,248,0.5)"/>
+
+  <!-- Home bar -->
+  <rect x="76" y="362" width="48" height="4" rx="2" fill="rgba(255,255,255,0.25)"/>
+
+  <!-- Power button right -->
+  <rect x="191" y="140" width="7" height="55" rx="3.5" fill="#4060a0"/>
+  <rect x="192" y="141" width="3" height="53" rx="1.5" fill="rgba(255,255,255,0.18)"/>
+
+  <!-- Volume buttons left -->
+  <rect x="2" y="130" width="7" height="34" rx="3.5" fill="#3858a0"/>
+  <rect x="3" y="131" width="3" height="32" rx="1.5" fill="rgba(255,255,255,0.15)"/>
+  <rect x="2" y="174" width="7" height="34" rx="3.5" fill="#3858a0"/>
+  <rect x="3" y="175" width="3" height="32" rx="1.5" fill="rgba(255,255,255,0.15)"/>
+
+  <!-- USB-C -->
+  <rect x="80" y="392" width="40" height="5" rx="2.5" fill="#4060a0"/>
+  <rect x="82" y="393" width="36" height="3" rx="1.5" fill="#2a4080"/>
+
+  <!-- Screen glow border -->
+  <rect x="14" y="14" width="172" height="372" rx="24" fill="none" stroke="rgba(99,102,241,0.1)" stroke-width="1.5"/>
+
+  <!-- Corner shine -->
+  <path d="M36 14 Q14 14 14 36" stroke="rgba(255,255,255,0.22)" stroke-width="1" fill="none"/>
+</svg>

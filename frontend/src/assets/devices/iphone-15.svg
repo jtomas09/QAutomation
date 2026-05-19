@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 400" fill="none">
+  <defs>
+    <!-- Titanium frame gradient -->
+    <linearGradient id="ip15-frame" x1="0" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#b8b8b8"/>
+      <stop offset="30%"  stop-color="#d4d4d4"/>
+      <stop offset="50%"  stop-color="#f0f0f0"/>
+      <stop offset="70%"  stop-color="#c8c8c8"/>
+      <stop offset="100%" stop-color="#a0a0a0"/>
+    </linearGradient>
+    <!-- Screen gradient -->
+    <linearGradient id="ip15-screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#1a1f35"/>
+      <stop offset="100%" stop-color="#0d1020"/>
+    </linearGradient>
+    <!-- Screen reflection -->
+    <linearGradient id="ip15-reflect" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="rgba(255,255,255,0.08)"/>
+      <stop offset="60%"  stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+    <!-- Side edge highlight -->
+    <linearGradient id="ip15-side-l" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#a0a0a0"/>
+      <stop offset="100%" stop-color="#d8d8d8"/>
+    </linearGradient>
+    <linearGradient id="ip15-side-r" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#c0c0c0"/>
+      <stop offset="100%" stop-color="#909090"/>
+    </linearGradient>
+    <!-- Glow -->
+    <filter id="ip15-glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="ip15-shadow">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="rgba(99,102,241,0.3)" flood-opacity="1"/>
+    </filter>
+    <!-- Dynamic Island mask -->
+    <clipPath id="ip15-screen-clip">
+      <rect x="16" y="16" width="168" height="368" rx="22"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer body glow -->
+  <rect x="10" y="8" width="180" height="384" rx="36" fill="rgba(99,102,241,0.08)" filter="url(#ip15-shadow)"/>
+
+  <!-- Frame (flat titanium sides) -->
+  <!-- Left side -->
+  <rect x="8" y="40" width="8" height="320" fill="url(#ip15-side-l)" rx="2"/>
+  <!-- Right side -->
+  <rect x="184" y="40" width="8" height="320" fill="url(#ip15-side-r)" rx="2"/>
+
+  <!-- Main body -->
+  <rect x="8" y="8" width="184" height="384" rx="36" fill="url(#ip15-frame)" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+
+  <!-- Back glass (subtle) -->
+  <rect x="10" y="10" width="180" height="380" rx="34" fill="#1c1c1e"/>
+
+  <!-- Screen bezel -->
+  <rect x="14" y="14" width="172" height="372" rx="28" fill="#111318"/>
+
+  <!-- Screen -->
+  <rect x="16" y="16" width="168" height="368" rx="26" fill="url(#ip15-screen)"/>
+
+  <!-- Screen content: subtle grid -->
+  <g clip-path="url(#ip15-screen-clip)" opacity="0.3">
+    <line x1="16" y1="100" x2="184" y2="100" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+    <line x1="16" y1="200" x2="184" y2="200" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+    <line x1="16" y1="300" x2="184" y2="300" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+  </g>
+
+  <!-- Screen reflection overlay -->
+  <rect x="16" y="16" width="168" height="368" rx="26" fill="url(#ip15-reflect)"/>
+
+  <!-- Screen top shimmer -->
+  <rect x="20" y="20" width="80" height="60" rx="4" fill="rgba(255,255,255,0.025)"/>
+
+  <!-- Dynamic Island -->
+  <rect x="68" y="28" width="64" height="28" rx="14" fill="#000000"/>
+  <!-- DI camera dot -->
+  <circle cx="120" cy="42" r="5" fill="#1a1a1a"/>
+  <circle cx="121" cy="41" r="1.5" fill="rgba(255,255,255,0.08)"/>
+  <!-- DI sensor -->
+  <circle cx="84" cy="42" r="4" fill="#111"/>
+
+  <!-- Status bar time -->
+  <rect x="24" y="34" width="28" height="6" rx="3" fill="rgba(255,255,255,0.25)"/>
+
+  <!-- Screen icons row 1 -->
+  <rect x="32"  y="100" width="28" height="28" rx="7" fill="rgba(99,102,241,0.4)"/>
+  <rect x="72"  y="100" width="28" height="28" rx="7" fill="rgba(16,185,129,0.4)"/>
+  <rect x="112" y="100" width="28" height="28" rx="7" fill="rgba(244,63,94,0.4)"/>
+  <rect x="152" y="100" width="28" height="28" rx="7" fill="rgba(245,158,11,0.4)"/>
+
+  <!-- Screen icons row 2 -->
+  <rect x="32"  y="144" width="28" height="28" rx="7" fill="rgba(56,189,248,0.3)"/>
+  <rect x="72"  y="144" width="28" height="28" rx="7" fill="rgba(124,58,237,0.3)"/>
+  <rect x="112" y="144" width="28" height="28" rx="7" fill="rgba(249,115,22,0.3)"/>
+  <rect x="152" y="144" width="28" height="28" rx="7" fill="rgba(20,184,166,0.3)"/>
+
+  <!-- Widget -->
+  <rect x="32" y="200" width="148" height="70" rx="14" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <rect x="46" y="216" width="60" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
+  <rect x="46" y="228" width="40" height="4" rx="2" fill="rgba(255,255,255,0.1)"/>
+  <rect x="46" y="244" width="80" height="4" rx="2" fill="rgba(99,102,241,0.5)"/>
+
+  <!-- Dock bar -->
+  <rect x="32" y="340" width="136" height="32" rx="16" fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <circle cx="66"  cy="356" r="10" fill="rgba(99,102,241,0.5)"/>
+  <circle cx="100" cy="356" r="10" fill="rgba(16,185,129,0.5)"/>
+  <circle cx="134" cy="356" r="10" fill="rgba(244,63,94,0.5)"/>
+
+  <!-- Home indicator -->
+  <rect x="76" y="376" width="48" height="4" rx="2" fill="rgba(255,255,255,0.3)"/>
+
+  <!-- Side button (right) -->
+  <rect x="192" y="120" width="6" height="50" rx="3" fill="#b0b0b0"/>
+  <rect x="193" y="121" width="3" height="48" rx="2" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- Volume buttons (left) -->
+  <rect x="2" y="100" width="6" height="30" rx="3" fill="#b0b0b0"/>
+  <rect x="3" y="101" width="3" height="28" rx="2" fill="rgba(255,255,255,0.2)"/>
+  <rect x="2" y="142" width="6" height="30" rx="3" fill="#b0b0b0"/>
+  <rect x="3" y="143" width="3" height="28" rx="2" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- Mute switch -->
+  <rect x="2" y="72" width="6" height="18" rx="3" fill="#a8a8a8"/>
+
+  <!-- USB-C port -->
+  <rect x="78" y="394" width="44" height="6" rx="3" fill="#888"/>
+  <rect x="80" y="395" width="40" height="4" rx="2" fill="#555"/>
+
+  <!-- Neon accent glow on screen -->
+  <rect x="16" y="16" width="168" height="368" rx="26" fill="none" stroke="rgba(99,102,241,0.15)" stroke-width="2"/>
+
+  <!-- Corner shine -->
+  <path d="M44 16 Q16 16 16 44" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none"/>
+</svg>

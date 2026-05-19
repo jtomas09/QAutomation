@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 400" fill="none">
+  <defs>
+    <linearGradient id="rn13-body" x1="0" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#1e1228"/>
+      <stop offset="50%"  stop-color="#2a1838"/>
+      <stop offset="100%" stop-color="#150d1e"/>
+    </linearGradient>
+    <linearGradient id="rn13-frame" x1="0" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#4a2870"/>
+      <stop offset="50%"  stop-color="#6b3a9e"/>
+      <stop offset="100%" stop-color="#3e2260"/>
+    </linearGradient>
+    <linearGradient id="rn13-screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#120d20"/>
+      <stop offset="100%" stop-color="#0a0814"/>
+    </linearGradient>
+    <linearGradient id="rn13-reflect" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="rgba(255,255,255,0.06)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+    <!-- Holographic back shimmer -->
+    <linearGradient id="rn13-holo" x1="0" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="rgba(180,60,255,0.12)"/>
+      <stop offset="40%"  stop-color="rgba(60,180,255,0.08)"/>
+      <stop offset="80%"  stop-color="rgba(255,60,180,0.1)"/>
+      <stop offset="100%" stop-color="rgba(60,255,180,0.06)"/>
+    </linearGradient>
+    <filter id="rn13-shadow">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="rgba(124,58,237,0.4)" flood-opacity="1"/>
+    </filter>
+  </defs>
+
+  <!-- Drop shadow -->
+  <rect x="10" y="6" width="180" height="388" rx="28" fill="rgba(124,58,237,0.06)" filter="url(#rn13-shadow)"/>
+
+  <!-- Frame — purple aluminum -->
+  <rect x="8" y="8" width="184" height="384" rx="28" fill="url(#rn13-frame)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+
+  <!-- Glass back with holographic shimmer -->
+  <rect x="10" y="10" width="180" height="380" rx="26" fill="url(#rn13-body)"/>
+  <rect x="10" y="10" width="180" height="380" rx="26" fill="url(#rn13-holo)"/>
+
+  <!-- ═══ CAMERA MODULE (rectangular, Redmi style top-center) ═══ -->
+  <rect x="58" y="16" width="84" height="72" rx="20" fill="rgba(0,0,0,0.6)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Main lens (large) -->
+  <circle cx="88" cy="46" r="22" fill="#060608" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <circle cx="88" cy="46" r="17" fill="#090a0d"/>
+  <circle cx="88" cy="46" r="12" fill="#050507"/>
+  <circle cx="84" cy="42" r="4"  fill="rgba(255,255,255,0.15)"/>
+  <!-- Lens ring shimmer -->
+  <circle cx="88" cy="46" r="17" fill="none" stroke="rgba(124,58,237,0.3)" stroke-width="1"/>
+
+  <!-- Portrait lens -->
+  <circle cx="124" cy="38" r="14" fill="#060608" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/>
+  <circle cx="124" cy="38" r="10" fill="#09090c"/>
+  <circle cx="124" cy="38" r="6"  fill="#050507"/>
+  <circle cx="122" cy="36" r="2"  fill="rgba(255,255,255,0.12)"/>
+
+  <!-- Macro lens -->
+  <circle cx="124" cy="62" r="10" fill="#060608" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+  <circle cx="124" cy="62" r="7"  fill="#09090c"/>
+  <circle cx="122" cy="60" r="1.5" fill="rgba(255,255,255,0.1)"/>
+
+  <!-- Flash + LED -->
+  <circle cx="74" cy="78" r="5"   fill="#d4a020" opacity="0.65"/>
+  <circle cx="74" cy="78" r="3"   fill="#f0c040" opacity="0.8"/>
+  <circle cx="84" cy="80" r="2.5" fill="#4060e0" opacity="0.5"/>
+
+  <!-- "200MP" text hint -->
+  <text x="100" y="84" fill="rgba(255,255,255,0.25)" font-size="7" text-anchor="middle" font-family="monospace">200MP</text>
+
+  <!-- Screen bezel -->
+  <rect x="12" y="12" width="176" height="376" rx="24" fill="#0c0a14"/>
+
+  <!-- Screen -->
+  <rect x="14" y="14" width="172" height="372" rx="22" fill="url(#rn13-screen)"/>
+  <rect x="14" y="14" width="172" height="372" rx="22" fill="url(#rn13-reflect)"/>
+
+  <!-- Punch-hole center top -->
+  <circle cx="100" cy="34" r="6"  fill="#000"/>
+  <circle cx="100" cy="34" r="4"  fill="#080808"/>
+  <circle cx="98.5" cy="32.5" r="1.5" fill="rgba(255,255,255,0.12)"/>
+
+  <!-- Status bar -->
+  <rect x="22" y="27" width="20" height="4" rx="2" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- MIUI icons row 1 -->
+  <rect x="24" y="68" width="30" height="30" rx="8" fill="rgba(124,58,237,0.5)"/>
+  <rect x="66" y="68" width="30" height="30" rx="8" fill="rgba(16,185,129,0.45)"/>
+  <rect x="108" y="68" width="30" height="30" rx="8" fill="rgba(244,63,94,0.45)"/>
+  <rect x="150" y="68" width="30" height="30" rx="8" fill="rgba(245,158,11,0.45)"/>
+
+  <!-- Icons row 2 -->
+  <rect x="24"  y="110" width="30" height="30" rx="8" fill="rgba(56,189,248,0.35)"/>
+  <rect x="66"  y="110" width="30" height="30" rx="8" fill="rgba(249,115,22,0.35)"/>
+  <rect x="108" y="110" width="30" height="30" rx="8" fill="rgba(99,102,241,0.35)"/>
+  <rect x="150" y="110" width="30" height="30" rx="8" fill="rgba(20,184,166,0.35)"/>
+
+  <!-- HyperOS Widget -->
+  <rect x="24" y="158" width="152" height="76" rx="16" fill="rgba(124,58,237,0.07)" stroke="rgba(124,58,237,0.2)" stroke-width="1"/>
+  <rect x="38" y="174" width="55" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
+  <rect x="38" y="188" width="35" height="4" rx="2" fill="rgba(124,58,237,0.7)"/>
+  <!-- Mini donut chart -->
+  <circle cx="150" cy="186" r="14" fill="none" stroke="rgba(124,58,237,0.4)" stroke-width="4"/>
+  <circle cx="150" cy="186" r="14" fill="none" stroke="rgba(16,185,129,0.5)" stroke-width="4"
+    stroke-dasharray="35 53" stroke-dashoffset="18"/>
+  <circle cx="150" cy="186" r="14" fill="none" stroke="rgba(244,63,94,0.4)" stroke-width="4"
+    stroke-dasharray="10 78" stroke-dashoffset="-17"/>
+  <!-- Widget bottom bar -->
+  <rect x="38" y="202" width="100" height="4" rx="2" fill="rgba(255,255,255,0.06)"/>
+  <rect x="38" y="202" width="65"  height="4" rx="2" fill="rgba(124,58,237,0.5)"/>
+
+  <!-- Icons row 3 -->
+  <rect x="24"  y="254" width="30" height="30" rx="8" fill="rgba(234,67,53,0.3)"/>
+  <rect x="66"  y="254" width="30" height="30" rx="8" fill="rgba(52,168,83,0.3)"/>
+  <rect x="108" y="254" width="30" height="30" rx="8" fill="rgba(66,133,244,0.3)"/>
+  <rect x="150" y="254" width="30" height="30" rx="8" fill="rgba(251,188,4,0.3)"/>
+
+  <!-- Dock -->
+  <rect x="24" y="304" width="152" height="48" rx="22" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+  <circle cx="52"  cy="328" r="13" fill="rgba(124,58,237,0.55)"/>
+  <circle cx="84"  cy="328" r="13" fill="rgba(16,185,129,0.5)"/>
+  <circle cx="116" cy="328" r="13" fill="rgba(244,63,94,0.5)"/>
+  <circle cx="148" cy="328" r="13" fill="rgba(56,189,248,0.5)"/>
+
+  <!-- Home bar -->
+  <rect x="76" y="366" width="48" height="4" rx="2" fill="rgba(255,255,255,0.25)"/>
+
+  <!-- Power button right -->
+  <rect x="191" y="150" width="7" height="55" rx="3.5" fill="#5e3090"/>
+  <rect x="192" y="151" width="3" height="53" rx="1.5" fill="rgba(255,255,255,0.15)"/>
+
+  <!-- Volume buttons left -->
+  <rect x="2" y="140" width="7" height="34" rx="3.5" fill="#502880"/>
+  <rect x="3" y="141" width="3" height="32" rx="1.5" fill="rgba(255,255,255,0.12)"/>
+  <rect x="2" y="184" width="7" height="34" rx="3.5" fill="#502880"/>
+  <rect x="3" y="185" width="3" height="32" rx="1.5" fill="rgba(255,255,255,0.12)"/>
+
+  <!-- USB-C -->
+  <rect x="80" y="392" width="40" height="5" rx="2.5" fill="#5e3090"/>
+  <rect x="82" y="393" width="36" height="3" rx="1.5" fill="#3e2060"/>
+
+  <!-- Screen glow -->
+  <rect x="14" y="14" width="172" height="372" rx="22" fill="none" stroke="rgba(124,58,237,0.12)" stroke-width="1.5"/>
+
+  <!-- Corner shine -->
+  <path d="M34 14 Q14 14 14 34" stroke="rgba(255,255,255,0.2)" stroke-width="1" fill="none"/>
+</svg>

@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 400" fill="none">
+  <defs>
+    <!-- Polished Obsidian body -->
+    <linearGradient id="p8-body" x1="0" y1="0" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#1e2022"/>
+      <stop offset="40%"  stop-color="#2a2d30"/>
+      <stop offset="100%" stop-color="#161819"/>
+    </linearGradient>
+    <!-- Camera bar gradient -->
+    <linearGradient id="p8-cam-bar" x1="0" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#111"/>
+      <stop offset="50%"  stop-color="#1f2124"/>
+      <stop offset="100%" stop-color="#111"/>
+    </linearGradient>
+    <!-- Screen -->
+    <linearGradient id="p8-screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#131926"/>
+      <stop offset="100%" stop-color="#0a1018"/>
+    </linearGradient>
+    <!-- Google colors -->
+    <linearGradient id="p8-reflect" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="rgba(255,255,255,0.06)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+    <filter id="p8-glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="p8-shadow">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="rgba(66,133,244,0.35)" flood-opacity="1"/>
+    </filter>
+    <clipPath id="p8-clip">
+      <rect x="14" y="14" width="172" height="372" rx="24"/>
+    </clipPath>
+  </defs>
+
+  <!-- Glow base -->
+  <rect x="12" y="8" width="176" height="384" rx="32" fill="rgba(66,133,244,0.06)" filter="url(#p8-shadow)"/>
+
+  <!-- Main body — matte obsidian -->
+  <rect x="8" y="8" width="184" height="384" rx="32" fill="url(#p8-body)" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Polished edge left -->
+  <rect x="8" y="50" width="6" height="300" fill="rgba(255,255,255,0.12)" rx="2"/>
+  <!-- Polished edge right -->
+  <rect x="186" y="50" width="6" height="300" fill="rgba(255,255,255,0.06)" rx="2"/>
+
+  <!-- ═══ CAMERA BAR (signature Pixel feature) ═══ -->
+  <rect x="8" y="30" width="184" height="70" rx="0" fill="url(#p8-cam-bar)"/>
+  <!-- Camera bar top rounding -->
+  <rect x="8" y="8" width="184" height="55" rx="32" fill="#151718"/>
+  <!-- Camera bar bottom edge line -->
+  <line x1="8" y1="100" x2="192" y2="100" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+
+  <!-- Camera lenses in bar -->
+  <!-- Main wide lens -->
+  <circle cx="56" cy="66" r="22" fill="#0a0a0b" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <circle cx="56" cy="66" r="18" fill="#111214"/>
+  <circle cx="56" cy="66" r="13" fill="#080909"/>
+  <circle cx="56" cy="66" r="9"  fill="#050506"/>
+  <circle cx="53" cy="63" r="3"  fill="rgba(255,255,255,0.12)"/>
+  <!-- Lens ring shine -->
+  <circle cx="56" cy="66" r="18" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Ultrawide lens -->
+  <circle cx="108" cy="66" r="18" fill="#0a0a0b" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <circle cx="108" cy="66" r="14" fill="#111"/>
+  <circle cx="108" cy="66" r="9"  fill="#060606"/>
+  <circle cx="105" cy="63" r="2.5" fill="rgba(255,255,255,0.1)"/>
+
+  <!-- Telephoto lens -->
+  <circle cx="156" cy="66" r="16" fill="#0a0a0b" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <circle cx="156" cy="66" r="12" fill="#111"/>
+  <circle cx="156" cy="66" r="8"  fill="#060606"/>
+  <circle cx="153" cy="63" r="2"  fill="rgba(255,255,255,0.1)"/>
+
+  <!-- Temperature/torch sensor -->
+  <rect x="24" y="42" width="10" height="6" rx="3" fill="#1a1a1a" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+
+  <!-- Microphone -->
+  <circle cx="180" cy="52" r="3" fill="#111" stroke="rgba(255,255,255,0.06)" stroke-width="0.5"/>
+
+  <!-- Screen area -->
+  <rect x="14" y="108" width="172" height="270" rx="6" fill="url(#p8-screen)"/>
+  <!-- Screen reflection -->
+  <rect x="14" y="108" width="172" height="270" rx="6" fill="url(#p8-reflect)"/>
+
+  <!-- Punch-hole selfie camera -->
+  <circle cx="100" cy="124" r="7" fill="#000"/>
+  <circle cx="100" cy="124" r="5" fill="#080808"/>
+  <circle cx="98"  cy="122" r="1.5" fill="rgba(255,255,255,0.12)"/>
+
+  <!-- Status bar -->
+  <rect x="22" y="116" width="24" height="5" rx="2.5" fill="rgba(255,255,255,0.2)"/>
+
+  <!-- Screen icons -->
+  <rect x="28"  y="152" width="30" height="30" rx="8" fill="rgba(66,133,244,0.4)"/>
+  <rect x="70"  y="152" width="30" height="30" rx="8" fill="rgba(52,168,83,0.4)"/>
+  <rect x="112" y="152" width="30" height="30" rx="8" fill="rgba(251,188,4,0.4)"/>
+  <rect x="154" y="152" width="30" height="30" rx="8" fill="rgba(234,67,53,0.4)"/>
+
+  <!-- Widget -->
+  <rect x="28" y="200" width="156" height="80" rx="16" fill="rgba(66,133,244,0.08)" stroke="rgba(66,133,244,0.15)" stroke-width="1"/>
+  <!-- Widget: Google bar shape -->
+  <rect x="40" y="218" width="132" height="24" rx="12" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <circle cx="56" cy="230" r="8" fill="rgba(66,133,244,0.4)"/>
+  <rect x="70" y="226" width="60" height="4" rx="2" fill="rgba(255,255,255,0.15)"/>
+  <!-- Widget bottom row -->
+  <rect x="40" y="252" width="40" height="14" rx="7" fill="rgba(66,133,244,0.2)"/>
+  <rect x="88" y="252" width="40" height="14" rx="7" fill="rgba(52,168,83,0.2)"/>
+  <rect x="136" y="252" width="40" height="14" rx="7" fill="rgba(251,188,4,0.2)"/>
+
+  <!-- Second row icons -->
+  <rect x="28"  y="300" width="30" height="30" rx="8" fill="rgba(99,102,241,0.3)"/>
+  <rect x="70"  y="300" width="30" height="30" rx="8" fill="rgba(244,63,94,0.3)"/>
+  <rect x="112" y="300" width="30" height="30" rx="8" fill="rgba(16,185,129,0.3)"/>
+  <rect x="154" y="300" width="30" height="30" rx="8" fill="rgba(245,158,11,0.3)"/>
+
+  <!-- Home gesture bar -->
+  <rect x="75" y="366" width="50" height="4" rx="2" fill="rgba(255,255,255,0.25)"/>
+
+  <!-- Bottom bezel -->
+  <rect x="14" y="378" width="172" height="14" rx="8" fill="rgba(0,0,0,0.3)"/>
+
+  <!-- Power button right -->
+  <rect x="190" y="130" width="7" height="55" rx="3.5" fill="#252829"/>
+  <rect x="191" y="131" width="3" height="53" rx="1.5" fill="rgba(255,255,255,0.15)"/>
+
+  <!-- Volume buttons left -->
+  <rect x="3" y="120" width="7" height="35" rx="3.5" fill="#202224"/>
+  <rect x="4" y="121" width="3" height="33" rx="1.5" fill="rgba(255,255,255,0.12)"/>
+  <rect x="3" y="165" width="7" height="35" rx="3.5" fill="#202224"/>
+  <rect x="4" y="166" width="3" height="33" rx="1.5" fill="rgba(255,255,255,0.12)"/>
+
+  <!-- USB-C bottom -->
+  <rect x="80" y="393" width="40" height="5" rx="2.5" fill="#111"/>
+  <rect x="82" y="394" width="36" height="3" rx="1.5" fill="#080808"/>
+
+  <!-- Neon screen glow -->
+  <rect x="14" y="108" width="172" height="270" rx="6" fill="none" stroke="rgba(66,133,244,0.1)" stroke-width="1.5"/>
+
+  <!-- Corner highlight -->
+  <path d="M36 108 Q14 108 14 130" stroke="rgba(255,255,255,0.2)" stroke-width="1" fill="none"/>
+</svg>
