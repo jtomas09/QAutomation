@@ -80,8 +80,8 @@ export async function getHealth(): Promise<string> {
   return httpGet<string>('/health')
 }
 
-export async function getStatus(): Promise<{ running: boolean }> {
-  return httpGet<{ running: boolean }>('/api/status')
+export async function getStatus(): Promise<{ running: boolean; runnerOnline: boolean }> {
+  return httpGet<{ running: boolean; runnerOnline: boolean }>('/api/status')
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────

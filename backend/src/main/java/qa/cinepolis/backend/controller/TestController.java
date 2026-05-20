@@ -26,6 +26,7 @@ public class TestController {
     /** GET /api/run/pending — returns the next QUEUED execution without claiming it. */
     @GetMapping("/run/pending")
     public ResponseEntity<?> pending() {
+        execService.recordRunnerPing();   // runner is alive
         Optional<Execution> next = execService.findAll().stream()
                 .filter(e -> e.getStatus() == ExecutionStatus.QUEUED)
                 .min(Comparator.comparing(Execution::getStartTime));
@@ -41,10 +42,13 @@ public class TestController {
         return Map.of("result", "aborted", "executionId", id);
     }
 
-    /** GET /api/status — whether any execution is currently running. */
+    /** GET /api/status — whether any execution is currently running + runner heartbeat. */
     @GetMapping("/status")
     public Map<String, Object> status() {
-        return Map.of("running", execService.isRunning());
+        return Map.of(
+                "running",       execService.isRunning(),
+                "runnerOnline",  execService.isRunnerOnline()
+        );
     }
 
     /** GET /api/config — option catalogs for the frontend selectors. */

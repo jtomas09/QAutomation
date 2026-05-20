@@ -88,4 +88,18 @@ public class ExecutionService {
         return store.findAll().stream()
                 .anyMatch(e -> e.getStatus() == ExecutionStatus.RUNNING);
     }
+
+    // ── Runner heartbeat ───────────────────────────────────────────────────────
+
+    private volatile Instant lastRunnerPing = Instant.EPOCH;
+
+    /** Called every time the runner agent polls GET /api/run/pending. */
+    public void recordRunnerPing() {
+        lastRunnerPing = Instant.now();
+    }
+
+    /** True if the runner pinged within the last 15 seconds. */
+    public boolean isRunnerOnline() {
+        return lastRunnerPing.isAfter(Instant.now().minusSeconds(15));
+    }
 }
