@@ -19,6 +19,16 @@ public class TestController {
         this.execService = execService;
     }
 
+    /** GET /api/run/pending — returns the next QUEUED execution without claiming it. */
+    @GetMapping("/run/pending")
+    public ResponseEntity<?> pending() {
+        return execService.findAll().stream()
+                .filter(e -> e.getStatus() == qa.cinepolis.backend.model.ExecutionStatus.QUEUED)
+                .min(java.util.Comparator.comparing(qa.cinepolis.backend.model.Execution::getStartTime))
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElse(ResponseEntity.noContent().build());
+    }
+
     /** DELETE /api/run/{id} — aborts a pending or running execution. */
     @DeleteMapping("/run/{id}")
     public Map<String, String> abortRun(@PathVariable String id) {

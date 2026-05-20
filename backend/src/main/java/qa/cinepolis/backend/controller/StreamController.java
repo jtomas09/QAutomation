@@ -46,7 +46,10 @@ public class StreamController {
 
             // If already finished, flush done event and close
             ExecutionStatus s = exec.getStatus();
-            if (s == ExecutionStatus.COMPLETED || s == ExecutionStatus.FAILED || s == ExecutionStatus.ABORTED) {
+            boolean isTerminal = s == ExecutionStatus.COMPLETED || s == ExecutionStatus.PASSED
+                    || s == ExecutionStatus.FAILED  || s == ExecutionStatus.SKIPPED
+                    || s == ExecutionStatus.ABORTED;
+            if (isTerminal) {
                 try {
                     emitter.send(SseEmitter.event().name("done").data(json.writeValueAsString(
                             Map.of("passed",  exec.getPassed(),

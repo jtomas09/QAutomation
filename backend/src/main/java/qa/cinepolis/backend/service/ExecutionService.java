@@ -57,7 +57,7 @@ public class ExecutionService {
             e.setFailed(failed);
             e.setSkipped(skipped);
             e.setTotal(passed + failed + skipped);
-            e.setStatus(failed == 0 ? ExecutionStatus.COMPLETED : ExecutionStatus.FAILED);
+            e.setStatus(failed == 0 ? ExecutionStatus.PASSED : ExecutionStatus.FAILED);
             e.setEndTime(Instant.now());
             if (allureUrl != null && !allureUrl.isBlank()) e.setAllureUrl(allureUrl);
 
