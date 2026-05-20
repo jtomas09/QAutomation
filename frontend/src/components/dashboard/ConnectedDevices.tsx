@@ -65,15 +65,15 @@ export default function ConnectedDevices({ onManage }: Props) {
       transition={{ duration: 0.45, ease: 'easeOut' }}
       className="overflow-hidden rounded-2xl"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        background: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        boxShadow: 'var(--panel-shadow)',
       }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        style={{ borderBottom: '1px solid var(--panel-divide)' }}
       >
         <div>
           <div className="text-sm font-bold text-slate-100">Dispositivos Conectados</div>
@@ -86,7 +86,7 @@ export default function ConnectedDevices({ onManage }: Props) {
         <button
           onClick={onManage}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-colors"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+          style={{ background: 'var(--btn-bg)', border: '1px solid var(--btn-border)' }}
         >
           <Settings size={11} />
           Gestionar
@@ -119,7 +119,7 @@ function DeviceCard({ device, index }: { device: Device; index: number }) {
       }}
       className="relative flex flex-col items-center gap-2 p-3 rounded-xl cursor-pointer overflow-hidden"
       style={{
-        background: 'rgba(255,255,255,0.025)',
+        background: 'var(--btn-bg)',
         border: `1px solid ${device.accent}22`,
         boxShadow: `0 0 20px ${device.glow.replace('0.4', '0.08')}`,
         transition: 'box-shadow 0.3s ease, border-color 0.3s ease',
@@ -195,7 +195,7 @@ function DeviceCard({ device, index }: { device: Device; index: number }) {
 
       {/* In-use indicator bar */}
       {device.status === 'inuse' && (
-        <div className="w-full h-0.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+        <div className="w-full h-0.5 rounded-full overflow-hidden" style={{ background: 'var(--panel-divide)' }}>
           <motion.div
             className="h-full rounded-full"
             style={{ background: `linear-gradient(90deg, ${device.accent}, ${device.accent}66)` }}

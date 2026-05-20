@@ -72,15 +72,15 @@ export default function RecentExecutions({ onViewAll }: Props) {
     <div
       className="flex flex-col h-full overflow-hidden rounded-2xl"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        background: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        boxShadow: 'var(--panel-shadow)',
       }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        style={{ borderBottom: '1px solid var(--panel-divide)' }}
       >
         <div>
           <div className="text-sm font-bold text-slate-100">Ejecuciones Recientes</div>
@@ -100,7 +100,7 @@ export default function RecentExecutions({ onViewAll }: Props) {
       <div className="flex-1 overflow-auto min-h-0">
         <table className="w-full text-xs border-collapse">
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <tr style={{ borderBottom: '1px solid var(--panel-divide)' }}>
               {['EJECUCIÓN','SUITE','DISPOSITIVO','ESTADO','INICIO','DURACIÓN',''].map(h => (
                 <th
                   key={h}
@@ -126,7 +126,7 @@ export default function RecentExecutions({ onViewAll }: Props) {
                   transition={{ delay: i * 0.05 }}
                   className="group transition-colors"
                   style={{
-                    borderBottom: '1px solid rgba(255,255,255,0.04)',
+                    borderBottom: '1px solid var(--panel-divide)',
                     background: isRun ? 'rgba(99,102,241,0.04)' : 'transparent',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}

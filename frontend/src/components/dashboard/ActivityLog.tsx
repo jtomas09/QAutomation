@@ -40,15 +40,15 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
     <div
       className="flex flex-col h-full overflow-hidden rounded-2xl"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        background: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        boxShadow: 'var(--panel-shadow)',
       }}
     >
       {/* Header */}
       <div
         className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+        style={{ borderBottom: '1px solid var(--panel-divide)' }}
       >
         <div className="flex items-center gap-2">
           <Terminal size={14} className="text-indigo-400" />
@@ -63,7 +63,7 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
           <button
             onClick={onClear}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-slate-500 hover:text-slate-300 transition-colors"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+            style={{ background: 'var(--btn-bg)', border: '1px solid var(--btn-border)' }}
           >
             <Trash2 size={11} />
             Limpiar
@@ -82,7 +82,7 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
       {/* Terminal body */}
       <div
         className="flex-1 min-h-0 overflow-y-auto px-4 py-3 font-mono text-[11px] leading-relaxed"
-        style={{ background: 'rgba(0,0,0,0.3)' }}
+        style={{ background: 'var(--terminal-bg)' }}
       >
         {logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-600">

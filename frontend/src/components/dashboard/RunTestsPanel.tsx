@@ -35,14 +35,14 @@ export default function RunTestsPanel(props: Props) {
     <div
       className="flex flex-col h-full overflow-hidden rounded-2xl"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        background: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        boxShadow: 'var(--panel-shadow)',
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        style={{ borderBottom: '1px solid var(--panel-divide)' }}>
         <div>
           <div className="text-sm font-bold text-slate-100">Ejecutar Pruebas</div>
           <div className="text-xs text-slate-500 mt-0.5">Selecciona las opciones para ejecutar</div>
@@ -83,8 +83,8 @@ export default function RunTestsPanel(props: Props) {
                   onChange={e => onCountryChange(e.target.value)}
                   className="w-full appearance-none pl-9 pr-7 py-2 rounded-xl text-xs font-semibold text-slate-200 outline-none"
                   style={{
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
                     backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E\")",
                     backgroundRepeat: 'no-repeat',
                     backgroundPosition: 'right 8px center',
@@ -244,8 +244,8 @@ function PremiumSelect({ value, onChange, options }: { value: string; onChange: 
         onChange={e => onChange(e.target.value)}
         className="w-full appearance-none px-3 py-2 pr-7 rounded-xl text-xs font-semibold text-slate-200 outline-none transition-all"
         style={{
-          background: 'rgba(255,255,255,0.05)',
-          border: '1px solid rgba(255,255,255,0.1)',
+          background: 'var(--input-bg)',
+          border: '1px solid var(--input-border)',
           backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E\")",
           backgroundRepeat: 'no-repeat',
           backgroundPosition: 'right 8px center',
@@ -261,7 +261,7 @@ function SmallBtn({ children }: { children: React.ReactNode }) {
   return (
     <button
       className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-300 transition-colors"
-      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+      style={{ background: 'var(--btn-bg)', border: '1px solid var(--btn-border)' }}
     >{children}</button>
   )
 }

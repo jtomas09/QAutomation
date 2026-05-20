@@ -93,7 +93,7 @@ export default function StatsCards({ passed, failed, skipped, total, avgMs, onCl
         <button
           onClick={onClear}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+          style={{ background: 'var(--btn-bg)', border: '1px solid var(--btn-border)' }}
           title="Restablecer estadísticas a 0"
         >
           <Trash2 size={11} />
@@ -119,9 +119,9 @@ function StatCard({ stat, index }: { stat: Stat; index: number }) {
       whileHover={{ y: -3, transition: { duration: 0.2 } }}
       className="relative overflow-hidden rounded-2xl flex flex-col"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        background: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        boxShadow: 'var(--panel-shadow)',
         paddingBottom: 0,
       }}
     >

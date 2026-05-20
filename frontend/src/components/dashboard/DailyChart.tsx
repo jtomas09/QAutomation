@@ -58,14 +58,14 @@ export default function DailyChart() {
       transition={{ duration: 0.4, ease: 'easeOut', delay: 0.1 }}
       className="flex flex-col h-full overflow-hidden rounded-2xl"
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+        background: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        boxShadow: 'var(--panel-shadow)',
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        style={{ borderBottom: '1px solid var(--panel-divide)' }}>
         <div>
           <div className="text-sm font-bold text-slate-100">Ejecuciones por Día</div>
           <div className="text-xs text-slate-500 mt-0.5">Últimos 7 días</div>
