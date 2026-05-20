@@ -1,6 +1,7 @@
 package qa.cinepolis.backend.controller;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import qa.cinepolis.backend.model.Execution;
@@ -22,16 +23,23 @@ public class TestController {
 
     /**
      * POST /api/run
-     * Enqueues a new execution and returns {executionId, status} immediately.
+     * Enqueues a new execution and returns {executionId, status, suite, device,
+     * environment, country} immediately.
      * Frontend subscribes to GET /api/run/{id}/stream for live SSE logs.
      */
     @PostMapping("/run")
-    public Map<String, String> startRun(@RequestBody RunRequest req) {
+    public ResponseEntity<Map<String, Object>> startRun(@RequestBody RunRequest req) {
         Execution exec = execService.create(req.suite(), req.env(), req.device(), req.country());
-        return Map.of(
-                "executionId", exec.getExecutionId(),
-                "status",      exec.getStatus().name()
-        );
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("success",     true);
+        body.put("message",     "Suite encolada correctamente");
+        body.put("executionId", exec.getExecutionId());
+        body.put("status",      exec.getStatus().name());
+        body.put("suite",       req.suite());
+        body.put("device",      req.device());
+        body.put("environment", req.env());
+        body.put("country",     req.country());
+        return ResponseEntity.ok(body);
     }
 
     /** DELETE /api/run/{id} — aborts a pending or running execution. */

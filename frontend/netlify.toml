@@ -5,12 +5,14 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  VITE_API_URL = "https://qautomation-production.up.railway.app"
 
-# Fase 4: redirige /api/* al backend Spring Boot en Railway
+# Proxy /api/* → Railway (fallback si VITE_API_URL no está en el build)
 [[redirects]]
   from   = "/api/*"
-  to     = ":VITE_API_URL/api/:splat"
+  to     = "https://qautomation-production.up.railway.app/api/:splat"
   status = 200
+  force  = true
 
 # SPA fallback (React Router)
 [[redirects]]
