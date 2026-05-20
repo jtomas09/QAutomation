@@ -1,8 +1,27 @@
 package qa.cinepolis.backend.model;
 
-public record RunRequest(
-    String suite,
-    String env,
-    String device,
-    String country
-) {}
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public class RunRequest {
+
+    private String suite;
+    private String device;
+
+    // Frontend sends "env"; @JsonProperty maps it to this field
+    @JsonProperty("env")
+    private String environment;
+
+    private String country;
+
+    public String getSuite() { return suite; }
+    public void setSuite(String suite) { this.suite = suite; }
+
+    public String getDevice() { return device; }
+    public void setDevice(String device) { this.device = device; }
+
+    public String getEnvironment() { return environment; }
+    public void setEnvironment(String environment) { this.environment = environment; }
+
+    public String getCountry() { return country; }
+    public void setCountry(String country) { this.country = country; }
+}

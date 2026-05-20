@@ -43,7 +43,7 @@ public class TestRunnerService {
 
         exec.submit(() -> {
             try {
-                send(emitter, LogEvent.of("INFO", "▶ Iniciando suite [" + req.suiteId() + "]  env=" + req.env() + "  device=" + req.device()));
+                send(emitter, LogEvent.of("INFO", "▶ Iniciando suite [" + req.getSuite() + "]  env=" + req.getEnvironment() + "  device=" + req.getDevice()));
                 send(emitter, LogEvent.of("INFO", "Modo Appium: " + appiumMode));
 
                 // Construir comando java -jar cinepolis-tests.jar con system properties
@@ -105,9 +105,9 @@ public class TestRunnerService {
             "java",
             "-jar", testsJar,
             "-Dappium.mode="      + appiumMode,
-            "-DsuiteId="          + req.suiteId(),
-            "-Denv="              + req.env(),
-            "-DdeviceName="       + req.device(),
+            "-DsuiteId="          + req.getSuite(),
+            "-Denv="              + req.getEnvironment(),
+            "-DdeviceName="       + req.getDevice(),
             "-DbrowserStack.user=" + System.getenv("BS_USER"),
             "-DbrowserStack.key="  + System.getenv("BS_KEY")
         );

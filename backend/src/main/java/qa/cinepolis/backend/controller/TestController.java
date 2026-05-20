@@ -1,11 +1,9 @@
 package qa.cinepolis.backend.controller;
 
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import qa.cinepolis.backend.model.Execution;
-import qa.cinepolis.backend.model.RunRequest;
 import qa.cinepolis.backend.service.ExecutionService;
 
 import java.util.List;
