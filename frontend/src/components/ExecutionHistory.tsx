@@ -4,16 +4,18 @@ import { getExecutions } from '../api'
 import s from './ExecutionHistory.module.css'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
+  PENDING:   'Pendiente',
   QUEUED:    'En Cola',
   RUNNING:   'Ejecutando',
-  PASSED:    'Completado',
-  FAILED:    'Fallido',
-  SKIPPED:   'Omitido',
+  PASSED:    'Passed',
+  FAILED:    'Failed',
+  SKIPPED:   'Skipped',
   COMPLETED: 'Completado',
   ABORTED:   'Abortado',
 }
 
 const STATUS_CLASS: Record<ExecutionStatus, string> = {
+  PENDING:   s.queued,
   QUEUED:    s.queued,
   RUNNING:   s.running,
   PASSED:    s.passed,

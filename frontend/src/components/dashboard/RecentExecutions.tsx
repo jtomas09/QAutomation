@@ -5,31 +5,34 @@ import type { ExecutionSummary, ExecutionStatus } from '../../types'
 import { getExecutions } from '../../api'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
+  PENDING:   'Pendiente',
   QUEUED:    'En Cola',
   RUNNING:   'Ejecutando',
-  PASSED:    'Completado',
-  FAILED:    'Fallido',
-  SKIPPED:   'Omitido',
+  PASSED:    'Passed',
+  FAILED:    'Failed',
+  SKIPPED:   'Skipped',
   COMPLETED: 'Completado',
   ABORTED:   'Abortado',
 }
 const STATUS_COLOR: Record<ExecutionStatus, string> = {
-  QUEUED:    '#f59e0b',
-  RUNNING:   '#6366f1',
-  PASSED:    '#10b981',
-  FAILED:    '#f43f5e',
-  SKIPPED:   '#f59e0b',
+  PENDING:   '#facc15',
+  QUEUED:    '#fb923c',
+  RUNNING:   '#22d3ee',
+  PASSED:    '#4ade80',
+  FAILED:    '#f87171',
+  SKIPPED:   '#eab308',
   COMPLETED: '#10b981',
-  ABORTED:   '#64748b',
+  ABORTED:   '#94a3b8',
 }
 const STATUS_BG: Record<ExecutionStatus, string> = {
-  QUEUED:    'rgba(245,158,11,0.12)',
-  RUNNING:   'rgba(99,102,241,0.12)',
-  PASSED:    'rgba(16,185,129,0.12)',
-  FAILED:    'rgba(244,63,94,0.12)',
-  SKIPPED:   'rgba(245,158,11,0.08)',
+  PENDING:   'rgba(250,204,21,0.10)',
+  QUEUED:    'rgba(251,146,60,0.12)',
+  RUNNING:   'rgba(34,211,238,0.12)',
+  PASSED:    'rgba(74,222,128,0.12)',
+  FAILED:    'rgba(248,113,113,0.12)',
+  SKIPPED:   'rgba(234,179,8,0.10)',
   COMPLETED: 'rgba(16,185,129,0.12)',
-  ABORTED:   'rgba(100,116,139,0.12)',
+  ABORTED:   'rgba(148,163,184,0.10)',
 }
 
 function fmt(iso: string) {
