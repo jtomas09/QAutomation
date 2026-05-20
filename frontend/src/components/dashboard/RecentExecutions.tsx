@@ -1,25 +1,34 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ExternalLink, Play, RefreshCw } from 'lucide-react'
+import { ExternalLink, Play } from 'lucide-react'
 import type { ExecutionSummary, ExecutionStatus } from '../../types'
 import { getExecutions } from '../../api'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
-  PENDING: 'PENDING', RUNNING: 'RUNNING',
-  COMPLETED: 'PASSED', FAILED: 'FAILED', ABORTED: 'ABORTED',
+  QUEUED:    'En Cola',
+  RUNNING:   'Ejecutando',
+  PASSED:    'Completado',
+  FAILED:    'Fallido',
+  SKIPPED:   'Omitido',
+  COMPLETED: 'Completado',
+  ABORTED:   'Abortado',
 }
 const STATUS_COLOR: Record<ExecutionStatus, string> = {
-  PENDING:   '#f59e0b',
+  QUEUED:    '#f59e0b',
   RUNNING:   '#6366f1',
-  COMPLETED: '#10b981',
+  PASSED:    '#10b981',
   FAILED:    '#f43f5e',
+  SKIPPED:   '#f59e0b',
+  COMPLETED: '#10b981',
   ABORTED:   '#64748b',
 }
 const STATUS_BG: Record<ExecutionStatus, string> = {
-  PENDING:   'rgba(245,158,11,0.12)',
+  QUEUED:    'rgba(245,158,11,0.12)',
   RUNNING:   'rgba(99,102,241,0.12)',
-  COMPLETED: 'rgba(16,185,129,0.12)',
+  PASSED:    'rgba(16,185,129,0.12)',
   FAILED:    'rgba(244,63,94,0.12)',
+  SKIPPED:   'rgba(245,158,11,0.08)',
+  COMPLETED: 'rgba(16,185,129,0.12)',
   ABORTED:   'rgba(100,116,139,0.12)',
 }
 
@@ -34,11 +43,11 @@ function dur(start: string, end: string | null) {
 }
 
 const MOCK: ExecutionSummary[] = [
-  { executionId: 'RUN-1247', suite: 'Smoke Tests',        env: 'QA',   device: 'Galaxy A56 5G',  country: 'mexico',    status: 'COMPLETED', startTime: new Date(Date.now()-165000).toISOString(),    endTime: new Date(Date.now()-300).toISOString(),             passed: 12, failed: 0, skipped: 0, total: 12, allureUrl: null },
+  { executionId: 'RUN-1247', suite: 'Smoke Tests',        env: 'QA',   device: 'Galaxy A56 5G',  country: 'mexico',    status: 'PASSED', startTime: new Date(Date.now()-165000).toISOString(),    endTime: new Date(Date.now()-300).toISOString(),             passed: 12, failed: 0, skipped: 0, total: 12, allureUrl: null },
   { executionId: 'RUN-1246', suite: 'Flujo Completo',     env: 'QA',   device: 'Pixel 8 Pro',    country: 'mexico',    status: 'FAILED',    startTime: new Date(Date.now()-3900000).toISOString(),  endTime: new Date(Date.now()-3900000+192000).toISOString(),  passed: 8,  failed: 3, skipped: 0, total: 11, allureUrl: null },
-  { executionId: 'RUN-1245', suite: 'Carrito de Compras', env: 'PROD', device: 'iPhone 15',      country: 'argentina', status: 'COMPLETED', startTime: new Date(Date.now()-7200000).toISOString(),  endTime: new Date(Date.now()-7200000+118000).toISOString(),  passed: 10, failed: 0, skipped: 0, total: 10, allureUrl: null },
+  { executionId: 'RUN-1245', suite: 'Carrito de Compras', env: 'PROD', device: 'iPhone 15',      country: 'argentina', status: 'PASSED', startTime: new Date(Date.now()-7200000).toISOString(),  endTime: new Date(Date.now()-7200000+118000).toISOString(),  passed: 10, failed: 0, skipped: 0, total: 10, allureUrl: null },
   { executionId: 'RUN-1244', suite: 'Checkout',           env: 'STG',  device: 'Galaxy S24',     country: 'chile',     status: 'ABORTED',   startTime: new Date(Date.now()-86400000).toISOString(), endTime: new Date(Date.now()-86400000+45000).toISOString(),  passed: 0,  failed: 0, skipped: 0, total: 0,  allureUrl: null },
-  { executionId: 'RUN-1243', suite: 'Alimentos',          env: 'QA',   device: 'Redmi Note 13',  country: 'mexico',    status: 'COMPLETED', startTime: new Date(Date.now()-90000000).toISOString(), endTime: new Date(Date.now()-90000000+150000).toISOString(), passed: 9,  failed: 0, skipped: 1, total: 10, allureUrl: null },
+  { executionId: 'RUN-1243', suite: 'Alimentos',          env: 'QA',   device: 'Redmi Note 13',  country: 'mexico',    status: 'PASSED', startTime: new Date(Date.now()-90000000).toISOString(), endTime: new Date(Date.now()-90000000+150000).toISOString(), passed: 9,  failed: 0, skipped: 1, total: 10, allureUrl: null },
 ]
 
 interface Props { onViewAll?: () => void }

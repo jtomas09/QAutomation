@@ -1,21 +1,25 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import type { ExecutionSummary, ExecutionStatus } from '../types'
 import { getExecutions } from '../api'
 import s from './ExecutionHistory.module.css'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
-  PENDING:   'En Cola',
+  QUEUED:    'En Cola',
   RUNNING:   'Ejecutando',
-  COMPLETED: 'Completado',
+  PASSED:    'Completado',
   FAILED:    'Fallido',
+  SKIPPED:   'Omitido',
+  COMPLETED: 'Completado',
   ABORTED:   'Abortado',
 }
 
 const STATUS_CLASS: Record<ExecutionStatus, string> = {
-  PENDING:   s.pending,
+  QUEUED:    s.queued,
   RUNNING:   s.running,
-  COMPLETED: s.completed,
+  PASSED:    s.passed,
   FAILED:    s.failed,
+  SKIPPED:   s.skipped,
+  COMPLETED: s.completed,
   ABORTED:   s.aborted,
 }
 

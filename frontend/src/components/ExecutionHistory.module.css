@@ -95,10 +95,12 @@
   font-weight: 700;
   letter-spacing: .04em;
 }
-.pending   { background: rgba(251,191,36,.12); color: #fbbf24; }
-.running   { background: rgba(59,130,246,.15); color: var(--accent); }
-.completed { background: rgba(16,185,129,.12); color: #10b981; }
-.failed    { background: rgba(239,68,68,.12);  color: #ef4444; }
+.queued    { background: rgba(251,191,36,.12);  color: #fbbf24; }
+.running   { background: rgba(59,130,246,.15);  color: var(--accent); }
+.passed    { background: rgba(16,185,129,.12);  color: #10b981; }
+.completed { background: rgba(16,185,129,.12);  color: #10b981; }
+.failed    { background: rgba(239,68,68,.12);   color: #ef4444; }
+.skipped   { background: rgba(251,191,36,.10);  color: #f59e0b; }
 .aborted   { background: rgba(107,114,128,.12); color: #6b7280; }
 
 /* Animated pulse dot for RUNNING */
