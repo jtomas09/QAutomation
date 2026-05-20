@@ -1,13 +1,17 @@
 package qa.cinepolis.backend.controller;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import qa.cinepolis.backend.model.Execution;
+import qa.cinepolis.backend.model.ExecutionStatus;
 import qa.cinepolis.backend.service.ExecutionService;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api")
@@ -22,11 +26,12 @@ public class TestController {
     /** GET /api/run/pending — returns the next QUEUED execution without claiming it. */
     @GetMapping("/run/pending")
     public ResponseEntity<?> pending() {
-        return execService.findAll().stream()
-                .filter(e -> e.getStatus() == qa.cinepolis.backend.model.ExecutionStatus.QUEUED)
-                .min(java.util.Comparator.comparing(qa.cinepolis.backend.model.Execution::getStartTime))
-                .<ResponseEntity<?>>map(ResponseEntity::ok)
-                .orElse(ResponseEntity.noContent().build());
+        Optional<Execution> next = execService.findAll().stream()
+                .filter(e -> e.getStatus() == ExecutionStatus.QUEUED)
+                .min(Comparator.comparing(Execution::getStartTime));
+        return next.isPresent()
+                ? ResponseEntity.ok(next.get())
+                : ResponseEntity.noContent().build();
     }
 
     /** DELETE /api/run/{id} — aborts a pending or running execution. */
@@ -58,7 +63,7 @@ public class TestController {
         return execService.findAll();
     }
 
-    /** GET /api/executions/{id} — detail of one execution including log lines. */
+    /** GET /api/executions/{id} — detail of one execution including logs. */
     @GetMapping("/executions/{id}")
     public Execution execution(@PathVariable String id) {
         return execService.findById(id)
