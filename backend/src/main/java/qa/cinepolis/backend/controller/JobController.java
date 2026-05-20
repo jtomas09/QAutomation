@@ -26,6 +26,7 @@ public class JobController {
      */
     @GetMapping("/next")
     public ResponseEntity<?> getNextJob() {
+        execService.recordRunnerPing();   // runner is alive
         Optional<Execution> opt = execService.claimNextPending();
         if (opt.isEmpty()) return ResponseEntity.noContent().build();
 
