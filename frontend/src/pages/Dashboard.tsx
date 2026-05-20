@@ -149,9 +149,9 @@ export default function Dashboard({
       <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', minHeight: 300 }}>
         <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
         <ResultsDonut
-          passed={state.passed}
-          failed={state.failed}
-          skipped={state.skipped}
+          passed={aggStats.passed}
+          failed={aggStats.failed}
+          skipped={aggStats.skipped}
         />
         <DailyChart />
       </div>

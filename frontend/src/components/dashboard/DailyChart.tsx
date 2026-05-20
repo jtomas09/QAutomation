@@ -1,35 +1,55 @@
-import React, { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend,
+  Tooltip, ResponsiveContainer,
 } from 'recharts'
+import { getExecutions } from '../../api'
+import type { ExecutionSummary } from '../../types'
 
-const RAW_DAYS = ['13 May','14 May','15 May','16 May','17 May','18 May','19 May']
-
-const DATA = RAW_DAYS.map((day, i) => ({
-  day,
-  Exitosas: [80, 95, 88, 110, 145, 130, 120][i],
-  Fallidas: [15, 12, 18,  20,  23,  17,  14][i],
-  Omitidas: [ 8, 10,  6,  14,  12,   9,  10][i],
-}))
+interface DayEntry { day: string; Exitosas: number; Fallidas: number; Omitidas: number }
 
 const SERIES = [
-  { key: 'Exitosas', color: '#10b981' },
-  { key: 'Fallidas', color: '#f43f5e' },
-  { key: 'Omitidas', color: '#f59e0b' },
-] as const
+  { key: 'Exitosas' as const, color: '#10b981' },
+  { key: 'Fallidas' as const, color: '#f43f5e' },
+  { key: 'Omitidas' as const, color: '#f59e0b' },
+]
+
+function buildDays(executions: ExecutionSummary[]): DayEntry[] {
+  const today = new Date()
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today)
+    d.setDate(d.getDate() - (6 - i))
+    const label   = d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
+    const dateKey = d.toDateString()
+    const dayExecs = executions.filter(e => new Date(e.startTime).toDateString() === dateKey)
+    return {
+      day:      label,
+      Exitosas: dayExecs.reduce((s, e) => s + e.passed,  0),
+      Fallidas: dayExecs.reduce((s, e) => s + e.failed,  0),
+      Omitidas: dayExecs.reduce((s, e) => s + e.skipped, 0),
+    }
+  })
+}
 
 export default function DailyChart() {
+  const [data,   setData]   = useState<DayEntry[]>(() => buildDays([]))
   const [hidden, setHidden] = useState<Set<string>>(new Set())
 
-  function toggle(key: string) {
-    setHidden(prev => {
-      const n = new Set(prev)
-      n.has(key) ? n.delete(key) : n.add(key)
-      return n
-    })
-  }
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const execs = await getExecutions()
+        setData(buildDays(execs))
+      } catch { /* backend offline — keep last known */ }
+    }
+    load()
+    const id = setInterval(load, 10_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const toggle = (key: string) =>
+    setHidden(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
 
   return (
     <motion.div
@@ -68,7 +88,7 @@ export default function DailyChart() {
       {/* Chart */}
       <div className="flex-1 min-h-0 px-2 py-3">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={DATA} margin={{ top: 4, right: 8, bottom: 0, left: -24 }}>
+          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -24 }}>
             <defs>
               {SERIES.map(s => (
                 <linearGradient key={s.key} id={`grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -77,22 +97,9 @@ export default function DailyChart() {
                 </linearGradient>
               ))}
             </defs>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="rgba(255,255,255,0.05)"
-              vertical={false}
-            />
-            <XAxis
-              dataKey="day"
-              tick={{ fill: '#475569', fontSize: 10 }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              tick={{ fill: '#475569', fontSize: 10 }}
-              axisLine={false}
-              tickLine={false}
-            />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+            <XAxis dataKey="day" tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
             <Tooltip
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null
