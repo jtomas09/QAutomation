@@ -35,7 +35,7 @@ export default function Dashboard({
   onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
   onRun, onStop, onClearLog, onViewAll, onManageDevices,
 }: Props) {
-  const [clearedAt, setClearedAt] = useState<number>(0)
+  const [clearedAt, setClearedAt] = useState<number>(() => Date.now())
   const [aggStats, setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
 
   useEffect(() => {
