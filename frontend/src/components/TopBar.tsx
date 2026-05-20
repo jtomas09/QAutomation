@@ -1,15 +1,17 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Search, Bell, Moon, ChevronDown, Command } from 'lucide-react'
+import { Search, Bell, Moon, Sun, ChevronDown, Command } from 'lucide-react'
 import type { BackendHealth } from '../hooks/useBackendHealth'
 
 interface Props {
-  backendHealth: BackendHealth
-  runnerOnline:  boolean
-  onNewExecution?: () => void
+  backendHealth:    BackendHealth
+  runnerOnline:     boolean
+  isDark:           boolean
+  onToggleTheme:    () => void
+  onNewExecution?:  () => void
 }
 
-export default function TopBar({ backendHealth, runnerOnline }: Props) {
+export default function TopBar({ backendHealth, runnerOnline, isDark, onToggleTheme }: Props) {
   const [search, setSearch] = useState('')
 
   return (
@@ -17,10 +19,10 @@ export default function TopBar({ backendHealth, runnerOnline }: Props) {
       className="flex items-center gap-4 px-6 flex-shrink-0"
       style={{
         height: 'var(--topbar-h)',
-        background: 'rgba(7,12,28,0.8)',
+        background: 'var(--topbar-bg)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid var(--topbar-border)',
       }}
     >
       {/* Search bar — centered */}
@@ -56,8 +58,10 @@ export default function TopBar({ backendHealth, runnerOnline }: Props) {
         <div className="w-px h-5 bg-white/10" />
 
         {/* Theme */}
-        <IconBtn>
-          <Moon size={15} className="text-slate-400" />
+        <IconBtn onClick={onToggleTheme} title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
+          {isDark
+            ? <Sun  size={15} className="text-slate-400" />
+            : <Moon size={15} className="text-slate-400" />}
         </IconBtn>
 
         {/* Notifications */}
@@ -121,12 +125,14 @@ function StatusPill({ label, status, text }: { label: string; status: 'online'|'
   )
 }
 
-function IconBtn({ children }: { children: React.ReactNode }) {
+function IconBtn({ children, onClick, title }: { children: React.ReactNode; onClick?: () => void; title?: string }) {
   return (
     <button
+      onClick={onClick}
+      title={title}
       className="w-8 h-8 rounded-lg flex items-center justify-center transition-all relative"
-      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
-      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.08)' }}
+      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--panel-border)' }}
+      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(128,128,128,0.12)' }}
       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)' }}
     >
       {children}

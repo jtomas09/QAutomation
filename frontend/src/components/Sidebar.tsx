@@ -50,8 +50,8 @@ export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props)
       className="flex flex-col h-full flex-shrink-0 overflow-hidden"
       style={{
         width: 'var(--sidebar-w)',
-        background: 'linear-gradient(180deg, #060a1f 0%, #040816 100%)',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        background: 'var(--sidebar-bg)',
+        borderRight: '1px solid var(--sidebar-border)',
       }}
     >
       {/* Ambient glow top */}

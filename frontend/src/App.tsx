@@ -3,6 +3,7 @@ import { ENVIRONMENTS, SUITES, TEST_SUITES } from './data'
 import { useTestRunner }    from './hooks/useTestRunner'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { useDeviceStore }   from './hooks/useDeviceStore'
+import { useTheme }         from './hooks/useTheme'
 import Sidebar, { type Page } from './components/Sidebar'
 import TopBar                 from './components/TopBar'
 import Dashboard              from './pages/Dashboard'
@@ -25,6 +26,7 @@ export default function App() {
 
   const { state, runTest, stopTest, clearLog } = useTestRunner()
   const backendHealth = useBackendHealth()
+  const { isDark, toggle: toggleTheme } = useTheme()
   const runnerOnline  = state.status === 'running'
   const runningCount  = state.status === 'running' ? 1 : 0
 
@@ -48,6 +50,8 @@ export default function App() {
         <TopBar
           backendHealth={backendHealth}
           runnerOnline={runnerOnline}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
           onNewExecution={handleRun}
         />
 
