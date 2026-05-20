@@ -21,27 +21,6 @@ public class TestController {
         this.execService = execService;
     }
 
-    /**
-     * POST /api/run
-     * Enqueues a new execution and returns {executionId, status, suite, device,
-     * environment, country} immediately.
-     * Frontend subscribes to GET /api/run/{id}/stream for live SSE logs.
-     */
-    @PostMapping("/run")
-    public ResponseEntity<Map<String, Object>> startRun(@RequestBody RunRequest req) {
-        Execution exec = execService.create(req.suite(), req.env(), req.device(), req.country());
-        Map<String, Object> body = new java.util.LinkedHashMap<>();
-        body.put("success",     true);
-        body.put("message",     "Suite encolada correctamente");
-        body.put("executionId", exec.getExecutionId());
-        body.put("status",      exec.getStatus().name());
-        body.put("suite",       req.suite());
-        body.put("device",      req.device());
-        body.put("environment", req.env());
-        body.put("country",     req.country());
-        return ResponseEntity.ok(body);
-    }
-
     /** DELETE /api/run/{id} — aborts a pending or running execution. */
     @DeleteMapping("/run/{id}")
     public Map<String, String> abortRun(@PathVariable String id) {
