@@ -8,7 +8,7 @@ public class HealthController {
 
     @GetMapping("/")
     public String home() {
-        return "QAutomation Backend Online 🚀";
+        return "QAutomation Backend v2 Online 🚀";
     }
 
     @GetMapping("/health")
