@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react'
+import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { AreaChart, Area, ResponsiveContainer } from 'recharts'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Trash2 } from 'lucide-react'
 
 interface Stat {
   label:   string
@@ -14,50 +14,95 @@ interface Stat {
   icon:    string
 }
 
-interface Props { passed: number; failed: number; skipped: number; total: number }
+interface Props {
+  passed:  number
+  failed:  number
+  skipped: number
+  total:   number
+  avgMs:   number
+  onClear: () => void
+}
 
-function mkData(arr: number[]) { return arr.map(v => ({ v })) }
+function fmtAvg(ms: number): string {
+  if (ms === 0) return '0s'
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  const m = Math.floor(ms / 60_000)
+  const s = Math.round((ms % 60_000) / 1000)
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
+}
 
 const BASE = [40,45,38,52,48,55,50,60,58,65,62,70,68,75,72,80]
 const jit  = (a: number[]) => a.map(v => ({ v: v + Math.random()*8-4 }))
 
-export default function StatsCards({ passed, failed, skipped, total }: Props) {
-  const stats = useMemo<Stat[]>(() => [
-    {
-      label: 'Ejecuciones Totales', value: total > 0 ? total.toLocaleString() : '1,247',
-      trend: '+12.5% vs anterior', up: true,
-      color: '#818cf8', glow: 'rgba(129,140,248,0.3)', icon: '◎',
-      data: jit(BASE),
-    },
-    {
-      label: 'Pruebas Exitosas', value: total > 0 ? passed.toLocaleString() : '1,024',
-      trend: '82.1% éxito', up: true,
-      color: '#10b981', glow: 'rgba(16,185,129,0.3)', icon: '✓',
-      data: jit([30,40,35,50,45,55,52,60,58,65,63,70,68,74,72,80]),
-    },
-    {
-      label: 'Pruebas Fallidas', value: total > 0 ? failed.toLocaleString() : '156',
-      trend: '12.5% fallo', up: false,
-      color: '#f43f5e', glow: 'rgba(244,63,94,0.3)', icon: '✗',
-      data: jit([50,45,55,40,48,38,42,35,38,30,33,28,30,25,22,18]),
-    },
-    {
-      label: 'Pruebas Omitidas', value: total > 0 ? skipped.toLocaleString() : '67',
-      trend: '5.4% omitido', up: null,
-      color: '#f59e0b', glow: 'rgba(245,158,11,0.3)', icon: '—',
-      data: jit([20,22,18,24,20,26,22,28,24,22,26,20,24,18,20,18]),
-    },
-    {
-      label: 'Tiempo Promedio', value: '2m 45s',
-      trend: '-8.3% más rápido', up: true,
-      color: '#38bdf8', glow: 'rgba(56,189,248,0.3)', icon: '⏱',
-      data: jit([60,58,62,55,58,52,55,50,53,48,50,45,48,43,42,38]),
-    },
-  ], [passed, failed, skipped, total])
+export default function StatsCards({ passed, failed, skipped, total, avgMs, onClear }: Props) {
+  const stats = useMemo<Stat[]>(() => {
+    const successRate = total > 0 ? Math.round(passed  / total * 1000) / 10 : 0
+    const failRate    = total > 0 ? Math.round(failed  / total * 1000) / 10 : 0
+    const skipRate    = total > 0 ? Math.round(skipped / total * 1000) / 10 : 0
+
+    return [
+      {
+        label: 'Ejecuciones Totales',
+        value: total.toLocaleString(),
+        trend: total > 0 ? `${total.toLocaleString()} pruebas en total` : 'Sin ejecuciones aún',
+        up: total > 0 ? true : null,
+        color: '#818cf8', glow: 'rgba(129,140,248,0.3)', icon: '◎',
+        data: jit(BASE),
+      },
+      {
+        label: 'Pruebas Exitosas',
+        value: passed.toLocaleString(),
+        trend: total > 0 ? `${successRate}% éxito` : '—',
+        up: total > 0 ? true : null,
+        color: '#10b981', glow: 'rgba(16,185,129,0.3)', icon: '✓',
+        data: jit([30,40,35,50,45,55,52,60,58,65,63,70,68,74,72,80]),
+      },
+      {
+        label: 'Pruebas Fallidas',
+        value: failed.toLocaleString(),
+        trend: total > 0 ? `${failRate}% fallo` : '—',
+        up: failed > 0 ? false : null,
+        color: '#f43f5e', glow: 'rgba(244,63,94,0.3)', icon: '✗',
+        data: jit([50,45,55,40,48,38,42,35,38,30,33,28,30,25,22,18]),
+      },
+      {
+        label: 'Pruebas Omitidas',
+        value: skipped.toLocaleString(),
+        trend: total > 0 ? `${skipRate}% omitido` : '—',
+        up: null,
+        color: '#f59e0b', glow: 'rgba(245,158,11,0.3)', icon: '—',
+        data: jit([20,22,18,24,20,26,22,28,24,22,26,20,24,18,20,18]),
+      },
+      {
+        label: 'Tiempo Promedio',
+        value: fmtAvg(avgMs),
+        trend: avgMs > 0 ? 'por ejecución' : 'Sin datos aún',
+        up: null,
+        color: '#38bdf8', glow: 'rgba(56,189,248,0.3)', icon: '⏱',
+        data: jit([60,58,62,55,58,52,55,50,53,48,50,45,48,43,42,38]),
+      },
+    ]
+  }, [passed, failed, skipped, total, avgMs])
 
   return (
-    <div className="grid grid-cols-5 gap-3.5">
-      {stats.map((s, i) => <StatCard key={i} stat={s} index={i} />)}
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+          Estadísticas Globales
+        </span>
+        <button
+          onClick={onClear}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+          title="Restablecer estadísticas a 0"
+        >
+          <Trash2 size={11} />
+          Limpiar
+        </button>
+      </div>
+      <div className="grid grid-cols-5 gap-3.5">
+        {stats.map((s, i) => <StatCard key={i} stat={s} index={i} />)}
+      </div>
     </div>
   )
 }

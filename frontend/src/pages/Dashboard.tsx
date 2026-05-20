@@ -1,7 +1,8 @@
-import React from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Calendar } from 'lucide-react'
 import type { RunState } from '../types'
+import { getExecutions } from '../api'
 import StatsCards       from '../components/dashboard/StatsCards'
 import RunTestsPanel    from '../components/dashboard/RunTestsPanel'
 import RecentExecutions from '../components/dashboard/RecentExecutions'
@@ -27,11 +28,44 @@ interface Props {
   onManageDevices: () => void
 }
 
+interface AggStats { passed: number; failed: number; skipped: number; total: number; avgMs: number }
+
 export default function Dashboard({
   state, suite, env, device, country,
   onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
   onRun, onStop, onClearLog, onViewAll, onManageDevices,
 }: Props) {
+  const [clearedAt, setClearedAt] = useState<number>(0)
+  const [aggStats, setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
+
+  useEffect(() => {
+    const aggregate = async () => {
+      try {
+        const execs    = await getExecutions()
+        const filtered = clearedAt > 0
+          ? execs.filter(e => new Date(e.startTime).getTime() >= clearedAt)
+          : execs
+        const passed   = filtered.reduce((s, e) => s + e.passed,  0)
+        const failed   = filtered.reduce((s, e) => s + e.failed,  0)
+        const skipped  = filtered.reduce((s, e) => s + e.skipped, 0)
+        const total    = filtered.reduce((s, e) => s + e.total,   0)
+        const durs     = filtered
+          .filter(e => e.endTime != null)
+          .map(e => new Date(e.endTime!).getTime() - new Date(e.startTime).getTime())
+        const avgMs    = durs.length > 0 ? Math.round(durs.reduce((a, b) => a + b, 0) / durs.length) : 0
+        setAggStats({ passed, failed, skipped, total, avgMs })
+      } catch { /* backend offline — keep last known values */ }
+    }
+    aggregate()
+    const id = setInterval(aggregate, 10_000)
+    return () => clearInterval(id)
+  }, [clearedAt])
+
+  const handleClear = () => {
+    setClearedAt(Date.now())
+    setAggStats({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
+  }
+
   return (
     <div className="flex flex-col gap-5 p-6 pb-8">
 
@@ -90,10 +124,12 @@ export default function Dashboard({
 
       {/* Stats cards row */}
       <StatsCards
-        passed={state.passed}
-        failed={state.failed}
-        skipped={state.skipped}
-        total={state.total}
+        passed={aggStats.passed}
+        failed={aggStats.failed}
+        skipped={aggStats.skipped}
+        total={aggStats.total}
+        avgMs={aggStats.avgMs}
+        onClear={handleClear}
       />
 
       {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
