@@ -52,7 +52,9 @@ const STATUS = {
   offline:   { label: 'Offline',    color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   Icon: WifiOff  },
 }
 
-export default function ConnectedDevices() {
+interface Props { onManage?: () => void }
+
+export default function ConnectedDevices({ onManage }: Props) {
   const available = DEVICES.filter(d => d.status === 'available').length
   const inuse     = DEVICES.filter(d => d.status === 'inuse').length
 
@@ -82,6 +84,7 @@ export default function ConnectedDevices() {
           </div>
         </div>
         <button
+          onClick={onManage}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-slate-200 transition-colors"
           style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
         >

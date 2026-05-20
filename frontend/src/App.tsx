@@ -65,6 +65,7 @@ export default function App() {
               onCountryChange={setCountry}
               onRun={handleRun}            onStop={stopTest}
               onClearLog={clearLog}        onViewAll={() => setPage('executions')}
+              onManageDevices={() => setPage('devices')}
             />
           )}
 

@@ -24,12 +24,13 @@ interface Props {
   onStop:          () => void
   onClearLog:      () => void
   onViewAll:       () => void
+  onManageDevices: () => void
 }
 
 export default function Dashboard({
   state, suite, env, device, country,
   onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
-  onRun, onStop, onClearLog, onViewAll,
+  onRun, onStop, onClearLog, onViewAll, onManageDevices,
 }: Props) {
   return (
     <div className="flex flex-col gap-5 p-6 pb-8">
@@ -121,7 +122,7 @@ export default function Dashboard({
 
       {/* Row 4: Devices + Quick Access */}
       <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
-        <ConnectedDevices />
+        <ConnectedDevices onManage={onManageDevices} />
         <QuickAccess />
       </div>
 
