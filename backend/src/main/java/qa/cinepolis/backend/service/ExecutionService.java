@@ -22,10 +22,10 @@ public class ExecutionService {
         return store.create(suite, env, device, country);
     }
 
-    /** Atomically claims the next PENDING job and marks it RUNNING. */
+    /** Atomically claims the next QUEUED job and marks it RUNNING. */
     public synchronized Optional<Execution> claimNextPending() {
         return store.findNextPending().filter(e -> {
-            if (e.getStatus() != ExecutionStatus.PENDING) return false;
+            if (e.getStatus() != ExecutionStatus.QUEUED) return false;
             e.setStatus(ExecutionStatus.RUNNING);
             sse.broadcast(e.getExecutionId(), "status",
                     Map.of("status", "RUNNING", "executionId", e.getExecutionId()));

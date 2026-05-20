@@ -25,7 +25,7 @@ public class ExecutionStore {
         exec.setEnv(env);
         exec.setDevice(device);
         exec.setCountry(country);
-        exec.setStatus(ExecutionStatus.PENDING);
+        exec.setStatus(ExecutionStatus.QUEUED);
         exec.setStartTime(Instant.now());
         exec.setLogs(new CopyOnWriteArrayList<>());
         map.put(id, exec);
@@ -38,7 +38,7 @@ public class ExecutionStore {
 
     public Optional<Execution> findNextPending() {
         return map.values().stream()
-                .filter(e -> e.getStatus() == ExecutionStatus.PENDING)
+                .filter(e -> e.getStatus() == ExecutionStatus.QUEUED)
                 .min(Comparator.comparing(Execution::getStartTime));
     }
 
