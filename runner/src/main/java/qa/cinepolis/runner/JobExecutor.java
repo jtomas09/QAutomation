@@ -281,6 +281,8 @@ public class JobExecutor {
                     + "  |  Env: "    + job.env
                     + "  |  Device: " + job.device
                     + "  |  País: "   + job.country);
+            client.sendLog(job.executionId, "INFO",
+                    "📹 Grabación de video: " + (job.videoEnabled ? "ACTIVA" : "INACTIVA"));
 
             // ── Pre-flight ────────────────────────────────────────────────────
             checkAdbDevices(job.executionId);
@@ -304,6 +306,7 @@ public class JobExecutor {
             pb.environment().put("APPIUM_HUB",     config.appiumHub);
             pb.environment().put("EXECUTION_NAME", nvl(job.suite));
             pb.environment().put("REUSE_DRIVER",   "true");
+            pb.environment().put("VIDEO_ENABLED",  String.valueOf(job.videoEnabled));
 
             Process process = pb.start();
 
