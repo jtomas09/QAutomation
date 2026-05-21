@@ -17,7 +17,7 @@ public class ExecutionStore {
     private final ConcurrentHashMap<String, Execution> map     = new ConcurrentHashMap<>();
     private final AtomicInteger                        counter = new AtomicInteger(1000);
 
-    public Execution create(String suite, String env, String device, String country) {
+    public Execution create(String suite, String env, String device, String country, boolean videoEnabled) {
         String id = "RUN-" + counter.incrementAndGet();
         Execution exec = new Execution();
         exec.setExecutionId(id);
@@ -25,6 +25,7 @@ public class ExecutionStore {
         exec.setEnv(env);
         exec.setDevice(device);
         exec.setCountry(country);
+        exec.setVideoEnabled(videoEnabled);
         exec.setStatus(ExecutionStatus.QUEUED);
         exec.setStartTime(Instant.now());
         exec.setLogs(new CopyOnWriteArrayList<>());

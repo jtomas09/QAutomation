@@ -30,10 +30,11 @@ export function useTestRunner() {
   }, [])
 
   const runTest = useCallback(async (
-    suiteId: string,
-    env:     string,
-    device:  string,
-    country: string = 'mexico',
+    suiteId:      string,
+    env:          string,
+    device:       string,
+    country:      string  = 'mexico',
+    videoEnabled: boolean = false,
   ) => {
     setState(prev => ({
       ...prev,
@@ -49,7 +50,7 @@ export function useTestRunner() {
 
     try {
       // Step 1: POST /api/run → get executionId
-      const { executionId } = await postRun({ suite: suiteId, env, device, country })
+      const { executionId } = await postRun({ suite: suiteId, env, device, country, videoEnabled })
       executionIdRef.current = executionId
       setState(prev => ({ ...prev, executionId }))
       addLog('INFO', `🆔 ${executionId} — En cola. Esperando runner local...`)

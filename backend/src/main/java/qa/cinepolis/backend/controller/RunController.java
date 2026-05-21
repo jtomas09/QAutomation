@@ -26,7 +26,8 @@ public class RunController {
                 request.getSuite(),
                 request.getEnvironment(),
                 request.getDevice(),
-                request.getCountry()
+                request.getCountry(),
+                request.isVideoEnabled()
         );
 
         Map<String, Object> body = new LinkedHashMap<>();

@@ -11,17 +11,21 @@ public class RunRequest {
     @JsonProperty("env")
     private String environment;
 
-    private String country;
+    private String  country;
+    private boolean videoEnabled;
 
-    public String getSuite() { return suite; }
-    public void setSuite(String suite) { this.suite = suite; }
+    public String  getSuite()       { return suite; }
+    public void    setSuite(String suite) { this.suite = suite; }
 
-    public String getDevice() { return device; }
-    public void setDevice(String device) { this.device = device; }
+    public String  getDevice()      { return device; }
+    public void    setDevice(String device) { this.device = device; }
 
-    public String getEnvironment() { return environment; }
-    public void setEnvironment(String environment) { this.environment = environment; }
+    public String  getEnvironment() { return environment; }
+    public void    setEnvironment(String environment) { this.environment = environment; }
 
-    public String getCountry() { return country; }
-    public void setCountry(String country) { this.country = country; }
+    public String  getCountry()     { return country; }
+    public void    setCountry(String country) { this.country = country; }
+
+    public boolean isVideoEnabled()           { return videoEnabled; }
+    public void    setVideoEnabled(boolean v) { this.videoEnabled = v; }
 }

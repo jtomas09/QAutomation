@@ -18,8 +18,8 @@ public class ExecutionService {
         this.sse   = sse;
     }
 
-    public Execution create(String suite, String env, String device, String country) {
-        return store.create(suite, env, device, country);
+    public Execution create(String suite, String env, String device, String country, boolean videoEnabled) {
+        return store.create(suite, env, device, country, videoEnabled);
     }
 
     /** Atomically claims the next QUEUED job and marks it RUNNING. */

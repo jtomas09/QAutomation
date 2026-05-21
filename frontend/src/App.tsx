@@ -19,7 +19,8 @@ export default function App() {
   const [country,    setCountry]    = useState('mexico')
   const [env,        setEnv]        = useState(ENVIRONMENTS[0])
   const [suite,      setSuite]      = useState(SUITES[0])
-  const [drillSuite, setDrillSuite] = useState<string | null>(null)
+  const [drillSuite,    setDrillSuite]    = useState<string | null>(null)
+  const [videoEnabled,  setVideoEnabled]  = useState(false)
 
   // Device comes from the store (persisted, configurable)
   const { devices, activeDevice, setActive } = useDeviceStore()
@@ -35,7 +36,7 @@ export default function App() {
   const runningCount  = state.status === 'running' ? 1 : 0
 
   function handleRun() {
-    runTest(suite, env, effectiveDevice, country)
+    runTest(suite, env, effectiveDevice, country, videoEnabled)
   }
 
   function handleCountryChange(c: string) {
@@ -75,6 +76,7 @@ export default function App() {
               onSuiteChange={setSuite}     onEnvChange={setEnv}
               onDeviceChange={setDeviceOverride}
               onCountryChange={handleCountryChange}
+              videoEnabled={videoEnabled}   onVideoToggle={setVideoEnabled}
               onRun={handleRun}            onStop={stopTest}
               onClearLog={clearLog}        onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}

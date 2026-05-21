@@ -17,10 +17,12 @@ interface Props {
   env:             string
   device:          string
   country:         string
+  videoEnabled:    boolean
   onSuiteChange:   (v: string) => void
   onEnvChange:     (v: string) => void
   onDeviceChange:  (v: string) => void
   onCountryChange: (v: string) => void
+  onVideoToggle:   (v: boolean) => void
   onRun:           () => void
   onStop:          () => void
   onClearLog:      () => void
@@ -37,9 +39,9 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, device, country,
+  state, suite, env, device, country, videoEnabled,
   onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
-  onRun, onStop, onClearLog, onViewAll, onManageDevices,
+  onVideoToggle, onRun, onStop, onClearLog, onViewAll, onManageDevices,
 }: Props) {
   const [daysBack,   setDaysBack]   = useState<number>(7)
   const [clearedAt,  setClearedAt]  = useState<number>(0)
@@ -152,6 +154,7 @@ export default function Dashboard({
           suite={suite}           env={env}
           device={device}         country={country}
           status={state.status}   executionId={state.executionId ?? null}
+          videoEnabled={videoEnabled}       onVideoToggle={onVideoToggle}
           onSuiteChange={onSuiteChange}     onEnvChange={onEnvChange}
           onDeviceChange={onDeviceChange}   onCountryChange={onCountryChange}
           onRun={onRun}           onStop={onStop}

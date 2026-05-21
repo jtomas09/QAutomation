@@ -409,6 +409,7 @@ public class JobExecutor {
         cmd.add("-Dappium.hub="    + config.appiumHub + "/wd/hub");
         cmd.add("-DexecutionName=" + nvl(job.suite,   "Suite"));
         cmd.add("-DREUSE_DRIVER=true");
+        if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
 
         return cmd;
     }
