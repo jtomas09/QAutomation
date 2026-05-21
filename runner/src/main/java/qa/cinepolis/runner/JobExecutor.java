@@ -478,18 +478,37 @@ public class JobExecutor {
     private void uploadVideos(String executionId, String suite) {
         try {
             Path videosDir = Paths.get(config.workDir, "build", "videos");
-            if (!Files.exists(videosDir)) return;
+            if (!Files.exists(videosDir)) {
+                client.sendLog(executionId, "INFO",
+                        "📹 Sin videos: directorio build/videos no existe");
+                return;
+            }
+
+            long[] count = {0};
             Files.walk(videosDir)
                     .filter(p -> p.toString().endsWith(".mp4"))
                     .forEach(p -> {
+                        count[0]++;
                         String className = p.getParent().getFileName().toString();
                         String testName  = p.getFileName().toString()
                                 .replace(".mp4", "")
                                 .replace("_", " ")
                                 .trim();
+                        client.sendLog(executionId, "INFO",
+                                "📹 Subiendo video: " + p.getFileName()
+                                + " (" + p.toFile().length() / 1024 + " KB)");
                         client.uploadVideo(executionId, nvl(suite, className), testName, p);
                     });
+
+            if (count[0] == 0) {
+                client.sendLog(executionId, "WARN",
+                        "📹 No se encontraron videos en build/videos (Appium no grabó)");
+            } else {
+                client.sendLog(executionId, "INFO",
+                        "📹 " + count[0] + " video(s) subido(s) — disponibles en sección Videos");
+            }
         } catch (Exception e) {
+            client.sendLog(executionId, "WARN", "📹 Error al subir videos: " + e.getMessage());
             System.out.println("[Executor] No se pudieron subir videos: " + e.getMessage());
         }
     }
