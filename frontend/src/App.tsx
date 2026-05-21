@@ -87,7 +87,7 @@ export default function App() {
             <DevicesPage onSelectDevice={handleSelectDevice} />
           )}
 
-          {page === 'videos' && <VideosPage />}
+          {page === 'videos' && <VideosPage videoEnabled={videoEnabled} />}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []

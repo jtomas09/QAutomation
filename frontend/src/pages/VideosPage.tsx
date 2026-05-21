@@ -13,7 +13,7 @@ interface VideoRecord {
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
-export default function VideosPage() {
+export default function VideosPage({ videoEnabled = false }: { videoEnabled?: boolean }) {
   const [videos,     setVideos]     = useState<VideoRecord[]>([])
   const [loading,    setLoading]    = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -88,20 +88,25 @@ export default function VideosPage() {
         </div>
       </div>
 
-      {/* Activate hint */}
+      {/* Status hint */}
       <div className="mb-5 px-4 py-3 rounded-xl text-xs flex items-start gap-3"
-        style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)' }}>
-        <Video size={14} style={{ color: '#818cf8', flexShrink: 0, marginTop: 1 }} />
-        <span style={{ color: 'var(--text-sec)' }}>
-          Para activar grabación establece&nbsp;
-          <code className="px-1.5 py-0.5 rounded font-mono text-[11px]"
-            style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc' }}>
-            video.enabled=true
-          </code>
-          &nbsp;en <code className="font-mono text-[11px]" style={{ color: '#a5b4fc' }}>appium.properties</code>
-          &nbsp;o pasa <code className="font-mono text-[11px]" style={{ color: '#a5b4fc' }}>-Dvideo.enabled=true</code> al runner.
-          Los videos se suben automáticamente al finalizar cada ejecución.
-        </span>
+        style={{
+          background: videoEnabled ? 'rgba(16,185,129,0.08)' : 'rgba(99,102,241,0.08)',
+          border: `1px solid ${videoEnabled ? 'rgba(16,185,129,0.22)' : 'rgba(99,102,241,0.18)'}`,
+        }}>
+        <Video size={14} style={{ color: videoEnabled ? '#10b981' : '#818cf8', flexShrink: 0, marginTop: 1 }} />
+        {videoEnabled ? (
+          <span style={{ color: 'var(--text-sec)' }}>
+            El toggle <strong style={{ color: '#10b981' }}>Grabar Video</strong> está activado —
+            los videos se subirán automáticamente al finalizar cada ejecución.
+          </span>
+        ) : (
+          <span style={{ color: 'var(--text-sec)' }}>
+            Activa el toggle <strong style={{ color: '#818cf8' }}>Grabar Video</strong> en el panel
+            <strong style={{ color: '#818cf8' }}> Ejecutar Pruebas</strong> del Dashboard
+            para grabar automáticamente la pantalla durante cada prueba.
+          </span>
+        )}
       </div>
 
       {/* Loading */}

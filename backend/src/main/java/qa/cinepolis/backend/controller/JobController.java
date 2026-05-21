@@ -31,13 +31,14 @@ public class JobController {
         if (opt.isEmpty()) return ResponseEntity.noContent().build();
 
         Execution exec = opt.get();
-        return ResponseEntity.ok(Map.of(
-                "executionId", exec.getExecutionId(),
-                "suite",       exec.getSuite(),
-                "env",         exec.getEnv(),
-                "device",      exec.getDevice(),
-                "country",     exec.getCountry()
-        ));
+        Map<String, Object> job = new java.util.LinkedHashMap<>();
+        job.put("executionId",  exec.getExecutionId());
+        job.put("suite",        exec.getSuite());
+        job.put("env",          exec.getEnv());
+        job.put("device",       exec.getDevice());
+        job.put("country",      exec.getCountry());
+        job.put("videoEnabled", exec.isVideoEnabled());
+        return ResponseEntity.ok(job);
     }
 
     /**
