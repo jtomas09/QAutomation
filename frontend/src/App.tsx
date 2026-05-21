@@ -13,6 +13,7 @@ import VideosPage             from './pages/VideosPage'
 import ExecutionHistory       from './components/ExecutionHistory'
 import TestCard               from './components/TestCard'
 import SuiteDetailPage        from './components/SuiteDetailPage'
+import SettingsPage           from './pages/SettingsPage'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
@@ -88,6 +89,10 @@ export default function App() {
           )}
 
           {page === 'videos' && <VideosPage videoEnabled={videoEnabled} />}
+
+          {page === 'settings' && (
+            <SettingsPage isDark={isDark} onToggleTheme={toggleTheme} />
+          )}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
