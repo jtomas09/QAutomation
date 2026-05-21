@@ -45,23 +45,15 @@ function dur(start: string, end: string | null) {
   return `${Math.round(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
 }
 
-const MOCK: ExecutionSummary[] = [
-  { executionId: 'RUN-1247', suite: 'Smoke Tests',        env: 'QA',   device: 'Galaxy A56 5G',  country: 'mexico',    status: 'PASSED', startTime: new Date(Date.now()-165000).toISOString(),    endTime: new Date(Date.now()-300).toISOString(),             passed: 12, failed: 0, skipped: 0, total: 12, allureUrl: null },
-  { executionId: 'RUN-1246', suite: 'Flujo Completo',     env: 'QA',   device: 'Pixel 8 Pro',    country: 'mexico',    status: 'FAILED',    startTime: new Date(Date.now()-3900000).toISOString(),  endTime: new Date(Date.now()-3900000+192000).toISOString(),  passed: 8,  failed: 3, skipped: 0, total: 11, allureUrl: null },
-  { executionId: 'RUN-1245', suite: 'Carrito de Compras', env: 'PROD', device: 'iPhone 15',      country: 'argentina', status: 'PASSED', startTime: new Date(Date.now()-7200000).toISOString(),  endTime: new Date(Date.now()-7200000+118000).toISOString(),  passed: 10, failed: 0, skipped: 0, total: 10, allureUrl: null },
-  { executionId: 'RUN-1244', suite: 'Checkout',           env: 'STG',  device: 'Galaxy S24',     country: 'chile',     status: 'ABORTED',   startTime: new Date(Date.now()-86400000).toISOString(), endTime: new Date(Date.now()-86400000+45000).toISOString(),  passed: 0,  failed: 0, skipped: 0, total: 0,  allureUrl: null },
-  { executionId: 'RUN-1243', suite: 'Alimentos',          env: 'QA',   device: 'Redmi Note 13',  country: 'mexico',    status: 'PASSED', startTime: new Date(Date.now()-90000000).toISOString(), endTime: new Date(Date.now()-90000000+150000).toISOString(), passed: 9,  failed: 0, skipped: 1, total: 10, allureUrl: null },
-]
-
 interface Props { onViewAll?: () => void }
 
 export default function RecentExecutions({ onViewAll }: Props) {
-  const [rows, setRows] = useState<ExecutionSummary[]>(MOCK)
+  const [rows, setRows] = useState<ExecutionSummary[]>([])
 
   useEffect(() => {
     const load = () =>
       getExecutions()
-        .then(data => { if (data.length > 0) setRows(data.slice(0, 5)) })
+        .then(data => setRows(data.slice(0, 5)))
         .catch(() => {})
     load()
     const id = setInterval(load, 10_000)
@@ -113,6 +105,13 @@ export default function RecentExecutions({ onViewAll }: Props) {
             </tr>
           </thead>
           <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-10 text-center text-xs text-slate-600">
+                  Sin ejecuciones aún
+                </td>
+              </tr>
+            )}
             {rows.map((row, i) => {
               const color  = STATUS_COLOR[row.status]
               const bg     = STATUS_BG[row.status]
