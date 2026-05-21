@@ -6,6 +6,12 @@ export interface TestSuite {
   accent: string;
 }
 
+export interface IndividualTest {
+  id: string;
+  title: string;
+  description: string;
+}
+
 export interface Country {
   id: string;
   name: string;

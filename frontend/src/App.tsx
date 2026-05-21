@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ENVIRONMENTS, SUITES, TEST_SUITES, ALIMENTOS_TESTS } from './data'
+import { ENVIRONMENTS, SUITES, TEST_SUITES, ALIMENTOS_TESTS, SUITE_TESTS } from './data'
 import { useTestRunner }    from './hooks/useTestRunner'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { useDeviceStore }   from './hooks/useDeviceStore'
@@ -11,12 +11,14 @@ import Dashboard              from './pages/Dashboard'
 import DevicesPage            from './pages/DevicesPage'
 import ExecutionHistory       from './components/ExecutionHistory'
 import TestCard               from './components/TestCard'
+import SuiteDetailPage        from './components/SuiteDetailPage'
 
 export default function App() {
-  const [page,    setPage]    = useState<Page>('dashboard')
-  const [country, setCountry] = useState('mexico')
-  const [env,     setEnv]     = useState(ENVIRONMENTS[0])
-  const [suite,   setSuite]   = useState(SUITES[0])
+  const [page,       setPage]       = useState<Page>('dashboard')
+  const [country,    setCountry]    = useState('mexico')
+  const [env,        setEnv]        = useState(ENVIRONMENTS[0])
+  const [suite,      setSuite]      = useState(SUITES[0])
+  const [drillSuite, setDrillSuite] = useState<string | null>(null)
 
   // Device comes from the store (persisted, configurable)
   const { devices, activeDevice, setActive } = useDeviceStore()
@@ -78,41 +80,67 @@ export default function App() {
             <DevicesPage onSelectDevice={handleSelectDevice} />
           )}
 
-          {page === 'execute' && (
-            <div className="p-7 space-y-8">
-              <section>
-                <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
-                  Suites Completas
-                </div>
-                <div className="flex flex-wrap gap-5">
-                  {TEST_SUITES.map(s => (
-                    <TestCard
-                      key={s.id} suite={s}
-                      onRun={id => runTest(id, env, effectiveDevice, country)}
-                      disabled={state.status === 'running'}
-                      isActive={state.activeSuite === s.id}
-                    />
-                  ))}
-                </div>
-              </section>
+          {page === 'execute' && (() => {
+            // Drill-down: show individual tests for a suite
+            if (drillSuite) {
+              const allCards = [...TEST_SUITES, ...ALIMENTOS_TESTS]
+              const suite = allCards.find(s => s.id === drillSuite)!
+              const tests = SUITE_TESTS[drillSuite] ?? []
+              return (
+                <SuiteDetailPage
+                  suite={suite}
+                  tests={tests}
+                  disabled={state.status === 'running'}
+                  activeId={state.activeSuite}
+                  onBack={() => setDrillSuite(null)}
+                  onRun={id => runTest(id, env, effectiveDevice, country)}
+                  onRunAll={() => runTest(drillSuite, env, effectiveDevice, country)}
+                />
+              )
+            }
 
-              <section>
-                <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
-                  Alimentos — Tests Individuales
-                </div>
-                <div className="flex flex-wrap gap-5">
-                  {ALIMENTOS_TESTS.map(s => (
-                    <TestCard
-                      key={s.id} suite={s}
-                      onRun={id => runTest(id, env, effectiveDevice, country)}
-                      disabled={state.status === 'running'}
-                      isActive={state.activeSuite === s.id}
-                    />
-                  ))}
-                </div>
-              </section>
-            </div>
-          )}
+            // Suite grid
+            const handleCardRun = (id: string) => {
+              if (SUITE_TESTS[id]) setDrillSuite(id)
+              else runTest(id, env, effectiveDevice, country)
+            }
+
+            return (
+              <div className="p-7 space-y-8">
+                <section>
+                  <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
+                    Suites Completas
+                  </div>
+                  <div className="flex flex-wrap gap-5">
+                    {TEST_SUITES.map(s => (
+                      <TestCard
+                        key={s.id} suite={s}
+                        onRun={handleCardRun}
+                        disabled={state.status === 'running'}
+                        isActive={state.activeSuite === s.id}
+                      />
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
+                    Alimentos — Tests Individuales
+                  </div>
+                  <div className="flex flex-wrap gap-5">
+                    {ALIMENTOS_TESTS.map(s => (
+                      <TestCard
+                        key={s.id} suite={s}
+                        onRun={handleCardRun}
+                        disabled={state.status === 'running'}
+                        isActive={state.activeSuite === s.id}
+                      />
+                    ))}
+                  </div>
+                </section>
+              </div>
+            )
+          })()}
 
           {(page === 'executions' || page === 'history') && (
             <div className="p-7">
