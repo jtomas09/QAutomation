@@ -2,7 +2,7 @@
 buildCommand = "cd backend && mvn package -DskipTests -q"
 
 [deploy]
-startCommand = "java -jar backend/target/*.jar"
+startCommand = "java -jar app.jar"
 healthcheckPath = "/health"
 healthcheckTimeout = 60
 restartPolicyType = "ON_FAILURE"
