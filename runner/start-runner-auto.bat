@@ -35,6 +35,8 @@ REM ── Iniciar runner (logs a archivo, sin bloquear) ───────�
 echo [%DATE% %TIME%] Runner iniciado. Backend: %BACKEND_URL% >> "%LOG_FILE%"
 
 java ^
+  -Dfile.encoding=UTF-8 ^
+  -Dstdout.encoding=UTF-8 ^
   -DBACKEND_URL=%BACKEND_URL% ^
   -DRUNNER_TOKEN=%RUNNER_TOKEN% ^
   -DPOLL_INTERVAL_MS=%POLL_INTERVAL_MS% ^

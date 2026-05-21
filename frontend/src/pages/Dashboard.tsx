@@ -30,21 +30,28 @@ interface Props {
 
 interface AggStats { passed: number; failed: number; skipped: number; total: number; avgMs: number }
 
+const DAYS_OPTIONS = [
+  { label: 'Últimos 7 días',  value: 7  },
+  { label: 'Últimos 14 días', value: 14 },
+  { label: 'Últimos 30 días', value: 30 },
+]
+
 export default function Dashboard({
   state, suite, env, device, country,
   onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
   onRun, onStop, onClearLog, onViewAll, onManageDevices,
 }: Props) {
-  const [clearedAt, setClearedAt] = useState<number>(() => Date.now())
-  const [aggStats, setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
+  const [daysBack,   setDaysBack]   = useState<number>(7)
+  const [clearedAt,  setClearedAt]  = useState<number>(0)
+  const [aggStats,   setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
 
   useEffect(() => {
     const aggregate = async () => {
       try {
         const execs    = await getExecutions()
-        const filtered = clearedAt > 0
-          ? execs.filter(e => new Date(e.startTime).getTime() >= clearedAt)
-          : execs
+        const windowMs = daysBack * 24 * 60 * 60 * 1000
+        const cutoff   = Math.max(clearedAt, Date.now() - windowMs)
+        const filtered = execs.filter(e => new Date(e.startTime).getTime() >= cutoff)
         const passed   = filtered.reduce((s, e) => s + e.passed,  0)
         const failed   = filtered.reduce((s, e) => s + e.failed,  0)
         const skipped  = filtered.reduce((s, e) => s + e.skipped, 0)
@@ -59,11 +66,16 @@ export default function Dashboard({
     aggregate()
     const id = setInterval(aggregate, 10_000)
     return () => clearInterval(id)
-  }, [clearedAt])
+  }, [clearedAt, daysBack])
 
   const handleClear = () => {
     setClearedAt(Date.now())
     setAggStats({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
+  }
+
+  const handleDaysChange = (days: number) => {
+    setDaysBack(days)
+    setClearedAt(0)
   }
 
   return (
@@ -90,6 +102,8 @@ export default function Dashboard({
           <div className="relative flex items-center">
             <Calendar size={13} className="absolute left-3 text-slate-500 pointer-events-none" />
             <select
+              value={daysBack}
+              onChange={e => handleDaysChange(Number(e.target.value))}
               className="appearance-none pl-8 pr-8 py-2 rounded-xl text-xs font-semibold text-slate-300 outline-none"
               style={{
                 background: 'rgba(255,255,255,0.05)',
@@ -99,9 +113,9 @@ export default function Dashboard({
                 backgroundPosition: 'right 8px center',
               }}
             >
-              <option>Últimos 7 días</option>
-              <option>Últimos 14 días</option>
-              <option>Últimos 30 días</option>
+              {DAYS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
 
@@ -133,7 +147,7 @@ export default function Dashboard({
       />
 
       {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', minHeight: 420 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
         <RunTestsPanel
           suite={suite}           env={env}
           device={device}         country={country}
@@ -146,7 +160,7 @@ export default function Dashboard({
       </div>
 
       {/* Row 3: Activity log + Donut + Daily chart */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', minHeight: 300 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', height: 380 }}>
         <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
         <ResultsDonut
           passed={aggStats.passed}

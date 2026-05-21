@@ -5,6 +5,7 @@ import qa.cinepolis.runner.model.JobDto;
 
 import java.net.URI;
 import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 
@@ -27,9 +28,9 @@ public class BackendClient {
                 .header("Authorization", "Bearer " + token)
                 .GET()
                 .build();
-        HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (res.statusCode() == 204) return Optional.empty();
-        if (res.statusCode() != 200) throw new RuntimeException("GET /api/jobs/next → " + res.statusCode());
+        if (res.statusCode() != 200) throw new RuntimeException("GET /api/jobs/next -> " + res.statusCode());
         return Optional.of(json.readValue(res.body(), JobDto.class));
     }
 
@@ -58,10 +59,10 @@ public class BackendClient {
     private HttpResponse<String> post(String path, String body) throws Exception {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + path))
-                .header("Content-Type", "application/json")
+                .header("Content-Type", "application/json; charset=UTF-8")
                 .header("Authorization", "Bearer " + token)
-                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
-        return http.send(req, HttpResponse.BodyHandlers.ofString());
+        return http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 }

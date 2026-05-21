@@ -198,24 +198,31 @@ public class JobExecutor {
     // ── Pre-flight: Appium ─────────────────────────────────────────────────────
 
     private void checkAppiumServer(String executionId) {
-        String hubBase    = config.appiumHub.replaceAll("/wd/hub$", "");
-        String statusUrl  = hubBase + "/status";
-        try {
-            HttpClient http = HttpClient.newHttpClient();
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(statusUrl))
-                    .timeout(Duration.ofSeconds(5))
-                    .GET().build();
-            int code = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
-            client.sendLog(executionId, code == 200 ? "INFO" : "WARN",
-                    code == 200
-                        ? "✅ Appium server online: " + config.appiumHub
-                        : "⚠️  Appium respondió HTTP " + code + " en " + statusUrl);
-        } catch (Exception e) {
-            client.sendLog(executionId, "WARN",
-                    "⚠️  Appium no disponible en " + config.appiumHub
-                    + " — inícialo con: appium --port 4723");
+        String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
+        HttpClient http = HttpClient.newHttpClient();
+
+        // Try /status (Appium 2.x default) and /wd/hub/status (Appium 1.x / base-path)
+        for (String path : new String[]{"/status", "/wd/hub/status"}) {
+            String statusUrl = hubBase + path;
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(statusUrl))
+                        .timeout(Duration.ofSeconds(5))
+                        .GET().build();
+                int code = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
+                if (code == 200) {
+                    client.sendLog(executionId, "INFO",
+                            "✅ Appium server online: " + hubBase);
+                    return;
+                }
+            } catch (Exception ignored) {
+                // try next path
+            }
         }
+
+        client.sendLog(executionId, "WARN",
+                "⚠️  Appium no disponible en " + hubBase
+                + " — inícialo con: appium --port 4723");
     }
 
     // ── Allure report (optional — requires allure CLI installed) ───────────────
