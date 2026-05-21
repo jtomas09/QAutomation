@@ -1,5 +1,0 @@
-# Cine por defecto para tests de México
-# Escenario 1: si al iniciar la app no hay cine seleccionado, se usará este.
-# Solo escribe el nombre exacto del cine en la línea siguiente (sin #).
-# Ejemplo: Cinépolis Morelia
-Cinépolis Morelia

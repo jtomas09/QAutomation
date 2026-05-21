@@ -44,6 +44,13 @@ saucelabs.app.id=
 # ── OTROS ─────────────────────────────────────────────────────
 # Variable de entorno equivalente: MAIL_ENABLED, NETLIFY_PUBLISH, MAIL_TO, CLAUDE_API_KEY
 mail.enabled=NO
+
+# ── VIDEO ──────────────────────────────────────────────────────
+# Grabar pantalla del dispositivo durante cada prueba.
+# Videos guardados en build/videos/{ClassName}/{TestName}.mp4
+# y adjuntados automáticamente al reporte Allure.
+# Activar con: -Dvideo.enabled=true  o poner  video.enabled=true  aquí.
+video.enabled=false
 netlify.publish=NO
 mail.recipients=
 claude.api.key=

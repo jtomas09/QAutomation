@@ -9,6 +9,7 @@ import Sidebar, { type Page } from './components/Sidebar'
 import TopBar                 from './components/TopBar'
 import Dashboard              from './pages/Dashboard'
 import DevicesPage            from './pages/DevicesPage'
+import VideosPage             from './pages/VideosPage'
 import ExecutionHistory       from './components/ExecutionHistory'
 import TestCard               from './components/TestCard'
 import SuiteDetailPage        from './components/SuiteDetailPage'
@@ -84,6 +85,8 @@ export default function App() {
             <DevicesPage onSelectDevice={handleSelectDevice} />
           )}
 
+          {page === 'videos' && <VideosPage />}
+
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
             // All known suite cards (needed for drill-down lookup)
@@ -151,7 +154,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>

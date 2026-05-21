@@ -56,3 +56,13 @@ DerivedData/
 # Frontend — artefactos de build y dependencias
 frontend/node_modules/
 frontend/dist/
+
+# IDE build output (Eclipse/IntelliJ)
+bin/
+
+# Maven / runner build output
+runner/target/
+runner/dependency-reduced-pom.xml
+
+# Videos generados en backend (datos de ejecución local)
+videos/

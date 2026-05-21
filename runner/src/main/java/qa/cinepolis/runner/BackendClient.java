@@ -6,6 +6,8 @@ import qa.cinepolis.runner.model.JobDto;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 
@@ -78,6 +80,31 @@ public class BackendClient {
         HttpResponse<String> res = post("/api/results", body);
         if (res.statusCode() != 200)
             throw new RuntimeException("POST /api/results → " + res.statusCode() + " " + res.body());
+    }
+
+    /** Fire-and-forget: uploads an MP4 video file as raw bytes. Does not throw. */
+    public void uploadVideo(String executionId, String suiteName, String testName, Path videoFile) {
+        try {
+            byte[] bytes    = Files.readAllBytes(videoFile);
+            String filename = videoFile.getFileName().toString();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/executions/" + executionId + "/videos"))
+                    .header("Content-Type",  "application/octet-stream")
+                    .header("Authorization", "Bearer " + token)
+                    .header("X-File-Name",   filename)
+                    .header("X-Suite-Name",  suiteName != null ? suiteName : "")
+                    .header("X-Test-Name",   testName  != null ? testName  : "")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(bytes))
+                    .build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (res.statusCode() == 200) {
+                System.out.println("[BackendClient] Video subido: " + filename + " (" + bytes.length / 1024 + " KB)");
+            } else {
+                System.err.println("[BackendClient] uploadVideo error: " + res.statusCode() + " " + res.body());
+            }
+        } catch (Exception e) {
+            System.err.println("[BackendClient] uploadVideo error: " + e.getMessage());
+        }
     }
 
     private HttpResponse<String> post(String path, String body) throws Exception {

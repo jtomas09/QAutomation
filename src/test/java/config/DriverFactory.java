@@ -565,7 +565,7 @@ public class DriverFactory {
      * Resolves a property value.
      * Priority: JVM system property (-D) > appium.properties file > default.
      */
-    private static String prop(String key, String def) {
+    static String prop(String key, String def) {
         initProps();
         String sys = System.getProperty(key);
         if (sys != null && !sys.isBlank()) return sys.trim();

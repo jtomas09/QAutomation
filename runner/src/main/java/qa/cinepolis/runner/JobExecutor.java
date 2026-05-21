@@ -10,6 +10,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -311,7 +314,9 @@ public class JobExecutor {
                     try { Thread.sleep(3_000); } catch (InterruptedException e) { return; }
                     if (client.isJobAborted(job.executionId)) {
                         wasAborted.set(true);
-                        System.out.println("\n[Executor] Aborto detectado — terminando proceso Gradle");
+                        System.out.println("\n[Executor] Aborto detectado — terminando árbol de procesos Gradle");
+                        // Kill all child processes first (JVM spawned by gradlew.bat on Windows)
+                        process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
                         process.destroyForcibly();
                         return;
                     }
@@ -358,6 +363,7 @@ public class JobExecutor {
                         ? "✅ Suite completada — " + summary
                         : "❌ Suite terminó con errores (exit " + exitCode + ") — " + summary);
 
+            uploadVideos(job.executionId, job.suite);
             String allureUrl = generateAllureReport(job.executionId);
             client.sendResult(job.executionId,
                     passed.get(), failed.get(), skipped.get(), allureUrl);
@@ -464,6 +470,27 @@ public class JobExecutor {
         client.sendLog(executionId, "WARN",
                 "⚠️  Appium no disponible en " + hubBase
                 + " — inícialo con: appium --port 4723");
+    }
+
+    // ── Video upload ───────────────────────────────────────────────────────────
+
+    private void uploadVideos(String executionId, String suite) {
+        try {
+            Path videosDir = Paths.get(config.workDir, "build", "videos");
+            if (!Files.exists(videosDir)) return;
+            Files.walk(videosDir)
+                    .filter(p -> p.toString().endsWith(".mp4"))
+                    .forEach(p -> {
+                        String className = p.getParent().getFileName().toString();
+                        String testName  = p.getFileName().toString()
+                                .replace(".mp4", "")
+                                .replace("_", " ")
+                                .trim();
+                        client.uploadVideo(executionId, nvl(suite, className), testName, p);
+                    });
+        } catch (Exception e) {
+            System.out.println("[Executor] No se pudieron subir videos: " + e.getMessage());
+        }
     }
 
     // ── Allure report (optional — requires allure CLI installed) ───────────────
