@@ -26,7 +26,7 @@ export const TEST_SUITES: TestSuite[] = [
   },
   {
     id: 'alimentos',
-    title: 'Alimentos — Todo',
+    title: 'Alimentos',
     description: 'Ejecuta todos los menús: Atmosphera, Coffee Tree, Mi Cine, Tradicional y VIP.',
     icon: '🍿',
     accent: '#f97316',
@@ -91,6 +91,33 @@ export const ALIMENTOS_TESTS: TestSuite[] = [
     accent: '#7c3aed',
   },
 ];
+
+export const ARGENTINA_SUITES: TestSuite[] = [
+  {
+    id: 'noafectacion-argentina',
+    title: 'No Afectación Argentina',
+    description: 'Suite completa de pruebas de compra para todos los cines de Argentina sin sesión.',
+    icon: '🎬',
+    accent: '#6366f1',
+  },
+];
+
+export const CHILE_SUITES: TestSuite[] = [
+  {
+    id: 'noafectacion-chile',
+    title: 'No Afectación Chile',
+    description: 'Suite completa de pruebas de compra para todos los cines de Chile sin sesión.',
+    icon: '🎬',
+    accent: '#ef4444',
+  },
+];
+
+// Maps country id → suite cards shown on Execute page
+export const COUNTRY_SUITES: Record<string, TestSuite[]> = {
+  mexico:    TEST_SUITES,
+  argentina: ARGENTINA_SUITES,
+  chile:     CHILE_SUITES,
+};
 
 export const ENVIRONMENTS = ['QA', 'PROD', 'STG'];
 export const SUITES       = ['Smoke Tests', 'Full Suite', 'Regresión', 'Sanity'];
@@ -229,6 +256,54 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'micine-t38', title: 'Palomitas Skwinkles — Grandes',       description: 'Palomitas Skwinkles Grandes Mantequilla' },
     { id: 'micine-t39', title: 'Palomitas Skwinkles — Medianas',      description: 'Palomitas Skwinkles Medianas Mantequilla' },
     { id: 'micine-t40', title: 'Palomitas Skwinkles — Chicas',        description: 'Palomitas Skwinkles Chicas Mantequilla' },
+  ],
+
+  'noafectacion-argentina': [
+    { id: 'ar-ticket-avellaneda',    title: 'Ticket — Avellaneda',       description: 'Compra ticket sin sesión en Cine Avellaneda' },
+    { id: 'ar-mix-avellaneda',       title: 'Mix — Avellaneda',          description: 'Compra mix sin sesión en Cine Avellaneda' },
+    { id: 'ar-food-avellaneda',      title: 'Alimento — Avellaneda',     description: 'Compra alimento sin sesión en Cine Avellaneda' },
+    { id: 'ar-ticket-lujan',         title: 'Ticket — Lujan',            description: 'Compra ticket sin sesión en Cine Lujan' },
+    { id: 'ar-mix-lujan',            title: 'Mix — Lujan',               description: 'Compra mix sin sesión en Cine Lujan' },
+    { id: 'ar-food-lujan',           title: 'Alimento — Lujan',          description: 'Compra alimento sin sesión en Cine Lujan' },
+    { id: 'ar-ticket-merlo',         title: 'Ticket — Merlo',            description: 'Compra ticket sin sesión en Cine Merlo' },
+    { id: 'ar-mix-merlo',            title: 'Mix — Merlo',               description: 'Compra mix sin sesión en Cine Merlo' },
+    { id: 'ar-food-merlo',           title: 'Alimento — Merlo',          description: 'Compra alimento sin sesión en Cine Merlo' },
+    { id: 'ar-ticket-pilar',         title: 'Ticket — Pilar',            description: 'Compra ticket sin sesión en Cine Pilar' },
+    { id: 'ar-mix-pilar',            title: 'Mix — Pilar',               description: 'Compra mix sin sesión en Cine Pilar' },
+    { id: 'ar-food-pilar',           title: 'Alimento — Pilar',          description: 'Compra alimento sin sesión en Cine Pilar' },
+    { id: 'ar-ticket-houssay',       title: 'Ticket — Plaza Houssay',    description: 'Compra ticket sin sesión en Cine Plaza Houssay' },
+    { id: 'ar-mix-houssay',          title: 'Mix — Plaza Houssay',       description: 'Compra mix sin sesión en Cine Plaza Houssay' },
+    { id: 'ar-food-houssay',         title: 'Alimento — Plaza Houssay',  description: 'Compra alimento sin sesión en Cine Plaza Houssay' },
+    { id: 'ar-ticket-recoleta',      title: 'Ticket — Recoleta',         description: 'Compra ticket sin sesión en Cine Recoleta' },
+    { id: 'ar-mix-recoleta',         title: 'Mix — Recoleta',            description: 'Compra mix sin sesión en Cine Recoleta' },
+    { id: 'ar-food-recoleta',        title: 'Alimento — Recoleta',       description: 'Compra alimento sin sesión en Cine Recoleta' },
+    { id: 'ar-ticket-arenamaipu',    title: 'Ticket — Arena Maipu',      description: 'Compra ticket sin sesión en Cine Arena Maipu' },
+    { id: 'ar-mix-arenamaipu',       title: 'Mix — Arena Maipu',         description: 'Compra mix sin sesión en Cine Arena Maipu' },
+    { id: 'ar-food-arenamaipu',      title: 'Alimento — Arena Maipu',    description: 'Compra alimento sin sesión en Cine Arena Maipu' },
+    { id: 'ar-ticket-mendozaplaza',  title: 'Ticket — Mendoza Plaza',    description: 'Compra ticket sin sesión en Cine Mendoza Plaza' },
+    { id: 'ar-mix-mendozaplaza',     title: 'Mix — Mendoza Plaza',       description: 'Compra mix sin sesión en Cine Mendoza Plaza' },
+    { id: 'ar-food-mendozaplaza',    title: 'Alimento — Mendoza Plaza',  description: 'Compra alimento sin sesión en Cine Mendoza Plaza' },
+    { id: 'ar-ticket-neuquen',       title: 'Ticket — Neuquen',          description: 'Compra ticket sin sesión en Cine Neuquen' },
+    { id: 'ar-mix-neuquen',          title: 'Mix — Neuquen',             description: 'Compra mix sin sesión en Cine Neuquen' },
+    { id: 'ar-food-neuquen',         title: 'Alimento — Neuquen',        description: 'Compra alimento sin sesión en Cine Neuquen' },
+    { id: 'ar-ticket-rosario',       title: 'Ticket — Rosario',          description: 'Compra ticket sin sesión en Cine Rosario' },
+    { id: 'ar-mix-rosario',          title: 'Mix — Rosario',             description: 'Compra mix sin sesión en Cine Rosario' },
+    { id: 'ar-food-rosario',         title: 'Alimento — Rosario',        description: 'Compra alimento sin sesión en Cine Rosario' },
+  ],
+
+  'noafectacion-chile': [
+    { id: 'cl-ticket-dominicos',       title: 'Ticket — Los Dominicos',        description: 'Compra ticket sin sesión en Cine Los Dominicos' },
+    { id: 'cl-mix-dominicos',          title: 'Mix — Los Dominicos',           description: 'Compra mix sin sesión en Cine Los Dominicos' },
+    { id: 'cl-alimento-dominicos',     title: 'Alimento — Los Dominicos',      description: 'Compra alimento sin sesión en Cine Los Dominicos' },
+    { id: 'cl-ticket-lareina',         title: 'Ticket — La Reina',             description: 'Compra ticket sin sesión en Cine La Reina' },
+    { id: 'cl-mix-lareina',            title: 'Mix — La Reina',                description: 'Compra mix sin sesión en Cine La Reina' },
+    { id: 'cl-alimento-lareina',       title: 'Alimento — La Reina',           description: 'Compra alimento sin sesión en Cine La Reina' },
+    { id: 'cl-ticket-parque',          title: 'Ticket — Parque Arauco',        description: 'Compra ticket sin sesión en Cine Parque Arauco' },
+    { id: 'cl-mix-parque',             title: 'Mix — Parque Arauco',           description: 'Compra mix sin sesión en Cine Parque Arauco' },
+    { id: 'cl-alimento-parque',        title: 'Alimento — Parque Arauco',      description: 'Compra alimento sin sesión en Cine Parque Arauco' },
+    { id: 'cl-ticket-parquepremium',   title: 'Ticket — Parque Arauco Premium',description: 'Compra ticket sin sesión en Cine Parque Arauco Premium' },
+    { id: 'cl-mix-parquepremium',      title: 'Mix — Parque Arauco Premium',   description: 'Compra mix sin sesión en Cine Parque Arauco Premium' },
+    { id: 'cl-alimento-parquepremium', title: 'Alimento — Parque Arauco Premium', description: 'Compra alimento sin sesión en Cine Parque Arauco Premium' },
   ],
 
   'alimentos-tradicional': [

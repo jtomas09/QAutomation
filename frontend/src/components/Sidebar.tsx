@@ -67,7 +67,7 @@ export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props)
           QA
         </div>
         <div>
-          <div className="text-xs font-bold tracking-widest text-white uppercase">Automation QA</div>
+          <div className="text-xs font-bold tracking-widest uppercase" style={{ color: 'var(--text-pri)' }}>Automation QA</div>
           <div className="text-[10px] text-slate-500 mt-0.5">Test Launcher v2.0</div>
         </div>
       </div>
@@ -92,13 +92,13 @@ export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props)
           <div className="relative">
             <div className="flex items-center gap-2 mb-2">
               <Zap size={13} className="text-yellow-400" />
-              <span className="text-xs font-bold text-white">Plan Enterprise</span>
+              <span className="text-xs font-bold" style={{ color: 'var(--text-pri)' }}>Plan Enterprise</span>
               <span className="ml-auto text-[10px] font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">ACTIVO</span>
             </div>
             <p className="text-[10px] text-slate-400 leading-relaxed mb-3">
               Automatiza, valida y entrega experiencias con IA integrada.
             </p>
-            <div className="text-[10px] text-slate-500 mb-2">Vence el 25/12/2025</div>
+            <div className="text-[10px] text-slate-500 mb-2">Vence el 25/12/2026</div>
             <button className="w-full py-1.5 rounded-lg text-[11px] font-semibold text-indigo-300 transition-all"
               style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.35)' }}
@@ -146,7 +146,7 @@ function NavRow({ item, active, onSelect, badge }: {
         background: active
           ? `${accent}18`
           : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
-        color: active ? '#f1f5f9' : hovered ? '#cbd5e1' : '#64748b',
+        color: active ? 'var(--text-pri)' : hovered ? 'var(--text-sec)' : 'var(--text-dim)',
       }}
     >
       {/* Active left bar */}
@@ -160,7 +160,7 @@ function NavRow({ item, active, onSelect, badge }: {
 
       <item.icon
         size={16}
-        style={{ color: active ? accent : hovered ? '#94a3b8' : '#475569', flexShrink: 0 }}
+        style={{ color: active ? accent : hovered ? 'var(--text-lbl)' : 'var(--text-dim)', flexShrink: 0 }}
       />
       <span className="text-sm font-medium flex-1">{item.label}</span>
       {badge !== undefined && (

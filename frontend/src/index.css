@@ -92,10 +92,16 @@
 [data-theme="light"] .text-slate-400 { color: #475569 !important; }
 [data-theme="light"] .text-slate-500 { color: #64748b !important; }
 [data-theme="light"] .text-slate-600 { color: #94a3b8 !important; }
+/* white text → dark in light mode (applies to .text-white and inline text-white) */
+[data-theme="light"] .text-white { color: #0f172a !important; }
 
 /* Selects: readable text in light mode */
 [data-theme="light"] select { color: #0f172a !important; }
 [data-theme="light"] select option { background: #ffffff; color: #0f172a; }
+
+/* Select options always use dark text so they're visible in any browser dropdown
+   (browser native dropdowns use a white/light background regardless of OS theme) */
+select option { color: #1e293b !important; background: #ffffff !important; }
 
 /* TopBar search input */
 [data-theme="light"] input::placeholder { color: #94a3b8 !important; }

@@ -208,6 +208,52 @@ public class JobExecutor {
         SUITE_MAP.put("trad-t48", "tests.México.alimentos.MenuTradicional.comprarMaxicomboMixDC");
         SUITE_MAP.put("trad-t49", "tests.México.alimentos.MenuTradicional.comprarMaxicomboMixPC");
         SUITE_MAP.put("trad-t50", "tests.México.alimentos.MenuTradicional.comprarMaxicomboMixPCJ");
+        // Argentina suite and individual tests
+        SUITE_MAP.put("noafectacion-argentina",   "tests.Argentina.NoAfectacionArgentina");
+        SUITE_MAP.put("ar-ticket-avellaneda",     "tests.Argentina.NoAfectacionArgentina.compraTicketAvellaneda");
+        SUITE_MAP.put("ar-mix-avellaneda",        "tests.Argentina.NoAfectacionArgentina.compraMixAvellaneda");
+        SUITE_MAP.put("ar-food-avellaneda",       "tests.Argentina.NoAfectacionArgentina.compraFoodAvellaneda");
+        SUITE_MAP.put("ar-ticket-lujan",          "tests.Argentina.NoAfectacionArgentina.compraTicketLujan");
+        SUITE_MAP.put("ar-mix-lujan",             "tests.Argentina.NoAfectacionArgentina.compraMixLujan");
+        SUITE_MAP.put("ar-food-lujan",            "tests.Argentina.NoAfectacionArgentina.compraFoodLujan");
+        SUITE_MAP.put("ar-ticket-merlo",          "tests.Argentina.NoAfectacionArgentina.compraTicketMerlo");
+        SUITE_MAP.put("ar-mix-merlo",             "tests.Argentina.NoAfectacionArgentina.compraMixMerlo");
+        SUITE_MAP.put("ar-food-merlo",            "tests.Argentina.NoAfectacionArgentina.compraFoodMerlo");
+        SUITE_MAP.put("ar-ticket-pilar",          "tests.Argentina.NoAfectacionArgentina.compraTicketPilar");
+        SUITE_MAP.put("ar-mix-pilar",             "tests.Argentina.NoAfectacionArgentina.compraMixPilar");
+        SUITE_MAP.put("ar-food-pilar",            "tests.Argentina.NoAfectacionArgentina.compraFoodPilar");
+        SUITE_MAP.put("ar-ticket-houssay",        "tests.Argentina.NoAfectacionArgentina.compraTicketPlazaHoussay");
+        SUITE_MAP.put("ar-mix-houssay",           "tests.Argentina.NoAfectacionArgentina.compraMixPlazaHoussay");
+        SUITE_MAP.put("ar-food-houssay",          "tests.Argentina.NoAfectacionArgentina.compraFoodPlazaHoussay");
+        SUITE_MAP.put("ar-ticket-recoleta",       "tests.Argentina.NoAfectacionArgentina.compraTicketRecoleta");
+        SUITE_MAP.put("ar-mix-recoleta",          "tests.Argentina.NoAfectacionArgentina.compraMixRecoleta");
+        SUITE_MAP.put("ar-food-recoleta",         "tests.Argentina.NoAfectacionArgentina.compraFoodRecoleta");
+        SUITE_MAP.put("ar-ticket-arenamaipu",     "tests.Argentina.NoAfectacionArgentina.compraTicketArenaMaipu");
+        SUITE_MAP.put("ar-mix-arenamaipu",        "tests.Argentina.NoAfectacionArgentina.compraMixArenaMaipu");
+        SUITE_MAP.put("ar-food-arenamaipu",       "tests.Argentina.NoAfectacionArgentina.compraFoodArenaMaipu");
+        SUITE_MAP.put("ar-ticket-mendozaplaza",   "tests.Argentina.NoAfectacionArgentina.compraTicketMendozaPlaza");
+        SUITE_MAP.put("ar-mix-mendozaplaza",      "tests.Argentina.NoAfectacionArgentina.compraMixMendozaPlaza");
+        SUITE_MAP.put("ar-food-mendozaplaza",     "tests.Argentina.NoAfectacionArgentina.compraFoodMendozaPlaza");
+        SUITE_MAP.put("ar-ticket-neuquen",        "tests.Argentina.NoAfectacionArgentina.compraTicketNeuquen");
+        SUITE_MAP.put("ar-mix-neuquen",           "tests.Argentina.NoAfectacionArgentina.compraMixNeuquen");
+        SUITE_MAP.put("ar-food-neuquen",          "tests.Argentina.NoAfectacionArgentina.compraFoodNeuquen");
+        SUITE_MAP.put("ar-ticket-rosario",        "tests.Argentina.NoAfectacionArgentina.compraTicketRosario");
+        SUITE_MAP.put("ar-mix-rosario",           "tests.Argentina.NoAfectacionArgentina.compraMixRosario");
+        SUITE_MAP.put("ar-food-rosario",          "tests.Argentina.NoAfectacionArgentina.compraFoodRosario");
+        // Chile suite and individual tests
+        SUITE_MAP.put("noafectacion-chile",          "tests.Chile.NoAfectacionChile");
+        SUITE_MAP.put("cl-ticket-dominicos",         "tests.Chile.NoAfectacionChile.compraTicketDominicos");
+        SUITE_MAP.put("cl-mix-dominicos",            "tests.Chile.NoAfectacionChile.compraMixDominicos");
+        SUITE_MAP.put("cl-alimento-dominicos",       "tests.Chile.NoAfectacionChile.compraAlimentoDominicos");
+        SUITE_MAP.put("cl-ticket-lareina",           "tests.Chile.NoAfectacionChile.compraTicketLaReina");
+        SUITE_MAP.put("cl-mix-lareina",              "tests.Chile.NoAfectacionChile.compraMixLaReina");
+        SUITE_MAP.put("cl-alimento-lareina",         "tests.Chile.NoAfectacionChile.compraAlimentoLaReina");
+        SUITE_MAP.put("cl-ticket-parque",            "tests.Chile.NoAfectacionChile.compraTicketParqueArauco");
+        SUITE_MAP.put("cl-mix-parque",               "tests.Chile.NoAfectacionChile.compraMixParqueArauco");
+        SUITE_MAP.put("cl-alimento-parque",          "tests.Chile.NoAfectacionChile.compraAlimentoParqueArauco");
+        SUITE_MAP.put("cl-ticket-parquepremium",     "tests.Chile.NoAfectacionChile.compraTicketParqueAraucoPremium");
+        SUITE_MAP.put("cl-mix-parquepremium",        "tests.Chile.NoAfectacionChile.compraMixParqueAraucoPremium");
+        SUITE_MAP.put("cl-alimento-parquepremium",   "tests.Chile.NoAfectacionChile.compraAlimentoParqueAraucoPremium");
     }
 
     private final RunnerConfig  config;

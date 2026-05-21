@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ENVIRONMENTS, SUITES, TEST_SUITES, ALIMENTOS_TESTS, SUITE_TESTS } from './data'
+import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES } from './data'
 import { useTestRunner }    from './hooks/useTestRunner'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { useDeviceStore }   from './hooks/useDeviceStore'
@@ -37,9 +37,13 @@ export default function App() {
     runTest(suite, env, effectiveDevice, country)
   }
 
+  function handleCountryChange(c: string) {
+    setCountry(c)
+    setDrillSuite(null)   // reset drill-down when country changes
+  }
+
   function handleSelectDevice(deviceName: string) {
     setDeviceOverride(deviceName)
-    // Also navigate back to dashboard for convenience
     setPage('dashboard')
   }
 
@@ -69,7 +73,7 @@ export default function App() {
               country={country}
               onSuiteChange={setSuite}     onEnvChange={setEnv}
               onDeviceChange={setDeviceOverride}
-              onCountryChange={setCountry}
+              onCountryChange={handleCountryChange}
               onRun={handleRun}            onStop={stopTest}
               onClearLog={clearLog}        onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}
@@ -81,10 +85,14 @@ export default function App() {
           )}
 
           {page === 'execute' && (() => {
+            const countrySuites = COUNTRY_SUITES[country] ?? []
+            // All known suite cards (needed for drill-down lookup)
+            const allKnownCards = [...(COUNTRY_SUITES['mexico'] ?? []), ...ALIMENTOS_TESTS,
+                                   ...(COUNTRY_SUITES['argentina'] ?? []), ...(COUNTRY_SUITES['chile'] ?? [])]
+
             // Drill-down: show individual tests for a suite
             if (drillSuite) {
-              const allCards = [...TEST_SUITES, ...ALIMENTOS_TESTS]
-              const suite = allCards.find(s => s.id === drillSuite)!
+              const suite = allKnownCards.find(s => s.id === drillSuite)!
               const tests = SUITE_TESTS[drillSuite] ?? []
               return (
                 <SuiteDetailPage
@@ -99,45 +107,40 @@ export default function App() {
               )
             }
 
-            // Suite grid
             const handleCardRun = (id: string) => {
               if (SUITE_TESTS[id]) setDrillSuite(id)
               else runTest(id, env, effectiveDevice, country)
             }
 
-            return (
-              <div className="p-7 space-y-8">
-                <section>
-                  <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
-                    Suites Completas
+            // No suites defined for this country yet
+            if (countrySuites.length === 0) {
+              return (
+                <div className="flex items-center justify-center h-64">
+                  <div className="text-center">
+                    <div className="text-4xl mb-4 opacity-30">🚧</div>
+                    <div className="text-sm font-semibold" style={{ color: 'var(--text-dim)' }}>
+                      No hay suites configuradas para este país
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-5">
-                    {TEST_SUITES.map(s => (
-                      <TestCard
-                        key={s.id} suite={s}
-                        onRun={handleCardRun}
-                        disabled={state.status === 'running'}
-                        isActive={state.activeSuite === s.id}
-                      />
-                    ))}
-                  </div>
-                </section>
+                </div>
+              )
+            }
 
-                <section>
-                  <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
-                    Alimentos — Tests Individuales
-                  </div>
-                  <div className="flex flex-wrap gap-5">
-                    {ALIMENTOS_TESTS.map(s => (
-                      <TestCard
-                        key={s.id} suite={s}
-                        onRun={handleCardRun}
-                        disabled={state.status === 'running'}
-                        isActive={state.activeSuite === s.id}
-                      />
-                    ))}
-                  </div>
-                </section>
+            return (
+              <div className="p-7">
+                <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
+                  Selecciona la prueba que deseas ejecutar
+                </div>
+                <div className="flex flex-wrap gap-5">
+                  {countrySuites.map((s: { id: string; title: string; description: string; icon: string; accent: string }) => (
+                    <TestCard
+                      key={s.id} suite={s}
+                      onRun={handleCardRun}
+                      disabled={state.status === 'running'}
+                      isActive={state.activeSuite === s.id}
+                    />
+                  ))}
+                </div>
               </div>
             )
           })()}
