@@ -13,8 +13,10 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class JobExecutor {
@@ -27,16 +29,36 @@ public class JobExecutor {
      *   tests.México.E2E.FlujosCompraNoLogin
      *   tests.RunAllTests  (JUnit Platform Suite that selects @SelectPackages("tests"))
      */
-    private static final Map<String, String> SUITE_MAP = Map.of(
-            "smoke tests",  "tests.RunAllTests",
-            "full suite",   "tests.RunAllTests",
-            "regresión",    "tests.RunAllTests",
-            "regresion",    "tests.RunAllTests",
-            "sanity",       "tests.RunAllTests",
-            "asientos",     "tests.México.asientos.SeleccionAsientos",
-            "alimentos",    "tests.México.alimentos.*",
-            "checkout",     "tests.México.E2E.FlujosCompraNoLogin"
-    );
+    private static final Map<String, String> SUITE_MAP;
+    static {
+        SUITE_MAP = new HashMap<>();
+        // Full suites
+        SUITE_MAP.put("smoke tests",          "tests.RunAllTests");
+        SUITE_MAP.put("full suite",           "tests.RunAllTests");
+        SUITE_MAP.put("regresión",            "tests.RunAllTests");
+        SUITE_MAP.put("regresion",            "tests.RunAllTests");
+        SUITE_MAP.put("sanity",               "tests.RunAllTests");
+        SUITE_MAP.put("flujo completo",       "tests.México.E2E.FlujosCompraNoLogin");
+        SUITE_MAP.put("flujo-completo",       "tests.México.E2E.FlujosCompraNoLogin");
+        SUITE_MAP.put("asientos",             "tests.México.asientos.SeleccionAsientos");
+        SUITE_MAP.put("alimentos",            "tests.México.alimentos.*");
+        SUITE_MAP.put("alimentos — todo",     "tests.México.alimentos.*");
+        SUITE_MAP.put("alimentos-todo",       "tests.México.alimentos.*");
+        SUITE_MAP.put("carrito de compras",   "tests.México.carrito.*");
+        SUITE_MAP.put("carrito",              "tests.México.carrito.*");
+        SUITE_MAP.put("checkout",             "tests.México.E2E.FlujosCompraNoLogin");
+        // Individual alimentos tests (by suite id)
+        SUITE_MAP.put("alimentos-atmosfera",  "tests.México.alimentos.MenuAtmosfera");
+        SUITE_MAP.put("menú atmosphera",      "tests.México.alimentos.MenuAtmosfera");
+        SUITE_MAP.put("alimentos-coffee",     "tests.México.alimentos.MenuCoffeTree");
+        SUITE_MAP.put("menú coffee tree",     "tests.México.alimentos.MenuCoffeTree");
+        SUITE_MAP.put("alimentos-micine",     "tests.México.alimentos.MenuMiCine");
+        SUITE_MAP.put("menú mi cine",         "tests.México.alimentos.MenuMiCine");
+        SUITE_MAP.put("alimentos-tradicional","tests.México.alimentos.MenuTradicional");
+        SUITE_MAP.put("menú tradicional",     "tests.México.alimentos.MenuTradicional");
+        SUITE_MAP.put("alimentos-vip",        "tests.México.alimentos.MenuVIP");
+        SUITE_MAP.put("menú vip",             "tests.México.alimentos.MenuVIP");
+    }
 
     private final RunnerConfig  config;
     private final BackendClient client;
@@ -86,6 +108,22 @@ public class JobExecutor {
 
             Process process = pb.start();
 
+            // Abort watcher — polls backend every 3 s; kills Gradle if ABORTED
+            AtomicBoolean wasAborted = new AtomicBoolean(false);
+            Thread abortWatcher = new Thread(() -> {
+                while (process.isAlive()) {
+                    try { Thread.sleep(3_000); } catch (InterruptedException e) { return; }
+                    if (client.isJobAborted(job.executionId)) {
+                        wasAborted.set(true);
+                        System.out.println("\n[Executor] Aborto detectado — terminando proceso Gradle");
+                        process.destroyForcibly();
+                        return;
+                    }
+                }
+            }, "abort-watcher-" + job.executionId);
+            abortWatcher.setDaemon(true);
+            abortWatcher.start();
+
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -100,6 +138,13 @@ public class JobExecutor {
             }
 
             int exitCode = process.waitFor();
+            abortWatcher.interrupt();
+
+            if (wasAborted.get()) {
+                client.sendLog(job.executionId, "WARN", "Ejecución abortada por el usuario");
+                System.out.println("[Executor] Job abortado: " + job.executionId);
+                return;
+            }
 
             // If Gradle crashed with no test output (e.g. compilation error),
             // record at least one failure so the execution doesn't finish as PASSED.

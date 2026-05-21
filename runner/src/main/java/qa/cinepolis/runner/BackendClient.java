@@ -45,6 +45,21 @@ public class BackendClient {
         }
     }
 
+    /** Returns true if the execution has been marked ABORTED by the backend. Does not throw. */
+    public boolean isJobAborted(String executionId) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/executions/" + executionId))
+                    .header("Authorization", "Bearer " + token)
+                    .GET()
+                    .build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return res.statusCode() == 200 && res.body().contains("\"ABORTED\"");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** Keeps the runner heartbeat alive while executing a job. Does not throw. */
     public void ping() {
         try {

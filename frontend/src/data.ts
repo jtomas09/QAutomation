@@ -26,8 +26,8 @@ export const TEST_SUITES: TestSuite[] = [
   },
   {
     id: 'alimentos',
-    title: 'Alimentos',
-    description: 'Pruebas de combos, agregado al carrito y selección de productos.',
+    title: 'Alimentos — Todo',
+    description: 'Ejecuta todos los menús: Atmosphera, Coffee Tree, Mi Cine, Tradicional y VIP.',
     icon: '🍿',
     accent: '#f97316',
   },
@@ -51,6 +51,44 @@ export const TEST_SUITES: TestSuite[] = [
     description: 'Suite rápida para validar funcionalidades críticas de la aplicación.',
     icon: '🐛',
     accent: '#eab308',
+  },
+];
+
+export const ALIMENTOS_TESTS: TestSuite[] = [
+  {
+    id: 'alimentos-atmosfera',
+    title: 'Menú Atmosphera',
+    description: 'Valida combos y productos del menú Atmosphera.',
+    icon: '✨',
+    accent: '#f97316',
+  },
+  {
+    id: 'alimentos-coffee',
+    title: 'Menú Coffee Tree',
+    description: 'Valida combos y productos del menú Coffee Tree.',
+    icon: '☕',
+    accent: '#a16207',
+  },
+  {
+    id: 'alimentos-micine',
+    title: 'Menú Mi Cine',
+    description: 'Valida combos y productos del menú Mi Cine.',
+    icon: '🎭',
+    accent: '#dc2626',
+  },
+  {
+    id: 'alimentos-tradicional',
+    title: 'Menú Tradicional',
+    description: 'Valida combos y productos del menú Tradicional.',
+    icon: '🌮',
+    accent: '#d97706',
+  },
+  {
+    id: 'alimentos-vip',
+    title: 'Menú VIP',
+    description: 'Valida combos y productos del menú VIP.',
+    icon: '⭐',
+    accent: '#7c3aed',
   },
 ];
 

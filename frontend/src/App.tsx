@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ENVIRONMENTS, SUITES, TEST_SUITES } from './data'
+import { ENVIRONMENTS, SUITES, TEST_SUITES, ALIMENTOS_TESTS } from './data'
 import { useTestRunner }    from './hooks/useTestRunner'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { useDeviceStore }   from './hooks/useDeviceStore'
@@ -79,20 +79,38 @@ export default function App() {
           )}
 
           {page === 'execute' && (
-            <div className="p-7">
-              <div className="text-[11px] font-bold tracking-widest text-slate-600 uppercase mb-5">
-                Selecciona la prueba que deseas ejecutar
-              </div>
-              <div className="flex flex-wrap gap-5">
-                {TEST_SUITES.map(s => (
-                  <TestCard
-                    key={s.id} suite={s}
-                    onRun={id => runTest(id, env, effectiveDevice, country)}
-                    disabled={state.status === 'running'}
-                    isActive={state.activeSuite === s.id}
-                  />
-                ))}
-              </div>
+            <div className="p-7 space-y-8">
+              <section>
+                <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
+                  Suites Completas
+                </div>
+                <div className="flex flex-wrap gap-5">
+                  {TEST_SUITES.map(s => (
+                    <TestCard
+                      key={s.id} suite={s}
+                      onRun={id => runTest(id, env, effectiveDevice, country)}
+                      disabled={state.status === 'running'}
+                      isActive={state.activeSuite === s.id}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-4">
+                  Alimentos — Tests Individuales
+                </div>
+                <div className="flex flex-wrap gap-5">
+                  {ALIMENTOS_TESTS.map(s => (
+                    <TestCard
+                      key={s.id} suite={s}
+                      onRun={id => runTest(id, env, effectiveDevice, country)}
+                      disabled={state.status === 'running'}
+                      isActive={state.activeSuite === s.id}
+                    />
+                  ))}
+                </div>
+              </section>
             </div>
           )}
 
