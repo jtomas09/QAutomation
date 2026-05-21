@@ -98,8 +98,8 @@ public class ExecutionService {
         lastRunnerPing = Instant.now();
     }
 
-    /** True if the runner pinged within the last 15 seconds. */
+    /** True if the runner pinged within the last 30 seconds. */
     public boolean isRunnerOnline() {
-        return lastRunnerPing.isAfter(Instant.now().minusSeconds(15));
+        return lastRunnerPing.isAfter(Instant.now().minusSeconds(30));
     }
 }

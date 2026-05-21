@@ -41,6 +41,16 @@ public class JobController {
     }
 
     /**
+     * POST /api/jobs/ping
+     * Runner sends this while executing a job so the heartbeat stays alive.
+     */
+    @PostMapping("/ping")
+    public Map<String, String> ping() {
+        execService.recordRunnerPing();
+        return Map.of("result", "ok");
+    }
+
+    /**
      * POST /api/jobs/{id}/status
      * Runner updates job lifecycle status (RUNNING, COMPLETED, FAILED, ABORTED).
      */

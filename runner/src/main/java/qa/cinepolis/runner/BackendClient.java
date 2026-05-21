@@ -45,6 +45,15 @@ public class BackendClient {
         }
     }
 
+    /** Keeps the runner heartbeat alive while executing a job. Does not throw. */
+    public void ping() {
+        try {
+            post("/api/jobs/ping", "{}");
+        } catch (Exception e) {
+            System.err.println("[BackendClient] ping error: " + e.getMessage());
+        }
+    }
+
     /** Reports final execution results. Throws on HTTP error. */
     public void sendResult(String executionId, int passed, int failed, int skipped, String allureUrl) throws Exception {
         Map<String, Object> payload = allureUrl != null
