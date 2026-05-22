@@ -49,12 +49,11 @@ public class TestRunnerService {
 
         exec.submit(() -> {
             try {
-                send(emitter, LogEvent.of("INFO", "▶ Iniciando suite [" + req.getSuite() + "]  env=" + req.getEnvironment() + "  device=" + req.getDevice()));
-                send(emitter, LogEvent.of("INFO", "Modo Appium: " + appiumMode));
+                safeSend(emitter, LogEvent.of("INFO", "▶ Iniciando suite [" + req.getSuite() + "]  env=" + req.getEnvironment() + "  device=" + req.getDevice()));
+                safeSend(emitter, LogEvent.of("INFO", "Modo Appium: " + appiumMode));
 
-                // Construir comando java -jar cinepolis-tests.jar con system properties
                 List<String> cmd = buildCommand(req);
-                send(emitter, LogEvent.of("INFO", "Ejecutando: " + String.join(" ", cmd)));
+                safeSend(emitter, LogEvent.of("INFO", "Ejecutando: " + String.join(" ", cmd)));
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.redirectErrorStream(true);
@@ -63,30 +62,28 @@ public class TestRunnerService {
                 }
                 currentProcess = pb.start();
 
-                // Stream stdout → SSE en tiempo real
                 try (BufferedReader br = new BufferedReader(new InputStreamReader(currentProcess.getInputStream()))) {
                     String line;
                     while ((line = br.readLine()) != null) {
                         LogLevel lvl = detectLevel(line);
-                        send(emitter, LogEvent.of(lvl.name(), line));
+                        safeSend(emitter, LogEvent.of(lvl.name(), line));
                     }
                 }
 
                 int exit = currentProcess.waitFor();
-                send(emitter, LogEvent.of(exit == 0 ? "PASS" : "FAIL",
+                safeSend(emitter, LogEvent.of(exit == 0 ? "PASS" : "FAIL",
                         exit == 0 ? "✅ Suite completada correctamente" : "❌ Suite terminó con errores (exit " + exit + ")"));
 
-                // Evento especial "done" para que el frontend cierre el EventSource
-                emitter.send(SseEmitter.event().name("done").data("{\"exit\":" + exit + "}"));
+                try { emitter.send(SseEmitter.event().name("done").data("{\"exit\":" + exit + "}")); }
+                catch (Exception ignored) {}
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
-                try { send(emitter, LogEvent.of("ERROR", "Error interno: " + e.getMessage())); }
-                catch (IOException ignored) {}
+                safeSend(emitter, LogEvent.of("ERROR", "Error interno: " + e.getMessage()));
             } finally {
                 running.set(false);
-                emitter.complete();
+                try { emitter.complete(); } catch (Exception ignored) {}
             }
         });
 
@@ -132,6 +129,11 @@ public class TestRunnerService {
 
     private void send(SseEmitter emitter, LogEvent event) throws IOException {
         emitter.send(SseEmitter.event().name("log").data(json.writeValueAsString(event)));
+    }
+
+    /** Sends an SSE log event, silently ignoring any error (e.g. no active HTTP connection). */
+    private void safeSend(SseEmitter emitter, LogEvent event) {
+        try { send(emitter, event); } catch (Exception ignored) {}
     }
 
     private String toSseEvent(LogEvent e) throws IOException {

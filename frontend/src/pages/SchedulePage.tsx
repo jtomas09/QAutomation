@@ -98,8 +98,9 @@ function formatInstant(iso?: string) {
 
 // ── components ────────────────────────────────────────────────────────────
 
-function JobCard({ job, onEdit, onDelete, onRunNow }: {
+function JobCard({ job, triggering, onEdit, onDelete, onRunNow }: {
   job: ScheduledJob
+  triggering: boolean
   onEdit: () => void
   onDelete: () => void
   onRunNow: () => void
@@ -109,9 +110,10 @@ function JobCard({ job, onEdit, onDelete, onRunNow }: {
   return (
     <div style={{
       background: 'var(--terminal-bg)',
-      border: '1px solid var(--btn-border)',
+      border: `1px solid ${triggering ? 'rgba(16,185,129,0.4)' : 'var(--btn-border)'}`,
       borderRadius: 12, padding: '16px 20px',
       display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+      transition: 'border-color 0.2s',
     }}>
       {/* Enabled dot */}
       <div style={{
@@ -124,7 +126,11 @@ function JobCard({ job, onEdit, onDelete, onRunNow }: {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-pri)' }}>{job.name}</span>
-          {statusBadge(job.lastStatus)}
+          {triggering
+            ? <span style={{ display:'inline-flex', alignItems:'center', gap:4, fontSize:10, fontWeight:700, color:'#10b981', background:'rgba(16,185,129,0.1)', padding:'2px 8px', borderRadius:6 }}>
+                <RefreshCw size={10} className="animate-spin" /> INICIANDO…
+              </span>
+            : statusBadge(job.lastStatus)}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: 'var(--text-dim)' }}>
           <span>Suite: <b style={{ color: 'var(--text-sec)' }}>{job.suite}</b></span>
@@ -143,9 +149,10 @@ function JobCard({ job, onEdit, onDelete, onRunNow }: {
       {/* Actions */}
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         <ActionBtn
-          icon={<Play size={13} />}
-          title="Ejecutar ahora"
+          icon={triggering ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+          title={triggering ? 'Iniciando…' : 'Ejecutar ahora'}
           color="#10b981"
+          disabled={triggering}
           onClick={onRunNow}
         />
         <ActionBtn
@@ -167,22 +174,24 @@ function JobCard({ job, onEdit, onDelete, onRunNow }: {
   )
 }
 
-function ActionBtn({ icon, title, color, onClick }: {
-  icon: React.ReactNode; title: string; color: string; onClick: () => void
+function ActionBtn({ icon, title, color, onClick, disabled }: {
+  icon: React.ReactNode; title: string; color: string; onClick: () => void; disabled?: boolean
 }) {
   const [hov, setHov] = useState(false)
   return (
     <button
       title={title}
       onClick={onClick}
+      disabled={disabled}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         width: 30, height: 30, borderRadius: 8, border: '1px solid var(--btn-border)',
-        background: hov ? `${color}22` : 'transparent',
-        color: hov ? color : 'var(--text-dim)',
-        cursor: 'pointer', transition: 'all 0.15s',
+        background: disabled ? 'transparent' : hov ? `${color}22` : 'transparent',
+        color: disabled ? '#484f58' : hov ? color : 'var(--text-dim)',
+        cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all 0.15s',
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       {icon}
@@ -409,13 +418,15 @@ function ToggleRow({ label, checked, onChange }: {
 // ── main page ────────────────────────────────────────────────────────────
 
 export default function SchedulePage() {
-  const [jobs,      setJobs]      = useState<ScheduledJob[]>([])
-  const [loading,   setLoading]   = useState(true)
-  const [showForm,  setShowForm]  = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [draft,     setDraft]     = useState<JobDraft>(emptyDraft())
-  const [saving,    setSaving]    = useState(false)
-  const [saveError, setSaveError] = useState('')
+  const [jobs,          setJobs]          = useState<ScheduledJob[]>([])
+  const [loading,       setLoading]       = useState(true)
+  const [showForm,      setShowForm]      = useState(false)
+  const [editingId,     setEditingId]     = useState<string | null>(null)
+  const [draft,         setDraft]         = useState<JobDraft>(emptyDraft())
+  const [saving,        setSaving]        = useState(false)
+  const [saveError,     setSaveError]     = useState('')
+  const [triggeringId,  setTriggeringId]  = useState<string | null>(null)
+  const [notification,  setNotification]  = useState<{ msg: string; ok: boolean } | null>(null)
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -455,8 +466,20 @@ export default function SchedulePage() {
   }
 
   async function runNow(id: string) {
-    await fetch(`${API_URL}/api/scheduler/jobs/${id}/run`, { method: 'POST' })
-    setTimeout(fetchJobs, 500)
+    setTriggeringId(id)
+    setNotification(null)
+    try {
+      const r = await fetch(`${API_URL}/api/scheduler/jobs/${id}/run`, { method: 'POST' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const jobName = jobs.find(j => j.id === id)?.name ?? id
+      setNotification({ msg: `✅ Ejecución iniciada: ${jobName}`, ok: true })
+      setTimeout(fetchJobs, 1000)
+    } catch (e: any) {
+      setNotification({ msg: `❌ Error al disparar ejecución: ${e.message ?? 'Error desconocido'}`, ok: false })
+    } finally {
+      setTriggeringId(null)
+      setTimeout(() => setNotification(null), 5000)
+    }
   }
 
   function openEdit(job: ScheduledJob) {
@@ -528,6 +551,20 @@ export default function SchedulePage() {
         </div>
       </div>
 
+      {/* Notification banner */}
+      {notification && (
+        <div style={{
+          background: notification.ok ? 'rgba(46,160,67,0.1)' : 'rgba(248,81,73,0.1)',
+          border: `1px solid ${notification.ok ? '#2ea043' : '#f85149'}`,
+          borderRadius: 10, padding: '10px 14px', marginBottom: 8,
+          fontSize: 13, fontWeight: 600,
+          color: notification.ok ? '#2ea043' : '#f85149',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          {notification.msg}
+        </div>
+      )}
+
       {/* Help strip */}
       <div style={{
         background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)',
@@ -556,6 +593,7 @@ export default function SchedulePage() {
             <JobCard
               key={job.id}
               job={job}
+              triggering={triggeringId === job.id}
               onEdit={() => openEdit(job)}
               onDelete={() => deleteJob(job.id)}
               onRunNow={() => runNow(job.id)}
