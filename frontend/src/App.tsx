@@ -14,6 +14,7 @@ import ExecutionHistory       from './components/ExecutionHistory'
 import TestCard               from './components/TestCard'
 import SuiteDetailPage        from './components/SuiteDetailPage'
 import SettingsPage           from './pages/SettingsPage'
+import SchedulePage           from './pages/SchedulePage'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
@@ -94,6 +95,8 @@ export default function App() {
             <SettingsPage isDark={isDark} onToggleTheme={toggleTheme} />
           )}
 
+          {page === 'schedule' && <SchedulePage />}
+
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
             // All known suite cards (needed for drill-down lookup)
@@ -161,7 +164,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>

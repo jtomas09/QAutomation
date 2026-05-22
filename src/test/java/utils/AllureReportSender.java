@@ -18,11 +18,15 @@ import java.nio.file.*;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 // HTTP server
 import com.sun.net.httpserver.HttpExchange;
@@ -249,6 +253,27 @@ public class AllureReportSender {
         int skipped = Math.max(0, total - passed - failed);
         String durationPretty = formatDurationPretty(durationMillis);
 
+        List<FailureInfo> failureDetails = failed > 0 ? readAllureFailures() : List.of();
+        String failuresSection = buildFailuresHtml(failureDetails);
+
+        String conclusionText;
+        String conclusionColor;
+        if (failed > 0) {
+            conclusionText = "Se detectaron <b>" + failed + " test(s) con fallos</b> de un total de " + total + ". Se requiere revisión.";
+            conclusionColor = "#f85149";
+        } else if (skipped > 0) {
+            conclusionText = "Todos los tests activos pasaron correctamente. <b>" + skipped + " test(s) omitidos</b>.";
+            conclusionColor = "#d29922";
+        } else {
+            conclusionText = "<b>Todos los " + total + " tests pasaron correctamente.</b>";
+            conclusionColor = "#2ea043";
+        }
+        String conclusionesSection =
+                "<div style='background:#111827;border:1px solid #22304a;border-radius:16px;padding:16px;margin-top:16px;'>"
+                + "<div style='font-size:15px;font-weight:800;color:#c9d1d9;margin-bottom:8px;'>📋 Conclusiones</div>"
+                + "<div style='font-size:13px;color:" + conclusionColor + ";'>" + conclusionText + "</div>"
+                + "</div>";
+
         // ✅ Bloque estético del link (recomendado: "card" + botón)
         String interactiveBlock = "";
         if (reportUrl != null && !reportUrl.isBlank()
@@ -343,6 +368,10 @@ public class AllureReportSender {
                         + "            <td style='padding:10px 12px;background:#0b1220;color:#c9d1d9;text-align:center;'><b>" + escapeHtml(durationPretty) + "</b></td></tr>"
                         + "      </table>"
                         + "    </div>"
+
+                        +      failuresSection
+
+                        +      conclusionesSection
 
                         + "    <div style='margin-top:14px;font-size:12px;color:#8b949e;'>"
                         + "      Se adjuntan: 📊 Reporte Allure (Overview + Behaviors) y 📋 PDFs individuales por test."
@@ -629,6 +658,124 @@ public class AllureReportSender {
         if (v == null) return def;
         String t = v.trim();
         return t.isEmpty() ? def : t;
+    }
+
+    // ======================================================
+    //            LECTURA DE FALLOS DESDE ALLURE RESULTS
+    // ======================================================
+
+    private record FailureInfo(String name, String suite, String message,
+                               String traceShort, String failingStep, String status) {}
+
+    private static List<FailureInfo> readAllureFailures() {
+        List<FailureInfo> failures = new ArrayList<>();
+        Path resultsDir = Paths.get("build", "allure-results");
+        if (!Files.exists(resultsDir)) return failures;
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            Files.walk(resultsDir, 1)
+                 .filter(p -> p.getFileName().toString().endsWith("-result.json"))
+                 .forEach(p -> {
+                     try {
+                         JsonNode root = mapper.readTree(p.toFile());
+                         String status = root.path("status").asText("");
+                         if (!status.equals("failed") && !status.equals("broken")) return;
+
+                         String name = root.path("name").asText("Test desconocido");
+
+                         JsonNode details = root.path("statusDetails");
+                         String message = details.path("message").asText("").trim();
+                         String trace   = details.path("trace").asText("").trim();
+
+                         String traceShort = Arrays.stream(trace.split("\\n"))
+                                 .limit(5)
+                                 .collect(java.util.stream.Collectors.joining("\n"));
+
+                         String failingStep = "";
+                         JsonNode steps = root.path("steps");
+                         if (steps.isArray()) {
+                             for (JsonNode step : steps) {
+                                 if ("failed".equals(step.path("status").asText(""))) {
+                                     failingStep = step.path("name").asText("");
+                                     break;
+                                 }
+                             }
+                         }
+
+                         String suite = "";
+                         JsonNode labels = root.path("labels");
+                         if (labels.isArray()) {
+                             for (JsonNode lbl : labels) {
+                                 if ("suite".equals(lbl.path("name").asText(""))) {
+                                     suite = lbl.path("value").asText("");
+                                     break;
+                                 }
+                             }
+                         }
+
+                         failures.add(new FailureInfo(name, suite, message, traceShort, failingStep, status));
+                     } catch (Exception ignored) {}
+                 });
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] No se pudieron leer allure-results: {}", e.getMessage());
+        }
+        return failures;
+    }
+
+    private static String buildFailuresHtml(List<FailureInfo> failures) {
+        if (failures.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div style='background:#111827;border:1px solid #3a1a1a;border-radius:16px;padding:18px;margin-top:16px;'>");
+        sb.append("<div style='font-size:18px;font-weight:800;color:#f85149;margin-bottom:14px;'>❌ Detalle de Fallos (")
+          .append(failures.size()).append(")</div>");
+
+        for (FailureInfo f : failures) {
+            boolean broken = "broken".equals(f.status());
+            String statusColor = broken ? "#d29922" : "#f85149";
+            String statusLabel = broken ? "⚠️ BROKEN" : "❌ FAILED";
+
+            sb.append("<div style='border:1px solid ").append(broken ? "#3a2a00" : "#3a1a1a")
+              .append(";border-radius:10px;padding:14px;margin-bottom:12px;background:#0d1117;'>");
+
+            sb.append("<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;'>");
+            sb.append("<span style='font-size:12px;font-weight:700;color:").append(statusColor)
+              .append(";background:").append(broken ? "rgba(210,153,34,0.1)" : "rgba(248,81,73,0.1)")
+              .append(";padding:2px 8px;border-radius:6px;'>").append(statusLabel).append("</span>");
+            if (!f.suite().isEmpty()) {
+                sb.append("<span style='font-size:11px;color:#8b949e;background:#1a2233;padding:2px 8px;border-radius:6px;'>")
+                  .append(escapeHtml(f.suite())).append("</span>");
+            }
+            sb.append("</div>");
+
+            sb.append("<div style='font-size:14px;font-weight:700;color:#c9d1d9;margin-bottom:8px;'>")
+              .append(escapeHtml(f.name())).append("</div>");
+
+            if (!f.message().isEmpty()) {
+                String msg = f.message().length() > 400 ? f.message().substring(0, 400) + "…" : f.message();
+                sb.append("<div style='font-size:12px;color:#f85149;background:#1c0a0a;border-left:3px solid #f85149;")
+                  .append("border-radius:0 6px 6px 0;padding:8px 10px;margin-bottom:8px;font-family:monospace;word-break:break-all;'>")
+                  .append(escapeHtml(msg)).append("</div>");
+            }
+
+            if (!f.failingStep().isEmpty()) {
+                sb.append("<div style='font-size:12px;color:#8b949e;margin-bottom:8px;'>")
+                  .append("<b style='color:#c9d1d9;'>Paso fallido:</b> <span style='color:#d29922;'>")
+                  .append(escapeHtml(f.failingStep())).append("</span></div>");
+            }
+
+            if (!f.traceShort().isEmpty()) {
+                sb.append("<pre style='font-size:11px;color:#6e7681;background:#0b0f14;border-radius:6px;")
+                  .append("padding:8px;margin:0;overflow-x:auto;white-space:pre-wrap;word-break:break-all;'>")
+                  .append(escapeHtml(f.traceShort())).append("</pre>");
+            }
+
+            sb.append("</div>");
+        }
+
+        sb.append("</div>");
+        return sb.toString();
     }
 }
 
