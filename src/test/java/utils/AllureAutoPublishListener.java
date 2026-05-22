@@ -47,9 +47,11 @@ public class AllureAutoPublishListener implements TestExecutionListener {
         try {
             log.info("[AllureAutoPublishListener] Generating and publishing Allure report...");
             String url = AllureAutoPublisher.generateAndPublish();
-            log.info("[AllureAutoPublishListener] Allure report published at: {}", url);
+            if (url != null && !url.isBlank()) {
+                log.info("[AllureAutoPublishListener] Allure report published at: {}", url);
+            }
         } catch (Exception e) {
-            log.error("[AllureAutoPublishListener] Failed to publish Allure report: {}", e.getMessage(), e);
+            log.warn("[AllureAutoPublishListener] Netlify publish skipped: {}", e.getMessage());
         }
     }
 
