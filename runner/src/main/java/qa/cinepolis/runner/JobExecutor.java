@@ -569,35 +569,50 @@ public class JobExecutor {
     private void preCleanTestResults(String executionId) {
         killStuckGradleProcesses(executionId);
 
-        Path binaryDir = Paths.get(config.workDir, "build", "test-results", "test", "binary");
-        if (!Files.exists(binaryDir)) return;
-
-        // Force-delete via cmd rd /S /Q on Windows (more aggressive than Files.delete)
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
-        if (isWindows) {
+
+        // ── Clean binary test-results dir (locked by previous Gradle run) ────
+        Path binaryDir = Paths.get(config.workDir, "build", "test-results", "test", "binary");
+        if (Files.exists(binaryDir)) {
+            if (isWindows) {
+                try {
+                    new ProcessBuilder("cmd", "/c", "rd", "/S", "/Q",
+                            binaryDir.toAbsolutePath().toString())
+                            .redirectErrorStream(true).start().waitFor(8, TimeUnit.SECONDS);
+                } catch (Exception ignored) {}
+            }
             try {
-                Process rd = new ProcessBuilder(
-                        "cmd", "/c", "rd", "/S", "/Q", binaryDir.toAbsolutePath().toString())
-                        .redirectErrorStream(true)
-                        .start();
-                rd.waitFor(8, TimeUnit.SECONDS);
+                if (Files.exists(binaryDir)) {
+                    Files.walk(binaryDir).sorted(Comparator.reverseOrder())
+                            .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                }
             } catch (Exception ignored) {}
+
+            if (!Files.exists(binaryDir)) {
+                client.sendLog(executionId, "INFO", "🧹 Resultados de test anteriores eliminados");
+            } else {
+                client.sendLog(executionId, "WARN",
+                        "⚠️ No se pudo eliminar build/test-results/test/binary — Gradle lo intentará");
+            }
         }
 
-        // Java-level cleanup as fallback
-        try {
-            if (Files.exists(binaryDir)) {
-                Files.walk(binaryDir)
-                        .sorted(Comparator.reverseOrder())
-                        .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+        // ── Clean stale videos so only this run's recordings get uploaded ────
+        Path videosDir = Paths.get(config.workDir, "build", "videos");
+        if (Files.exists(videosDir)) {
+            if (isWindows) {
+                try {
+                    new ProcessBuilder("cmd", "/c", "rd", "/S", "/Q",
+                            videosDir.toAbsolutePath().toString())
+                            .redirectErrorStream(true).start().waitFor(8, TimeUnit.SECONDS);
+                } catch (Exception ignored) {}
             }
-        } catch (Exception ignored) {}
-
-        if (!Files.exists(binaryDir)) {
-            client.sendLog(executionId, "INFO", "🧹 Directorio de resultados anteriores eliminado");
-        } else {
-            client.sendLog(executionId, "WARN",
-                    "⚠️ No se pudo eliminar build/test-results/test/binary — Gradle intentará borrarlo");
+            try {
+                if (Files.exists(videosDir)) {
+                    Files.walk(videosDir).sorted(Comparator.reverseOrder())
+                            .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                }
+            } catch (Exception ignored) {}
+            client.sendLog(executionId, "INFO", "🎬 Videos de ejecuciones anteriores eliminados");
         }
     }
 
