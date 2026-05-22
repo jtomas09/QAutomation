@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Comparator;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -559,22 +560,78 @@ public class JobExecutor {
         }
     }
 
-    // ── Pre-clean locked test-results binary directory ────────────────────────
-    // Gradle --rerun-tasks tries to delete this dir; if a prior daemon holds the
-    // file open, the build fails immediately with an IOException. Deleting it
-    // ourselves first avoids that failure entirely.
+    // ── Pre-clean: kill stuck Gradle JVMs, then delete locked binary dir ─────
+    // Gradle --rerun-tasks fails with IOException when a prior test JVM still
+    // has build/test-results/test/binary/output.bin open. We first kill any
+    // java.exe whose command line references "gradle" (the stuck build daemon
+    // or test JVM), wait for it to die, then delete the directory ourselves.
 
     private void preCleanTestResults(String executionId) {
+        killStuckGradleProcesses(executionId);
+
         Path binaryDir = Paths.get(config.workDir, "build", "test-results", "test", "binary");
         if (!Files.exists(binaryDir)) return;
+
+        // Force-delete via cmd rd /S /Q on Windows (more aggressive than Files.delete)
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        if (isWindows) {
+            try {
+                Process rd = new ProcessBuilder(
+                        "cmd", "/c", "rd", "/S", "/Q", binaryDir.toAbsolutePath().toString())
+                        .redirectErrorStream(true)
+                        .start();
+                rd.waitFor(8, TimeUnit.SECONDS);
+            } catch (Exception ignored) {}
+        }
+
+        // Java-level cleanup as fallback
         try {
-            Files.walk(binaryDir)
-                    .sorted(Comparator.reverseOrder())
-                    .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
-            client.sendLog(executionId, "INFO", "🧹 Resultados de prueba anteriores limpiados");
+            if (Files.exists(binaryDir)) {
+                Files.walk(binaryDir)
+                        .sorted(Comparator.reverseOrder())
+                        .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+            }
+        } catch (Exception ignored) {}
+
+        if (!Files.exists(binaryDir)) {
+            client.sendLog(executionId, "INFO", "🧹 Directorio de resultados anteriores eliminado");
+        } else {
+            client.sendLog(executionId, "WARN",
+                    "⚠️ No se pudo eliminar build/test-results/test/binary — Gradle intentará borrarlo");
+        }
+    }
+
+    private void killStuckGradleProcesses(String executionId) {
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        if (!isWindows) return;
+
+        long currentPid = ProcessHandle.current().pid();
+        try {
+            // Query all java.exe processes via PowerShell WMI
+            String script =
+                "Get-WmiObject Win32_Process -Filter \"name='java.exe'\" | " +
+                "Where-Object { $_.ProcessId -ne " + currentPid + " -and " +
+                "  $_.CommandLine -like '*gradle*' -and " +
+                "  $_.CommandLine -notlike '*appium*' } | " +
+                "ForEach-Object { " +
+                "  Write-Output (\"Terminando PID \" + $_.ProcessId); " +
+                "  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+
+            Process ps = new ProcessBuilder(
+                    "powershell", "-NonInteractive", "-NoProfile", "-Command", script)
+                    .redirectErrorStream(true)
+                    .start();
+
+            String output = new String(ps.getInputStream().readAllBytes()).trim();
+            ps.waitFor(10, TimeUnit.SECONDS);
+
+            if (!output.isBlank()) {
+                client.sendLog(executionId, "WARN", "🔪 " + output);
+                Thread.sleep(1500); // wait for OS to release file handles
+            }
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
-                    "⚠️ No se pudo limpiar resultados anteriores: " + e.getMessage());
+                    "⚠️ No se pudo consultar procesos Java: " + e.getMessage());
         }
     }
 
