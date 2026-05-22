@@ -218,11 +218,16 @@ public class CinemasHelper extends BasePage {
     public void ensureCinemaSelectedFromAlimentos(String targetCinema) {
         log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> {}", targetCinema);
 
+        // Si ya estamos en el menú de alimentos y el cine requerido ya está seleccionado, continuar directo.
+        if (isOnAlimentosHome() && isCinemaAlreadySelected(targetCinema)) {
+            log.info("[CinemasHelper] Cine '{}' ya seleccionado — omitiendo selección.", targetCinema);
+            return;
+        }
+
         goToAlimentosTab();
         openSelectorFromAlimentosIfNeeded();
         waitSelectorScreenOrThrow();
 
-        // ✅ Tu escritura robusta (misma lógica, solo más compatible con Compose/acentos)
         typeInSearchBoxULTRA(targetCinema);
 
         pickCinemaFromResults(targetCinema);
@@ -236,6 +241,15 @@ public class CinemasHelper extends BasePage {
         goToAlimentosTab();
 
         log.info("[CinemasHelper] Cine seleccionado OK -> {}", targetCinema);
+    }
+
+    private boolean isCinemaAlreadySelected(String targetCinema) {
+        try {
+            By cinemaText = By.xpath("//android.widget.TextView[@text='" + escapeXpath(targetCinema) + "']");
+            return isVisibleNow(cinemaText);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void goToAlimentosTab() {
