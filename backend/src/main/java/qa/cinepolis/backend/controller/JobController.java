@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Execution;
 import qa.cinepolis.backend.model.JobStatusUpdate;
 import qa.cinepolis.backend.service.ExecutionService;
+import qa.cinepolis.backend.store.ReportEmailStore;
 
 import java.util.Map;
 import java.util.Optional;
@@ -14,9 +15,11 @@ import java.util.Optional;
 public class JobController {
 
     private final ExecutionService execService;
+    private final ReportEmailStore reportEmailStore;
 
-    public JobController(ExecutionService execService) {
+    public JobController(ExecutionService execService, ReportEmailStore reportEmailStore) {
         this.execService = execService;
+        this.reportEmailStore = reportEmailStore;
     }
 
     /**
@@ -32,12 +35,14 @@ public class JobController {
 
         Execution exec = opt.get();
         Map<String, Object> job = new java.util.LinkedHashMap<>();
-        job.put("executionId",  exec.getExecutionId());
-        job.put("suite",        exec.getSuite());
-        job.put("env",          exec.getEnv());
-        job.put("device",       exec.getDevice());
-        job.put("country",      exec.getCountry());
-        job.put("videoEnabled", exec.isVideoEnabled());
+        job.put("executionId",        exec.getExecutionId());
+        job.put("suite",              exec.getSuite());
+        job.put("env",                exec.getEnv());
+        job.put("device",             exec.getDevice());
+        job.put("country",            exec.getCountry());
+        job.put("videoEnabled",       exec.isVideoEnabled());
+        job.put("sendMail",           reportEmailStore.isEnabled());
+        job.put("reportEmails",       reportEmailStore.getMailTo());
         return ResponseEntity.ok(job);
     }
 

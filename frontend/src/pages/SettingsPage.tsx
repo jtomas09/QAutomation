@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   Info, Play, Bell, Zap, Shield, Settings,
   Wifi, Database, BarChart3, Activity,
@@ -20,6 +20,7 @@ interface SettingsState {
   reinstallAppiumSettings: boolean; adbWaitTime: number
   generateAllure: boolean; attachScreenshots: boolean; attachVideos: boolean
   retentionDays: number; logLevel: string; clearOldReports: boolean
+  reportEmailsEnabled: boolean; reportEmails: string
   notifyOnStart: boolean; notifyOnEnd: boolean; notifyOnFail: boolean
   notificationChannel: string; notificationEmail: string; dailySummary: boolean
   webhookEnabled: boolean; webhookUrl: string
@@ -43,6 +44,7 @@ const DEFAULTS: SettingsState = {
   validateDevice: true, reinstallAppiumSettings: true, adbWaitTime: 20,
   generateAllure: true, attachScreenshots: true, attachVideos: true,
   retentionDays: 30, logLevel: 'INFO', clearOldReports: false,
+  reportEmailsEnabled: true, reportEmails: 'jtomasb@ia.com.mx,ygonzalez@ia.com.mx,avelasco@ia.com.mx,jurbina@ia.com.mx',
   notifyOnStart: true, notifyOnEnd: true, notifyOnFail: true,
   notificationChannel: 'Email', notificationEmail: 'qa-team@empresa.com', dailySummary: false,
   webhookEnabled: true, webhookUrl: 'https://tuservidor.com/webhook/qa',
@@ -130,6 +132,64 @@ function SSelect({ value, onChange, options, width = 138 }: {
   )
 }
 
+function EmailTagInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [inputVal, setInputVal] = useState('')
+  const tags = value.split(',').map(e => e.trim()).filter(Boolean)
+
+  function addTag(email: string) {
+    const e = email.trim()
+    if (!e || tags.includes(e)) { setInputVal(''); return }
+    onChange([...tags, e].join(','))
+    setInputVal('')
+  }
+
+  function removeTag(tag: string) {
+    onChange(tags.filter(t => t !== tag).join(','))
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      addTag(inputVal)
+    } else if (e.key === 'Backspace' && !inputVal && tags.length > 0) {
+      removeTag(tags[tags.length - 1])
+    }
+  }
+
+  return (
+    <div style={{
+      background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+      borderRadius: 8, padding: '5px 8px', display: 'flex', flexWrap: 'wrap',
+      gap: 4, cursor: 'text', marginTop: 6,
+    }}>
+      {tags.map(tag => (
+        <div key={tag} style={{
+          display: 'flex', alignItems: 'center', gap: 3,
+          background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
+          borderRadius: 6, padding: '2px 7px', fontSize: 10, color: '#10b981',
+        }}>
+          <span>{tag}</span>
+          <button
+            onClick={() => removeTag(tag)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#10b981', padding: 0, fontSize: 13, lineHeight: 1, marginLeft: 2 }}
+          >×</button>
+        </div>
+      ))}
+      <input
+        value={inputVal}
+        onChange={e => setInputVal(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => { if (inputVal) addTag(inputVal) }}
+        placeholder={tags.length === 0 ? 'correo@empresa.com' : '+correo'}
+        style={{
+          flex: 1, minWidth: 110, background: 'none', border: 'none',
+          outline: 'none', color: 'var(--text-pri)', fontSize: 11, padding: '2px 4px',
+        }}
+      />
+    </div>
+  )
+}
+
 function Card({ title, icon: Icon, accent = '#6366f1', children }: {
   title: string; icon: React.ElementType; accent?: string; children: React.ReactNode
 }) {
@@ -191,11 +251,36 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
     setSettings(prev => ({ ...prev, [k]: v }))
   }
 
-  function handleSave() {
+  async function handleSave() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+    try {
+      await fetch(`${API_URL}/api/settings/report-emails`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: settings.reportEmailsEnabled,
+          emails: settings.reportEmails.split(',').map(e => e.trim()).filter(Boolean),
+        }),
+      })
+    } catch { /* best-effort */ }
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/settings/report-emails`)
+      .then(r => r.json())
+      .then((data: { enabled: boolean; emails: string[] }) => {
+        if (data.emails?.length > 0) {
+          setSettings(prev => ({
+            ...prev,
+            reportEmailsEnabled: data.enabled,
+            reportEmails: data.emails.join(','),
+          }))
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   async function handleTestAppium() {
     setTesting(true); setTestRes(null)
@@ -359,6 +444,17 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
       <SRow label="Conservar datos (días)"><SInput value={settings.retentionDays} type="number" onChange={v => set('retentionDays', +v)} /></SRow>
       <SRow label="Nivel de logs"><SSelect value={settings.logLevel} onChange={v => set('logLevel', v)} options={['DEBUG','INFO','WARN','ERROR']} /></SRow>
       <SRow label="Limpiar reportes antiguos"><Toggle value={settings.clearOldReports} onChange={v => set('clearOldReports', v)} /></SRow>
+      <div style={{ borderTop: '1px solid var(--panel-border)', marginTop: 10, paddingTop: 10 }}>
+        <SRow label="Enviar reporte por correo"><Toggle value={settings.reportEmailsEnabled} onChange={v => set('reportEmailsEnabled', v)} /></SRow>
+        {settings.reportEmailsEnabled && (
+          <div style={{ marginTop: 6 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-sec)' }}>
+              Destinatarios — Enter o coma para agregar, Backspace para borrar
+            </span>
+            <EmailTagInput value={settings.reportEmails} onChange={v => set('reportEmails', v)} />
+          </div>
+        )}
+      </div>
     </Card>
   )
 

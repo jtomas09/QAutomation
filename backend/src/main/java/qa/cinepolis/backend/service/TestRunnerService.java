@@ -1,13 +1,16 @@
 package qa.cinepolis.backend.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import qa.cinepolis.backend.model.LogEvent;
 import qa.cinepolis.backend.model.RunRequest;
+import qa.cinepolis.backend.store.ReportEmailStore;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,6 +23,9 @@ public class TestRunnerService {
 
     @Value("${appium.mode}")
     private String appiumMode;
+
+    @Autowired
+    private ReportEmailStore reportEmailStore;
 
     private final ObjectMapper json = new ObjectMapper();
     private final ExecutorService exec = Executors.newCachedThreadPool();
@@ -52,6 +58,9 @@ public class TestRunnerService {
 
                 ProcessBuilder pb = new ProcessBuilder(cmd);
                 pb.redirectErrorStream(true);
+                if (reportEmailStore.isEnabled() && !reportEmailStore.getMailTo().isBlank()) {
+                    pb.environment().put("MAIL_TO", reportEmailStore.getMailTo());
+                }
                 currentProcess = pb.start();
 
                 // Stream stdout → SSE en tiempo real
@@ -101,16 +110,20 @@ public class TestRunnerService {
     // ── helpers ────────────────────────────────────────────────────────────────
 
     private List<String> buildCommand(RunRequest req) {
-        return List.of(
+        List<String> cmd = new ArrayList<>(List.of(
             "java",
             "-jar", testsJar,
-            "-Dappium.mode="      + appiumMode,
-            "-DsuiteId="          + req.getSuite(),
-            "-Denv="              + req.getEnvironment(),
-            "-DdeviceName="       + req.getDevice(),
+            "-Dappium.mode="       + appiumMode,
+            "-DsuiteId="           + req.getSuite(),
+            "-Denv="               + req.getEnvironment(),
+            "-DdeviceName="        + req.getDevice(),
             "-DbrowserStack.user=" + System.getenv("BS_USER"),
             "-DbrowserStack.key="  + System.getenv("BS_KEY")
-        );
+        ));
+        if (reportEmailStore.isEnabled() && !reportEmailStore.getMailTo().isBlank()) {
+            cmd.add("-DsendMail=true");
+        }
+        return cmd;
     }
 
     private void send(SseEmitter emitter, LogEvent event) throws IOException {
