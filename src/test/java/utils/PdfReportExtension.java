@@ -79,6 +79,7 @@ public class PdfReportExtension implements
             Cinema ann = method.getAnnotation(Cinema.class);
             if (ann != null && !ann.value().isBlank()) {
                 TestSteps.setCinema(ann.value());
+                context.getStore(NS).put("cinema", ann.value());
                 try { Allure.label("cinema", ann.value()); } catch (Exception ignored) {}
                 log.debug("[Test] Cinema from @Cinema annotation: {}", ann.value());
             }
@@ -127,7 +128,8 @@ public class PdfReportExtension implements
             }
         });
 
-        String cinema = TestSteps.getCinema();
+        String cinema = context.getStore(NS).get("cinema", String.class);
+        if (cinema == null || cinema.isBlank()) cinema = TestSteps.getCinema();
         List<StepResult> steps = TestSteps.finishScenario();
         PdfReportGenerator.generate(testName, cinema, steps);
 

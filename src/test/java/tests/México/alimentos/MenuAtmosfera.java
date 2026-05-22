@@ -23,7 +23,10 @@ public class MenuAtmosfera extends BaseTest {
     @BeforeEach
     void setUp() {
         page = new AlimentosPagina(driver);
-        TestSteps.run("Cerrar pantalla inicial", () -> page.cerrarPantalla(), driver);
+        // Navigate back from any leftover screen (cart, checkout) from previous test
+        try { page.cerrarPantalla(); } catch (Exception ignored) {}
+        try { page.cerrarPantalla(); } catch (Exception ignored) {}
+        try { page.cerrarPantalla(); } catch (Exception ignored) {}
         TestSteps.run("Abrir menú de alimentos", () -> page.abrirMenu(), driver);
         TestSteps.run("Cerrar notificaciones", () -> page.cerrarPantalla(), driver);
     }
@@ -128,7 +131,7 @@ public class MenuAtmosfera extends BaseTest {
 
     @Test
     @Order(1)
-    @DisplayName("Té Caliente - Grande Menta Manzanilla")
+    @DisplayName("Té Caliente Menta Manzanilla - Patio Santa Fe")
     @Story("Bebidas Calientes")
     @Cinema("Patio Santa Fe")
     void comprarTeCalienteManzanillaPatioSantaFe() {
@@ -149,7 +152,7 @@ public class MenuAtmosfera extends BaseTest {
 
     @Test
     @Order(2)
-    @DisplayName("Té Caliente - Grande Menta Manzanilla")
+    @DisplayName("Té Caliente Menta Manzanilla - Arcos Bosques")
     @Story("Bebidas Calientes")
     @Cinema("Arcos Bosques")
     void comprarTeCalienteManzanillaArcosBosques() {

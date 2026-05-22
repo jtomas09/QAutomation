@@ -277,7 +277,6 @@ public class BaseTest {
         }
 
         startVideoRecording();
-        TestSteps.startScenario(testInfo.getDisplayName());
 
         if (testInfo.getDisplayName() != null && !testInfo.getDisplayName().isBlank()) {
             if (!executedTests.contains(testInfo.getDisplayName())) {
@@ -321,30 +320,15 @@ public class BaseTest {
                 }
             }
 
-            try {
-                String path = TestSteps.captureEvidence(driver, "TEST_FINAL", "TEST_FINAL");
-                if (path != null) {
-                    TestSteps.getStepsInternal()
-                            .add(new StepResult("Evidencia final (auto)", "OK", path));
-                }
-            } catch (Exception ignored) {}
-
-            String cinema = TestSteps.getCinema();
-            List<StepResult> results = TestSteps.finishScenario();
-            PdfReportGenerator.generate(testInfo.getDisplayName(), cinema, results);
-
             totalTests++;
 
             boolean junitFailed = BaseTestStatusRegistry.isFailed(testKey);
-            boolean stepsFailed = results.stream()
-                    .anyMatch(r -> "FAIL".equalsIgnoreCase(r.getStatus())
-                            || "ERROR".equalsIgnoreCase(r.getStatus()));
 
             // Si el driver es null aquí significa que setUp() falló antes de crearlo
             boolean setupFailed = (driver == null && !REUSE_DRIVER)
                     || (REUSE_DRIVER && !driverCreatedOnce);
 
-            boolean finalFailed = junitFailed || stepsFailed || setupFailed;
+            boolean finalFailed = junitFailed || setupFailed;
 
             if (setupFailed) {
                 log.error("[BaseTest] TEST FAILED (setUp falló — driver no creado): {}", testInfo.getDisplayName());
