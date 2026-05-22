@@ -64,26 +64,21 @@ if %ERRORLEVEL% neq 0 (
 echo.
 
 REM ============================================================
-REM  COMPILAR RUNNER (solo si el JAR no existe)
+REM  COMPILAR RUNNER (Maven detecta cambios automaticamente)
 REM ============================================================
 
 cd /d "%~dp0"
 
-if not exist "target\cinepolis-runner.jar" (
-    echo  [Build] Compilando Runner Agent...
+echo  [Build] Verificando y compilando Runner Agent...
+echo.
+call mvn package -DskipTests
+if !ERRORLEVEL! neq 0 (
     echo.
-    call mvn package -DskipTests
-    if !ERRORLEVEL! neq 0 (
-        echo.
-        echo  [ERROR] Fallo al compilar el runner. Revisa los errores de Maven arriba.
-        pause & exit /b 1
-    )
-    echo.
-    echo  [OK] Runner compilado correctamente.
-    echo.
-) else (
-    echo  [OK] JAR encontrado, omitiendo compilacion.
+    echo  [ERROR] Fallo al compilar el runner. Revisa los errores de Maven arriba.
+    pause & exit /b 1
 )
+echo.
+echo  [OK] Runner Agent listo.
 
 REM ============================================================
 REM  INICIO DEL AGENTE
