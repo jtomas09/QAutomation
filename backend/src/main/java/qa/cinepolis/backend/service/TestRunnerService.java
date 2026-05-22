@@ -112,6 +112,7 @@ public class TestRunnerService {
             "-jar", testsJar,
             "-Dappium.mode="       + appiumMode,
             "-DsuiteId="           + req.getSuite(),
+            "-DexecutionName="     + req.getSuite(),
             "-Denv="               + req.getEnvironment(),
             "-DdeviceName="        + req.getDevice(),
             "-Dcountry="           + (req.getCountry() != null ? req.getCountry() : "mexico"),
