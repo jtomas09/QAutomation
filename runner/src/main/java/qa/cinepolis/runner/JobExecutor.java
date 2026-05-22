@@ -606,32 +606,53 @@ public class JobExecutor {
         if (!isWindows) return;
 
         long currentPid = ProcessHandle.current().pid();
-        try {
-            // Query all java.exe processes via PowerShell WMI
-            String script =
-                "Get-WmiObject Win32_Process -Filter \"name='java.exe'\" | " +
-                "Where-Object { $_.ProcessId -ne " + currentPid + " -and " +
-                "  $_.CommandLine -like '*gradle*' -and " +
-                "  $_.CommandLine -notlike '*appium*' } | " +
-                "ForEach-Object { " +
-                "  Write-Output (\"Terminando PID \" + $_.ProcessId); " +
-                "  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+        List<String> pidsToKill = new ArrayList<>();
 
-            Process ps = new ProcessBuilder(
-                    "powershell", "-NonInteractive", "-NoProfile", "-Command", script)
+        try {
+            // wmic handles quoting reliably; avoids PowerShell escaping issues
+            Process wmic = new ProcessBuilder(
+                    "wmic", "process", "where", "name='java.exe'",
+                    "get", "processid,commandline", "/format:csv")
                     .redirectErrorStream(true)
                     .start();
 
-            String output = new String(ps.getInputStream().readAllBytes()).trim();
-            ps.waitFor(10, TimeUnit.SECONDS);
+            String output = new String(wmic.getInputStream().readAllBytes());
+            wmic.waitFor(8, TimeUnit.SECONDS);
 
-            if (!output.isBlank()) {
-                client.sendLog(executionId, "WARN", "🔪 " + output);
-                Thread.sleep(1500); // wait for OS to release file handles
+            for (String line : output.split("\\r?\\n")) {
+                if (line.isBlank() || line.startsWith("Node")) continue;
+                // CSV columns: Node,CommandLine,ProcessId
+                int lastComma = line.lastIndexOf(',');
+                if (lastComma < 0) continue;
+                String pid     = line.substring(lastComma + 1).trim();
+                String cmdLine = line.substring(0, lastComma);
+
+                if (pid.isEmpty() || pid.equals(String.valueOf(currentPid))) continue;
+                if (cmdLine.contains("gradle") && !cmdLine.contains("appium")) {
+                    pidsToKill.add(pid);
+                }
             }
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
-                    "⚠️ No se pudo consultar procesos Java: " + e.getMessage());
+                    "⚠️ wmic no disponible, omitiendo limpieza de procesos: " + e.getMessage());
+        }
+
+        for (String pid : pidsToKill) {
+            try {
+                client.sendLog(executionId, "WARN",
+                        "🔪 Terminando proceso Java/Gradle bloqueante PID: " + pid);
+                new ProcessBuilder("taskkill", "/F", "/T", "/PID", pid)
+                        .redirectErrorStream(true)
+                        .start()
+                        .waitFor(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                client.sendLog(executionId, "WARN",
+                        "No se pudo terminar PID " + pid + ": " + e.getMessage());
+            }
+        }
+
+        if (!pidsToKill.isEmpty()) {
+            try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
         }
     }
 
