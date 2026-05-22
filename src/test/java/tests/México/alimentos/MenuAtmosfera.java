@@ -7,8 +7,10 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.openqa.selenium.By;
+import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import pages.alimentos.AlimentosLocators;
@@ -39,6 +41,7 @@ public class MenuAtmosfera extends BaseTest {
         if (firstTest) {
             log.info("Primer test detectado → NO reiniciar app");
             firstTest = false;
+            waitForHomeReady();
         } else {
             log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             log.info("Reiniciando app entre pruebas");
@@ -46,14 +49,15 @@ public class MenuAtmosfera extends BaseTest {
 
             try {
                 driver.terminateApp(APP_PACKAGE);
+                log.info("App terminada correctamente");
+
+                Thread.sleep(2000);
+
                 driver.activateApp(APP_PACKAGE);
+                log.info("App activada nuevamente");
 
-                new WebDriverWait(driver, Duration.ofSeconds(15))
-                    .until(ExpectedConditions.presenceOfElementLocated(
-                        By.xpath("//*[contains(@text,'Cines')]")
-                    ));
-
-                log.info("App reiniciada correctamente");
+                waitForHomeReady();
+                log.info("App reiniciada y estable");
             } catch (Exception e) {
                 log.error("Error reiniciando app", e);
                 throw new RuntimeException("No se pudo reiniciar la app", e);
@@ -63,6 +67,34 @@ public class MenuAtmosfera extends BaseTest {
         page = new AlimentosPagina(driver);
         TestSteps.run("Abrir menú de alimentos", () -> page.abrirMenu(), driver);
         TestSteps.run("Cerrar notificaciones", () -> page.cerrarPantalla(), driver);
+    }
+
+    private void waitForHomeReady() {
+        log.info("Esperando Home principal...");
+
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+
+        try {
+            wait.until(ExpectedConditions.presenceOfElementLocated(
+                By.xpath("//*[contains(@text,'Cines')]")
+            ));
+
+            wait.until(d -> {
+                List<WebElement> loaders = d.findElements(
+                    By.xpath("//*[contains(@text,'Cargando')]")
+                );
+                return loaders.isEmpty();
+            });
+
+            Thread.sleep(2500);
+
+            log.info("Home cargado correctamente");
+            log.info("Jetpack Compose estabilizado");
+
+        } catch (Exception e) {
+            log.error("Home no cargó correctamente", e);
+            throw new RuntimeException("La app no terminó de cargar correctamente", e);
+        }
     }
 
     /**
