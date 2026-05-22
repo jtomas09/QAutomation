@@ -6,6 +6,7 @@ import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
+import pages.common.CinemasHelper;
 import utils.TestSteps;
 
 /**
@@ -39,10 +40,10 @@ public class MenuAtmosfera extends BaseTest {
 
     @Test
     @Order(1)
-    @DisplayName("Combo Crepa Dulce y Frappé de Frutos Rojos")
+    @DisplayName("Té de Manzanilla")
     @Story("Combos")
     void comprarCrepaDulceFrappe() {
-        //new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("La Perla");
+       new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("La Perla");
         TestSteps.run("Seleccionar Crepa Dulce", () -> page.clickCrepasDulces1(), driver);
         TestSteps.run("Personalizar Crepa Dulce", () -> {
             page.personalizar();
@@ -121,6 +122,26 @@ public class MenuAtmosfera extends BaseTest {
         TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
+        }, driver);
+    }
+
+    @Test
+    @Order(4)
+    @DisplayName("Té Caliente - Grande Menta Manzanilla")
+    @Story("Bebidas Calientes")
+    void comprarTeCalienteManzanilla() {
+        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Patio Santa Fe");
+        TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
+        TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->
+            page.validarElementoVisible(AlimentosLocators.BTN_GRANDE_CALIENTE), driver);
+        TestSteps.run("Seleccionar sabor Té Menta Manzanilla", () -> page.TeMentaManzanilla(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.clickContinuar(), driver);
+        TestSteps.run("Agregar al carrito", () -> page.agregarCarrito(), driver);
+        TestSteps.run("Abrir carrito y validar", () -> {
+            page.abrirCarrito();
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_CALIENTE_CARRITO);
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_VARIANTE_CARRITO);
         }, driver);
     }
 

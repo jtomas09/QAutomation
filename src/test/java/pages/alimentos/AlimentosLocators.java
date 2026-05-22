@@ -188,4 +188,10 @@ public final class AlimentosLocators {
     public static final By PRIMERA_OPCION_DESPLEGABLE= By.xpath("//android.widget.ScrollView/android.view.View[1]");
     public static final By BOTON_VINCULAR_ORDEN     = By.xpath("//android.widget.TextView[@text='Buscar']");
     public static final By BOTON_CONFIRMAR_VINCULACION= By.xpath("//android.widget.TextView[@text='Confirmar']");
+
+    // ─── Té Caliente ──────────────────────────────────────────────────────────────
+
+    public static final By BTN_GRANDE_CALIENTE      = By.xpath("//android.widget.TextView[@text='Grande Caliente']");
+    public static final By TXT_TE_CALIENTE_CARRITO  = By.xpath("//android.widget.TextView[@text='Té caliente']");
+    public static final By TXT_TE_VARIANTE_CARRITO  = By.xpath("//android.widget.TextView[@text='Grande Caliente. Té Menta Manzanilla.']");
 }

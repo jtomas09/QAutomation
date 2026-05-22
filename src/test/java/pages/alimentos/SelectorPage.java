@@ -4,6 +4,7 @@ import io.appium.java_client.AppiumBy;
 import io.appium.java_client.android.AndroidDriver;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.Map;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Dimension;
 import org.openqa.selenium.Point;
@@ -374,6 +375,22 @@ public class SelectorPage extends BasePage {
 
     public void clickTeCaliente() {
         this.clickRightFromAmericanoAnchor("Té caliente");
+    }
+
+    public void buscarTeCaliente() {
+        this.click(By.xpath("//android.widget.TextView[@text='Buscar']"));
+        this.click(By.xpath("//android.widget.EditText/android.view.View[3]"));
+        this.driver.executeScript("mobile: type", Map.of("text", "té caliente"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Té caliente']"));
+    }
+
+    public void TeMentaManzanilla() {
+        this.clickCardByTextWithFallback("Té Menta Manzanilla", 10);
+    }
+
+    public void clickContinuar() {
+        this.clickCardByTextWithFallback("Continuar", 10);
     }
 
     public void clickChocolate() {
