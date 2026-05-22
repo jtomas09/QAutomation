@@ -31,7 +31,7 @@ export default function App() {
   // The effective device name sent to the backend
   const effectiveDevice = deviceOverride ?? activeDevice?.deviceName ?? activeDevice?.name ?? 'Galaxy A56 5G'
 
-  const { state, runTest, stopTest, clearLog } = useTestRunner()
+  const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
   const backendHealth = useBackendHealth()
   const { isDark, toggle: toggleTheme } = useTheme()
   const runnerOnline  = useRunnerStatus()
@@ -82,6 +82,7 @@ export default function App() {
               onRun={handleRun}            onStop={stopTest}
               onClearLog={clearLog}        onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}
+              onAttach={attachToExecution}
             />
           )}
 
