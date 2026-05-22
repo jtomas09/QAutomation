@@ -9,6 +9,8 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.Dimension;
 import org.openqa.selenium.Point;
 import org.openqa.selenium.WebElement;
+import org.openqa.selenium.Rectangle;
+import org.openqa.selenium.interactions.Pause;
 import org.openqa.selenium.interactions.PointerInput;
 import org.openqa.selenium.interactions.Sequence;
 import org.openqa.selenium.interactions.PointerInput.Kind;
@@ -482,30 +484,44 @@ public class SelectorPage extends BasePage {
     }
 
     public void abrirCarrito() {
-        this.sleep(1200);
-        // Cart icon is clickable=false but enabled=true — use W3C tap (forzarClic) to bypass clickable check
-        By cartXpath = By.xpath(
-            "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View"
-            + "/android.view.View/android.view.View[2]/android.view.View/android.view.View[5]");
-        By badgeParent = By.xpath(
-            "//android.widget.TextView[@text='1']/ancestor::android.view.View[1]");
+        log.info("[abrirCarrito] Intentando abrir carrito...");
+
+        By badge = By.xpath("//android.widget.TextView[@text='1']");
 
         try {
-            new WebDriverWait(driver, Duration.ofSeconds(5))
-                .until(ExpectedConditions.presenceOfElementLocated(cartXpath));
-            forzarClic(cartXpath);
-            return;
-        } catch (Exception e) {
-            log.warn("[abrirCarrito] Primary XPath not found, trying badge parent: {}", e.getMessage());
-        }
+            WebElement badgeElement = new WebDriverWait(driver, Duration.ofSeconds(10))
+                    .until(ExpectedConditions.visibilityOfElementLocated(badge));
 
-        try {
-            new WebDriverWait(driver, Duration.ofSeconds(3))
-                .until(ExpectedConditions.presenceOfElementLocated(badgeParent));
-            forzarClic(badgeParent);
+            log.info("[abrirCarrito] Badge encontrado");
+
+            Rectangle rect = badgeElement.getRect();
+            int centerX = rect.getX() + (rect.getWidth() / 2);
+            int centerY = rect.getY() + (rect.getHeight() / 2);
+
+            log.info("[abrirCarrito] Tap coordenadas -> X:{} Y:{}", centerX, centerY);
+
+            PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
+            Sequence tap = new Sequence(finger, 1);
+            tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), centerX, centerY));
+            tap.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
+            tap.addAction(new Pause(finger, Duration.ofMillis(120)));
+            tap.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
+
+            driver.perform(Collections.singletonList(tap));
+            log.info("[abrirCarrito] Tap ejecutado correctamente");
+
+            new WebDriverWait(driver, Duration.ofSeconds(8))
+                    .until(ExpectedConditions.or(
+                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Carrito')]")),
+                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Continuar')]")),
+                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Ir a pagar')]"))
+                    ));
+
+            log.info("[abrirCarrito] Carrito abierto correctamente");
+
         } catch (Exception e) {
-            log.error("[abrirCarrito] Badge parent fallback also failed: {}", e.getMessage());
-            throw new RuntimeException("No se pudo abrir el carrito: elemento no encontrado.", e);
+            log.error("[abrirCarrito] Error abriendo carrito", e);
+            throw new RuntimeException("No se pudo abrir el carrito correctamente", e);
         }
     }
 
