@@ -117,14 +117,20 @@ public class AllureReportSender {
             return;
         }
 
-        if (failedTests == 0) {
-            boolean isAtmosfera =
+        // Omitir email si es una ejecución de Atmosfera SIN fallos reales.
+        // Doble verificación: contador pasado (ya corregido en AllureMailListener) +
+        // lectura directa de allure-results por si el contador viniera en 0 por otro caller.
+        boolean isAtmosfera =
                 (suiteName != null && suiteName.toLowerCase().contains("atmosfera")) ||
                 (executedTests != null && executedTests.contains("MenuAtmosfera"));
-            if (isAtmosfera) {
-                log.info("[AllureReportSender] MenuAtmosfera suite passed — email skipped.");
+
+        if (isAtmosfera) {
+            boolean hasFailures = failedTests > 0 || hasMenuAtmosferaFailuresInResults();
+            if (!hasFailures) {
+                log.info("[AllureReportSender] MenuAtmosfera suite — sin fallos detectados — email omitido.");
                 return;
             }
+            log.info("[AllureReportSender] MenuAtmosfera suite falló (failedTests={}) — enviando correo.", failedTests);
         }
 
         if (isFinalMailAlreadySent()) {
@@ -712,6 +718,47 @@ public class AllureReportSender {
             return m.length() > 120 ? m.substring(0, 120) + "…" : m;
         }
         return "Error durante la ejecución del test";
+    }
+
+    private static boolean hasMenuAtmosferaFailuresInResults() {
+        Path resultsDir = Paths.get("build", "allure-results");
+        if (!Files.exists(resultsDir)) return false;
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            return Files.walk(resultsDir, 1)
+                    .filter(p -> p.getFileName().toString().endsWith("-result.json"))
+                    .anyMatch(p -> {
+                        try {
+                            JsonNode root = mapper.readTree(p.toFile());
+                            String status = root.path("status").asText("");
+                            if (!status.equals("failed") && !status.equals("broken")) return false;
+
+                            String fullName = root.path("fullName").asText("");
+                            if (fullName.contains("MenuAtmosfera")
+                                    || fullName.toLowerCase().contains("atmosfera")) return true;
+
+                            JsonNode labels = root.path("labels");
+                            if (labels.isArray()) {
+                                for (JsonNode lbl : labels) {
+                                    String lblName  = lbl.path("name").asText("");
+                                    String lblValue = lbl.path("value").asText("");
+                                    if (("testClass".equals(lblName) || "suite".equals(lblName)
+                                            || "feature".equals(lblName))
+                                            && (lblValue.contains("MenuAtmosfera")
+                                                || lblValue.toLowerCase().contains("atmosfera"))) {
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        } catch (Exception e) {
+                            return false;
+                        }
+                    });
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] Error revisando allure-results para fallos Atmosfera: {}", e.getMessage());
+            return false;
+        }
     }
 
     private static List<FailureInfo> readAllureFailures() {
