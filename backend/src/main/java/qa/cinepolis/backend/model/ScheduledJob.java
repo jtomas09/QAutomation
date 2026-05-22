@@ -20,7 +20,8 @@ public class ScheduledJob {
     private String  testClass;
     private Instant lastRun;
     private Instant nextRun;
-    private String  lastStatus;   // PENDING | TRIGGERED | ERROR
+    private String  lastStatus;   // PENDING | QUEUED | RUNNING | ERROR | PASSED | FAILED
+    private String  lastExecutionId;
 
     public String  getId()                         { return id; }
     public void    setId(String id)                { this.id = id; }
@@ -60,4 +61,7 @@ public class ScheduledJob {
 
     public String  getLastStatus()                 { return lastStatus; }
     public void    setLastStatus(String s)         { this.lastStatus = s; }
+
+    public String  getLastExecutionId()            { return lastExecutionId; }
+    public void    setLastExecutionId(String v)    { this.lastExecutionId = v; }
 }

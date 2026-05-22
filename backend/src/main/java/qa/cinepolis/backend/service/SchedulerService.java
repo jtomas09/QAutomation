@@ -107,7 +107,7 @@ public class SchedulerService {
         store.save(job);
 
         try {
-            execService.create(
+            var execution = execService.create(
                 job.getSuite(),
                 job.getEnvironment(),
                 job.getDevice(),
@@ -116,8 +116,9 @@ public class SchedulerService {
                 job.getTestClass()
             );
             job.setLastStatus("QUEUED");
+            job.setLastExecutionId(execution.getExecutionId());
             store.save(job);
-            log.info("[SchedulerService] Job '{}' encolado correctamente", job.getName());
+            log.info("[SchedulerService] Job '{}' encolado correctamente → {}", job.getName(), execution.getExecutionId());
         } catch (Exception e) {
             log.error("[SchedulerService] Error encolando job '{}': {}", job.getName(), e.getMessage());
             job.setLastStatus("ERROR");

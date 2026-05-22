@@ -307,6 +307,9 @@ public class JobExecutor {
             pb.environment().put("EXECUTION_NAME", nvl(job.suite));
             pb.environment().put("REUSE_DRIVER",   "true");
             pb.environment().put("VIDEO_ENABLED",  String.valueOf(job.videoEnabled));
+            if (job.testClass != null && !job.testClass.isBlank()) {
+                pb.environment().put("TEST_CLASS", job.testClass);
+            }
             if (job.sendMail && job.reportEmails != null && !job.reportEmails.isBlank()) {
                 pb.environment().put("MAIL_TO", job.reportEmails);
             }
@@ -391,7 +394,7 @@ public class JobExecutor {
 
     private List<String> buildCommand(JobDto job) {
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
-        String  testFilter = resolveTestFilter(job.suite);
+        String  testFilter = resolveTestFilter(job.suite, job.testClass);
 
         List<String> cmd = new ArrayList<>();
         if (isWindows) {
@@ -417,12 +420,28 @@ public class JobExecutor {
         cmd.add("-DREUSE_DRIVER=true");
         if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
         if (job.sendMail)     cmd.add("-DsendMail=true");
+        if (job.testClass != null && !job.testClass.isBlank())
+            cmd.add("-DtestClass=" + job.testClass);
 
         return cmd;
     }
 
-    private static String resolveTestFilter(String suiteName) {
+    private static String resolveTestFilter(String suiteName, String testClass) {
         if (suiteName == null || suiteName.isBlank()) return "tests.RunAllTests";
+
+        // When a specific class is requested within a suite, target it directly
+        if (testClass != null && !testClass.isBlank()) {
+            String key = suiteName.toLowerCase().trim();
+            String base = SUITE_MAP.getOrDefault(key, null);
+            if (base != null) {
+                // Strip the trailing .* wildcard and append the class name
+                String pkg = base.endsWith(".*") ? base.substring(0, base.length() - 2) : base;
+                return pkg + "." + testClass;
+            }
+            // Fallback: derive package from suite directly
+            return "tests.México.alimentos." + testClass;
+        }
+
         String key = suiteName.toLowerCase().trim();
         return SUITE_MAP.getOrDefault(key, "tests.RunAllTests");
     }

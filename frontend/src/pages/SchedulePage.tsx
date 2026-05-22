@@ -1,25 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   CalendarClock, Plus, Play, Pencil, Trash2, Clock,
-  RefreshCw, CheckCircle2, XCircle, AlertCircle, ToggleLeft, ToggleRight,
+  RefreshCw, CheckCircle2, XCircle, AlertCircle, ToggleLeft, ToggleRight, Square,
 } from 'lucide-react'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 interface ScheduledJob {
-  id:             string
-  name:           string
-  suite:          string
-  testClass?:     string
-  device:         string
-  env:            string
-  country:        string
-  videoEnabled:   boolean
-  cronExpression: string
-  enabled:        boolean
-  lastRun?:       string
-  nextRun?:       string
-  lastStatus?:    string
+  id:                string
+  name:              string
+  suite:             string
+  testClass?:        string
+  device:            string
+  env:               string
+  country:           string
+  videoEnabled:      boolean
+  cronExpression:    string
+  enabled:           boolean
+  lastRun?:          string
+  nextRun?:          string
+  lastStatus?:       string
+  lastExecutionId?:  string
 }
 
 type JobDraft = Omit<ScheduledJob, 'id'>
@@ -70,8 +71,10 @@ function statusBadge(status?: string) {
   const map: Record<string, { color: string; bg: string; icon: React.ReactNode; label: string }> = {
     PENDING:   { color: '#8b949e', bg: 'rgba(139,148,158,0.12)', icon: <Clock size={11} />,         label: 'PENDIENTE'  },
     TRIGGERED: { color: '#818cf8', bg: 'rgba(129,140,248,0.12)', icon: <Play size={11} />,          label: 'DISPARADO'  },
+    QUEUED:    { color: '#818cf8', bg: 'rgba(129,140,248,0.12)', icon: <Clock size={11} />,          label: 'EN COLA'    },
     ERROR:     { color: '#f85149', bg: 'rgba(248,81,73,0.12)',   icon: <XCircle size={11} />,       label: 'ERROR'      },
     PASSED:    { color: '#2ea043', bg: 'rgba(46,160,67,0.12)',   icon: <CheckCircle2 size={11} />,  label: 'PASADO'     },
+    FAILED:    { color: '#f85149', bg: 'rgba(248,81,73,0.12)',   icon: <XCircle size={11} />,       label: 'FALLIDO'    },
     RUNNING:   { color: '#f97316', bg: 'rgba(249,115,22,0.12)', icon: <RefreshCw size={11} className="animate-spin" />, label: 'EJECUTANDO' },
   }
   const m = map[status] ?? map['PENDING']
@@ -98,12 +101,14 @@ function formatInstant(iso?: string) {
 
 // ── components ────────────────────────────────────────────────────────────
 
-function JobCard({ job, triggering, onEdit, onDelete, onRunNow }: {
+function JobCard({ job, triggering, stopping, onEdit, onDelete, onRunNow, onStop }: {
   job: ScheduledJob
   triggering: boolean
+  stopping: boolean
   onEdit: () => void
   onDelete: () => void
   onRunNow: () => void
+  onStop: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -148,13 +153,23 @@ function JobCard({ job, triggering, onEdit, onDelete, onRunNow }: {
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        <ActionBtn
-          icon={triggering ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
-          title={triggering ? 'Iniciando…' : 'Ejecutar ahora'}
-          color="#10b981"
-          disabled={triggering}
-          onClick={onRunNow}
-        />
+        {(job.lastStatus === 'RUNNING' || job.lastStatus === 'QUEUED') && job.lastExecutionId ? (
+          <ActionBtn
+            icon={stopping ? <RefreshCw size={13} className="animate-spin" /> : <Square size={13} />}
+            title={stopping ? 'Deteniendo…' : 'Detener ejecución'}
+            color="#f85149"
+            disabled={stopping}
+            onClick={onStop}
+          />
+        ) : (
+          <ActionBtn
+            icon={triggering ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />}
+            title={triggering ? 'Iniciando…' : 'Ejecutar ahora'}
+            color="#10b981"
+            disabled={triggering}
+            onClick={onRunNow}
+          />
+        )}
         <ActionBtn
           icon={<Pencil size={13} />}
           title="Editar"
@@ -426,6 +441,7 @@ export default function SchedulePage() {
   const [saving,        setSaving]        = useState(false)
   const [saveError,     setSaveError]     = useState('')
   const [triggeringId,  setTriggeringId]  = useState<string | null>(null)
+  const [stoppingId,    setStoppingId]    = useState<string | null>(null)
   const [notification,  setNotification]  = useState<{ msg: string; ok: boolean } | null>(null)
 
   const fetchJobs = useCallback(async () => {
@@ -463,6 +479,22 @@ export default function SchedulePage() {
   async function deleteJob(id: string) {
     await fetch(`${API_URL}/api/scheduler/jobs/${id}`, { method: 'DELETE' })
     await fetchJobs()
+  }
+
+  async function stopJob(id: string, executionId: string) {
+    setStoppingId(id)
+    setNotification(null)
+    try {
+      const r = await fetch(`${API_URL}/api/run/${executionId}`, { method: 'DELETE' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      setNotification({ msg: '⛔ Ejecución detenida', ok: true })
+      setTimeout(fetchJobs, 1500)
+    } catch (e: any) {
+      setNotification({ msg: `❌ Error al detener: ${e.message ?? 'Error desconocido'}`, ok: false })
+    } finally {
+      setStoppingId(null)
+      setTimeout(() => setNotification(null), 5000)
+    }
   }
 
   async function runNow(id: string) {
@@ -594,9 +626,11 @@ export default function SchedulePage() {
               key={job.id}
               job={job}
               triggering={triggeringId === job.id}
+              stopping={stoppingId === job.id}
               onEdit={() => openEdit(job)}
               onDelete={() => deleteJob(job.id)}
               onRunNow={() => runNow(job.id)}
+              onStop={() => job.lastExecutionId && stopJob(job.id, job.lastExecutionId)}
             />
           ))}
         </div>

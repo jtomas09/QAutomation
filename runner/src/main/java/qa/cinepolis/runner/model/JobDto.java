@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 public class JobDto {
     public String  executionId;
     public String  suite;
+    public String  testClass;
     public String  env;
     public String  device;
     public String  country;
