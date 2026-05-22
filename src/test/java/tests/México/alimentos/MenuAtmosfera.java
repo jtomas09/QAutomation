@@ -70,15 +70,37 @@ public class MenuAtmosfera extends BaseTest {
     }
 
     private void waitForHomeReady() {
-        log.info("Esperando Home principal...");
+        log.info("Esperando carga de la app...");
 
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
 
         try {
+            // Esperar a que la app renderice algo — home OR pantalla Club Cinépolis
+            wait.until(ExpectedConditions.or(
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@text,'Cines')]")
+                ),
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@text,'Inicia sesi')]")
+                ),
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@content-desc,'CLUB')]")
+                )
+            ));
+
+            log.info("App visible — descartando pantallas transitorias (Club Cinépolis, promos, etc.)");
+
+            // dismissTransientPromosGuard maneja: Club Cinépolis login, Mario promo, location popup
+            new CinemasHelper(driver).dismissTransientPromosGuard("waitForHomeReady");
+
+            log.info("Esperando Home principal...");
+
+            // Ahora sí esperar el home real
             wait.until(ExpectedConditions.presenceOfElementLocated(
                 By.xpath("//*[contains(@text,'Cines')]")
             ));
 
+            // Esperar que desaparezcan indicadores de carga
             wait.until(d -> {
                 List<WebElement> loaders = d.findElements(
                     By.xpath("//*[contains(@text,'Cargando')]")
