@@ -203,12 +203,19 @@ public class AllureReportSender {
             }
         } catch (Exception ignored) {}
 
+        // MAIL_TO env var (set by backend when Settings recipients are saved) takes priority
+        String mailToEnv = System.getenv("MAIL_TO");
+        if (mailToEnv != null && !mailToEnv.isBlank()) {
+            to = mailToEnv.trim();
+            log.info("[AllureReportSender] Destinatarios sobreescritos por MAIL_TO env: {}", to);
+        }
+
         if (smtpPass.isBlank()) {
             log.error("[AllureReportSender] smtp.pass is missing in smtp-config.json; email will not be sent.");
             return false;
         }
         if (to.isBlank()) {
-            log.error("[AllureReportSender] No recipients configured in smtp-config.json (mail.to).");
+            log.error("[AllureReportSender] No recipients configured (smtp-config.json mail.to ni MAIL_TO env).");
             return false;
         }
 
@@ -667,6 +674,36 @@ public class AllureReportSender {
     private record FailureInfo(String name, String suite, String message,
                                String traceShort, String failingStep, String status) {}
 
+    private static String buildFriendlyDescription(String failingStep, String message) {
+        // Priority 1: use the step name to build the message
+        if (failingStep != null && !failingStep.isBlank()) {
+            String step = failingStep.trim();
+            // Strip "failed" suffix if present
+            if (step.toLowerCase().endsWith(" failed.")) step = step.substring(0, step.length() - 8).trim();
+            if (step.toLowerCase().endsWith(" failed"))  step = step.substring(0, step.length() - 7).trim();
+            return "Falló al intentar: " + step;
+        }
+        // Priority 2: simplify the error message
+        if (message != null && !message.isBlank()) {
+            String m = message.trim();
+            String ml = m.toLowerCase();
+            if (ml.contains("timeout") || ml.contains("timed out"))
+                return "Tiempo de espera agotado — el elemento no apareció a tiempo";
+            if (ml.contains("nosuchelement") || ml.contains("no such element"))
+                return "Elemento no encontrado en pantalla";
+            if (ml.contains("stale") && ml.contains("element"))
+                return "El elemento dejó de estar disponible en pantalla";
+            if (ml.contains("assertionerror") || ml.contains("expected") && ml.contains("but"))
+                return "Verificación fallida — el resultado no fue el esperado";
+            // Generic: strip " failed." suffix and show the action
+            if (m.endsWith(" failed.")) return "Falló al intentar: " + m.substring(0, m.length() - 8).trim();
+            if (m.endsWith(" failed"))  return "Falló al intentar: " + m.substring(0, m.length() - 7).trim();
+            // Fallback to first 120 chars of message
+            return m.length() > 120 ? m.substring(0, 120) + "…" : m;
+        }
+        return "Error durante la ejecución del test";
+    }
+
     private static List<FailureInfo> readAllureFailures() {
         List<FailureInfo> failures = new ArrayList<>();
         Path resultsDir = Paths.get("build", "allure-results");
@@ -759,17 +796,9 @@ public class AllureReportSender {
                   .append(escapeHtml(msg)).append("</div>");
             }
 
-            if (!f.failingStep().isEmpty()) {
-                sb.append("<div style='font-size:12px;color:#8b949e;margin-bottom:8px;'>")
-                  .append("<b style='color:#c9d1d9;'>Paso fallido:</b> <span style='color:#d29922;'>")
-                  .append(escapeHtml(f.failingStep())).append("</span></div>");
-            }
-
-            if (!f.traceShort().isEmpty()) {
-                sb.append("<pre style='font-size:11px;color:#6e7681;background:#0b0f14;border-radius:6px;")
-                  .append("padding:8px;margin:0;overflow-x:auto;white-space:pre-wrap;word-break:break-all;'>")
-                  .append(escapeHtml(f.traceShort())).append("</pre>");
-            }
+            String desc = buildFriendlyDescription(f.failingStep(), f.message());
+            sb.append("<div style='font-size:12px;color:#8b949e;margin-bottom:4px;'>")
+              .append("<span style='color:#c9d1d9;font-style:italic;'>").append(escapeHtml(desc)).append("</span></div>");
 
             sb.append("</div>");
         }

@@ -55,138 +55,141 @@ public class PdfReportGenerator {
         try (PDDocument doc = new PDDocument()) {
             Files.createDirectories(REPORT_DIR);
 
+            float margin     = 36;
+            float rowHeightMin = 130;
+            float headerHeight = 26;
+            float padding    = 6;
+            // Reserve space at bottom for conclusions section on last page
+            float conclusionsReserve = 120;
+
+            // ── First page ──────────────────────────────────────────────────
             PDPage page = new PDPage(PDRectangle.A4);
             doc.addPage(page);
+            float pageWidth  = page.getMediaBox().getWidth();
+            float pageHeight = page.getMediaBox().getHeight();
+            float yStart     = pageHeight - margin;
 
-            PDRectangle mediaBox = page.getMediaBox();
-            float pageWidth = mediaBox.getWidth();
-            float pageHeight = mediaBox.getHeight();
+            PDPageContentStream content = new PDPageContentStream(doc, page);
 
-            float margin = 36;
-            float yStart = pageHeight - margin;
+            setNonStrokingColor(content, COLOR_BG_LIGHT);
+            content.addRect(0, 0, pageWidth, pageHeight);
+            content.fill();
 
-            try (PDPageContentStream content = new PDPageContentStream(doc, page)) {
+            float yAfterHeader = drawHeader(content, doc, pageWidth, yStart);
 
-                // Fondo claro
-                setNonStrokingColor(content, COLOR_BG_LIGHT);
-                content.addRect(0, 0, pageWidth, pageHeight);
-                content.fill();
+            boolean testFailed = steps.stream()
+                    .anyMatch(s -> "ERROR".equalsIgnoreCase(s.getStatus())
+                                || "FAIL".equalsIgnoreCase(s.getStatus()));
+            boolean testSkipped = steps.stream()
+                    .anyMatch(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()));
+            int skippedCount = (int) steps.stream()
+                    .filter(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()))
+                    .count();
+            float yAfterSummary = drawTestSummaryBox(content, margin, yAfterHeader - 10,
+                    1, testFailed ? 0 : (testSkipped ? 0 : 1), testFailed ? 1 : 0, skippedCount);
 
-                float yAfterHeader = drawHeader(content, doc, pageWidth, yStart);
+            content.beginText();
+            setNonStrokingColor(content, COLOR_TEXT_BLACK);
+            content.setFont(PDType1Font.HELVETICA_BOLD, 13);
+            content.newLineAtOffset(margin, yAfterSummary - 18);
+            content.showText("Test: " + testName);
+            content.endText();
 
-// ======= RESUMEN DE TESTS =======
-                boolean testFailed = steps.stream()
-                        .anyMatch(s -> "ERROR".equalsIgnoreCase(s.getStatus())
-                                    || "FAIL".equalsIgnoreCase(s.getStatus()));
-                boolean testSkipped = steps.stream()
-                        .anyMatch(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()));
-                int skippedCount = (int) steps.stream()
-                        .filter(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()))
-                        .count();
-                float yAfterSummary = drawTestSummaryBox(content, margin, yAfterHeader - 10,
-                        1, testFailed ? 0 : (testSkipped ? 0 : 1), testFailed ? 1 : 0, skippedCount);
+            float y = yAfterSummary - 40;
 
-// ======= Nombre del test =======
-                content.beginText();
-                setNonStrokingColor(content, COLOR_TEXT_BLACK);
-                content.setFont(PDType1Font.HELVETICA_BOLD, 13);
-                content.newLineAtOffset(margin, yAfterSummary - 18);
-                content.showText("Test: " + testName);
-                content.endText();
+            float tableWidth       = pageWidth - 2 * margin;
+            float colPasoWidth     = tableWidth * 0.25f;
+            float colResultadoWidth= tableWidth * 0.12f;
+            float colEvidenciaWidth= tableWidth - colPasoWidth - colResultadoWidth;
 
-                float y = yAfterSummary - 40;
+            drawTableHeaderRow(content, margin, y, tableWidth, headerHeight,
+                    colPasoWidth, colResultadoWidth, colEvidenciaWidth);
+            y -= headerHeight;
 
+            // ── Rows (multi-page) ───────────────────────────────────────────
+            for (int i = 0; i < steps.size(); i++) {
+                StepResult step = steps.get(i);
+                boolean isLastStep = (i == steps.size() - 1);
+                float minBottom = isLastStep ? (margin + conclusionsReserve) : margin;
 
-                // ========= TABLA DE PASOS =========
-                float tableWidth = pageWidth - 2 * margin;
-                float colPasoWidth = tableWidth * 0.25f;
-                float colResultadoWidth = tableWidth * 0.12f;
-                float colEvidenciaWidth = tableWidth - colPasoWidth - colResultadoWidth;
+                if (y - rowHeightMin < minBottom) {
+                    // Close current page and open a new one
+                    content.close();
 
-                float rowHeightMin = 140;
-                float headerHeight = 26;
-                float padding = 6;
+                    PDPage extraPage = new PDPage(PDRectangle.A4);
+                    doc.addPage(extraPage);
+                    content = new PDPageContentStream(doc, extraPage);
 
-                // Header tabla
-                drawTableHeaderRow(content, margin, y, tableWidth, headerHeight,
-                        colPasoWidth, colResultadoWidth, colEvidenciaWidth);
-
-                y -= headerHeight;
-
-                // Filas
-                for (StepResult step : steps) {
-                    float rowHeight = rowHeightMin;
-
-                    if (y - rowHeight < margin + 80) { // dejar espacio para conclusiones
-                        break;
-                    }
-
-                    // Fondo fila
                     setNonStrokingColor(content, COLOR_BG_LIGHT);
-                    content.addRect(margin, y - rowHeight, tableWidth, rowHeight);
+                    content.addRect(0, 0, pageWidth, pageHeight);
                     content.fill();
 
-                    // Bordes
-                    setStrokingColor(content, COLOR_BORDER);
-                    content.addRect(margin, y - rowHeight, tableWidth, rowHeight);
-                    content.stroke();
-
-                    float xPaso = margin;
-                    float xResultado = margin + colPasoWidth;
-                    float xEvidencia = margin + colPasoWidth + colResultadoWidth;
-
-                    // Paso
-                    content.beginText();
-                    setNonStrokingColor(content, COLOR_TEXT_BLACK);
-                    content.setFont(PDType1Font.HELVETICA, 11);
-                    content.newLineAtOffset(xPaso + padding, y - 18);
-                    content.showText(step.getStepName());
-                    content.endText();
-
-                    // Resultado (OK / SKIPPED / ERROR)
-                    content.beginText();
-                    if (step.getStatus().equalsIgnoreCase("OK")) {
-                        setNonStrokingColor(content, COLOR_OK);
-                    } else if (step.getStatus().equalsIgnoreCase("SKIPPED")) {
-                        setNonStrokingColor(content, COLOR_SKIP);
-                    } else {
-                        setNonStrokingColor(content, COLOR_FAIL);
-                    }
-                    content.setFont(PDType1Font.HELVETICA_BOLD, 12);
-                    content.newLineAtOffset(xResultado + padding, y - 18);
-                    content.showText(step.getStatus());
-                    content.endText();
-
-                    // Evidencia (imagen)
-                    if (step.getScreenshotPath() != null &&
-                            Files.exists(Paths.get(step.getScreenshotPath()))) {
-
-                        PDImageXObject image = PDImageXObject.createFromFile(step.getScreenshotPath(), doc);
-
-                        float availableW = colEvidenciaWidth - 2 * padding;
-                        float availableH = rowHeight - 2 * padding;
-
-                        float scale = Math.min(availableW / image.getWidth(), availableH / image.getHeight());
-
-                        float imgW = image.getWidth() * scale;
-                        float imgH = image.getHeight() * scale;
-
-                        float imgX = xEvidencia + (availableW - imgW) / 2;
-                        float imgY = y - padding - imgH;
-
-                        content.drawImage(image, imgX, imgY, imgW, imgH);
-                    }
-
-                    y -= rowHeight;
+                    y = pageHeight - margin;
+                    drawTableHeaderRow(content, margin, y, tableWidth, headerHeight,
+                            colPasoWidth, colResultadoWidth, colEvidenciaWidth);
+                    y -= headerHeight;
                 }
 
-                // ========= CONCLUSIONES DE LA EJECUCIÓN =========
-                drawConclusions(content, margin, y - 20, steps);
+                float rowHeight = rowHeightMin;
+
+                // Row background
+                setNonStrokingColor(content, COLOR_BG_LIGHT);
+                content.addRect(margin, y - rowHeight, tableWidth, rowHeight);
+                content.fill();
+
+                // Row border
+                setStrokingColor(content, COLOR_BORDER);
+                content.addRect(margin, y - rowHeight, tableWidth, rowHeight);
+                content.stroke();
+
+                float xPaso      = margin;
+                float xResultado = margin + colPasoWidth;
+                float xEvidencia = margin + colPasoWidth + colResultadoWidth;
+
+                content.beginText();
+                setNonStrokingColor(content, COLOR_TEXT_BLACK);
+                content.setFont(PDType1Font.HELVETICA, 11);
+                content.newLineAtOffset(xPaso + padding, y - 18);
+                content.showText(step.getStepName());
+                content.endText();
+
+                content.beginText();
+                if (step.getStatus().equalsIgnoreCase("OK")) {
+                    setNonStrokingColor(content, COLOR_OK);
+                } else if (step.getStatus().equalsIgnoreCase("SKIPPED")) {
+                    setNonStrokingColor(content, COLOR_SKIP);
+                } else {
+                    setNonStrokingColor(content, COLOR_FAIL);
+                }
+                content.setFont(PDType1Font.HELVETICA_BOLD, 12);
+                content.newLineAtOffset(xResultado + padding, y - 18);
+                content.showText(step.getStatus());
+                content.endText();
+
+                if (step.getScreenshotPath() != null &&
+                        Files.exists(Paths.get(step.getScreenshotPath()))) {
+                    PDImageXObject image = PDImageXObject.createFromFile(step.getScreenshotPath(), doc);
+                    float availableW = colEvidenciaWidth - 2 * padding;
+                    float availableH = rowHeight - 2 * padding;
+                    float scale = Math.min(availableW / image.getWidth(), availableH / image.getHeight());
+                    float imgW = image.getWidth() * scale;
+                    float imgH = image.getHeight() * scale;
+                    float imgX = xEvidencia + (availableW - imgW) / 2;
+                    float imgY = y - padding - imgH;
+                    content.drawImage(image, imgX, imgY, imgW, imgH);
+                }
+
+                y -= rowHeight;
             }
+
+            // ── Conclusions on the last page ────────────────────────────────
+            drawConclusions(content, margin, y - 20, steps);
+            content.close();
 
             Path pdfFile = REPORT_DIR.resolve(sanitize(testName) + ".pdf");
             doc.save(pdfFile.toFile());
-            log.info("[PdfReportGenerator] PDF generated: {}", pdfFile.toAbsolutePath());
+            log.info("[PdfReportGenerator] PDF generated ({} pages, {} steps): {}",
+                    doc.getNumberOfPages(), steps.size(), pdfFile.toAbsolutePath());
 
         } catch (Exception e) {
             e.printStackTrace();

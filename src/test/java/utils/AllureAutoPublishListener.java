@@ -33,6 +33,7 @@ public class AllureAutoPublishListener implements TestExecutionListener {
         }
 
         AllureReportSender.resetMailLock();
+        AllureAutoPublisher.resetDeployLock();
         resetUrlFile();
 
         if (isRunAllTests.get()) {

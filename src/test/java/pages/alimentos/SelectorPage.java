@@ -378,8 +378,8 @@ public class SelectorPage extends BasePage {
     }
 
     public void buscarTeCaliente() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Rounded.Search"
-        this.click(By.xpath("//android.view.View[@content-desc='Rounded.Search']"));
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
         this.sleep(600);
         // Foco en el campo de texto y escritura
         this.click(By.className("android.widget.EditText"));

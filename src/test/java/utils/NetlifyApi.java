@@ -47,6 +47,11 @@ public class NetlifyApi {
 
                 HttpResponse<String> resp = client.send(request, HttpResponse.BodyHandlers.ofString());
 
+                if (resp.statusCode() >= 400 && resp.statusCode() < 500) {
+                    // Client error (wrong token/siteId, etc.) — retrying won't help
+                    throw new IllegalStateException(
+                            "Netlify error " + resp.statusCode() + " (no reintentable): " + resp.body());
+                }
                 if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
                     throw new RuntimeException("Netlify deploy failed: " + resp.statusCode() + " - " + resp.body());
                 }
@@ -58,6 +63,9 @@ public class NetlifyApi {
 
                 throw new RuntimeException("Netlify response did not contain a URL: " + resp.body());
 
+            } catch (IllegalStateException e) {
+                // 4xx client error — no point retrying
+                throw e;
             } catch (Exception e) {
                 last = e;
                 log.warn("[NetlifyApi] Attempt {} failed: {}", attempt, e.getMessage());
