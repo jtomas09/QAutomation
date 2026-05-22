@@ -117,9 +117,14 @@ public class AllureReportSender {
             return;
         }
 
-        if (suiteName != null && suiteName.toLowerCase().contains("atmosfera") && failedTests == 0) {
-            log.info("[AllureReportSender] MenuAtmosfera suite passed with 0 failures — email skipped.");
-            return;
+        if (failedTests == 0) {
+            boolean isAtmosfera =
+                (suiteName != null && suiteName.toLowerCase().contains("atmosfera")) ||
+                (executedTests != null && executedTests.contains("MenuAtmosfera"));
+            if (isAtmosfera) {
+                log.info("[AllureReportSender] MenuAtmosfera suite passed — email skipped.");
+                return;
+            }
         }
 
         if (isFinalMailAlreadySent()) {
