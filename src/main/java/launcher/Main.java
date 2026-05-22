@@ -3653,6 +3653,22 @@ private static final Color BORDER     = new Color(25, 35, 65);
     private static final Scanner SCANNER = new Scanner(System.in);
 
     private static void runConsole() {
+        // Auto-navigate when launched by the backend scheduler (no interactive stdin)
+        String suiteId = System.getProperty("suiteId");
+        if (suiteId != null && !suiteId.isBlank()) {
+            selectedCountry = "México";
+            System.setProperty("country", "México");
+            System.out.println("  [AUTO] suiteId=" + suiteId + "  country=" + selectedCountry);
+            switch (suiteId.toLowerCase()) {
+                case "alimentos"      -> consoleMenuAlimentos();
+                case "asientos"       -> consoleRun("Asientos", selectPackage("tests.México.asientos"));
+                case "flujo-completo" -> consoleRun("E2E", selectClass("tests.México.E2E.FlujosCompraNoLogin"));
+                case "runalltests"    -> consoleRun("Completo", selectPackage("tests.México"));
+                default               -> consoleRun("Suite-" + suiteId, selectPackage("tests.México." + suiteId));
+            }
+            return;
+        }
+
         while (true) {
             System.out.println("\n  === CINEPOLIS AUTOMATION QA ===");
             System.out.println("  Selecciona un pais:");
@@ -3783,6 +3799,19 @@ private static final Color BORDER     = new Color(25, 35, 65);
     }
 
     private static void consoleMenuAlimentos() {
+        String testClass = System.getProperty("testClass", "").trim();
+        if (!testClass.isBlank()) {
+            System.out.println("  [AUTO] testClass=" + testClass);
+            switch (testClass) {
+                case "MenuTradicional" -> consoleRun("Tradicional", selectClass("tests.México.alimentos.MenuTradicional"));
+                case "MenuAtmosfera"   -> consoleRun("Atmosfera",   selectClass("tests.México.alimentos.MenuAtmosfera"));
+                case "MenuVIP"         -> consoleRun("VIP",         selectClass("tests.México.alimentos.MenuVIP"));
+                case "MenuCoffeTree"   -> consoleRun("CoffeeTree",  selectClass("tests.México.alimentos.MenuCoffeTree"));
+                case "MenuMiCine"      -> consoleRun("MiCine",      selectClass("tests.México.alimentos.MenuMiCine"));
+                default                -> consoleRun("Todos",       selectPackage("tests.México.alimentos"));
+            }
+            return;
+        }
         System.out.println("\n  1.Todos 2.Tradicional 3.Atmosfera 4.VIP 5.CoffeeTree 6.MiCine");
         System.out.print("  Elige: ");
         switch (readLine()) {

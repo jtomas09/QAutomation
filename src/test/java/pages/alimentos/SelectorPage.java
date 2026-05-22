@@ -482,14 +482,30 @@ public class SelectorPage extends BasePage {
     }
 
     public void abrirCarrito() {
-        this.sleep(1200); // wait for post-add-to-cart animation to settle
-        // Primary: content-desc containing "arrito" (handles "Carrito", "Ver carrito", etc.)
-        By byDesc = By.xpath("//android.view.View[contains(@content-desc,'arrito')]");
-        if (!this.clickIfPresent(byDesc)) {
-            // Fallback: positional XPath in top navigation bar
-            this.click(By.xpath(
-                "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[1]"
-                + "/android.view.View/android.view.View[2]/android.view.View/android.view.View[5]"));
+        this.sleep(1200);
+        // Cart icon is clickable=false but enabled=true — use W3C tap (forzarClic) to bypass clickable check
+        By cartXpath = By.xpath(
+            "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View"
+            + "/android.view.View/android.view.View[2]/android.view.View/android.view.View[5]");
+        By badgeParent = By.xpath(
+            "//android.widget.TextView[@text='1']/ancestor::android.view.View[1]");
+
+        try {
+            new WebDriverWait(driver, Duration.ofSeconds(5))
+                .until(ExpectedConditions.presenceOfElementLocated(cartXpath));
+            forzarClic(cartXpath);
+            return;
+        } catch (Exception e) {
+            log.warn("[abrirCarrito] Primary XPath not found, trying badge parent: {}", e.getMessage());
+        }
+
+        try {
+            new WebDriverWait(driver, Duration.ofSeconds(3))
+                .until(ExpectedConditions.presenceOfElementLocated(badgeParent));
+            forzarClic(badgeParent);
+        } catch (Exception e) {
+            log.error("[abrirCarrito] Badge parent fallback also failed: {}", e.getMessage());
+            throw new RuntimeException("No se pudo abrir el carrito: elemento no encontrado.", e);
         }
     }
 

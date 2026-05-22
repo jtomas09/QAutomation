@@ -13,6 +13,7 @@ public class RunRequest {
 
     private String  country;
     private boolean videoEnabled;
+    private String  testClass;
 
     public String  getSuite()       { return suite; }
     public void    setSuite(String suite) { this.suite = suite; }
@@ -28,4 +29,7 @@ public class RunRequest {
 
     public boolean isVideoEnabled()           { return videoEnabled; }
     public void    setVideoEnabled(boolean v) { this.videoEnabled = v; }
+
+    public String  getTestClass()             { return testClass; }
+    public void    setTestClass(String tc)    { this.testClass = tc; }
 }

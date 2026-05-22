@@ -17,6 +17,7 @@ public class ScheduledJob {
     private boolean videoEnabled;
     private String  cronExpression;
     private boolean enabled;
+    private String  testClass;
     private Instant lastRun;
     private Instant nextRun;
     private String  lastStatus;   // PENDING | TRIGGERED | ERROR
@@ -47,6 +48,9 @@ public class ScheduledJob {
 
     public boolean isEnabled()                     { return enabled; }
     public void    setEnabled(boolean enabled)     { this.enabled = enabled; }
+
+    public String  getTestClass()                   { return testClass; }
+    public void    setTestClass(String testClass)   { this.testClass = testClass; }
 
     public Instant getLastRun()                    { return lastRun; }
     public void    setLastRun(Instant t)           { this.lastRun = t; }

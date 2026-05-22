@@ -117,9 +117,13 @@ public class TestRunnerService {
             "-DsuiteId="           + req.getSuite(),
             "-Denv="               + req.getEnvironment(),
             "-DdeviceName="        + req.getDevice(),
+            "-Dcountry="           + (req.getCountry() != null ? req.getCountry() : "mexico"),
             "-DbrowserStack.user=" + System.getenv("BS_USER"),
             "-DbrowserStack.key="  + System.getenv("BS_KEY")
         ));
+        if (req.getTestClass() != null && !req.getTestClass().isBlank()) {
+            cmd.add("-DtestClass=" + req.getTestClass());
+        }
         if (reportEmailStore.isEnabled() && !reportEmailStore.getMailTo().isBlank()) {
             cmd.add("-DsendMail=true");
         }

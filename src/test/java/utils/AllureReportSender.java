@@ -117,6 +117,11 @@ public class AllureReportSender {
             return;
         }
 
+        if (suiteName != null && suiteName.toLowerCase().contains("atmosfera") && failedTests == 0) {
+            log.info("[AllureReportSender] MenuAtmosfera suite passed with 0 failures — email skipped.");
+            return;
+        }
+
         if (isFinalMailAlreadySent()) {
             log.info("[AllureReportSender] Skipping: mail lock already exists at {}",
                     FINAL_MAIL_LOCK.toAbsolutePath());

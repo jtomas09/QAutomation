@@ -114,6 +114,7 @@ public class SchedulerService {
         req.setEnvironment(job.getEnvironment());
         req.setCountry(job.getCountry() != null ? job.getCountry() : "mexico");
         req.setVideoEnabled(job.isVideoEnabled());
+        req.setTestClass(job.getTestClass());
 
         try {
             runner.run(req);

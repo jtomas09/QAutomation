@@ -10,6 +10,7 @@ interface ScheduledJob {
   id:             string
   name:           string
   suite:          string
+  testClass?:     string
   device:         string
   env:            string
   country:        string
@@ -26,6 +27,7 @@ type JobDraft = Omit<ScheduledJob, 'id'>
 const emptyDraft = (): JobDraft => ({
   name:           '',
   suite:          'alimentos',
+  testClass:      '',
   device:         'Galaxy A56 5G',
   env:            'QA',
   country:        'mexico',
@@ -38,11 +40,21 @@ const CRON_PRESETS = [
   { label: 'Cada día hábil 8 AM',   value: '0 8 * * 1-5' },
   { label: 'Lunes y Jueves 9 AM',   value: '0 9 * * 1,4' },
   { label: 'Cada hora',             value: '0 * * * *'   },
+  { label: 'Cada 2 hrs',            value: '0 */2 * * *' },
   { label: 'Cada 30 min',           value: '*/30 * * * *' },
   { label: 'Domingos 6 AM',         value: '0 6 * * 0'   },
 ]
 
 const SUITES = ['alimentos', 'smoke', 'flujo-completo', 'asientos', 'checkout', 'carrito', 'RunAllTests']
+
+const ALIMENTOS_SUBCATEGORIES = [
+  { label: 'Todas',            value: '' },
+  { label: 'Menú Atmósfera',   value: 'MenuAtmosfera' },
+  { label: 'Menú Tradicional', value: 'MenuTradicional' },
+  { label: 'Menú VIP',         value: 'MenuVIP' },
+  { label: 'Coffee Tree',      value: 'MenuCoffeTree' },
+  { label: 'Mi Cine',          value: 'MenuMiCine' },
+]
 const ENVS   = ['QA', 'PROD', 'STG']
 const COUNTRIES = [
   { id: 'mexico',    label: 'México'    },
@@ -116,6 +128,9 @@ function JobCard({ job, onEdit, onDelete, onRunNow }: {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: 'var(--text-dim)' }}>
           <span>Suite: <b style={{ color: 'var(--text-sec)' }}>{job.suite}</b></span>
+          {job.testClass && (
+            <span>Cat: <b style={{ color: '#10b981' }}>{job.testClass}</b></span>
+          )}
           <span>Env: <b style={{ color: 'var(--text-sec)' }}>{job.env}</b></span>
           <span>País: <b style={{ color: 'var(--text-sec)' }}>{job.country}</b></span>
           <span style={{ fontFamily: 'monospace', color: '#8b5cf6' }}>{job.cronExpression}</span>
@@ -256,7 +271,8 @@ function JobFormModal({ draft, editingId, saving, error, onChange, onSave, onCan
             <div style={row}>
               <label style={lbl}>Suite</label>
               <select style={{ ...inp, cursor: 'pointer' }}
-                value={draft.suite} onChange={e => onChange({ suite: e.target.value })}>
+                value={draft.suite}
+                onChange={e => onChange({ suite: e.target.value, testClass: '' })}>
                 {SUITES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
@@ -268,6 +284,20 @@ function JobFormModal({ draft, editingId, saving, error, onChange, onSave, onCan
               </select>
             </div>
           </div>
+
+          {/* Alimentos subcategory — visible only when suite === 'alimentos' */}
+          {draft.suite === 'alimentos' && (
+            <div style={row}>
+              <label style={lbl}>Categoría</label>
+              <select style={{ ...inp, cursor: 'pointer' }}
+                value={draft.testClass ?? ''}
+                onChange={e => onChange({ testClass: e.target.value })}>
+                {ALIMENTOS_SUBCATEGORIES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Country + Device */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -431,7 +461,8 @@ export default function SchedulePage() {
 
   function openEdit(job: ScheduledJob) {
     setEditingId(job.id)
-    setDraft({ name: job.name, suite: job.suite, device: job.device, env: job.env,
+    setDraft({ name: job.name, suite: job.suite, testClass: job.testClass ?? '',
+               device: job.device, env: job.env,
                country: job.country, videoEnabled: job.videoEnabled,
                cronExpression: job.cronExpression, enabled: job.enabled })
     setSaveError('')
