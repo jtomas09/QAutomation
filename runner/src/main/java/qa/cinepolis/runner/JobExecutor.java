@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -288,6 +289,9 @@ public class JobExecutor {
             checkAdbDevices(job.executionId);
             checkAppiumServer(job.executionId);
 
+            // ── Pre-clean locked test-results to avoid file-lock failures ────
+            preCleanTestResults(job.executionId);
+
             // ── Build Gradle command ──────────────────────────────────────────
             List<String> cmd = buildCommand(job);
             client.sendLog(job.executionId, "INFO",
@@ -409,6 +413,7 @@ public class JobExecutor {
         cmd.add("--tests");
         cmd.add(testFilter);
         cmd.add("--rerun-tasks");
+        cmd.add("--no-daemon");
 
         // build.gradle contains: systemProperties System.getProperties()
         // so -D flags on the Gradle JVM are visible to tests as System.getProperty()
@@ -536,6 +541,25 @@ public class JobExecutor {
         } catch (Exception e) {
             client.sendLog(executionId, "WARN", "📹 Error al subir videos: " + e.getMessage());
             System.out.println("[Executor] No se pudieron subir videos: " + e.getMessage());
+        }
+    }
+
+    // ── Pre-clean locked test-results binary directory ────────────────────────
+    // Gradle --rerun-tasks tries to delete this dir; if a prior daemon holds the
+    // file open, the build fails immediately with an IOException. Deleting it
+    // ourselves first avoids that failure entirely.
+
+    private void preCleanTestResults(String executionId) {
+        Path binaryDir = Paths.get(config.workDir, "build", "test-results", "test", "binary");
+        if (!Files.exists(binaryDir)) return;
+        try {
+            Files.walk(binaryDir)
+                    .sorted(Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+            client.sendLog(executionId, "INFO", "🧹 Resultados de prueba anteriores limpiados");
+        } catch (Exception e) {
+            client.sendLog(executionId, "WARN",
+                    "⚠️ No se pudo limpiar resultados anteriores: " + e.getMessage());
         }
     }
 
