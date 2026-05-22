@@ -747,6 +747,10 @@ public class CinemasHelper extends BasePage {
 
     /** Verificación rápida (sin espera) — usar solo cuando ya esperamos antes de llamar. */
     public boolean isClubLoginVisible() {
+        // El menú de Alimentos muestra "Club Cinépolis" como sección y "Ingresa tu folio" como campo.
+        // Si estamos en esa pantalla, no es la pantalla de login de Club → salir inmediatamente.
+        if (isVisibleNow(By.xpath("//android.widget.TextView[@text='Ingresa tu folio']"))) return false;
+
         if (isVisibleNow(CLUB_LOGIN_TITLE)) return true;
         if (isVisibleNow(CLUB_LOGIN_LOGO))  return true;
 
