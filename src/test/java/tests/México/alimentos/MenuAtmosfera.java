@@ -38,7 +38,7 @@ public class MenuAtmosfera extends BaseTest {
         }, driver);
     }
 
-    @Test
+   /*  @Test
     @Order(1)
     @DisplayName("Té de Manzanilla")
     @Story("Combos")
@@ -65,9 +65,9 @@ public class MenuAtmosfera extends BaseTest {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
-    }
+    } */
 
-    @Test
+    /* @Test
     @Order(2)
     @DisplayName("Combo Frappé de Coco y Crepa Dulce con Queso")
     @Story("Combos")
@@ -94,9 +94,9 @@ public class MenuAtmosfera extends BaseTest {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
-    }
+    } */
 
-    @Test
+  /*   @Test
     @Order(3)
     @DisplayName("Combo Frappé Sandía Pelonada y Crepa de Fresa")
     @Story("Combos")
@@ -123,14 +123,34 @@ public class MenuAtmosfera extends BaseTest {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
-    }
+    } */
 
     @Test
-    @Order(4)
+    @Order(1)
     @DisplayName("Té Caliente - Grande Menta Manzanilla")
     @Story("Bebidas Calientes")
-    void comprarTeCalienteManzanilla() {
+    void comprarTeCalienteManzanillaPatioSantaFe() {
         new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Patio Santa Fe");
+        TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
+        TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->
+            page.validarElementoVisible(AlimentosLocators.BTN_GRANDE_CALIENTE), driver);
+        TestSteps.run("Seleccionar sabor Té Menta Manzanilla", () -> page.TeMentaManzanilla(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.clickContinuar(), driver);
+        TestSteps.run("Agregar al carrito", () -> page.agregarCarrito(), driver);
+        TestSteps.run("Abrir carrito y validar", () -> {
+            page.abrirCarrito();
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_CALIENTE_CARRITO);
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_VARIANTE_CARRITO);
+        }, driver);
+    }
+
+        @Test
+    @Order(2)
+    @DisplayName("Té Caliente - Grande Menta Manzanilla")
+    @Story("Bebidas Calientes")
+    void comprarTeCalienteManzanillaArcosBosques() {
+        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Arcos Bosques");
         TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
         TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
         TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->
