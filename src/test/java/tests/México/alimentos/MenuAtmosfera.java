@@ -4,29 +4,57 @@ import base.BaseTest;
 import io.qameta.allure.Epic;
 import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.openqa.selenium.By;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
 import pages.common.CinemasHelper;
 import utils.Cinema;
 import utils.TestSteps;
+import java.time.Duration;
 
 /**
  * Pruebas para el flujo de compra en la sección Atmósfera.
  * ✅ Refactorizado para incluir TODOS los casos de prueba originales con una estructura robusta y limpia.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Execution(ExecutionMode.SAME_THREAD)
 @Epic("Alimentos y Bebidas - Atmósfera")
 public class MenuAtmosfera extends BaseTest {
+
+    private static final Logger log = LoggerFactory.getLogger(MenuAtmosfera.class);
+    private static final String APP_PACKAGE = "com.cinepolis.go";
 
     private AlimentosPagina page;
 
     @BeforeEach
     void setUp() {
+        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        log.info("Reiniciando app antes del test");
+        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+        try {
+            driver.terminateApp(APP_PACKAGE);
+            driver.activateApp(APP_PACKAGE);
+
+            new WebDriverWait(driver, Duration.ofSeconds(15))
+                .until(ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@text,'Cines')]")
+                ));
+
+            log.info("App reiniciada correctamente");
+            log.info("Home principal detectado correctamente");
+        } catch (Exception e) {
+            log.error("Error reiniciando app", e);
+            throw new RuntimeException("No se pudo reiniciar la aplicación correctamente", e);
+        }
+
         page = new AlimentosPagina(driver);
-        // Navigate back from any leftover screen (cart, checkout) from previous test
-        try { page.cerrarPantalla(); } catch (Exception ignored) {}
-        try { page.cerrarPantalla(); } catch (Exception ignored) {}
-        try { page.cerrarPantalla(); } catch (Exception ignored) {}
         TestSteps.run("Abrir menú de alimentos", () -> page.abrirMenu(), driver);
         TestSteps.run("Cerrar notificaciones", () -> page.cerrarPantalla(), driver);
     }
