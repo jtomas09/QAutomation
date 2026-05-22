@@ -307,6 +307,9 @@ public class JobExecutor {
             pb.environment().put("EXECUTION_NAME", nvl(job.suite));
             pb.environment().put("REUSE_DRIVER",   "true");
             pb.environment().put("VIDEO_ENABLED",  String.valueOf(job.videoEnabled));
+            if (job.sendMail && job.reportEmails != null && !job.reportEmails.isBlank()) {
+                pb.environment().put("MAIL_TO", job.reportEmails);
+            }
 
             Process process = pb.start();
 
@@ -413,6 +416,7 @@ public class JobExecutor {
         cmd.add("-DexecutionName=" + nvl(job.suite,   "Suite"));
         cmd.add("-DREUSE_DRIVER=true");
         if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
+        if (job.sendMail)     cmd.add("-DsendMail=true");
 
         return cmd;
     }

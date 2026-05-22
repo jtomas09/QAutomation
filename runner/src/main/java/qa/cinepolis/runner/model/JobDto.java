@@ -10,4 +10,6 @@ public class JobDto {
     public String  device;
     public String  country;
     public boolean videoEnabled;
+    public boolean sendMail;
+    public String  reportEmails;
 }

@@ -360,7 +360,7 @@ echo   │  Ejecutando : %~2
 echo   │  Filtro     : %~1
 echo   └──────────────────────────────────────────────────┘
 echo.
-call gradlew.bat test --tests %~1 --rerun-tasks
+call gradlew.bat test --tests %~1 --rerun-tasks -DsendMail=true
 echo.
 if %errorlevel%==0 (
     echo   Tests finalizados correctamente.
