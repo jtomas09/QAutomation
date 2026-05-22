@@ -30,28 +30,34 @@ public class MenuAtmosfera extends BaseTest {
     private static final Logger log = LoggerFactory.getLogger(MenuAtmosfera.class);
     private static final String APP_PACKAGE = "com.cinepolis.go";
 
+    private static boolean firstTest = true;
+
     private AlimentosPagina page;
 
     @BeforeEach
     void setUp() {
-        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        log.info("Reiniciando app antes del test");
-        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        if (firstTest) {
+            log.info("Primer test detectado → NO reiniciar app");
+            firstTest = false;
+        } else {
+            log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            log.info("Reiniciando app entre pruebas");
+            log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-        try {
-            driver.terminateApp(APP_PACKAGE);
-            driver.activateApp(APP_PACKAGE);
+            try {
+                driver.terminateApp(APP_PACKAGE);
+                driver.activateApp(APP_PACKAGE);
 
-            new WebDriverWait(driver, Duration.ofSeconds(15))
-                .until(ExpectedConditions.presenceOfElementLocated(
-                    By.xpath("//*[contains(@text,'Cines')]")
-                ));
+                new WebDriverWait(driver, Duration.ofSeconds(15))
+                    .until(ExpectedConditions.presenceOfElementLocated(
+                        By.xpath("//*[contains(@text,'Cines')]")
+                    ));
 
-            log.info("App reiniciada correctamente");
-            log.info("Home principal detectado correctamente");
-        } catch (Exception e) {
-            log.error("Error reiniciando app", e);
-            throw new RuntimeException("No se pudo reiniciar la aplicación correctamente", e);
+                log.info("App reiniciada correctamente");
+            } catch (Exception e) {
+                log.error("Error reiniciando app", e);
+                throw new RuntimeException("No se pudo reiniciar la app", e);
+            }
         }
 
         page = new AlimentosPagina(driver);
