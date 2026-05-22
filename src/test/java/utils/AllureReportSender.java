@@ -345,7 +345,7 @@ public class AllureReportSender {
                         + "    </div>"
 
                         + "    <div style='margin-top:14px;font-size:12px;color:#8b949e;'>"
-                        + "      Se adjunta el PDF con el resumen detallado de ejecución (Dashboard Allure: Overview + Suites)."
+                        + "      Se adjuntan: 📊 Reporte Allure (Overview + Behaviors) y 📋 PDFs individuales por test."
                         + "    </div>"
 
                         + "  </div>"
@@ -357,10 +357,21 @@ public class AllureReportSender {
         Multipart multipart = new MimeMultipart();
         multipart.addBodyPart(htmlPart);
 
+        // Adjunto 1: Allure Overview + Behaviors PDF
         MimeBodyPart allurePart = new MimeBodyPart();
         allurePart.attachFile(allurePdf.toFile());
         allurePart.setFileName("Reporte_Allure_" + sanitizeFileName(projectName) + ".pdf");
         multipart.addBodyPart(allurePart);
+
+        // Adjunto 2: PDFs por test (merged de build/reportes-pdf/)
+        Path testsPdf = mergeTestPdfs(projectName);
+        if (testsPdf != null && Files.exists(testsPdf)) {
+            MimeBodyPart testsPart = new MimeBodyPart();
+            testsPart.attachFile(testsPdf.toFile());
+            testsPart.setFileName("Reporte_Tests_" + sanitizeFileName(projectName) + ".pdf");
+            multipart.addBodyPart(testsPart);
+            log.info("[AllureReportSender] Per-test PDF attached: {}", testsPdf.getFileName());
+        }
 
         message.setContent(multipart);
 
@@ -372,6 +383,43 @@ public class AllureReportSender {
         } catch (Throwable e) {
             log.error("[AllureReportSender] Email send failed: {} -> {}", e.getClass().getName(), e.getMessage(), e);
             return false;
+        }
+    }
+
+    private static Path mergeTestPdfs(String projectName) {
+        Path reportsDir = Paths.get("build", "reportes-pdf");
+        if (!Files.exists(reportsDir)) {
+            log.info("[AllureReportSender] Per-test PDF dir not found: {}", reportsDir.toAbsolutePath());
+            return null;
+        }
+
+        Path merged = reportsDir.resolve("Reporte_Tests_" + sanitizeFileName(projectName) + ".pdf");
+        try { Files.deleteIfExists(merged); } catch (Exception ignored) {}
+
+        try {
+            java.util.List<Path> pdfs = Files.walk(reportsDir, 1)
+                    .filter(p -> p.toString().endsWith(".pdf") && !p.equals(merged))
+                    .sorted()
+                    .collect(java.util.stream.Collectors.toList());
+
+            if (pdfs.isEmpty()) {
+                log.info("[AllureReportSender] No per-test PDFs found in {}", reportsDir.toAbsolutePath());
+                return null;
+            }
+
+            PDFMergerUtility merger = new PDFMergerUtility();
+            merger.setDestinationFileName(merged.toAbsolutePath().toString());
+            for (Path p : pdfs) {
+                if (Files.exists(p)) merger.addSource(p.toFile());
+            }
+            merger.mergeDocuments(null);
+
+            log.info("[AllureReportSender] Merged {} per-test PDFs → {}", pdfs.size(), merged.toAbsolutePath());
+            return Files.exists(merged) ? merged : null;
+
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] Could not merge per-test PDFs: {}", e.getMessage());
+            return null;
         }
     }
 

@@ -418,6 +418,13 @@ public class JobExecutor {
         if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
         if (job.sendMail)     cmd.add("-DsendMail=true");
 
+        String netlifyToken  = System.getenv("NETLIFY_AUTH_TOKEN");
+        String netlifySiteId = System.getenv("NETLIFY_SITE_ID");
+        if (netlifyToken != null && !netlifyToken.isBlank()
+                && netlifySiteId != null && !netlifySiteId.isBlank()) {
+            cmd.add("-DdeployToNetlify=true");
+        }
+
         return cmd;
     }
 
