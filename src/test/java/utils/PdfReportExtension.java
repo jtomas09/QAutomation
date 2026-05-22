@@ -114,8 +114,9 @@ public class PdfReportExtension implements
             }
         });
 
+        String cinema = TestSteps.getCinema();
         List<StepResult> steps = TestSteps.finishScenario();
-        PdfReportGenerator.generate(testName, steps);
+        PdfReportGenerator.generate(testName, cinema, steps);
 
         log.info("[Test] Finished: {}", testName);
     }

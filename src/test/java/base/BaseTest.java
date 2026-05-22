@@ -329,8 +329,9 @@ public class BaseTest {
                 }
             } catch (Exception ignored) {}
 
+            String cinema = TestSteps.getCinema();
             List<StepResult> results = TestSteps.finishScenario();
-            PdfReportGenerator.generate(testInfo.getDisplayName(), results);
+            PdfReportGenerator.generate(testInfo.getDisplayName(), cinema, results);
 
             totalTests++;
 

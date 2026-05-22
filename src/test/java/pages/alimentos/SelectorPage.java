@@ -482,7 +482,15 @@ public class SelectorPage extends BasePage {
     }
 
     public void abrirCarrito() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[1]/android.view.View/android.view.View[2]/android.view.View/android.view.View[5]"));
+        this.sleep(1200); // wait for post-add-to-cart animation to settle
+        // Primary: content-desc containing "arrito" (handles "Carrito", "Ver carrito", etc.)
+        By byDesc = By.xpath("//android.view.View[contains(@content-desc,'arrito')]");
+        if (!this.clickIfPresent(byDesc)) {
+            // Fallback: positional XPath in top navigation bar
+            this.click(By.xpath(
+                "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[1]"
+                + "/android.view.View/android.view.View[2]/android.view.View/android.view.View[5]"));
+        }
     }
 
     public void personalizar() {

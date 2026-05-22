@@ -671,7 +671,7 @@ public class AllureReportSender {
     //            LECTURA DE FALLOS DESDE ALLURE RESULTS
     // ======================================================
 
-    private record FailureInfo(String name, String suite, String message,
+    private record FailureInfo(String name, String suite, String cinema, String message,
                                String traceShort, String failingStep, String status) {}
 
     private static String buildFriendlyDescription(String failingStep, String message) {
@@ -741,17 +741,17 @@ public class AllureReportSender {
                          }
 
                          String suite = "";
+                         String cinema = "";
                          JsonNode labels = root.path("labels");
                          if (labels.isArray()) {
                              for (JsonNode lbl : labels) {
-                                 if ("suite".equals(lbl.path("name").asText(""))) {
-                                     suite = lbl.path("value").asText("");
-                                     break;
-                                 }
+                                 String lblName = lbl.path("name").asText("");
+                                 if ("suite".equals(lblName)) suite = lbl.path("value").asText("");
+                                 else if ("cinema".equals(lblName)) cinema = lbl.path("value").asText("");
                              }
                          }
 
-                         failures.add(new FailureInfo(name, suite, message, traceShort, failingStep, status));
+                         failures.add(new FailureInfo(name, suite, cinema, message, traceShort, failingStep, status));
                      } catch (Exception ignored) {}
                  });
         } catch (Exception e) {
@@ -783,6 +783,10 @@ public class AllureReportSender {
             if (!f.suite().isEmpty()) {
                 sb.append("<span style='font-size:11px;color:#8b949e;background:#1a2233;padding:2px 8px;border-radius:6px;'>")
                   .append(escapeHtml(f.suite())).append("</span>");
+            }
+            if (!f.cinema().isEmpty()) {
+                sb.append("<span style='font-size:11px;color:#c9d1d9;background:#1a2233;padding:2px 8px;border-radius:6px;'>🎬 ")
+                  .append(escapeHtml(f.cinema())).append("</span>");
             }
             sb.append("</div>");
 

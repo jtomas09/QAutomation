@@ -19,6 +19,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import io.qameta.allure.Allure;
+import utils.TestSteps;
 
 public class CinemasHelper extends BasePage {
 
@@ -217,6 +219,10 @@ public class CinemasHelper extends BasePage {
 
     public void ensureCinemaSelectedFromAlimentos(String targetCinema) {
         log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> '{}'", targetCinema);
+
+        // Track cinema for PDF and Allure reporting
+        TestSteps.setCinema(targetCinema);
+        try { Allure.label("cinema", targetCinema); } catch (Exception ignored) {}
 
         if (isOnAlimentosHome()) {
 

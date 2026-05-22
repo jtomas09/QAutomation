@@ -33,16 +33,27 @@ public class TestSteps {
             ThreadLocal.withInitial(ArrayList::new);
 
     private static final ThreadLocal<String> currentTestName = new ThreadLocal<>();
+    private static final ThreadLocal<String> currentCinema = new ThreadLocal<>();
 
     public static void startScenario(String testName) {
         currentTestName.set(sanitize(testName));
         steps.get().clear();
+        currentCinema.remove();
+    }
+
+    public static void setCinema(String cinema) {
+        currentCinema.set(cinema);
+    }
+
+    public static String getCinema() {
+        return currentCinema.get();
     }
 
     public static List<StepResult> finishScenario() {
         List<StepResult> copy = new ArrayList<>(steps.get());
         steps.remove();
         currentTestName.remove();
+        currentCinema.remove();
         return copy;
     }
 

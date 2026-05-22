@@ -46,7 +46,7 @@ public class PdfReportGenerator {
     private static final float[] COLOR_FAIL = {0.8f, 0.1f, 0.1f};
     private static final float[] COLOR_SKIP = {0.85f, 0.55f, 0.0f};
 
-    public static void generate(String testName, List<StepResult> steps) {
+    public static void generate(String testName, String cinema, List<StepResult> steps) {
         if (steps == null || steps.isEmpty()) {
             log.info("[PdfReportGenerator] No steps found for test: {}", testName);
             return;
@@ -95,7 +95,18 @@ public class PdfReportGenerator {
             content.showText("Test: " + testName);
             content.endText();
 
-            float y = yAfterSummary - 40;
+            float y;
+            if (cinema != null && !cinema.isBlank()) {
+                content.beginText();
+                setNonStrokingColor(content, COLOR_TEXT_BLACK);
+                content.setFont(PDType1Font.HELVETICA, 11);
+                content.newLineAtOffset(margin, yAfterSummary - 34);
+                content.showText("Cine: " + cinema);
+                content.endText();
+                y = yAfterSummary - 56;
+            } else {
+                y = yAfterSummary - 40;
+            }
 
             float tableWidth       = pageWidth - 2 * margin;
             float colPasoWidth     = tableWidth * 0.25f;
@@ -186,7 +197,10 @@ public class PdfReportGenerator {
             drawConclusions(content, margin, y - 20, steps);
             content.close();
 
-            Path pdfFile = REPORT_DIR.resolve(sanitize(testName) + ".pdf");
+            String pdfBaseName = cinema != null && !cinema.isBlank()
+                    ? sanitize(testName) + "_" + sanitize(cinema)
+                    : sanitize(testName);
+            Path pdfFile = REPORT_DIR.resolve(pdfBaseName + ".pdf");
             doc.save(pdfFile.toFile());
             log.info("[PdfReportGenerator] PDF generated ({} pages, {} steps): {}",
                     doc.getNumberOfPages(), steps.size(), pdfFile.toAbsolutePath());
