@@ -263,9 +263,22 @@ public class JobExecutor {
     private final RunnerConfig  config;
     private final BackendClient client;
 
+    private volatile Process activeProcess;
+
     public JobExecutor(RunnerConfig config, BackendClient client) {
         this.config = config;
         this.client = client;
+    }
+
+    /** Kills the currently running Gradle process tree. Called by the shutdown hook. */
+    public void killActiveProcess() {
+        Process p = activeProcess;
+        if (p != null && p.isAlive()) {
+            System.out.println("\n[Runner] Shutdown detectado — terminando proceso Gradle...");
+            p.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+            p.destroyForcibly();
+            System.out.println("[Runner] Proceso Gradle terminado.");
+        }
     }
 
     public void execute(JobDto job) {
@@ -319,6 +332,7 @@ public class JobExecutor {
             }
 
             Process process = pb.start();
+            activeProcess = process;
 
             // Abort watcher — polls backend every 3 s; kills Gradle if ABORTED
             AtomicBoolean wasAborted = new AtomicBoolean(false);
@@ -352,6 +366,7 @@ public class JobExecutor {
             }
 
             int exitCode = process.waitFor();
+            activeProcess = null;
             abortWatcher.interrupt();
 
             if (wasAborted.get()) {
