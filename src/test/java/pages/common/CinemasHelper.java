@@ -219,14 +219,35 @@ public class CinemasHelper extends BasePage {
         log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> '{}'", targetCinema);
 
         if (isOnAlimentosHome()) {
-            String currentCinema = getCurrentCinemaName();
-            if (currentCinema != null && !currentCinema.isBlank()) {
-                log.info("[CinemasHelper] Cine actual detectado: '{}'", currentCinema);
-                if (cinemaMatches(currentCinema, targetCinema)) {
-                    log.info("[CinemasHelper] El cine ya coincide con '{}' — continuando flujo.", targetCinema);
-                    return;
+
+            // Si el chip de "sin selección" NO es visible → ya hay un cine seleccionado
+            boolean cinemaSelected = !isVisibleNow(CINES_SIN_SELECCION);
+
+            if (cinemaSelected) {
+                // Intento 1: leer el nombre del cine del chip
+                String currentCinema = getCurrentCinemaName();
+
+                if (currentCinema != null && !currentCinema.isBlank()) {
+                    log.info("[CinemasHelper] Cine actual detectado: '{}'", currentCinema);
+                    if (cinemaMatches(currentCinema, targetCinema)) {
+                        log.info("[CinemasHelper] El cine ya coincide con '{}' — continuando flujo.", targetCinema);
+                        return;
+                    }
+                    log.info("[CinemasHelper] Cambiando cine de '{}' a '{}'", currentCinema, targetCinema);
+                } else {
+                    // Intento 2: el nombre no se pudo leer, pero verificamos si el texto
+                    //            del cine objetivo ya es visible en el chip/encabezado
+                    String xpathTarget = "//android.widget.TextView[contains(@text,'"
+                            + escapeXpath(targetCinema) + "')]"
+                            + " | //android.view.View[contains(@content-desc,'"
+                            + escapeXpath(targetCinema) + "')]";
+                    if (isVisibleNow(By.xpath(xpathTarget))) {
+                        log.info("[CinemasHelper] Cine '{}' ya visible en pantalla — continuando flujo.", targetCinema);
+                        return;
+                    }
+                    log.info("[CinemasHelper] Hay cine seleccionado pero no se pudo leer su nombre — " +
+                             "procediendo con selección de '{}'.", targetCinema);
                 }
-                log.info("[CinemasHelper] Cambiando cine seleccionado de '{}' a '{}'", currentCinema, targetCinema);
             } else {
                 log.info("[CinemasHelper] No hay cine seleccionado — configurando: '{}'", targetCinema);
             }
