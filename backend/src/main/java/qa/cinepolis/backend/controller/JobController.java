@@ -41,6 +41,7 @@ public class JobController {
         job.put("device",             exec.getDevice());
         job.put("country",            exec.getCountry());
         job.put("videoEnabled",       exec.isVideoEnabled());
+        job.put("testClass",          exec.getTestClass());
         job.put("sendMail",           reportEmailStore.isEnabled());
         job.put("reportEmails",       reportEmailStore.getMailTo());
         return ResponseEntity.ok(job);

@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
-import qa.cinepolis.backend.model.RunRequest;
 import qa.cinepolis.backend.model.ScheduledJob;
 import qa.cinepolis.backend.store.ScheduledJobStore;
 
@@ -22,13 +21,13 @@ public class SchedulerService {
     private static final Logger log = LoggerFactory.getLogger(SchedulerService.class);
 
     private final ScheduledJobStore store;
-    private final TestRunnerService runner;
+    private final ExecutionService  execService;
     private final ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     private final Map<String, ScheduledFuture<?>> futures = new ConcurrentHashMap<>();
 
-    public SchedulerService(ScheduledJobStore store, TestRunnerService runner) {
-        this.store = store;
-        this.runner = runner;
+    public SchedulerService(ScheduledJobStore store, ExecutionService execService) {
+        this.store       = store;
+        this.execService = execService;
     }
 
     @PostConstruct
@@ -102,24 +101,25 @@ public class SchedulerService {
     }
 
     private void executeJob(ScheduledJob job) {
-        log.info("[SchedulerService] Job ejecutado automáticamente: '{}' suite='{}'",
+        log.info("[SchedulerService] Job encolado automáticamente: '{}' suite='{}'",
                  job.getName(), job.getSuite());
         job.setLastRun(Instant.now());
-        job.setLastStatus("TRIGGERED");
         store.save(job);
 
-        RunRequest req = new RunRequest();
-        req.setSuite(job.getSuite());
-        req.setDevice(job.getDevice());
-        req.setEnvironment(job.getEnvironment());
-        req.setCountry(job.getCountry() != null ? job.getCountry() : "mexico");
-        req.setVideoEnabled(job.isVideoEnabled());
-        req.setTestClass(job.getTestClass());
-
         try {
-            runner.run(req);
+            execService.create(
+                job.getSuite(),
+                job.getEnvironment(),
+                job.getDevice(),
+                job.getCountry() != null ? job.getCountry() : "mexico",
+                job.isVideoEnabled(),
+                job.getTestClass()
+            );
+            job.setLastStatus("QUEUED");
+            store.save(job);
+            log.info("[SchedulerService] Job '{}' encolado correctamente", job.getName());
         } catch (Exception e) {
-            log.error("[SchedulerService] Error disparando job '{}': {}", job.getName(), e.getMessage());
+            log.error("[SchedulerService] Error encolando job '{}': {}", job.getName(), e.getMessage());
             job.setLastStatus("ERROR");
             store.save(job);
         }
