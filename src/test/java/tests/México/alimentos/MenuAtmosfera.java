@@ -7,6 +7,7 @@ import org.junit.jupiter.api.*;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
 import pages.common.CinemasHelper;
+import utils.Cinema;
 import utils.TestSteps;
 
 /**
@@ -129,6 +130,7 @@ public class MenuAtmosfera extends BaseTest {
     @Order(1)
     @DisplayName("Té Caliente - Grande Menta Manzanilla")
     @Story("Bebidas Calientes")
+    @Cinema("Patio Santa Fe")
     void comprarTeCalienteManzanillaPatioSantaFe() {
         new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Patio Santa Fe");
         TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
@@ -145,10 +147,11 @@ public class MenuAtmosfera extends BaseTest {
         }, driver);
     }
 
-        @Test
+    @Test
     @Order(2)
     @DisplayName("Té Caliente - Grande Menta Manzanilla")
     @Story("Bebidas Calientes")
+    @Cinema("Arcos Bosques")
     void comprarTeCalienteManzanillaArcosBosques() {
         new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Arcos Bosques");
         TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);

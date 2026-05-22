@@ -1,6 +1,7 @@
 package utils;
 
 import io.appium.java_client.android.AndroidDriver;
+import io.qameta.allure.Allure;
 import org.junit.jupiter.api.extension.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +72,18 @@ public class PdfReportExtension implements
         EXECUTED_TESTS.append(testName);
 
         TestSteps.startScenario(testName);
+
+        // Register cinema from @Cinema annotation BEFORE @BeforeEach runs, so it's
+        // captured in the report even when setup steps fail before ensureCinemaSelectedFromAlimentos().
+        context.getTestMethod().ifPresent(method -> {
+            Cinema ann = method.getAnnotation(Cinema.class);
+            if (ann != null && !ann.value().isBlank()) {
+                TestSteps.setCinema(ann.value());
+                try { Allure.label("cinema", ann.value()); } catch (Exception ignored) {}
+                log.debug("[Test] Cinema from @Cinema annotation: {}", ann.value());
+            }
+        });
+
         log.info("[Test] Starting: {}", testName);
     }
 
