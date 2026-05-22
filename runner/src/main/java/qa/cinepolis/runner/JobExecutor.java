@@ -624,32 +624,35 @@ public class JobExecutor {
         List<String> pidsToKill = new ArrayList<>();
 
         try {
-            // wmic handles quoting reliably; avoids PowerShell escaping issues
-            Process wmic = new ProcessBuilder(
-                    "wmic", "process", "where", "name='java.exe'",
-                    "get", "processid,commandline", "/format:csv")
+            // Get-CimInstance replaces wmic (removed in Windows 11 22H2+).
+            // Uses Where-Object pipeline with single-quoted literals to avoid
+            // the double-quote escaping issues of -Filter string.
+            String script =
+                "$myPid = " + currentPid + "; " +
+                "Get-CimInstance Win32_Process | " +
+                "Where-Object { $_.Name -eq 'java.exe' -and " +
+                "  $_.ProcessId -ne $myPid -and " +
+                "  $_.CommandLine -like '*gradle*' -and " +
+                "  $_.CommandLine -notlike '*appium*' } | " +
+                "Select-Object -ExpandProperty ProcessId";
+
+            Process ps = new ProcessBuilder(
+                    "powershell", "-NonInteractive", "-NoProfile", "-Command", script)
                     .redirectErrorStream(true)
                     .start();
 
-            String output = new String(wmic.getInputStream().readAllBytes());
-            wmic.waitFor(8, TimeUnit.SECONDS);
+            String output = new String(ps.getInputStream().readAllBytes()).trim();
+            ps.waitFor(10, TimeUnit.SECONDS);
 
             for (String line : output.split("\\r?\\n")) {
-                if (line.isBlank() || line.startsWith("Node")) continue;
-                // CSV columns: Node,CommandLine,ProcessId
-                int lastComma = line.lastIndexOf(',');
-                if (lastComma < 0) continue;
-                String pid     = line.substring(lastComma + 1).trim();
-                String cmdLine = line.substring(0, lastComma);
-
-                if (pid.isEmpty() || pid.equals(String.valueOf(currentPid))) continue;
-                if (cmdLine.contains("gradle") && !cmdLine.contains("appium")) {
+                String pid = line.trim();
+                if (!pid.isEmpty() && pid.matches("\\d+")) {
                     pidsToKill.add(pid);
                 }
             }
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
-                    "⚠️ wmic no disponible, omitiendo limpieza de procesos: " + e.getMessage());
+                    "⚠️ No se pudo consultar procesos Java: " + e.getMessage());
         }
 
         for (String pid : pidsToKill) {
