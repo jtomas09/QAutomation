@@ -378,8 +378,11 @@ public class SelectorPage extends BasePage {
     }
 
     public void buscarTeCaliente() {
-        this.click(By.xpath("//android.widget.TextView[@text='Buscar']"));
-        this.click(By.xpath("//android.widget.EditText/android.view.View[3]"));
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Rounded.Search"
+        this.click(By.xpath("//android.view.View[@content-desc='Rounded.Search']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
         this.driver.executeScript("mobile: type", Map.of("text", "té caliente"));
         this.sleep(1500);
         this.click(By.xpath("//android.widget.TextView[@text='Té caliente']"));
