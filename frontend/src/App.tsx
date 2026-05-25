@@ -115,15 +115,15 @@ export default function App() {
                   disabled={state.status === 'running'}
                   activeId={state.activeSuite}
                   onBack={() => setDrillSuite(null)}
-                  onRun={id => runTest(id, env, effectiveDevice, country)}
-                  onRunAll={() => runTest(drillSuite, env, effectiveDevice, country)}
+                  onRun={id => runTest(id, env, effectiveDevice, country, videoEnabled)}
+                  onRunAll={() => runTest(drillSuite, env, effectiveDevice, country, videoEnabled)}
                 />
               )
             }
 
             const handleCardRun = (id: string) => {
               if (SUITE_TESTS[id]) setDrillSuite(id)
-              else runTest(id, env, effectiveDevice, country)
+              else runTest(id, env, effectiveDevice, country, videoEnabled)
             }
 
             // No suites defined for this country yet

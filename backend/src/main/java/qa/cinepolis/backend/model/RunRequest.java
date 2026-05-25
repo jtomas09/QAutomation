@@ -12,7 +12,10 @@ public class RunRequest {
     private String environment;
 
     private String  country;
+
+    @JsonProperty("videoEnabled")
     private boolean videoEnabled;
+
     private String  testClass;
 
     public String  getSuite()       { return suite; }

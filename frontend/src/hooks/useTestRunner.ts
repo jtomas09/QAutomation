@@ -50,6 +50,7 @@ export function useTestRunner() {
 
     try {
       // Step 1: POST /api/run → get executionId
+      console.log('[runTest] postRun payload:', { suite: suiteId, env, device, country, videoEnabled })
       const { executionId } = await postRun({ suite: suiteId, env, device, country, videoEnabled })
       executionIdRef.current = executionId
       setState(prev => ({ ...prev, executionId }))
