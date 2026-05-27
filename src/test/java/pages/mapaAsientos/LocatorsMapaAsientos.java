@@ -11,12 +11,17 @@ public class LocatorsMapaAsientos {
     //   · Premium : filas con letras (A,B,C…), asientos con etiqueta "PR"
     // Busca el View[@enabled='true'] que contiene directamente un TextView
     // numérico O con texto "PR", evitando contenedores de etiqueta de fila.
+    // España — filas numéricas (1,2,3…) y asientos con número o etiqueta "PR".
+    // La etiqueta de fila (ej. "1") también tiene @enabled='true', por lo que se
+    // distingue por profundidad: su abuelo es el row container (muchos hijos View),
+    // mientras que el abuelo de un asiento real es un wrapper con un solo hijo View.
     public static final By PRIMER_ASIENTO_DISPONIBLE_ESPANA = By.xpath(
         "(//android.widget.TextView[contains(@text,'Pantalla')]" +
-        "/following::android.view.View[@enabled='true' and (" +
-            "android.widget.TextView[string(number(@text)) != 'NaN'] or " +
-            "android.widget.TextView[@text='PR']" +
-        ")])[1]");
+        "/following::android.widget.TextView[" +
+            "(string(number(@text)) != 'NaN' or @text='PR')" +
+            " and @enabled='true'" +
+            " and count(../../android.view.View) = 1" +
+        "]/..)[1]");
     public static final By PANTALLA_MAPA = By.xpath("//android.widget.TextView[contains(@text, 'Pantalla')]");
     public static final By BOTON_CONTINUAR_MAPA = By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[2]/android.view.View[2]/android.widget.Button");
     public static final By TAB_SIGUIENTE_HORARIO = By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View/android.view.View[1]/android.view.View/android.view.View/android.view.View[2]");
@@ -24,7 +29,7 @@ public class LocatorsMapaAsientos {
 
 
 //SELECTOR DE BOLETOS
-    public static final By AUMENTAR_BOLETO_ESTANDAR = By.xpath("(//android.view.View[@content-desc=\"Añadir\"])[1]");
+    public static final By AUMENTAR_BOLETO_ESTANDAR = By.xpath("(//android.view.View[@enabled='true']/android.view.View[@content-desc=\"Añadir\"])[1]");
     public static final By DISMINUIR_BOLETO_ESTANDAR = By.xpath("(//android.view.View[@content-desc=\"Menos\"])[1]");
     public static final By AUMENTAR_BOLETO_NIÑO = By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View[5]/android.view.View[2]/android.widget.Button");
     public static final By DISMINUIR_BOLETO_NIÑO = By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View[5]/android.view.View[1]/android.widget.Button");

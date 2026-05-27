@@ -9,6 +9,7 @@ import io.qameta.allure.Allure;
 import pages.carritoCompras.SelectorsCarrito;
 import pages.common.BasePage;
 import static pages.checkOut.LocatorsCheckOut.*;
+import static pages.alimentos.LocatorsAlimentos.TÍTULO_MODAL_VINCULACION_ESPAÑA;
 
 public class SelectorsCheckOut extends BasePage {
     public static final int FAST_VISIBLE_SECONDS = 2;
@@ -34,6 +35,19 @@ public class SelectorsCheckOut extends BasePage {
 
     public void validarPantallaCheckout() {
         validarElementoVisible(ENCABEZADO_CHECKOUT);
+    }
+
+    public void validarSinModalOrderLinkingEspaña() {
+        aceptarDisclaimerSiPresente();
+        sleep(1500);
+        if (isVisibleQuick(TÍTULO_MODAL_VINCULACION_ESPAÑA)) {
+            takeScreenshot("Modal de vinculación mostrado inesperadamente - Test 10");
+            Allure.step("❌ El modal de vinculación de pedidos España se mostró al seleccionar un alimento estándar");
+            org.junit.jupiter.api.Assertions.fail(
+                "El modal de vinculación se mostró en un flujo donde no debería aparecer");
+        }
+        waitForVisibility(ENCABEZADO_CHECKOUT);
+        Allure.step("✅ Pantalla de checkout alcanzada sin mostrar el modal de vinculación de pedidos");
     }
 
 

@@ -11,10 +11,12 @@ import io.appium.java_client.android.AndroidDriver;
 import io.qameta.allure.Allure;
 import pages.common.BasePage;
 
-import static pages.alimentos.AlimentosLocators.*;
+import static pages.alimentos.LocatorsAlimentos.*;
 
 public class SelectorsAlimentos extends BasePage {
     public static final int FAST_VISIBLE_SECONDS = 2;
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SelectorsAlimentos.class);
 
     public SelectorsAlimentos(AndroidDriver driver) {
         super(driver);
@@ -32,20 +34,12 @@ public class SelectorsAlimentos extends BasePage {
 
     public void clickTabSnacks() {
         waitForVisibility(INPUT_FOLIO_ALIMENTOS);
-        // Desplazamiento lateral dentro del contenedor de pestañas
+        int cy = obtenerBarraCategoriasY();
         for (int i = 0; i < 5; i++) {
-            try {
-                WebElement container = driver.findElement(resolverBarraCategorias());
-                int left  = container.getLocation().getX() + 20;
-                int right = container.getLocation().getX() + container.getSize().getWidth() - 20;
-                int cy    = container.getLocation().getY() + container.getSize().getHeight() / 2;
-                swipeW3C(right, cy, left, cy, 600L);
-                sleep(400);
-            } catch (Exception ignored) {}
-
+            fastSwipeLeftAtY(cy);
+            sleep(400);
             if (clickIfPresent(TAB_SNACKS)) return;
         }
-
         throw new AssertionError("FAST-FAIL: Tab 'Snacks' NO encontrado tras desplazamiento horizontal en la barra de pestañas.");
     }
 
@@ -64,6 +58,39 @@ public class SelectorsAlimentos extends BasePage {
         this.click(PRIMER_RESULTADO_BUSQUEDA); // primer resultado de búsqueda
     }
 
+// VINCULACIÓN ALIMENTOS PREMIUM ESPAÑA
+
+    public void buscarAlimentoPremium() {
+        this.click(BUSCADOR_ALIMENTOS);
+        this.click(INPUT_BUSCADOR_ALIMENTOS);
+        this.driver.executeScript("mobile: type", Map.of("text", "burguer doble"));
+        sleep(1500);
+        this.click(PRIMER_RESULTADO_BUSQUEDA); // primer resultado de búsqueda
+    }   
+
+    public void buscarAlimentoEstandar() {
+        this.click(BUSCADOR_ALIMENTOS);
+        this.click(INPUT_BUSCADOR_ALIMENTOS);
+        this.driver.executeScript("mobile: type", Map.of("text", "refresco"));
+        sleep(1500);
+        this.click(PRIMER_RESULTADO_BUSQUEDA); // primer resultado de búsqueda
+    }  
+
+    public void seleccionarAlimentoPremium() {
+        buscarAlimentoPremium();
+        completarPersonalizacion();
+    }
+
+    public void seleccionarAlimentoEstandarEspaña() {
+        buscarAlimentoEstandar();
+        completarPersonalizacion();
+    }
+
+    public void validarModalOrderLinkingEspaña() {
+        validarElementoVisible(TÍTULO_MODAL_VINCULACION_ESPAÑA);
+        validarElementoVisible(BOTON_LLEVAR_A_BUTACA);
+        Allure.step("✅ Modal de vinculación de pedidos España mostrado correctamente");
+    }
 
     public void clickExtraQueso() {
         if (clickIfPresent(EXTRA_QUESO)) return;
@@ -90,33 +117,115 @@ public class SelectorsAlimentos extends BasePage {
     }
 
     public void vincularOrdenVIPSinSesion() {
-        this.click(BOTON_BUSCAR_FUNCION);
-        this.click(BOTON_ELEGIR_MANUALMENTE);
-        this.click(ELEGIR_PELICULA);
+        scrollYClick(BOTON_BUSCAR_FUNCION);
+        scrollYClick(BOTON_ELEGIR_MANUALMENTE);
+        scrollYClick(ELEGIR_PELICULA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(ELEGIR_HORA);
+        scrollYClick(ELEGIR_HORA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(ELEGIR_FILA);
+        scrollYClick(ELEGIR_FILA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(ELEGIR_NUMERO);
+        scrollYClick(ELEGIR_NUMERO);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(BOTON_VINCULAR_ORDEN);
-        this.click(BOTON_CONFIRMAR_VINCULACION);
+        scrollYClick(BOTON_VINCULAR_ORDEN);
+        scrollYClick(BOTON_CONFIRMAR_VINCULACION);
+        sleep(1500);
+
+        if (isVisibleQuick(ALERTA_ERROR_VINCULACION)) {
+            String msg = "Hubo un error al vincular tu función";
+            takeScreenshot("Error de vinculación - VIP");
+            log.error("[VincularVIP] Error de vinculación detectado: {}", msg);
+            Allure.step("❌ Error de vinculación detectado: " + msg);
+            org.junit.jupiter.api.Assertions.fail("Error de vinculación VIP: " + msg);
+        }
+
+        By errorInesperado = By.xpath(
+            "//android.widget.TextView[contains(@text,'error') or contains(@text,'Error')" +
+            " or contains(@text,'falló') or contains(@text,'no se pudo')]");
+        if (isVisibleQuick(errorInesperado)) {
+            String textoError = "";
+            try { textoError = driver.findElement(errorInesperado).getText(); } catch (Exception ignored) {}
+            takeScreenshot("Error inesperado de vinculación - VIP");
+            log.error("[VincularVIP] Error inesperado detectado: {}", textoError);
+            Allure.step("❌ Error inesperado en vinculación VIP: " + textoError);
+            org.junit.jupiter.api.Assertions.fail("Error inesperado al vincular la orden VIP: " + textoError);
+        }
     }
 
+public void vincularOrdenEspaña() {
+        scrollYClick(BOTON_LLEVAR_A_BUTACA);
+        scrollYClick(ELEGIR_PELICULA);
+        this.click(PRIMERA_OPCION_DESPLEGABLE);
+        scrollYClick(ELEGIR_HORA);
+        this.click(PRIMERA_OPCION_DESPLEGABLE);
+        scrollYClick(ELEGIR_FILA);
+        this.click(PRIMERA_FILA_HABILITADA_PREMIUM);
+        scrollYClick(ELEGIR_NUMERO_DE_BUTACA);
+        this.click(PRIMERA_OPCION_DESPLEGABLE);
+        scrollYClick(BOTON_VINCULAR_ORDEN);
+        scrollYClick(BOTON_CONFIRMAR_VINCULACION);
+        sleep(1500);
+
+        if (isVisibleQuick(ALERTA_ERROR_VINCULACION)) {
+            String msg = "Hubo un error al vincular tu función";
+            takeScreenshot("Error de vinculación - España");
+            log.error("[VincularEspaña] Error de vinculación detectado: {}", msg);
+            Allure.step("❌ Error de vinculación detectado: " + msg);
+            org.junit.jupiter.api.Assertions.fail("Error de vinculación: " + msg);
+        }
+
+        By errorInesperado = By.xpath(
+            "//android.widget.TextView[contains(@text,'error') or contains(@text,'Error')" +
+            " or contains(@text,'falló') or contains(@text,'no se pudo')]");
+        if (isVisibleQuick(errorInesperado)) {
+            String textoError = "";
+            try { textoError = driver.findElement(errorInesperado).getText(); } catch (Exception ignored) {}
+            takeScreenshot("Error inesperado de vinculación - España");
+            log.error("[VincularEspaña] Error inesperado detectado: {}", textoError);
+            Allure.step("❌ Error inesperado en vinculación: " + textoError);
+            org.junit.jupiter.api.Assertions.fail("Error inesperado al vincular la orden: " + textoError);
+        }
+    }
+
+    public void saltarVinculacionEspaña() {
+        sleep(1500);
+        if (isVisibleQuick(TÍTULO_MODAL_VINCULACION_ESPAÑA)) {
+            Allure.step("ℹ️ Modal de vinculación detectado – saltando vinculación para continuar al checkout");
+            click(BOTON_SALTAR_VINCULACION_ESPAÑA);
+        }
+    }
+
+//VINCULACION DE ORDEN DE ALIMENTOS EN CHILE
+
     public void vincularOrdenChile() {
-        this.click(BOTON_BUSCAR_FUNCION);
-        this.click(BOTON_ELEGIR_MANUALMENTE);
-        this.click(ELEGIR_PELICULA);
+        By tituloPantalla = By.xpath("//android.widget.TextView[@text='Vinculación de pedidos']");
+        boolean pantallaVisible = isVisibleQuick(tituloPantalla); 
+
+        if (!pantallaVisible) {
+            takeScreenshot("Pantalla de vinculación no encontrada");
+            Allure.step("❌ La pantalla de vinculación de orden no se muestra");
+            org.junit.jupiter.api.Assertions.fail(
+                "La pantalla 'Vinculación de pedidos' no se muestra en este cine");
+            return;
+        }
+
+        Allure.step("✅ Pantalla de vinculación de orden mostrada correctamente");
+        scrollYClick(ELEGIR_PELICULA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(ELEGIR_HORA);
+        scrollYClick(ELEGIR_HORA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(ELEGIR_FILA);
+        scrollYClick(ELEGIR_FILA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(ELEGIR_NUMERO);
+        scrollYClick(ELEGIR_NUMERO_BUTACA);
         this.click(PRIMERA_OPCION_DESPLEGABLE);
-        this.click(BOTON_VINCULAR_ORDEN);
-        this.click(BOTON_CONFIRMAR_VINCULACION);
+        scrollYClick(BOTON_BUSCAR);
+        scrollYClick(BOTON_CONFIRMAR_VINCULACION);
+    }
+
+
+    private void scrollYClick(By locator) {
+        ensureVisibleNoClick(locator, 5);
+        this.click(locator);
     }
 
 
@@ -152,7 +261,7 @@ public class SelectorsAlimentos extends BasePage {
 
     // Tabs de la barra que no son categorías de productos y deben ignorarse
     private static final java.util.Set<String> TABS_EXCLUIDOS = new java.util.HashSet<>(
-        java.util.Arrays.asList("Club Cinépolis", "Promocionales", "Buscar"));
+        java.util.Arrays.asList("Club Cinépolis", "Promocionales", "Buscar", "Mis promociones Movie Yelmo", "Gafas 3D"));
 
     /**
      * Paso 1: recorre la barra de categorías de izquierda a derecha recopilando
@@ -163,16 +272,12 @@ public class SelectorsAlimentos extends BasePage {
     public void seleccionarTabAleatorio() {
         // Calcular Y central de la barra con retry: Compose puede recomponer el nodo
         // justo entre findElement() y getLocation(), dejando la referencia stale.
-        int barraY = 0;
-        int barraHalf = 0;
-        for (int r = 0; r < 3; r++) {
-            try {
-                WebElement b = driver.findElement(resolverBarraCategorias());
-                barraHalf = b.getSize().getHeight() / 2;
-                barraY    = b.getLocation().getY() + barraHalf;
-                break;
-            } catch (Exception ignored) { if (r < 2) sleep(400); }
-        }
+        // Usar el mínimo Y entre todas las instancias de textos de tab conocidos.
+        // Compose renderiza el contenido (sección "Destacados") antes que la barra de tabs,
+        // por lo que el primer resultado en DOM puede ser el título de sección (Y alto)
+        // en lugar del tab real (Y bajo). El mínimo Y siempre corresponde al tab.
+        int barraY    = encontrarTabBarY();
+        int barraHalf = 30;
 
         // Resetear al inicio y esperar a que la barra se estabilice
         for (int i = 0; i < 4; i++) fastSwipeRightAtY(barraY);
@@ -192,13 +297,17 @@ public class SelectorsAlimentos extends BasePage {
         for (int intento = 0; intento < 10; intento++) {
             int antes = tabs.size();
             try {
-                for (WebElement tv : safeFindElements(By.className("android.widget.TextView"))) {
+                List<WebElement> allTvs = safeFindElements(By.className("android.widget.TextView"));
+                for (WebElement tv : allTvs) {
                     try {
-                        if (Math.abs(tv.getLocation().getY() - barraY) > barraHalf + 10) continue;
+                        int tvY = tv.getLocation().getY();
+                        int distY = Math.abs(tvY - barraY);
                         String texto = tv.getText();
-                        if (texto != null && !texto.isBlank()
-                                && !TABS_EXCLUIDOS.contains(texto)
-                                && !tabs.contains(texto))
+                        boolean filtradoPorY = distY > barraHalf + 10;
+                        boolean excluido = TABS_EXCLUIDOS.contains(texto);
+                        boolean yaEnLista = tabs.contains(texto);
+                        if (filtradoPorY) continue;
+                        if (texto != null && !texto.isBlank() && !excluido && !yaEnLista)
                             tabs.add(texto);
                     } catch (Exception ignored) {}
                 }
@@ -262,7 +371,9 @@ public class SelectorsAlimentos extends BasePage {
         // Esperar hasta 10 s a que aparezca la barra de categorías,
         // distinguiendo dos escenarios de fallo distintos.
         long limite = System.currentTimeMillis() + 10_000;
+        int ciclo = 0;
         while (System.currentTimeMillis() < limite) {
+            ciclo++;
             // Escenario 1: el cine no tiene alimentos activos → SKIP
             if (isVisibleQuick(MENU_NO_DISPONIBLE)) {
                 takeScreenshot("Menú de alimentos no disponible");
@@ -271,13 +382,14 @@ public class SelectorsAlimentos extends BasePage {
                     "El menú de alimentos no está disponible en este cine");
                 return;
             }
-            // Barra de categorías visible → menú cargado correctamente
-            if (isVisibleQuick(resolverBarraCategorias())) break;
+            By barraBy = resolverBarraCategorias();
+            if (isVisibleQuick(barraBy)) break;
             sleep(500);
         }
 
         // Escenario 2: el menú no cargó (error de servicio o intermitencia) → FAIL
-        if (!isVisibleQuick(resolverBarraCategorias())) {
+        By barraFinal = resolverBarraCategorias();
+        if (!isVisibleQuick(barraFinal)) {
             takeScreenshot("Error – menú de alimentos no cargó");
             Allure.step("❌ El menú de alimentos no cargó tras 10 s – posible error de servicio o intermitencia");
             org.junit.jupiter.api.Assertions.fail(
@@ -285,6 +397,7 @@ public class SelectorsAlimentos extends BasePage {
             return;
         }
 
+        log.info("[Alimentos] Barra de categorías detectada, iniciando recolección de categorías para seleccionar una al azar");
         seleccionarTabAleatorio();
         seleccionarProductoEnSeccionActual();
         boolean exito = completarPersonalizacion();
@@ -421,6 +534,7 @@ public class SelectorsAlimentos extends BasePage {
                     int y = (Integer.parseInt(m.group(2)) + Integer.parseInt(m.group(4))) / 2;
                     int x = (Integer.parseInt(m.group(1)) + Integer.parseInt(m.group(3))) / 2;
                     if (Math.abs(y - carouselY) <= toleranciaY && x > 0 && x < screenW) {
+                        sleep(300); // dejar que el carrusel termine de asentarse antes del tap
                         tapW3C(x, y);
                         sleep(500);
                         return true;
@@ -529,7 +643,7 @@ public class SelectorsAlimentos extends BasePage {
         sleep(600);
         click(BOTON_IR_ATRAS_ALIMENTOS);
         sleep(800);
-        clickIfPresent(BOTON_CONFIRMAR_SALIR);
+        clickIfPresent(BOTON_CONFIRMAR_SALIR_ALIMENTOS);
         sleep(600);
         return true;
     }
@@ -543,12 +657,112 @@ public class SelectorsAlimentos extends BasePage {
         return false;
     }
 
+    /**
+     * Devuelve el locator más estable disponible para detectar la barra de categorías.
+     * El orden refleja qué tab aparece primero según el país/cadena de cines.
+     */
     private By resolverBarraCategorias() {
+        // Estrategia 1: "Club Cinépolis" — primer tab en la mayoría de mercados
+        By byClub = By.xpath("//android.widget.TextView[@text='Club Cinépolis']");
         try {
-            if (!driver.findElements(BARRA_CATEGORIAS_ALIMENTOS).isEmpty())
+            if (!driver.findElements(byClub).isEmpty()) {
+                System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 1: 'Club Cinépolis' encontrado");
+                return byClub;
+            } else { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 1: 'Club Cinépolis' NO encontrado"); }
+        } catch (Exception e) { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 1 excepción: " + e.getMessage()); }
+
+        // Estrategia 2: "Destacados"
+        By byDestacados = By.xpath("//android.widget.TextView[@text='Destacados']");
+        try {
+            if (!driver.findElements(byDestacados).isEmpty()) {
+                System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 2: 'Destacados' encontrado");
+                return byDestacados;
+            } else { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 2: 'Destacados' NO encontrado"); }
+        } catch (Exception e) { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 2 excepción: " + e.getMessage()); }
+
+        // Estrategia 3: "Promociones"
+        try {
+            if (!driver.findElements(BARRA_CATEGORIAS_ALIMENTOS_PROMO).isEmpty()) {
+                System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 3: 'Promociones' encontrado");
+                return BARRA_CATEGORIAS_ALIMENTOS_PROMO;
+            } else { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 3: 'Promociones' NO encontrado"); }
+        } catch (Exception e) { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 3 excepción: " + e.getMessage()); }
+
+        // Estrategia 4: "Coleccionables"
+        By byColeccionables = By.xpath("//android.widget.TextView[@text='Coleccionables']");
+        try {
+            if (!driver.findElements(byColeccionables).isEmpty()) {
+                System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 4: 'Coleccionables' encontrado");
+                return byColeccionables;
+            } else { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 4: 'Coleccionables' NO encontrado"); }
+        } catch (Exception e) { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 4 excepción: " + e.getMessage()); }
+
+        // Estrategia 5: "Mis promociones Movie Yelmo"
+        By byYelmo = By.xpath("//android.widget.TextView[@text='Mis promociones Movie Yelmo']");
+        try {
+            if (!driver.findElements(byYelmo).isEmpty()) {
+                System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 5: 'Mis promociones Movie Yelmo' encontrado");
+                return byYelmo;
+            } else { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 5: 'Mis promociones Movie Yelmo' NO encontrado"); }
+        } catch (Exception e) { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 5 excepción: " + e.getMessage()); }
+
+        // Estrategia 6: otros tabs de categoría genéricos
+        for (String tab : new String[]{"Snacks", "Combos", "Bebidas", "Palomitas", "Postres"}) {
+            By by = By.xpath("//android.widget.TextView[@text='" + tab + "']");
+            try {
+                if (!driver.findElements(by).isEmpty()) {
+                    System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 6: tab '" + tab + "' encontrado");
+                    return by;
+                }
+            } catch (Exception ignored) {}
+        }
+        System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 6: ningún tab genérico encontrado");
+
+        // Último recurso: localizador estructural original
+        try {
+            if (!driver.findElements(BARRA_CATEGORIAS_ALIMENTOS).isEmpty()) {
+                System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 7: localizador estructural OK");
                 return BARRA_CATEGORIAS_ALIMENTOS;
-        } catch (Exception ignored) {}
+            } else { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 7: localizador estructural VACÍO"); }
+        } catch (Exception e) { System.out.println("[DEBUG-ALIMENTOS] resolverBarra → estrategia 7 excepción: " + e.getMessage()); }
+
+        System.out.println("[DEBUG-ALIMENTOS] resolverBarra → todas las estrategias fallaron, devolviendo PROMO como último recurso");
         return BARRA_CATEGORIAS_ALIMENTOS_PROMO;
+    }
+
+    /**
+     * Obtiene la coordenada Y central de la barra de categorías de alimentos
+     * delegando a encontrarTabBarY().
+     */
+    private int obtenerBarraCategoriasY() {
+        return encontrarTabBarY();
+    }
+
+    /**
+     * Calcula la Y central de la barra de tabs buscando el mínimo Y entre todas
+     * las instancias de textos de tab conocidos.
+     *
+     * Compose renderiza el contenido (ej. sección "Destacados") antes que la barra
+     * de navegación de tabs en el árbol de accesibilidad, por lo que driver.findElement
+     * devuelve el título de sección (Y alto) en lugar del tab real (Y bajo).
+     * Tomando el mínimo Y siempre se obtiene el tab, no el heading de sección.
+     */
+    private int encontrarTabBarY() {
+        int minY = Integer.MAX_VALUE;
+        String[] tabTexts = {"Club Cinépolis", "Destacados", "Coleccionables",
+                             "Mis promociones Movie Yelmo", "Snacks", "Combos",
+                             "Bebidas", "Palomitas", "Postres", "Promociones"};
+        for (String text : tabTexts) {
+            try {
+                for (WebElement el : driver.findElements(
+                        By.xpath("//android.widget.TextView[@text='" + text + "']"))) {
+                    int y = el.getLocation().getY();
+                    if (y > 0 && y < minY) minY = y;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (minY < Integer.MAX_VALUE) return minY + 30; // +30 px ≈ mitad de la altura de un tab
+        return (int) (driver.manage().window().getSize().getHeight() * 0.20);
     }
 
     private void seleccionarOpcionesAlAzar() {

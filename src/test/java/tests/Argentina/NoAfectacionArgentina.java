@@ -16,6 +16,7 @@ import pages.carritoCompras.SelectorsCarrito;
 import pages.checkOut.SelectorsCheckOut;
 import pages.homeCartelera.SelectorsHome;
 import pages.mapaAsientos.SelectorsMapaAsientos;
+import pages.common.CinemasHelper;
 import pages.seleccionCines.SelectorsCines;
 import utils.TestSteps;
 
@@ -36,6 +37,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @BeforeAll
     void configurarPais() {
         driver = DriverFactory.getDriver();
+        new CinemasHelper(driver).dismissLocationPopupIfPresent();
         new SelectorsHome(driver).cambiarPaisArgentina();
     }
 
@@ -56,9 +58,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraTicketAvellaneda() {
         TestSteps.run("Compra de boleto en cine Avellaneda - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineAvellaneda();
-            cines.validarTabCineAvellaneda();
+            cines.ensureCineAvellanedaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -81,9 +81,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraMixAvellaneda() {
         TestSteps.run("Compra de boleto y alimento en cine Avellaneda - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineAvellaneda();
-            cines.validarTabCineAvellaneda();
+            cines.ensureCineAvellanedaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -109,9 +107,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraFoodAvellaneda() {
         TestSteps.run("Compra de alimento en cine Avellaneda - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineAvellaneda();
-            cines.validarTabCineAvellaneda();
+            cines.ensureCineAvellanedaSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -131,9 +127,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraTicketLujan() {
         TestSteps.run("Compra de boleto en cine Lujan - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineLujan();
-            cines.validarTabCineLujan();
+            cines.ensureCineLujanSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -156,9 +150,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraMixLujan() {
         TestSteps.run("Compra de boleto y alimento en cine Lujan - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineLujan();
-            cines.validarTabCineLujan();
+            cines.ensureCineLujanSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -183,9 +175,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraFoodLujan() {
         TestSteps.run("Compra de alimento en cine Lujan - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineLujan();
-            cines.validarTabCineLujan();
+            cines.ensureCineLujanSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -207,9 +197,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraTicketMerlo() {
         TestSteps.run("Compra de boleto en cine Merlo - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineMerlo();
-            cines.validarTabCineMerlo();
+            cines.ensureCineMerloSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -232,9 +220,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraMixMerlo() {
         TestSteps.run("Compra de boleto y alimento en cine Merlo - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineMerlo();
-            cines.validarTabCineMerlo();
+            cines.ensureCineMerloSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -260,9 +246,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraFoodMerlo() {
         TestSteps.run("Compra de alimento en cine Merlo - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineMerlo();
-            cines.validarTabCineMerlo();
+            cines.ensureCineMerloSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -282,9 +266,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraTicketPilar() {
         TestSteps.run("Compra de boleto en cine Pilar - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCinePilar();
-            cines.validarTabCinePilar();
+            cines.ensureCinePilarSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -307,9 +289,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraMixPilar() {
         TestSteps.run("Compra de boleto y alimento en cine Pilar - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCinePilar();
-            cines.validarTabCinePilar();
+            cines.ensureCinePilarSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -335,9 +315,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraFoodPilar() {
         TestSteps.run("Compra de alimento en cine Pilar - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCinePilar();
-            cines.validarTabCinePilar();
+            cines.ensureCinePilarSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -357,9 +335,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraTicketPlazaHoussay() {
         TestSteps.run("Compra de boleto en cine Plaza Houssay - Argentina - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCinePlazaHoussay();
-            cines.validarTabCinePlazaHoussay();
+            cines.ensureCinePlazaHoussaySeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -382,9 +358,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraMixPlazaHoussay() {
         TestSteps.run("Compra de boleto y alimento en cine Plaza Houssay - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCinePlazaHoussay();
-            cines.validarTabCinePlazaHoussay();
+            cines.ensureCinePlazaHoussaySeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -410,9 +384,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraFoodPlazaHoussay() {
         TestSteps.run("Compra de alimento en cine Plaza Houssay - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCinePlazaHoussay();
-            cines.validarTabCinePlazaHoussay();
+            cines.ensureCinePlazaHoussaySeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -433,9 +405,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraTicketRecoleta() {
         TestSteps.run("Compra de boleto en cine Recoleta - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineRecoleta();
-            cines.validarTabCineRecoleta();
+            cines.ensureCineRecoletaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -458,9 +428,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraMixRecoleta() {
         TestSteps.run("Compra de boleto y alimento en cine Recoleta - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineRecoleta();
-            cines.validarTabCineRecoleta();
+            cines.ensureCineRecoletaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -486,9 +454,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Buenos Aires - Argentina")
     void compraFoodRecoleta() {
         TestSteps.run("Compra de alimento en cine Recoleta - Buenos Aires - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineRecoleta();
-            cines.validarTabCineRecoleta();
+            cines.ensureCineRecoletaSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -509,9 +475,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Mendoza - Argentina")
     void compraTicketArenaMaipu() {
         TestSteps.run("Compra de boleto en cine Arena Maipu - Mendoza - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineArenaMaipu();
-            cines.validarTabCineArenaMaipu();
+            cines.ensureCineArenaMaipuSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -534,9 +498,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Mendoza - Argentina")
     void compraMixArenaMaipu() {
         TestSteps.run("Compra de boleto y alimento en cine Arena Maipu - Mendoza - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineArenaMaipu();
-            cines.validarTabCineArenaMaipu();
+            cines.ensureCineArenaMaipuSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -562,9 +524,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Mendoza - Argentina")
     void compraFoodArenaMaipu() {
         TestSteps.run("Compra de alimento en cine Arena Maipu - Mendoza - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineArenaMaipu();
-            cines.validarTabCineArenaMaipu();
+            cines.ensureCineArenaMaipuSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -584,9 +544,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Mendoza - Argentina")
     void compraTicketMendozaPlaza() {
         TestSteps.run("Compra de boleto en cine Mendoza Plaza - Mendoza - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineMendozaPlaza();
-            cines.validarTabCineMendozaPlaza();
+            cines.ensureCineMendozaPlazaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -609,9 +567,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Mendoza - Argentina")
     void compraMixMendozaPlaza() {
         TestSteps.run("Compra de boleto y alimento en cine Mendoza Plaza - Mendoza - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineMendozaPlaza();
-            cines.validarTabCineMendozaPlaza();
+            cines.ensureCineMendozaPlazaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -637,9 +593,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Mendoza - Argentina")
     void compraFoodMendozaPlaza() {
         TestSteps.run("Compra de alimento en cine Mendoza Plaza - Mendoza - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineMendozaPlaza();
-            cines.validarTabCineMendozaPlaza();
+            cines.ensureCineMendozaPlazaSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -661,9 +615,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Neuquen - Argentina")
     void compraTicketNeuquen() {
         TestSteps.run("Compra de boleto en cine Neuquen - Neuquen - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineNeuquen();
-            cines.validarTabCineNeuquen();
+            cines.ensureCineNeuquenSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -686,9 +638,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Neuquen - Argentina")
     void compraMixNeuquen() {
         TestSteps.run("Compra de boleto y alimento en cine Neuquen - Neuquen - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineNeuquen();
-            cines.validarTabCineNeuquen();
+            cines.ensureCineNeuquenSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -714,9 +664,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Neuquen - Argentina")
     void compraFoodNeuquen() {
         TestSteps.run("Compra de alimento en cine Neuquen - Neuquen - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineNeuquen();
-            cines.validarTabCineNeuquen();
+            cines.ensureCineNeuquenSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();
@@ -738,9 +686,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Santa Fe - Argentina")
     void compraTicketRosario() {
         TestSteps.run("Compra de boleto en cine Rosario - Santa Fe - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineRosario();
-            cines.validarTabCineRosario();
+            cines.ensureCineRosarioSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -763,9 +709,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Santa Fe - Argentina")
     void compraMixRosario() {
         TestSteps.run("Compra de boleto y alimento en cine Rosario - Santa Fe - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineRosario();
-            cines.validarTabCineRosario();
+            cines.ensureCineRosarioSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -791,9 +735,7 @@ public class NoAfectacionArgentina extends BaseTest {
     @Story("Flujos de compra Santa Fe - Argentina")
     void compraFoodRosario() {
         TestSteps.run("Compra de alimento en cine Rosario - Santa Fe - Argentina", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineRosario();
-            cines.validarTabCineRosario();
+            cines.ensureCineRosarioSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.seleccionarAlimentoAleatorio();

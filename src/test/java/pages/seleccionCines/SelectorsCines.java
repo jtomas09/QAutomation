@@ -350,6 +350,263 @@ public class SelectorsCines extends BasePage {
         Allure.step("✅ Cine Parque Arauco Premium (Santiago Oriente) seleccionado correctamente");
     }
 
+// SELECCIÓN CONDICIONAL - verifica si el tab ya está visible antes de abrir el selector
+
+    public void ensureCineTradicionalSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_ESCALA_MORELIA)) {
+            abrirSelectorCines();
+            seleccionarCineTradicional();
+            aplicarSeleccionCine();
+            validarTabCineTradicional();
+        } else {
+            Allure.step("✅ Cine Escala Morelia ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineAtmosferaSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_CUMBRES)) {
+            abrirSelectorCines();
+            buscarCineAtmosfera();
+            seleccionarCineAtmosfera();
+            aplicarSeleccionCine();
+            validarTabCineAtmosfera();
+        } else {
+            Allure.step("✅ Cine Atmósfera Cumbres Monterrey ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineVIPSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_VIP)) {
+            abrirSelectorCines();
+            buscarCineVIP();
+            clickCineVIP();
+            aplicarSeleccionCine();
+            validarTabCineVIP();
+        } else {
+            Allure.step("✅ Cine VIP Diana Acapulco ya seleccionado correctamente");
+        }
+    }
+
+// VALIDACIÓN DE CINES SELECCIONADOS ARGENTINA
+
+    public void ensureCineAvellanedaSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_AVELLANEDA)) {
+            abrirSelectorCines();
+            seleccionarCineAvellaneda();
+            validarTabCineAvellaneda();
+        } else {
+            Allure.step("✅ Cine Avellaneda ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineLujanSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_LUJAN)) {
+            abrirSelectorCines();
+            seleccionarCineLujan();
+            validarTabCineLujan();
+        } else {
+            Allure.step("✅ Cine Lujan ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineMerloSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_MERLO)) {
+            abrirSelectorCines();
+            seleccionarCineMerlo();
+            validarTabCineMerlo();
+        } else {
+            Allure.step("✅ Cine Merlo ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCinePilarSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PILAR)) {
+            abrirSelectorCines();
+            seleccionarCinePilar();
+            validarTabCinePilar();
+        } else {
+            Allure.step("✅ Cine Pilar ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCinePlazaHoussaySeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PLAZA_HOUSSAY)) {
+            abrirSelectorCines();
+            seleccionarCinePlazaHoussay();
+            validarTabCinePlazaHoussay();
+        } else {
+            Allure.step("✅ Cine Plaza Houssay ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineRecoletaSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_RECOLETA)) {
+            abrirSelectorCines();
+            seleccionarCineRecoleta();
+            validarTabCineRecoleta();
+        } else {
+            Allure.step("✅ Cine Recoleta ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineArenaMaipuSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_ARENA_MAIPU)) {
+            abrirSelectorCines();
+            seleccionarCineArenaMaipu();
+            validarTabCineArenaMaipu();
+        } else {
+            Allure.step("✅ Cine Arena Maipu ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineMendozaPlazaSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_MENDOZA_PLAZA)) {
+            abrirSelectorCines();
+            seleccionarCineMendozaPlaza();
+            validarTabCineMendozaPlaza();
+        } else {
+            Allure.step("✅ Cine Mendoza Plaza ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineNeuquenSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_NEUQUEN)) {
+            abrirSelectorCines();
+            seleccionarCineNeuquen();
+            validarTabCineNeuquen();
+        } else {
+            Allure.step("✅ Cine Neuquen ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineRosarioSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_ROSARIO)) {
+            abrirSelectorCines();
+            seleccionarCineRosario();
+            validarTabCineRosario();
+        } else {
+            Allure.step("✅ Cine Rosario ya seleccionado correctamente");
+        }
+    }
+
+// VALIDACIÓN DE CINES SELECCIONADOS CHILE
+
+    public void ensureCineDominicosSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_LOS_DOMINICOS)) {
+            abrirSelectorCines();
+            seleccionarCineDominicos();
+            validarTabCineLosDominicos();
+        } else {
+            Allure.step("✅ Cine Los Dominicos ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineLaReinaSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_LA_REINA)) {
+            abrirSelectorCines();
+            seleccionarCineLaReina();
+            validarTabCineLaReina();
+        } else {
+            Allure.step("✅ Cine La Reina ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineParqueAraucoSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PARQUE_ARAUCO)) {
+            abrirSelectorCines();
+            seleccionarCineParqueArauco();
+            validarTabCineParqueArauco();
+        } else {
+            Allure.step("✅ Cine Parque Arauco ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineAraucoPremiumSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PARQUE_ARAUCO_PREMIUM)) {
+            abrirSelectorCines();
+            seleccionarCineAraucoPremium();
+            validarTabCineParqueAraucoPremium();
+        } else {
+            Allure.step("✅ Cine Parque Arauco Premium ya seleccionado correctamente");
+        }
+    }
+
+
+// VALIDACIÓN DE CINES SELECCIONADOS ESPAÑA
+
+    public void ensureCinePleniulunioSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PLENILUNIO)) {
+            abrirSelectorCines();
+            seleccionarCinePlenilunio();
+            validarTabCinePlenilunio();
+        } else {
+            Allure.step("✅ Cine Plenilunio ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineParqueCorredorSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PARQUE_CORREDOR)) {
+            abrirSelectorCines();
+            seleccionarCineParqueCorredor();
+            validarTabCineParqueCorredor();
+        } else {
+            Allure.step("✅ Cine Parque Corredor ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCineTresAguasSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_TRES_AGUAS)) {
+            abrirSelectorCines();
+            seleccionarCineTresAguas();
+            validarTabCineTresAguas();
+        } else {
+            Allure.step("✅ Cine TresAguas ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCinePlazaNorteSeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PLAZA_NORTE)) {
+            abrirSelectorCines();
+            seleccionarCinePlazaNorte();
+            validarTabCinePlazaNorte();
+        } else {
+            Allure.step("✅ Cine Plaza Norte 2 ya seleccionado correctamente");
+        }
+    }
+
+    public void ensureCinePalafoxLuxurySeleccionado() {
+        waitForVisibility(TAB_CARTELERA);
+        if (!isVisibleQuick(TAB_CINE_PALAFOX_LUXURY)) {
+            abrirSelectorCines();
+            seleccionarCinePalafoxLuxury();
+            validarTabCinePalafoxLuxury();
+        } else {
+            Allure.step("✅ Cine Palafoz Luxury ya seleccionado correctamente");
+        }
+    }
+
+
 // VALIDACIONES ESPAÑA
 
     public void validarTabCinePlenilunio() {

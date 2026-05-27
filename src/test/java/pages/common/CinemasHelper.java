@@ -927,6 +927,19 @@ public class CinemasHelper extends BasePage {
         }
     }
 
+    // Espera hasta 5 s a que aparezca el popup de cambio de zona/ubicación y lo cierra
+    // si se presenta. Pensado para llamarse en @BeforeAll justo después de lanzar la app.
+    public void dismissLocationPopupIfPresent() {
+        long limite = System.currentTimeMillis() + 5_000;
+        while (System.currentTimeMillis() < limite) {
+            if (isLocationChangePopupVisible()) {
+                dismissLocationChangePopupIfPresent("beforeAll");
+                return;
+            }
+            safeSleep(400);
+        }
+    }
+
     private boolean isLocationChangePopupVisible() {
         try {
             List<WebElement> els = driver.findElements(POPUP_ZONA_DETECTION);

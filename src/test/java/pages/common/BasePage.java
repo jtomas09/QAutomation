@@ -371,7 +371,7 @@ public class BasePage {
     // =========================================================
 
     public void tapW3C(int x, int y) {
-ensureAppIsInForegroundOrRecover();
+        ensureAppIsInForegroundOrRecover();
         Dimension screen = driver.manage().window().getSize();
         int safeX = Math.max(1, Math.min(x, screen.width  - 1));
         int safeY = Math.max(1, Math.min(y, screen.height - 1));
@@ -379,7 +379,7 @@ ensureAppIsInForegroundOrRecover();
         PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
         Sequence tap = new Sequence(finger, 1);
 
-        tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), x, y));
+        tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), safeX, safeY));
         tap.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
         tap.addAction(new Pause(finger, Duration.ofMillis(120)));
         tap.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));

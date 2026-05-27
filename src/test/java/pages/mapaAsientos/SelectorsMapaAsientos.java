@@ -9,6 +9,7 @@ import pages.common.BasePage;
 public class SelectorsMapaAsientos extends BasePage {
     public static final int FAST_VISIBLE_SECONDS = 2;
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SelectorsMapaAsientos.class);
     private static final int PANTALLA_TIMEOUT_MS = 25_000;
 
     public SelectorsMapaAsientos(AndroidDriver driver) {
@@ -23,6 +24,7 @@ public class SelectorsMapaAsientos extends BasePage {
 
     public void seleccionarAsiento() {
         esperarMapaOFallar();
+        log.info("[Mapa] Mapa cargado correctamente, iniciando selección del primer asiento disponible");
         tapAsientoExacto(waitForVisibility(locatorAsiento()));
     }
 
@@ -47,13 +49,53 @@ public class SelectorsMapaAsientos extends BasePage {
     // numérico de etiqueta de fila (falso positivo del DOM de Compose).
     public void seleccionarAsientoEspana() {
         esperarMapaOFallar();
-        tapAsientoExacto(waitForVisibility(PRIMER_ASIENTO_DISPONIBLE_ESPANA));
+        log.info("[Mapa] Mapa cargado (España), buscando primer asiento disponible...");
+        tapAsientoEspana();
     }
 
     public void seleccionarDosAsientosEspana() {
         esperarMapaOFallar();
-        tapAsientoExacto(waitForVisibility(PRIMER_ASIENTO_DISPONIBLE_ESPANA));
-        tapAsientoExacto(waitForVisibility(PRIMER_ASIENTO_DISPONIBLE_ESPANA));
+        tapAsientoEspana();
+        tapAsientoEspana();
+    }
+
+    // Busca el primer TextView numérico+enabled que NO esté en la columna izquierda
+    // de etiquetas de fila (x < 90) y toca sus coordenadas directamente.
+    // Evita navegar al padre via XPath (..) que falla en elementos Compose de España.
+    private void tapAsientoEspana() {
+        By tvNumericos = By.xpath(
+            "//android.widget.TextView[contains(@text,'Pantalla')]" +
+            "/following::android.widget.TextView[" +
+                "(string(number(@text)) != 'NaN' or @text='PR') and @enabled='true']");
+
+        java.util.List<org.openqa.selenium.WebElement> candidatos = driver.findElements(tvNumericos);
+        System.out.println("[DEBUG-MAPA] Candidatos (numérico o PR) enabled: " + candidatos.size());
+
+        for (org.openqa.selenium.WebElement tv : candidatos) {
+            org.openqa.selenium.Point loc = tv.getLocation();
+            if (loc.x < 90) {
+                System.out.println("[DEBUG-MAPA] Saltando etiqueta de fila en x=" + loc.x + " texto='" + tv.getText() + "'");
+                continue;
+            }
+            org.openqa.selenium.Dimension sz = tv.getSize();
+            int cx = loc.x + sz.width  / 2;
+            int cy = loc.y + sz.height / 2;
+            String texto = "";
+            try { texto = tv.getText(); } catch (Exception ignored) {}
+            System.out.println("[DEBUG-MAPA] Tapping asiento: texto='" + texto + "' coords=(" + cx + "," + cy + ")");
+            try {
+                java.util.Map<String, Object> args = new java.util.HashMap<>();
+                args.put("x", cx);
+                args.put("y", cy);
+                driver.executeScript("mobile: clickGesture", args);
+            } catch (Exception ignored) {
+                tapW3C(cx, cy);
+            }
+            takeScreenshot();
+            return;
+        }
+
+        org.junit.jupiter.api.Assertions.fail("No se encontró ningún asiento disponible en España");
     }
 
     /**
@@ -161,6 +203,9 @@ public class SelectorsMapaAsientos extends BasePage {
     }
 
     public void agregarBoletoAdulto() {
+        if (!isVisibleQuick(AUMENTAR_BOLETO_ESTANDAR)) {
+            scrollSlowDownThenUpUntilVisible(AUMENTAR_BOLETO_ESTANDAR, 4);
+        }
         this.click(AUMENTAR_BOLETO_ESTANDAR);
     }
 

@@ -17,6 +17,7 @@ import pages.carritoCompras.SelectorsCarrito;
 import pages.checkOut.SelectorsCheckOut;
 import pages.homeCartelera.SelectorsHome;
 import pages.mapaAsientos.SelectorsMapaAsientos;
+import pages.common.CinemasHelper;
 import pages.seleccionCines.SelectorsCines;
 import utils.TestSteps;
 
@@ -37,6 +38,7 @@ public class NoAfectacionChile extends BaseTest {
     @BeforeAll
     void configurarPais() {
         driver = DriverFactory.getDriver();
+        new CinemasHelper(driver).dismissLocationPopupIfPresent();
         new SelectorsHome(driver).cambiarPaisChile();
     }
 
@@ -56,9 +58,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine tradicional - Chile")
     void compraTicketDominicos() {
         TestSteps.run("Compra de boleto en cine Los Dominicos - Tradicional - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineDominicos();
-            cines.validarTabCineLosDominicos();
+            cines.ensureCineDominicosSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -82,9 +82,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine tradicional - Chile\")")
     void compraMixDominicos() {
         TestSteps.run("Compra de boleto y alimento en cine Los Dominicos - Tradicional - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineDominicos();
-            cines.validarTabCineLosDominicos();
+            cines.ensureCineDominicosSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -109,9 +107,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine tradicional - Chile")
     void compraAlimentoDominicos() {
         TestSteps.run("Compra de alimento en cine Los Dominicos - Tradicional - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineDominicos();
-            cines.validarTabCineLosDominicos();
+            cines.ensureCineDominicosSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();
@@ -131,9 +127,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine atmósfera - Chile")
     void compraTicketLaReina() {
         TestSteps.run("Compra de boleto en cine La Reina - Atmósfera - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineLaReina();
-            cines.validarTabCineLaReina();
+            cines.ensureCineLaReinaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -157,9 +151,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine atmósfera - Chile\")")
     void compraMixLaReina() {
         TestSteps.run("Compra de boleto y alimento en cine La Reina - Atmósfera - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineLaReina();
-            cines.validarTabCineLaReina();
+            cines.ensureCineLaReinaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -184,9 +176,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine atmósfera - Chile")
     void compraAlimentoLaReina() {
         TestSteps.run("Compra de alimento en cine La Reina - Atmósfera - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineLaReina();
-            cines.validarTabCineLaReina();
+            cines.ensureCineLaReinaSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();
@@ -206,9 +196,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine atmósfera - Chile")
     void compraTicketParqueArauco() {
         TestSteps.run("Compra de boleto en cine Parque Arauco - Atmósfera - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineParqueArauco();
-            cines.validarTabCineParqueArauco();
+            cines.ensureCineParqueAraucoSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -232,9 +220,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine atmósfera - Chile\")")
     void compraMixParqueArauco() {
         TestSteps.run("Compra de boleto y alimento en cine Parque Arauco - Atmósfera - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineParqueArauco();
-            cines.validarTabCineParqueArauco();
+            cines.ensureCineParqueAraucoSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -259,9 +245,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine atmósfera - Chile")
     void compraAlimentoParqueArauco() {
         TestSteps.run("Compra de alimento en cine Parque Arauco - Atmósfera - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineParqueArauco();
-            cines.validarTabCineParqueArauco();
+            cines.ensureCineParqueAraucoSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();
@@ -281,9 +265,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine VIP - Chile")
     void compraTicketParqueAraucoPremium() {
         TestSteps.run("Compra de boleto en cine Parque Arauco Premium - VIP - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineAraucoPremium();
-            cines.validarTabCineParqueAraucoPremium();
+            cines.ensureCineAraucoPremiumSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -307,9 +289,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine VIP - Chile\")")
     void compraMixParqueAraucoPremium() {
         TestSteps.run("Compra de boleto y alimento en cine Parque Arauco - VIP - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineAraucoPremium();
-            cines.validarTabCineParqueAraucoPremium();
+            cines.ensureCineAraucoPremiumSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -334,9 +314,7 @@ public class NoAfectacionChile extends BaseTest {
     @Story("Flujos de compra en cine VIP - Chile")
     void compraAlimentoParqueAraucoPremium() {
         TestSteps.run("Compra de alimento en cine Parque Arauco Premium - VIP - Chile", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineAraucoPremium();
-            cines.validarTabCineParqueAraucoPremium();
+            cines.ensureCineAraucoPremiumSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();

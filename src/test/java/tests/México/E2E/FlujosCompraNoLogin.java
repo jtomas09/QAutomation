@@ -15,6 +15,7 @@ import io.qameta.allure.Story;
 import pages.alimentos.SelectorsAlimentos;
 import pages.carritoCompras.SelectorsCarrito;
 import pages.checkOut.SelectorsCheckOut;
+import pages.common.CinemasHelper;
 import pages.homeCartelera.SelectorsHome;
 import pages.mapaAsientos.SelectorsMapaAsientos;
 import pages.seleccionCines.SelectorsCines;
@@ -36,6 +37,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     void configurarPais() {
         driver = DriverFactory.getDriver();
         new SelectorsHome(driver).cambiarPaisMexico();
+        new CinemasHelper(driver).ensureMexicoCinemaSelected();
     }
 
     @BeforeEach
@@ -54,10 +56,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraTicketTradicional() {
         TestSteps.run("Compra de boleto en cine tradicional", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineTradicional();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineTradicional();
+            cines.ensureCineTradicionalSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -81,10 +80,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraMixTradicional() {
         TestSteps.run("Compra de boleto y alimento en cine tradicional", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineTradicional();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineTradicional();
+            cines.ensureCineTradicionalSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -109,10 +105,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraAlimentoTradicional() {
         TestSteps.run("Compra de alimento en cine tradicional", () -> {
-            cines.abrirSelectorCines();
-            cines.seleccionarCineTradicional();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineTradicional();
+            cines.ensureCineTradicionalSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();
@@ -131,11 +124,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraTicketAtmosfera() {
         TestSteps.run("Compra de boleto en cine Atmósfera", () -> {
-            cines.abrirSelectorCines();
-            cines.buscarCineAtmosfera();
-            cines.seleccionarCineAtmosfera();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineAtmosfera();
+            cines.ensureCineAtmosferaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -159,11 +148,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraMixAtmosfera() {
         TestSteps.run("Flujo de compra mix en cine Atmósfera", () -> {
-            cines.abrirSelectorCines();
-            cines.buscarCineAtmosfera();
-            cines.seleccionarCineAtmosfera();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineAtmosfera();
+            cines.ensureCineAtmosferaSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -188,11 +173,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraAlimentoAtmosfera() {
         TestSteps.run("Comprar alimento en cine Atmósfera", () -> {
-            cines.abrirSelectorCines();
-            cines.buscarCineAtmosfera();
-            cines.seleccionarCineAtmosfera();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineAtmosfera();
+            cines.ensureCineAtmosferaSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();
@@ -211,11 +192,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraTicketVIP() {
         TestSteps.run("Compra de boleto en cine VIP", () -> {
-            cines.abrirSelectorCines();
-            cines.buscarCineVIP();
-            cines.clickCineVIP();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineVIP();
+            cines.ensureCineVIPSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -239,11 +216,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraMixVIP() {
         TestSteps.run("Compra mix en cine VIP", () -> {
-            cines.abrirSelectorCines();
-            cines.buscarCineVIP();
-            cines.clickCineVIP();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineVIP();
+            cines.ensureCineVIPSeleccionado();
             home.seleccionarPrimerHorario();
             mapa.seleccionarAsiento();
             mapa.clickContinuarMapaAsientos();
@@ -269,11 +242,7 @@ public class FlujosCompraNoLogin extends BaseTest {
     @Story("Flujos de compra sin sesión iniciada - México")
     void compraAlimentoVIP() {
         TestSteps.run("Compra de alimento en cine VIP", () -> {
-            cines.abrirSelectorCines();
-            cines.buscarCineVIP();
-            cines.clickCineVIP();
-            cines.aplicarSeleccionCine();
-            cines.validarTabCineVIP();
+            cines.ensureCineVIPSeleccionado();
             home.clickSeccionAlimentos();
             alimentos.seleccionarAlimentoAleatorio();
             alimentos.clikIrAPagar();

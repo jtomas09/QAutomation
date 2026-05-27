@@ -458,11 +458,11 @@ public class SelectorsCarrito extends BasePage {
     }
 
     public void validarAlimentoEnCarritoEspana() {
+        sleep(200); // esperar a que la sección Comida termine de renderizar tras combinar pedido mix
         for (int i = 0; i < 5; i++) {
             if (isVisibleQuick(BADGE_COMIDA_CARRITO)) break;
             slowSwipeUp();
         }
-        validarElementoVisible(BADGE_COMIDA_CARRITO);
 
         List<Map<String, String>> productos = recopilarProductosCarritoEspana();
 

@@ -10,6 +10,8 @@ import static pages.perfil.LocatorsPerfil.*;
 public class SelectorsHome extends BasePage {
     public static final int FAST_VISIBLE_SECONDS = 2;
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SelectorsHome.class);
+
     public SelectorsHome(AndroidDriver driver) {
         super(driver);
     }
@@ -173,11 +175,19 @@ public class SelectorsHome extends BasePage {
     // persista el cambio. En ambos casos termina la app sin relanzarla; @BeforeEach se encarga
     // del relaunch, evitando dos ciclos terminate+activate en cascada.
     private void seleccionarPais(By opcion, String nombrePais) {
+        log.info("[País] Iniciando verificación del país seleccionado...");
         By yaSeleccionado = By.xpath(
             "//android.view.View[android.widget.RadioButton[@checked='true']" +
             " and android.widget.TextView[@text='" + nombrePais + "']]");
         if (isVisibleQuick(yaSeleccionado)) {
+            log.info("[País] {} ya está seleccionado. Iniciando ejecución de los tests.", nombrePais);
             click(CERRAR_LISTADO_PAISES);
+            // Argentina no regresa al home al cerrar el listado: queda en Ajustes.
+            // Terminar la app desde ahí provoca que al relanzarla aparezca la pantalla de login
+            // y bloquee el flujo. Navegamos al home antes de terminar la app.
+            if ("Argentina".equals(nombrePais)) {
+                navegarAlHomeDesdeAjustesArgentina();
+            }
         } else {
             click(opcion);
             click(BOTON_APLICAR);
@@ -185,6 +195,19 @@ public class SelectorsHome extends BasePage {
             try { Thread.sleep(5_000); } catch (InterruptedException ignored) {}
         }
         terminarAppSinRelanzar();
+    }
+
+    private void navegarAlHomeDesdeAjustesArgentina() {
+        clickIfPresent(BOTON_IR_ATRAS_AJUSTES);
+        long end = System.currentTimeMillis() + 5_000;
+        while (System.currentTimeMillis() < end) {
+            if (isVisibleQuick(TAB_CARTELERA)) {
+                System.out.println("[PAÍS][ARG] Tab Cartelera visible - home alcanzado antes de terminar app.");
+                return;
+            }
+            sleep(300);
+        }
+        System.out.println("[PAÍS][ARG] WARN: Tab Cartelera no visible tras 5s, se continúa de todas formas.");
     }
 
     private void terminarAppSinRelanzar() {
