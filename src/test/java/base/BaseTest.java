@@ -2,6 +2,8 @@ package base;
 
 import config.DriverFactory;
 import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.android.AndroidStartScreenRecordingOptions;
+import io.qameta.allure.Allure;
 import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,9 +19,11 @@ import org.slf4j.LoggerFactory;
 import pages.common.CinemasHelper;
 import utils.*;
 
+import java.io.ByteArrayInputStream;
 import java.io.OutputStream;
 import java.nio.file.*;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
@@ -272,7 +276,7 @@ public class BaseTest {
             }
         }
 
-        TestSteps.startScenario(testInfo.getDisplayName());
+        startVideoRecording();
 
         if (testInfo.getDisplayName() != null && !testInfo.getDisplayName().isBlank()) {
             if (!executedTests.contains(testInfo.getDisplayName())) {
@@ -306,6 +310,7 @@ public class BaseTest {
 
     @AfterEach
     public void tearDown(TestInfo testInfo) {
+        stopVideoRecording(testInfo);
         String testKey = testInfo.getDisplayName();
 
         try {
@@ -315,29 +320,15 @@ public class BaseTest {
                 }
             }
 
-            try {
-                String path = TestSteps.captureEvidence(driver, "TEST_FINAL", "TEST_FINAL");
-                if (path != null) {
-                    TestSteps.getStepsInternal()
-                            .add(new StepResult("Evidencia final (auto)", "OK", path));
-                }
-            } catch (Exception ignored) {}
-
-            List<StepResult> results = TestSteps.finishScenario();
-            PdfReportGenerator.generate(testInfo.getDisplayName(), results);
-
             totalTests++;
 
             boolean junitFailed = BaseTestStatusRegistry.isFailed(testKey);
-            boolean stepsFailed = results.stream()
-                    .anyMatch(r -> "FAIL".equalsIgnoreCase(r.getStatus())
-                            || "ERROR".equalsIgnoreCase(r.getStatus()));
 
             // Si el driver es null aquí significa que setUp() falló antes de crearlo
             boolean setupFailed = (driver == null && !REUSE_DRIVER)
                     || (REUSE_DRIVER && !driverCreatedOnce);
 
-            boolean finalFailed = junitFailed || stepsFailed || setupFailed;
+            boolean finalFailed = junitFailed || setupFailed;
 
             if (setupFailed) {
                 log.error("[BaseTest] TEST FAILED (setUp falló — driver no creado): {}", testInfo.getDisplayName());
@@ -429,6 +420,55 @@ public class BaseTest {
                 try { DriverFactory.quitDriver(); } catch (Exception ignored) {}
                 driver = null;
             }
+        }
+    }
+
+    // ── Video recording ────────────────────────────────────────────────────────
+
+    private static boolean isVideoEnabled() {
+        return "true".equalsIgnoreCase(System.getProperty("video.enabled",
+                System.getenv().getOrDefault("VIDEO_ENABLED", "false")));
+    }
+
+    private void startVideoRecording() {
+        if (!isVideoEnabled() || driver == null) return;
+        try {
+            driver.startRecordingScreen(
+                new AndroidStartScreenRecordingOptions()
+                    .withBitRate(2_000_000)
+                    .withTimeLimit(Duration.ofMinutes(15))
+            );
+            log.info("[Video] Grabacion iniciada");
+        } catch (Exception e) {
+            log.warn("[Video] No se pudo iniciar grabacion: {}", e.getMessage());
+        }
+    }
+
+    private void stopVideoRecording(TestInfo testInfo) {
+        if (!isVideoEnabled() || driver == null) return;
+        try {
+            String base64 = driver.stopRecordingScreen();
+            if (base64 == null || base64.isBlank()) return;
+
+            byte[] videoBytes = Base64.getDecoder().decode(base64);
+            String className  = getClass().getSimpleName();
+            String testName   = testInfo.getDisplayName()
+                    .replaceAll("[^a-zA-Z0-9_\\-]", "_");
+
+            Path dir  = Paths.get("build", "videos", className);
+            Files.createDirectories(dir);
+            Path file = dir.resolve(testName + ".mp4");
+            Files.write(file, videoBytes);
+            log.info("[Video] Guardado ({} KB): {}", videoBytes.length / 1024, file.toAbsolutePath());
+
+            Allure.addAttachment(
+                "Video — " + testInfo.getDisplayName(),
+                "video/mp4",
+                new ByteArrayInputStream(videoBytes),
+                ".mp4"
+            );
+        } catch (Exception e) {
+            log.warn("[Video] No se pudo guardar grabacion: {}", e.getMessage());
         }
     }
 

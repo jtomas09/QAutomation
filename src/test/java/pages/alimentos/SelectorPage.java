@@ -4,10 +4,13 @@ import io.appium.java_client.AppiumBy;
 import io.appium.java_client.android.AndroidDriver;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.Map;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Dimension;
 import org.openqa.selenium.Point;
 import org.openqa.selenium.WebElement;
+import org.openqa.selenium.Rectangle;
+import org.openqa.selenium.interactions.Pause;
 import org.openqa.selenium.interactions.PointerInput;
 import org.openqa.selenium.interactions.Sequence;
 import org.openqa.selenium.interactions.PointerInput.Kind;
@@ -376,6 +379,25 @@ public class SelectorPage extends BasePage {
         this.clickRightFromAmericanoAnchor("Té caliente");
     }
 
+    public void buscarTeCaliente() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "té caliente"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Té caliente']"));
+    }
+
+    public void TeMentaManzanilla() {
+        this.clickCardByTextWithFallback("Té Menta Manzanilla", 10);
+    }
+
+    public void clickContinuar() {
+        this.clickCardByTextWithFallback("Continuar", 10);
+    }
+
     public void clickChocolate() {
         this.clickRightFromAmericanoAnchor("Chocolate");
     }
@@ -462,7 +484,45 @@ public class SelectorPage extends BasePage {
     }
 
     public void abrirCarrito() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[1]/android.view.View/android.view.View[2]/android.view.View/android.view.View[5]"));
+        log.info("[abrirCarrito] Intentando abrir carrito...");
+
+        By badge = By.xpath("//android.widget.TextView[@text='1']");
+
+        try {
+            WebElement badgeElement = new WebDriverWait(driver, Duration.ofSeconds(10))
+                    .until(ExpectedConditions.visibilityOfElementLocated(badge));
+
+            log.info("[abrirCarrito] Badge encontrado");
+
+            Rectangle rect = badgeElement.getRect();
+            int centerX = rect.getX() + (rect.getWidth() / 2);
+            int centerY = rect.getY() + (rect.getHeight() / 2);
+
+            log.info("[abrirCarrito] Tap coordenadas -> X:{} Y:{}", centerX, centerY);
+
+            PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
+            Sequence tap = new Sequence(finger, 1);
+            tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), centerX, centerY));
+            tap.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
+            tap.addAction(new Pause(finger, Duration.ofMillis(120)));
+            tap.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
+
+            driver.perform(Collections.singletonList(tap));
+            log.info("[abrirCarrito] Tap ejecutado correctamente");
+
+            new WebDriverWait(driver, Duration.ofSeconds(8))
+                    .until(ExpectedConditions.or(
+                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Carrito')]")),
+                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Continuar')]")),
+                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Ir a pagar')]"))
+                    ));
+
+            log.info("[abrirCarrito] Carrito abierto correctamente");
+
+        } catch (Exception e) {
+            log.error("[abrirCarrito] Error abriendo carrito", e);
+            throw new RuntimeException("No se pudo abrir el carrito correctamente", e);
+        }
     }
 
     public void personalizar() {

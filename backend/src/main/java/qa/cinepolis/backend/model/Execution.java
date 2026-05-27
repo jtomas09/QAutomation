@@ -20,6 +20,8 @@ public class Execution {
     private int             total;
     private List<LogEvent>  logs = new CopyOnWriteArrayList<>();
     private String          allureUrl;
+    private boolean         videoEnabled;
+    private String          testClass;
 
     public String          getExecutionId()              { return executionId; }
     public void            setExecutionId(String v)      { this.executionId = v; }
@@ -49,4 +51,8 @@ public class Execution {
     public void            setLogs(List<LogEvent> v)     { this.logs = v; }
     public String          getAllureUrl()                 { return allureUrl; }
     public void            setAllureUrl(String v)        { this.allureUrl = v; }
+    public boolean         isVideoEnabled()              { return videoEnabled; }
+    public void            setVideoEnabled(boolean v)   { this.videoEnabled = v; }
+    public String          getTestClass()                { return testClass; }
+    public void            setTestClass(String v)        { this.testClass = v; }
 }

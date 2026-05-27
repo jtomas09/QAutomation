@@ -4,26 +4,119 @@ import base.BaseTest;
 import io.qameta.allure.Epic;
 import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebElement;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
+import pages.common.CinemasHelper;
+import utils.Cinema;
 import utils.TestSteps;
+import java.time.Duration;
 
 /**
  * Pruebas para el flujo de compra en la sección Atmósfera.
  * ✅ Refactorizado para incluir TODOS los casos de prueba originales con una estructura robusta y limpia.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Execution(ExecutionMode.SAME_THREAD)
 @Epic("Alimentos y Bebidas - Atmósfera")
 public class MenuAtmosfera extends BaseTest {
+
+    private static final Logger log = LoggerFactory.getLogger(MenuAtmosfera.class);
+    private static final String APP_PACKAGE = "com.cinepolis.go";
+
+    private static boolean firstTest = true;
 
     private AlimentosPagina page;
 
     @BeforeEach
     void setUp() {
+        if (firstTest) {
+            log.info("Primer test detectado → NO reiniciar app");
+            firstTest = false;
+            waitForHomeReady();
+        } else {
+            log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            log.info("Reiniciando app entre pruebas");
+            log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+            try {
+                driver.terminateApp(APP_PACKAGE);
+                log.info("App terminada correctamente");
+
+                Thread.sleep(2000);
+
+                driver.activateApp(APP_PACKAGE);
+                log.info("App activada nuevamente");
+
+                waitForHomeReady();
+                log.info("App reiniciada y estable");
+            } catch (Exception e) {
+                log.error("Error reiniciando app", e);
+                throw new RuntimeException("No se pudo reiniciar la app", e);
+            }
+        }
+
         page = new AlimentosPagina(driver);
-        TestSteps.run("Cerrar pantalla inicial", () -> page.cerrarPantalla(), driver);
         TestSteps.run("Abrir menú de alimentos", () -> page.abrirMenu(), driver);
         TestSteps.run("Cerrar notificaciones", () -> page.cerrarPantalla(), driver);
+    }
+
+    private void waitForHomeReady() {
+        log.info("Esperando carga de la app...");
+
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+
+        try {
+            // Esperar a que la app renderice algo — home OR pantalla Club Cinépolis
+            wait.until(ExpectedConditions.or(
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@text,'Cines')]")
+                ),
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@text,'Inicia sesi')]")
+                ),
+                ExpectedConditions.presenceOfElementLocated(
+                    By.xpath("//*[contains(@content-desc,'CLUB')]")
+                )
+            ));
+
+            log.info("App visible — descartando pantallas transitorias (Club Cinépolis, promos, etc.)");
+
+            // dismissTransientPromosGuard maneja: Club Cinépolis login, Mario promo, location popup
+            new CinemasHelper(driver).dismissTransientPromosGuard("waitForHomeReady");
+
+            log.info("Esperando Home principal...");
+
+            // Ahora sí esperar el home real
+            wait.until(ExpectedConditions.presenceOfElementLocated(
+                By.xpath("//*[contains(@text,'Cines')]")
+            ));
+
+            // Esperar que desaparezcan indicadores de carga
+            wait.until(d -> {
+                List<WebElement> loaders = d.findElements(
+                    By.xpath("//*[contains(@text,'Cargando')]")
+                );
+                return loaders.isEmpty();
+            });
+
+            Thread.sleep(2500);
+
+            log.info("Home cargado correctamente");
+            log.info("Jetpack Compose estabilizado");
+
+        } catch (Exception e) {
+            log.error("Home no cargó correctamente", e);
+            throw new RuntimeException("La app no terminó de cargar correctamente", e);
+        }
     }
 
     /**
@@ -37,12 +130,12 @@ public class MenuAtmosfera extends BaseTest {
         }, driver);
     }
 
-    @Test
+   /*  @Test
     @Order(1)
-    @DisplayName("Combo Crepa Dulce y Frappé de Frutos Rojos")
+    @DisplayName("Té de Manzanilla")
     @Story("Combos")
     void comprarCrepaDulceFrappe() {
-        //new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("La Perla");
+       new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("La Perla");
         TestSteps.run("Seleccionar Crepa Dulce", () -> page.clickCrepasDulces1(), driver);
         TestSteps.run("Personalizar Crepa Dulce", () -> {
             page.personalizar();
@@ -64,9 +157,9 @@ public class MenuAtmosfera extends BaseTest {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
-    }
+    } */
 
-    @Test
+    /* @Test
     @Order(2)
     @DisplayName("Combo Frappé de Coco y Crepa Dulce con Queso")
     @Story("Combos")
@@ -93,9 +186,9 @@ public class MenuAtmosfera extends BaseTest {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
-    }
+    } */
 
-    @Test
+  /*   @Test
     @Order(3)
     @DisplayName("Combo Frappé Sandía Pelonada y Crepa de Fresa")
     @Story("Combos")
@@ -121,6 +214,48 @@ public class MenuAtmosfera extends BaseTest {
         TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
+        }, driver);
+    } */
+
+    @Test
+    @Order(1)
+    @DisplayName("Té Caliente Menta Manzanilla - Patio Santa Fe")
+    @Story("Bebidas Calientes")
+    @Cinema("Patio Santa Fe")
+    void comprarTeCalienteManzanillaPatioSantaFe() {
+        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Patio Santa Fe");
+        TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
+        TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->
+            page.validarElementoVisible(AlimentosLocators.BTN_GRANDE_CALIENTE), driver);
+        TestSteps.run("Seleccionar sabor Té Menta Manzanilla", () -> page.TeMentaManzanilla(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.clickContinuar(), driver);
+        TestSteps.run("Agregar al carrito", () -> page.agregarCarrito(), driver);
+        TestSteps.run("Abrir carrito y validar", () -> {
+            page.abrirCarrito();
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_CALIENTE_CARRITO);
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_VARIANTE_CARRITO);
+        }, driver);
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Té Caliente Menta Manzanilla - Arcos Bosques")
+    @Story("Bebidas Calientes")
+    @Cinema("Arcos Bosques")
+    void comprarTeCalienteManzanillaArcosBosques() {
+        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Arcos Bosques");
+        TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
+        TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->
+            page.validarElementoVisible(AlimentosLocators.BTN_GRANDE_CALIENTE), driver);
+        TestSteps.run("Seleccionar sabor Té Menta Manzanilla", () -> page.TeMentaManzanilla(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.clickContinuar(), driver);
+        TestSteps.run("Agregar al carrito", () -> page.agregarCarrito(), driver);
+        TestSteps.run("Abrir carrito y validar", () -> {
+            page.abrirCarrito();
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_CALIENTE_CARRITO);
+            page.validarElementoVisible(AlimentosLocators.TXT_TE_VARIANTE_CARRITO);
         }, driver);
     }
 

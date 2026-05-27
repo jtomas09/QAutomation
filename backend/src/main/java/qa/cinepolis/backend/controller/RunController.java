@@ -1,5 +1,7 @@
 package qa.cinepolis.backend.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Execution;
@@ -14,6 +16,8 @@ import java.util.Map;
 @CrossOrigin(origins = "*")
 public class RunController {
 
+    private static final Logger log = LoggerFactory.getLogger(RunController.class);
+
     private final ExecutionService execService;
 
     public RunController(ExecutionService execService) {
@@ -22,11 +26,15 @@ public class RunController {
 
     @PostMapping("/run")
     public ResponseEntity<?> runSuite(@RequestBody RunRequest request) {
+        log.info("[RunController] POST /api/run suite={} env={} device={} country={} videoEnabled={}",
+                request.getSuite(), request.getEnvironment(), request.getDevice(),
+                request.getCountry(), request.isVideoEnabled());
         Execution exec = execService.create(
                 request.getSuite(),
                 request.getEnvironment(),
                 request.getDevice(),
-                request.getCountry()
+                request.getCountry(),
+                request.isVideoEnabled()
         );
 
         Map<String, Object> body = new LinkedHashMap<>();

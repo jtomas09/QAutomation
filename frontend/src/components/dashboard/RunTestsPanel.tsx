@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import ReactCountryFlag from 'react-country-flag'
 import { ENVIRONMENTS, DEVICES, SUITES, COUNTRIES } from '../../data'
 import type { RunStatus } from '../../types'
-import { RefreshCw, X, ChevronDown } from 'lucide-react'
+import { RefreshCw, X, ChevronDown, Video } from 'lucide-react'
 
 interface Props {
   suite:           string
@@ -12,10 +12,12 @@ interface Props {
   country:         string
   status:          RunStatus
   executionId:     string | null
+  videoEnabled:    boolean
   onSuiteChange:   (v: string) => void
   onEnvChange:     (v: string) => void
   onDeviceChange:  (v: string) => void
   onCountryChange: (v: string) => void
+  onVideoToggle:   (v: boolean) => void
   onRun:           () => void
   onStop:          () => void
 }
@@ -27,6 +29,7 @@ const COUNTRY_ISO: Record<string, string> = {
 
 export default function RunTestsPanel(props: Props) {
   const { suite, env, device, country, status, executionId,
+          videoEnabled, onVideoToggle,
           onSuiteChange, onEnvChange, onDeviceChange, onCountryChange, onRun, onStop } = props
   const [advanced, setAdvanced] = useState(false)
   const running = status === 'running'
@@ -100,6 +103,9 @@ export default function RunTestsPanel(props: Props) {
               <PremiumSelect value={env} onChange={onEnvChange} options={ENVIRONMENTS} />
             </Field>
           </div>
+
+          {/* Video toggle */}
+          <VideoToggle enabled={videoEnabled} onChange={onVideoToggle} />
 
           {/* Advanced */}
           <button
@@ -263,5 +269,65 @@ function SmallBtn({ children }: { children: React.ReactNode }) {
       className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-300 transition-colors"
       style={{ background: 'var(--btn-bg)', border: '1px solid var(--btn-border)' }}
     >{children}</button>
+  )
+}
+
+function VideoToggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between px-1 py-0.5">
+      <div className="flex items-center gap-2">
+        <Video size={13} style={{ color: enabled ? '#f97316' : 'var(--text-dim)', transition: 'color .2s' }} />
+        <span className="text-xs font-semibold" style={{ color: enabled ? 'var(--text-sec)' : 'var(--text-dim)', transition: 'color .2s' }}>
+          Grabar Video
+        </span>
+        {enabled && (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ background: 'rgba(249,115,22,0.15)', color: '#f97316' }}>
+            ACTIVO
+          </span>
+        )}
+      </div>
+
+      {/* Toggle pill */}
+      <button
+        onClick={() => onChange(!enabled)}
+        className="relative flex items-center rounded-full select-none flex-shrink-0"
+        style={{
+          width: 58,
+          height: 26,
+          background: enabled ? '#f97316' : 'var(--input-bg)',
+          border: `1.5px solid ${enabled ? '#f97316' : 'var(--input-border)'}`,
+          padding: 3,
+          transition: 'background .25s, border-color .25s',
+          cursor: 'pointer',
+        }}
+      >
+        {/* Label */}
+        <span
+          className="absolute text-[9px] font-black tracking-wide pointer-events-none"
+          style={{
+            left:  enabled ? 9   : 'auto',
+            right: enabled ? 'auto' : 8,
+            color: enabled ? 'white' : 'var(--text-dim)',
+            transition: 'color .2s',
+          }}
+        >
+          {enabled ? 'ON' : 'OFF'}
+        </span>
+        {/* Circle */}
+        <div
+          className="rounded-full"
+          style={{
+            width: 18,
+            height: 18,
+            background: enabled ? 'white' : '#f97316',
+            transform: enabled ? 'translateX(32px)' : 'translateX(0)',
+            transition: 'transform .25s, background .25s',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+            flexShrink: 0,
+          }}
+        />
+      </button>
+    </div>
   )
 }

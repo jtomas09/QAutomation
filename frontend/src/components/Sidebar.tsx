@@ -4,14 +4,14 @@ import {
   LayoutDashboard, Play, ListOrdered, Layers3,
   Smartphone, Globe, Settings2, BarChart3,
   TrendingUp, Clock4, Activity, BookOpen, Video, Headphones,
-  Zap, ChevronDown,
+  Zap, ChevronDown, CalendarClock,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export type Page =
   | 'dashboard' | 'execute' | 'executions' | 'suites' | 'devices' | 'environments' | 'settings'
   | 'reports' | 'metrics' | 'history' | 'trends'
-  | 'docs' | 'videos' | 'support'
+  | 'docs' | 'videos' | 'support' | 'schedule'
 
 interface NavItem { id: Page; label: string; icon: React.ElementType; accent?: string }
 
@@ -23,6 +23,7 @@ const MAIN_NAV: NavItem[] = [
   { id: 'devices',      label: 'Dispositivos',     icon: Smartphone,      accent: '#f97316' },
   { id: 'environments', label: 'Ambientes',        icon: Globe,           accent: '#eab308' },
   { id: 'settings',     label: 'Configuración',    icon: Settings2,       accent: '#94a3b8' },
+  { id: 'schedule',     label: 'Programación',     icon: CalendarClock,   accent: '#8b5cf6' },
 ]
 
 const ANALYTICS_NAV: NavItem[] = [

@@ -33,7 +33,12 @@ public class BackendClient {
         HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (res.statusCode() == 204) return Optional.empty();
         if (res.statusCode() != 200) throw new RuntimeException("GET /api/jobs/next -> " + res.statusCode());
-        return Optional.of(json.readValue(res.body(), JobDto.class));
+        String body = res.body();
+        System.out.println("[BackendClient] /api/jobs/next raw JSON: " + body);
+        JobDto dto = json.readValue(body, JobDto.class);
+        System.out.println("[BackendClient] Deserialized → videoEnabled=" + dto.videoEnabled
+                + " sendMail=" + dto.sendMail + " executionId=" + dto.executionId);
+        return Optional.of(dto);
     }
 
     /** Fire-and-forget log line (does not throw on failure). */

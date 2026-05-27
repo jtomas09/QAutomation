@@ -13,13 +13,18 @@ import VideosPage             from './pages/VideosPage'
 import ExecutionHistory       from './components/ExecutionHistory'
 import TestCard               from './components/TestCard'
 import SuiteDetailPage        from './components/SuiteDetailPage'
+import SettingsPage           from './pages/SettingsPage'
+import SchedulePage           from './pages/SchedulePage'
+import ReportsPage            from './pages/ReportsPage'
+import MetricsPage            from './pages/MetricsPage'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
   const [country,    setCountry]    = useState('mexico')
   const [env,        setEnv]        = useState(ENVIRONMENTS[0])
   const [suite,      setSuite]      = useState(SUITES[0])
-  const [drillSuite, setDrillSuite] = useState<string | null>(null)
+  const [drillSuite,    setDrillSuite]    = useState<string | null>(null)
+  const [videoEnabled,  setVideoEnabled]  = useState(false)
 
   // Device comes from the store (persisted, configurable)
   const { devices, activeDevice, setActive } = useDeviceStore()
@@ -28,14 +33,14 @@ export default function App() {
   // The effective device name sent to the backend
   const effectiveDevice = deviceOverride ?? activeDevice?.deviceName ?? activeDevice?.name ?? 'Galaxy A56 5G'
 
-  const { state, runTest, stopTest, clearLog } = useTestRunner()
+  const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
   const backendHealth = useBackendHealth()
   const { isDark, toggle: toggleTheme } = useTheme()
   const runnerOnline  = useRunnerStatus()
   const runningCount  = state.status === 'running' ? 1 : 0
 
   function handleRun() {
-    runTest(suite, env, effectiveDevice, country)
+    runTest(suite, env, effectiveDevice, country, videoEnabled)
   }
 
   function handleCountryChange(c: string) {
@@ -75,9 +80,11 @@ export default function App() {
               onSuiteChange={setSuite}     onEnvChange={setEnv}
               onDeviceChange={setDeviceOverride}
               onCountryChange={handleCountryChange}
+              videoEnabled={videoEnabled}   onVideoToggle={setVideoEnabled}
               onRun={handleRun}            onStop={stopTest}
               onClearLog={clearLog}        onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}
+              onAttach={attachToExecution}
             />
           )}
 
@@ -85,7 +92,17 @@ export default function App() {
             <DevicesPage onSelectDevice={handleSelectDevice} />
           )}
 
-          {page === 'videos' && <VideosPage />}
+          {page === 'videos' && <VideosPage videoEnabled={videoEnabled} />}
+
+          {page === 'settings' && (
+            <SettingsPage isDark={isDark} onToggleTheme={toggleTheme} />
+          )}
+
+          {page === 'schedule' && <SchedulePage />}
+
+          {page === 'reports'  && <ReportsPage />}
+
+          {page === 'metrics'  && <MetricsPage />}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
@@ -104,15 +121,15 @@ export default function App() {
                   disabled={state.status === 'running'}
                   activeId={state.activeSuite}
                   onBack={() => setDrillSuite(null)}
-                  onRun={id => runTest(id, env, effectiveDevice, country)}
-                  onRunAll={() => runTest(drillSuite, env, effectiveDevice, country)}
+                  onRun={id => runTest(id, env, effectiveDevice, country, videoEnabled)}
+                  onRunAll={() => runTest(drillSuite, env, effectiveDevice, country, videoEnabled)}
                 />
               )
             }
 
             const handleCardRun = (id: string) => {
               if (SUITE_TESTS[id]) setDrillSuite(id)
-              else runTest(id, env, effectiveDevice, country)
+              else runTest(id, env, effectiveDevice, country, videoEnabled)
             }
 
             // No suites defined for this country yet
@@ -154,7 +171,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>

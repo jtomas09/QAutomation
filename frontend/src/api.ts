@@ -99,10 +99,11 @@ export async function getConfig(): Promise<BackendConfig> {
 // ─── Run execution ────────────────────────────────────────────────────────────
 
 export interface RunRequest {
-  suite: string
-  env: string
-  device: string
-  country: string
+  suite:        string
+  env:          string
+  device:       string
+  country:      string
+  videoEnabled?: boolean
 }
 
 export interface ExecutionStarted {

@@ -17,15 +17,18 @@ interface Props {
   env:             string
   device:          string
   country:         string
+  videoEnabled:    boolean
   onSuiteChange:   (v: string) => void
   onEnvChange:     (v: string) => void
   onDeviceChange:  (v: string) => void
   onCountryChange: (v: string) => void
+  onVideoToggle:   (v: boolean) => void
   onRun:           () => void
   onStop:          () => void
   onClearLog:      () => void
   onViewAll:       () => void
   onManageDevices: () => void
+  onAttach:        (executionId: string, suiteName: string) => void
 }
 
 interface AggStats { passed: number; failed: number; skipped: number; total: number; avgMs: number }
@@ -37,9 +40,9 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, device, country,
+  state, suite, env, device, country, videoEnabled,
   onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
-  onRun, onStop, onClearLog, onViewAll, onManageDevices,
+  onVideoToggle, onRun, onStop, onClearLog, onViewAll, onManageDevices, onAttach,
 }: Props) {
   const [daysBack,   setDaysBack]   = useState<number>(7)
   const [clearedAt,  setClearedAt]  = useState<number>(0)
@@ -67,6 +70,23 @@ export default function Dashboard({
     const id = setInterval(aggregate, 10_000)
     return () => clearInterval(id)
   }, [clearedAt, daysBack])
+
+  // Auto-attach to scheduled executions that started without user interaction
+  useEffect(() => {
+    if (state.status === 'running') return
+    const detect = async () => {
+      try {
+        const execs = await getExecutions()
+        const running = execs.find(e => e.status === 'RUNNING')
+        if (running && state.executionId === null) {
+          onAttach(running.executionId, running.suite)
+        }
+      } catch { /* backend offline */ }
+    }
+    detect()
+    const id = setInterval(detect, 5_000)
+    return () => clearInterval(id)
+  }, [state.status, state.executionId, onAttach])
 
   const handleClear = () => {
     setClearedAt(Date.now())
@@ -152,6 +172,7 @@ export default function Dashboard({
           suite={suite}           env={env}
           device={device}         country={country}
           status={state.status}   executionId={state.executionId ?? null}
+          videoEnabled={videoEnabled}       onVideoToggle={onVideoToggle}
           onSuiteChange={onSuiteChange}     onEnvChange={onEnvChange}
           onDeviceChange={onDeviceChange}   onCountryChange={onCountryChange}
           onRun={onRun}           onStop={onStop}

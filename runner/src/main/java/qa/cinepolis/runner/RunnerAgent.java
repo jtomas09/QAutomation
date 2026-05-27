@@ -24,6 +24,12 @@ public class RunnerAgent {
         System.out.println("  Poll:      " + config.pollIntervalMs + " ms");
         System.out.println("\n[Runner] Iniciando...\n");
 
+        // Shutdown hook — kills active Gradle process tree when runner window is closed
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("\n[Runner] Cerrando runner — deteniendo ejecución activa...");
+            executor.killActiveProcess();
+        }, "shutdown-hook"));
+
         // Background heartbeat — pings every 10 s independent of job execution
         ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "heartbeat");

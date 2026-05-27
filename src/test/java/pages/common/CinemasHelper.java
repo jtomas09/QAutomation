@@ -19,6 +19,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import io.qameta.allure.Allure;
+import utils.TestSteps;
 
 public class CinemasHelper extends BasePage {
 
@@ -216,13 +218,51 @@ public class CinemasHelper extends BasePage {
     }
 
     public void ensureCinemaSelectedFromAlimentos(String targetCinema) {
-        log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> {}", targetCinema);
+        log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> '{}'", targetCinema);
+
+        // Track cinema for PDF and Allure reporting
+        TestSteps.setCinema(targetCinema);
+        try { Allure.label("cinema", targetCinema); } catch (Exception ignored) {}
+
+        if (isOnAlimentosHome()) {
+
+            // Si el chip de "sin selección" NO es visible → ya hay un cine seleccionado
+            boolean cinemaSelected = !isVisibleNow(CINES_SIN_SELECCION);
+
+            if (cinemaSelected) {
+                // Intento 1: leer el nombre del cine del chip
+                String currentCinema = getCurrentCinemaName();
+
+                if (currentCinema != null && !currentCinema.isBlank()) {
+                    log.info("[CinemasHelper] Cine actual detectado: '{}'", currentCinema);
+                    if (cinemaMatches(currentCinema, targetCinema)) {
+                        log.info("[CinemasHelper] El cine ya coincide con '{}' — continuando flujo.", targetCinema);
+                        return;
+                    }
+                    log.info("[CinemasHelper] Cambiando cine de '{}' a '{}'", currentCinema, targetCinema);
+                } else {
+                    // Intento 2: el nombre no se pudo leer, pero verificamos si el texto
+                    //            del cine objetivo ya es visible en el chip/encabezado
+                    String xpathTarget = "//android.widget.TextView[contains(@text,'"
+                            + escapeXpath(targetCinema) + "')]"
+                            + " | //android.view.View[contains(@content-desc,'"
+                            + escapeXpath(targetCinema) + "')]";
+                    if (isVisibleNow(By.xpath(xpathTarget))) {
+                        log.info("[CinemasHelper] Cine '{}' ya visible en pantalla — continuando flujo.", targetCinema);
+                        return;
+                    }
+                    log.info("[CinemasHelper] Hay cine seleccionado pero no se pudo leer su nombre — " +
+                             "procediendo con selección de '{}'.", targetCinema);
+                }
+            } else {
+                log.info("[CinemasHelper] No hay cine seleccionado — configurando: '{}'", targetCinema);
+            }
+        }
 
         goToAlimentosTab();
         openSelectorFromAlimentosIfNeeded();
         waitSelectorScreenOrThrow();
 
-        // ✅ Tu escritura robusta (misma lógica, solo más compatible con Compose/acentos)
         typeInSearchBoxULTRA(targetCinema);
 
         pickCinemaFromResults(targetCinema);
@@ -231,11 +271,66 @@ public class CinemasHelper extends BasePage {
         clickAplicarSeleccion();
         acceptAlertsIfPresent();
 
-        // ✅ Si después de aplicar aparece Club Cinépolis, ciérralo y regresa a Alimentos
         dismissClubLoginIfPresent();
         goToAlimentosTab();
 
-        log.info("[CinemasHelper] Cine seleccionado OK -> {}", targetCinema);
+        log.info("[CinemasHelper] Cine configurado correctamente -> '{}'", targetCinema);
+    }
+
+    /**
+     * Intenta leer el nombre del cine actualmente seleccionado desde el chip del menú de alimentos.
+     * El chip muestra el nombre del cine como TextView hermano o ancestro de la etiqueta "Cines".
+     */
+    private String getCurrentCinemaName() {
+        // 1) TextView hermano anterior o posterior a la etiqueta "Cines"
+        try {
+            List<WebElement> siblings = driver.findElements(By.xpath(
+                "//android.widget.TextView[@text='Cines']/preceding-sibling::android.widget.TextView" +
+                " | //android.widget.TextView[@text='Cines']/following-sibling::android.widget.TextView"
+            ));
+            for (WebElement el : siblings) {
+                try {
+                    String t = el.getText();
+                    if (t != null && !t.trim().isEmpty() && !t.equals("Cines")) return t.trim();
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+
+        // 2) content-desc del contenedor padre del chip de cines
+        try {
+            WebElement cinesLabel = firstOrNull(By.xpath("//android.widget.TextView[@text='Cines']"));
+            if (cinesLabel != null) {
+                WebElement parent = cinesLabel.findElement(By.xpath(".."));
+                String desc = parent.getAttribute("content-desc");
+                if (desc != null && !desc.isBlank()) {
+                    String cleaned = desc.replace("Cines", "").replace(",", "").trim();
+                    if (!cleaned.isEmpty()) return cleaned;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // 3) Cualquier TextView visible dentro del chip de cines (excluye "Cines")
+        try {
+            List<WebElement> candidates = driver.findElements(By.xpath(
+                "//android.widget.TextView[@text='Cines']/ancestor::android.view.View[1]" +
+                "//android.widget.TextView[@text != 'Cines']"
+            ));
+            for (WebElement el : candidates) {
+                try {
+                    String t = el.getText();
+                    if (t != null && !t.trim().isEmpty()) return t.trim();
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+
+        return null;
+    }
+
+    /** Compara dos nombres de cine ignorando acentos, mayúsculas y espacios extra. */
+    private boolean cinemaMatches(String current, String target) {
+        if (current == null || target == null) return false;
+        return normalize(stripAccents(current)).contains(normalize(stripAccents(target))) ||
+               normalize(stripAccents(target)).contains(normalize(stripAccents(current)));
     }
 
     private void goToAlimentosTab() {
@@ -747,6 +842,10 @@ public class CinemasHelper extends BasePage {
 
     /** Verificación rápida (sin espera) — usar solo cuando ya esperamos antes de llamar. */
     public boolean isClubLoginVisible() {
+        // El menú de Alimentos muestra "Club Cinépolis" como sección y "Ingresa tu folio" como campo.
+        // Si estamos en esa pantalla, no es la pantalla de login de Club → salir inmediatamente.
+        if (isVisibleNow(By.xpath("//android.widget.TextView[@text='Ingresa tu folio']"))) return false;
+
         if (isVisibleNow(CLUB_LOGIN_TITLE)) return true;
         if (isVisibleNow(CLUB_LOGIN_LOGO))  return true;
 

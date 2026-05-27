@@ -18,11 +18,15 @@ import java.nio.file.*;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 // HTTP server
 import com.sun.net.httpserver.HttpExchange;
@@ -113,6 +117,22 @@ public class AllureReportSender {
             return;
         }
 
+        // Omitir email si es una ejecución de Atmosfera SIN fallos reales.
+        // Doble verificación: contador pasado (ya corregido en AllureMailListener) +
+        // lectura directa de allure-results por si el contador viniera en 0 por otro caller.
+        boolean isAtmosfera =
+                (suiteName != null && suiteName.toLowerCase().contains("atmosfera")) ||
+                (executedTests != null && executedTests.contains("MenuAtmosfera"));
+
+        if (isAtmosfera) {
+            boolean hasFailures = failedTests > 0 || hasMenuAtmosferaFailuresInResults();
+            if (!hasFailures) {
+                log.info("[AllureReportSender] MenuAtmosfera suite — sin fallos detectados — email omitido.");
+                return;
+            }
+            log.info("[AllureReportSender] MenuAtmosfera suite falló (failedTests={}) — enviando correo.", failedTests);
+        }
+
         if (isFinalMailAlreadySent()) {
             log.info("[AllureReportSender] Skipping: mail lock already exists at {}",
                     FINAL_MAIL_LOCK.toAbsolutePath());
@@ -199,12 +219,19 @@ public class AllureReportSender {
             }
         } catch (Exception ignored) {}
 
+        // MAIL_TO env var (set by backend when Settings recipients are saved) takes priority
+        String mailToEnv = System.getenv("MAIL_TO");
+        if (mailToEnv != null && !mailToEnv.isBlank()) {
+            to = mailToEnv.trim();
+            log.info("[AllureReportSender] Destinatarios sobreescritos por MAIL_TO env: {}", to);
+        }
+
         if (smtpPass.isBlank()) {
             log.error("[AllureReportSender] smtp.pass is missing in smtp-config.json; email will not be sent.");
             return false;
         }
         if (to.isBlank()) {
-            log.error("[AllureReportSender] No recipients configured in smtp-config.json (mail.to).");
+            log.error("[AllureReportSender] No recipients configured (smtp-config.json mail.to ni MAIL_TO env).");
             return false;
         }
 
@@ -248,6 +275,27 @@ public class AllureReportSender {
         int failed = failedTests;
         int skipped = Math.max(0, total - passed - failed);
         String durationPretty = formatDurationPretty(durationMillis);
+
+        List<FailureInfo> failureDetails = failed > 0 ? readAllureFailures() : List.of();
+        String failuresSection = buildFailuresHtml(failureDetails);
+
+        String conclusionText;
+        String conclusionColor;
+        if (failed > 0) {
+            conclusionText = "Se detectaron <b>" + failed + " test(s) con fallos</b> de un total de " + total + ". Se requiere revisión.";
+            conclusionColor = "#f85149";
+        } else if (skipped > 0) {
+            conclusionText = "Todos los tests activos pasaron correctamente. <b>" + skipped + " test(s) omitidos</b>.";
+            conclusionColor = "#d29922";
+        } else {
+            conclusionText = "<b>Todos los " + total + " tests pasaron correctamente.</b>";
+            conclusionColor = "#2ea043";
+        }
+        String conclusionesSection =
+                "<div style='background:#111827;border:1px solid #22304a;border-radius:16px;padding:16px;margin-top:16px;'>"
+                + "<div style='font-size:15px;font-weight:800;color:#c9d1d9;margin-bottom:8px;'>📋 Conclusiones</div>"
+                + "<div style='font-size:13px;color:" + conclusionColor + ";'>" + conclusionText + "</div>"
+                + "</div>";
 
         // ✅ Bloque estético del link (recomendado: "card" + botón)
         String interactiveBlock = "";
@@ -344,8 +392,12 @@ public class AllureReportSender {
                         + "      </table>"
                         + "    </div>"
 
+                        +      failuresSection
+
+                        +      conclusionesSection
+
                         + "    <div style='margin-top:14px;font-size:12px;color:#8b949e;'>"
-                        + "      Se adjunta el PDF con el resumen detallado de ejecución (Dashboard Allure: Overview + Suites)."
+                        + "      Se adjuntan: 📊 Reporte Allure (Overview + Behaviors) y 📋 PDFs individuales por test."
                         + "    </div>"
 
                         + "  </div>"
@@ -357,10 +409,21 @@ public class AllureReportSender {
         Multipart multipart = new MimeMultipart();
         multipart.addBodyPart(htmlPart);
 
+        // Adjunto 1: Allure Overview + Behaviors PDF
         MimeBodyPart allurePart = new MimeBodyPart();
         allurePart.attachFile(allurePdf.toFile());
         allurePart.setFileName("Reporte_Allure_" + sanitizeFileName(projectName) + ".pdf");
         multipart.addBodyPart(allurePart);
+
+        // Adjunto 2: PDFs por test (merged de build/reportes-pdf/)
+        Path testsPdf = mergeTestPdfs(projectName);
+        if (testsPdf != null && Files.exists(testsPdf)) {
+            MimeBodyPart testsPart = new MimeBodyPart();
+            testsPart.attachFile(testsPdf.toFile());
+            testsPart.setFileName("Reporte_Tests_" + sanitizeFileName(projectName) + ".pdf");
+            multipart.addBodyPart(testsPart);
+            log.info("[AllureReportSender] Per-test PDF attached: {}", testsPdf.getFileName());
+        }
 
         message.setContent(multipart);
 
@@ -372,6 +435,43 @@ public class AllureReportSender {
         } catch (Throwable e) {
             log.error("[AllureReportSender] Email send failed: {} -> {}", e.getClass().getName(), e.getMessage(), e);
             return false;
+        }
+    }
+
+    private static Path mergeTestPdfs(String projectName) {
+        Path reportsDir = Paths.get("build", "reportes-pdf");
+        if (!Files.exists(reportsDir)) {
+            log.info("[AllureReportSender] Per-test PDF dir not found: {}", reportsDir.toAbsolutePath());
+            return null;
+        }
+
+        Path merged = reportsDir.resolve("Reporte_Tests_" + sanitizeFileName(projectName) + ".pdf");
+        try { Files.deleteIfExists(merged); } catch (Exception ignored) {}
+
+        try {
+            java.util.List<Path> pdfs = Files.walk(reportsDir, 1)
+                    .filter(p -> p.toString().endsWith(".pdf") && !p.equals(merged))
+                    .sorted()
+                    .collect(java.util.stream.Collectors.toList());
+
+            if (pdfs.isEmpty()) {
+                log.info("[AllureReportSender] No per-test PDFs found in {}", reportsDir.toAbsolutePath());
+                return null;
+            }
+
+            PDFMergerUtility merger = new PDFMergerUtility();
+            merger.setDestinationFileName(merged.toAbsolutePath().toString());
+            for (Path p : pdfs) {
+                if (Files.exists(p)) merger.addSource(p.toFile());
+            }
+            merger.mergeDocuments(null);
+
+            log.info("[AllureReportSender] Merged {} per-test PDFs → {}", pdfs.size(), merged.toAbsolutePath());
+            return Files.exists(merged) ? merged : null;
+
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] Could not merge per-test PDFs: {}", e.getMessage());
+            return null;
         }
     }
 
@@ -581,6 +681,191 @@ public class AllureReportSender {
         if (v == null) return def;
         String t = v.trim();
         return t.isEmpty() ? def : t;
+    }
+
+    // ======================================================
+    //            LECTURA DE FALLOS DESDE ALLURE RESULTS
+    // ======================================================
+
+    private record FailureInfo(String name, String suite, String cinema, String message,
+                               String traceShort, String failingStep, String status) {}
+
+    private static String buildFriendlyDescription(String failingStep, String message) {
+        // Priority 1: use the step name to build the message
+        if (failingStep != null && !failingStep.isBlank()) {
+            String step = failingStep.trim();
+            // Strip "failed" suffix if present
+            if (step.toLowerCase().endsWith(" failed.")) step = step.substring(0, step.length() - 8).trim();
+            if (step.toLowerCase().endsWith(" failed"))  step = step.substring(0, step.length() - 7).trim();
+            return "Falló al intentar: " + step;
+        }
+        // Priority 2: simplify the error message
+        if (message != null && !message.isBlank()) {
+            String m = message.trim();
+            String ml = m.toLowerCase();
+            if (ml.contains("timeout") || ml.contains("timed out"))
+                return "Tiempo de espera agotado — el elemento no apareció a tiempo";
+            if (ml.contains("nosuchelement") || ml.contains("no such element"))
+                return "Elemento no encontrado en pantalla";
+            if (ml.contains("stale") && ml.contains("element"))
+                return "El elemento dejó de estar disponible en pantalla";
+            if (ml.contains("assertionerror") || ml.contains("expected") && ml.contains("but"))
+                return "Verificación fallida — el resultado no fue el esperado";
+            // Generic: strip " failed." suffix and show the action
+            if (m.endsWith(" failed.")) return "Falló al intentar: " + m.substring(0, m.length() - 8).trim();
+            if (m.endsWith(" failed"))  return "Falló al intentar: " + m.substring(0, m.length() - 7).trim();
+            // Fallback to first 120 chars of message
+            return m.length() > 120 ? m.substring(0, 120) + "…" : m;
+        }
+        return "Error durante la ejecución del test";
+    }
+
+    private static boolean hasMenuAtmosferaFailuresInResults() {
+        Path resultsDir = Paths.get("build", "allure-results");
+        if (!Files.exists(resultsDir)) return false;
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            return Files.walk(resultsDir, 1)
+                    .filter(p -> p.getFileName().toString().endsWith("-result.json"))
+                    .anyMatch(p -> {
+                        try {
+                            JsonNode root = mapper.readTree(p.toFile());
+                            String status = root.path("status").asText("");
+                            if (!status.equals("failed") && !status.equals("broken")) return false;
+
+                            String fullName = root.path("fullName").asText("");
+                            if (fullName.contains("MenuAtmosfera")
+                                    || fullName.toLowerCase().contains("atmosfera")) return true;
+
+                            JsonNode labels = root.path("labels");
+                            if (labels.isArray()) {
+                                for (JsonNode lbl : labels) {
+                                    String lblName  = lbl.path("name").asText("");
+                                    String lblValue = lbl.path("value").asText("");
+                                    if (("testClass".equals(lblName) || "suite".equals(lblName)
+                                            || "feature".equals(lblName))
+                                            && (lblValue.contains("MenuAtmosfera")
+                                                || lblValue.toLowerCase().contains("atmosfera"))) {
+                                        return true;
+                                    }
+                                }
+                            }
+                            return false;
+                        } catch (Exception e) {
+                            return false;
+                        }
+                    });
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] Error revisando allure-results para fallos Atmosfera: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private static List<FailureInfo> readAllureFailures() {
+        List<FailureInfo> failures = new ArrayList<>();
+        Path resultsDir = Paths.get("build", "allure-results");
+        if (!Files.exists(resultsDir)) return failures;
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            Files.walk(resultsDir, 1)
+                 .filter(p -> p.getFileName().toString().endsWith("-result.json"))
+                 .forEach(p -> {
+                     try {
+                         JsonNode root = mapper.readTree(p.toFile());
+                         String status = root.path("status").asText("");
+                         if (!status.equals("failed") && !status.equals("broken")) return;
+
+                         String name = root.path("name").asText("Test desconocido");
+
+                         JsonNode details = root.path("statusDetails");
+                         String message = details.path("message").asText("").trim();
+                         String trace   = details.path("trace").asText("").trim();
+
+                         String traceShort = Arrays.stream(trace.split("\\n"))
+                                 .limit(5)
+                                 .collect(java.util.stream.Collectors.joining("\n"));
+
+                         String failingStep = "";
+                         JsonNode steps = root.path("steps");
+                         if (steps.isArray()) {
+                             for (JsonNode step : steps) {
+                                 if ("failed".equals(step.path("status").asText(""))) {
+                                     failingStep = step.path("name").asText("");
+                                     break;
+                                 }
+                             }
+                         }
+
+                         String suite = "";
+                         String cinema = "";
+                         JsonNode labels = root.path("labels");
+                         if (labels.isArray()) {
+                             for (JsonNode lbl : labels) {
+                                 String lblName = lbl.path("name").asText("");
+                                 if ("suite".equals(lblName)) suite = lbl.path("value").asText("");
+                                 else if ("cinema".equals(lblName)) cinema = lbl.path("value").asText("");
+                             }
+                         }
+
+                         failures.add(new FailureInfo(name, suite, cinema, message, traceShort, failingStep, status));
+                     } catch (Exception ignored) {}
+                 });
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] No se pudieron leer allure-results: {}", e.getMessage());
+        }
+        return failures;
+    }
+
+    private static String buildFailuresHtml(List<FailureInfo> failures) {
+        if (failures.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div style='background:#111827;border:1px solid #3a1a1a;border-radius:16px;padding:18px;margin-top:16px;'>");
+        sb.append("<div style='font-size:18px;font-weight:800;color:#f85149;margin-bottom:14px;'>❌ Detalle de Fallos (")
+          .append(failures.size()).append(")</div>");
+
+        for (FailureInfo f : failures) {
+            boolean broken = "broken".equals(f.status());
+            String statusColor = broken ? "#d29922" : "#f85149";
+            String statusLabel = broken ? "⚠️ BROKEN" : "❌ FAILED";
+
+            sb.append("<div style='border:1px solid ").append(broken ? "#3a2a00" : "#3a1a1a")
+              .append(";border-radius:10px;padding:14px;margin-bottom:12px;background:#0d1117;'>");
+
+            sb.append("<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;'>");
+            sb.append("<span style='font-size:12px;font-weight:700;color:").append(statusColor)
+              .append(";background:").append(broken ? "rgba(210,153,34,0.1)" : "rgba(248,81,73,0.1)")
+              .append(";padding:2px 8px;border-radius:6px;'>").append(statusLabel).append("</span>");
+            if (!f.suite().isEmpty()) {
+                sb.append("<span style='font-size:11px;color:#8b949e;background:#1a2233;padding:2px 8px;border-radius:6px;'>")
+                  .append(escapeHtml(f.suite())).append("</span>");
+            }
+            if (!f.cinema().isEmpty()) {
+                sb.append("<span style='font-size:11px;color:#c9d1d9;background:#1a2233;padding:2px 8px;border-radius:6px;'>🎬 ")
+                  .append(escapeHtml(f.cinema())).append("</span>");
+            }
+            sb.append("</div>");
+
+            sb.append("<div style='font-size:14px;font-weight:700;color:#c9d1d9;margin-bottom:8px;'>")
+              .append(escapeHtml(f.name())).append("</div>");
+
+            if (!f.message().isEmpty()) {
+                String msg = f.message().length() > 400 ? f.message().substring(0, 400) + "…" : f.message();
+                sb.append("<div style='font-size:12px;color:#f85149;background:#1c0a0a;border-left:3px solid #f85149;")
+                  .append("border-radius:0 6px 6px 0;padding:8px 10px;margin-bottom:8px;font-family:monospace;word-break:break-all;'>")
+                  .append(escapeHtml(msg)).append("</div>");
+            }
+
+            String desc = buildFriendlyDescription(f.failingStep(), f.message());
+            sb.append("<div style='font-size:12px;color:#8b949e;margin-bottom:4px;'>")
+              .append("<span style='color:#c9d1d9;font-style:italic;'>").append(escapeHtml(desc)).append("</span></div>");
+
+            sb.append("</div>");
+        }
+
+        sb.append("</div>");
+        return sb.toString();
     }
 }
 

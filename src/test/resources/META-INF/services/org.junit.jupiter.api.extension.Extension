@@ -1,1 +1,3 @@
-config.VideoRecordingExtension
+# VideoRecordingExtension registrada manualmente via BaseTest.setUp()/tearDown()
+# para garantizar que el driver exista antes de intentar grabar.
+# config.VideoRecordingExtension

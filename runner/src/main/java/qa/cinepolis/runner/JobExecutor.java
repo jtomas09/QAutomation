@@ -19,6 +19,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -262,9 +264,22 @@ public class JobExecutor {
     private final RunnerConfig  config;
     private final BackendClient client;
 
+    private volatile Process activeProcess;
+
     public JobExecutor(RunnerConfig config, BackendClient client) {
         this.config = config;
         this.client = client;
+    }
+
+    /** Kills the currently running Gradle process tree. Called by the shutdown hook. */
+    public void killActiveProcess() {
+        Process p = activeProcess;
+        if (p != null && p.isAlive()) {
+            System.out.println("\n[Runner] Shutdown detectado — terminando proceso Gradle...");
+            p.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
+            p.destroyForcibly();
+            System.out.println("[Runner] Proceso Gradle terminado.");
+        }
     }
 
     public void execute(JobDto job) {
@@ -281,10 +296,15 @@ public class JobExecutor {
                     + "  |  Env: "    + job.env
                     + "  |  Device: " + job.device
                     + "  |  País: "   + job.country);
+            client.sendLog(job.executionId, "INFO",
+                    "📹 Grabación de video: " + (job.videoEnabled ? "ACTIVA" : "INACTIVA"));
 
             // ── Pre-flight ────────────────────────────────────────────────────
             checkAdbDevices(job.executionId);
             checkAppiumServer(job.executionId);
+
+            // ── Pre-clean locked test-results to avoid file-lock failures ────
+            preCleanTestResults(job.executionId);
 
             // ── Build Gradle command ──────────────────────────────────────────
             List<String> cmd = buildCommand(job);
@@ -304,8 +324,16 @@ public class JobExecutor {
             pb.environment().put("APPIUM_HUB",     config.appiumHub);
             pb.environment().put("EXECUTION_NAME", nvl(job.suite));
             pb.environment().put("REUSE_DRIVER",   "true");
+            pb.environment().put("VIDEO_ENABLED",  String.valueOf(job.videoEnabled));
+            if (job.testClass != null && !job.testClass.isBlank()) {
+                pb.environment().put("TEST_CLASS", job.testClass);
+            }
+            if (job.sendMail && job.reportEmails != null && !job.reportEmails.isBlank()) {
+                pb.environment().put("MAIL_TO", job.reportEmails);
+            }
 
             Process process = pb.start();
+            activeProcess = process;
 
             // Abort watcher — polls backend every 3 s; kills Gradle if ABORTED
             AtomicBoolean wasAborted = new AtomicBoolean(false);
@@ -339,6 +367,7 @@ public class JobExecutor {
             }
 
             int exitCode = process.waitFor();
+            activeProcess = null;
             abortWatcher.interrupt();
 
             if (wasAborted.get()) {
@@ -385,7 +414,7 @@ public class JobExecutor {
 
     private List<String> buildCommand(JobDto job) {
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
-        String  testFilter = resolveTestFilter(job.suite);
+        String  testFilter = resolveTestFilter(job.suite, job.testClass);
 
         List<String> cmd = new ArrayList<>();
         if (isWindows) {
@@ -400,6 +429,7 @@ public class JobExecutor {
         cmd.add("--tests");
         cmd.add(testFilter);
         cmd.add("--rerun-tasks");
+        cmd.add("--no-daemon");
 
         // build.gradle contains: systemProperties System.getProperties()
         // so -D flags on the Gradle JVM are visible to tests as System.getProperty()
@@ -409,12 +439,30 @@ public class JobExecutor {
         cmd.add("-Dappium.hub="    + config.appiumHub + "/wd/hub");
         cmd.add("-DexecutionName=" + nvl(job.suite,   "Suite"));
         cmd.add("-DREUSE_DRIVER=true");
+        if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
+        if (job.sendMail)     cmd.add("-DsendMail=true");
+        if (job.testClass != null && !job.testClass.isBlank())
+            cmd.add("-DtestClass=" + job.testClass);
 
         return cmd;
     }
 
-    private static String resolveTestFilter(String suiteName) {
+    private static String resolveTestFilter(String suiteName, String testClass) {
         if (suiteName == null || suiteName.isBlank()) return "tests.RunAllTests";
+
+        // When a specific class is requested within a suite, target it directly
+        if (testClass != null && !testClass.isBlank()) {
+            String key = suiteName.toLowerCase().trim();
+            String base = SUITE_MAP.getOrDefault(key, null);
+            if (base != null) {
+                // Strip the trailing .* wildcard and append the class name
+                String pkg = base.endsWith(".*") ? base.substring(0, base.length() - 2) : base;
+                return pkg + "." + testClass;
+            }
+            // Fallback: derive package from suite directly
+            return "tests.México.alimentos." + testClass;
+        }
+
         String key = suiteName.toLowerCase().trim();
         return SUITE_MAP.getOrDefault(key, "tests.RunAllTests");
     }
@@ -477,19 +525,152 @@ public class JobExecutor {
     private void uploadVideos(String executionId, String suite) {
         try {
             Path videosDir = Paths.get(config.workDir, "build", "videos");
-            if (!Files.exists(videosDir)) return;
+            if (!Files.exists(videosDir)) {
+                client.sendLog(executionId, "INFO",
+                        "📹 Sin videos: directorio build/videos no existe");
+                return;
+            }
+
+            long[] count = {0};
             Files.walk(videosDir)
                     .filter(p -> p.toString().endsWith(".mp4"))
                     .forEach(p -> {
+                        count[0]++;
                         String className = p.getParent().getFileName().toString();
                         String testName  = p.getFileName().toString()
                                 .replace(".mp4", "")
                                 .replace("_", " ")
                                 .trim();
+                        client.sendLog(executionId, "INFO",
+                                "📹 Subiendo video: " + p.getFileName()
+                                + " (" + p.toFile().length() / 1024 + " KB)");
                         client.uploadVideo(executionId, nvl(suite, className), testName, p);
                     });
+
+            if (count[0] == 0) {
+                client.sendLog(executionId, "WARN",
+                        "📹 No se encontraron videos en build/videos (Appium no grabó)");
+            } else {
+                client.sendLog(executionId, "INFO",
+                        "📹 " + count[0] + " video(s) subido(s) — disponibles en sección Videos");
+            }
         } catch (Exception e) {
+            client.sendLog(executionId, "WARN", "📹 Error al subir videos: " + e.getMessage());
             System.out.println("[Executor] No se pudieron subir videos: " + e.getMessage());
+        }
+    }
+
+    // ── Pre-clean: kill stuck Gradle JVMs, then delete locked binary dir ─────
+    // Gradle --rerun-tasks fails with IOException when a prior test JVM still
+    // has build/test-results/test/binary/output.bin open. We first kill any
+    // java.exe whose command line references "gradle" (the stuck build daemon
+    // or test JVM), wait for it to die, then delete the directory ourselves.
+
+    private void preCleanTestResults(String executionId) {
+        killStuckGradleProcesses(executionId);
+
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+
+        // ── Clean binary test-results dir (locked by previous Gradle run) ────
+        Path binaryDir = Paths.get(config.workDir, "build", "test-results", "test", "binary");
+        if (Files.exists(binaryDir)) {
+            if (isWindows) {
+                try {
+                    new ProcessBuilder("cmd", "/c", "rd", "/S", "/Q",
+                            binaryDir.toAbsolutePath().toString())
+                            .redirectErrorStream(true).start().waitFor(8, TimeUnit.SECONDS);
+                } catch (Exception ignored) {}
+            }
+            try {
+                if (Files.exists(binaryDir)) {
+                    Files.walk(binaryDir).sorted(Comparator.reverseOrder())
+                            .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                }
+            } catch (Exception ignored) {}
+
+            if (!Files.exists(binaryDir)) {
+                client.sendLog(executionId, "INFO", "🧹 Resultados de test anteriores eliminados");
+            } else {
+                client.sendLog(executionId, "WARN",
+                        "⚠️ No se pudo eliminar build/test-results/test/binary — Gradle lo intentará");
+            }
+        }
+
+        // ── Clean stale videos so only this run's recordings get uploaded ────
+        Path videosDir = Paths.get(config.workDir, "build", "videos");
+        if (Files.exists(videosDir)) {
+            if (isWindows) {
+                try {
+                    new ProcessBuilder("cmd", "/c", "rd", "/S", "/Q",
+                            videosDir.toAbsolutePath().toString())
+                            .redirectErrorStream(true).start().waitFor(8, TimeUnit.SECONDS);
+                } catch (Exception ignored) {}
+            }
+            try {
+                if (Files.exists(videosDir)) {
+                    Files.walk(videosDir).sorted(Comparator.reverseOrder())
+                            .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                }
+            } catch (Exception ignored) {}
+            client.sendLog(executionId, "INFO", "🎬 Videos de ejecuciones anteriores eliminados");
+        }
+    }
+
+    private void killStuckGradleProcesses(String executionId) {
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        if (!isWindows) return;
+
+        long currentPid = ProcessHandle.current().pid();
+        List<String> pidsToKill = new ArrayList<>();
+
+        try {
+            // Get-CimInstance replaces wmic (removed in Windows 11 22H2+).
+            // Uses Where-Object pipeline with single-quoted literals to avoid
+            // the double-quote escaping issues of -Filter string.
+            String script =
+                "$myPid = " + currentPid + "; " +
+                "Get-CimInstance Win32_Process | " +
+                "Where-Object { $_.Name -eq 'java.exe' -and " +
+                "  $_.ProcessId -ne $myPid -and " +
+                "  $_.CommandLine -like '*gradle*' -and " +
+                "  $_.CommandLine -notlike '*appium*' } | " +
+                "Select-Object -ExpandProperty ProcessId";
+
+            Process ps = new ProcessBuilder(
+                    "powershell", "-NonInteractive", "-NoProfile", "-Command", script)
+                    .redirectErrorStream(true)
+                    .start();
+
+            String output = new String(ps.getInputStream().readAllBytes()).trim();
+            ps.waitFor(10, TimeUnit.SECONDS);
+
+            for (String line : output.split("\\r?\\n")) {
+                String pid = line.trim();
+                if (!pid.isEmpty() && pid.matches("\\d+")) {
+                    pidsToKill.add(pid);
+                }
+            }
+        } catch (Exception e) {
+            client.sendLog(executionId, "WARN",
+                    "⚠️ No se pudo consultar procesos Java: " + e.getMessage());
+        }
+
+        for (String pid : pidsToKill) {
+            try {
+                client.sendLog(executionId, "WARN",
+                        "🔪 Terminando proceso Java/Gradle bloqueante PID: " + pid);
+                new ProcessBuilder("taskkill", "/F", "/T", "/PID", pid)
+                        .redirectErrorStream(true)
+                        .start()
+                        .waitFor(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                client.sendLog(executionId, "WARN",
+                        "No se pudo terminar PID " + pid + ": " + e.getMessage());
+            }
+        }
+
+        if (!pidsToKill.isEmpty()) {
+            try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
         }
     }
 

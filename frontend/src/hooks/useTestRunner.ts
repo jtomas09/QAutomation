@@ -30,10 +30,11 @@ export function useTestRunner() {
   }, [])
 
   const runTest = useCallback(async (
-    suiteId: string,
-    env:     string,
-    device:  string,
-    country: string = 'mexico',
+    suiteId:      string,
+    env:          string,
+    device:       string,
+    country:      string  = 'mexico',
+    videoEnabled: boolean = false,
   ) => {
     setState(prev => ({
       ...prev,
@@ -49,7 +50,8 @@ export function useTestRunner() {
 
     try {
       // Step 1: POST /api/run → get executionId
-      const { executionId } = await postRun({ suite: suiteId, env, device, country })
+      console.log('[runTest] postRun payload:', { suite: suiteId, env, device, country, videoEnabled })
+      const { executionId } = await postRun({ suite: suiteId, env, device, country, videoEnabled })
       executionIdRef.current = executionId
       setState(prev => ({ ...prev, executionId }))
       addLog('INFO', `🆔 ${executionId} — En cola. Esperando runner local...`)
@@ -106,5 +108,46 @@ export function useTestRunner() {
     setState(prev => ({ ...prev, logs: [] }))
   }, [])
 
-  return { state, runTest, stopTest, clearLog }
+  const attachToExecution = useCallback((executionId: string, suiteName: string) => {
+    if (executionIdRef.current) return  // already tracking one
+    executionIdRef.current = executionId
+    setState(prev => ({
+      ...prev,
+      status:      'running',
+      passed:      0,
+      failed:      0,
+      skipped:     0,
+      total:       0,
+      activeSuite: suiteName,
+      executionId,
+      logs:        [],
+    }))
+    addLog('INFO', `📡 Ejecución programada detectada: ${executionId} — suite: ${suiteName}`)
+
+    const unsubscribe = streamExecution(
+      executionId,
+      addLog,
+      (result) => {
+        closeStreamRef.current = null
+        executionIdRef.current = null
+        setState(prev => ({
+          ...prev,
+          status:      'finished',
+          ...result,
+          lastRun:     new Date().toLocaleString('es-MX'),
+          activeSuite: null,
+          executionId: null,
+        }))
+      },
+      (errMsg) => {
+        closeStreamRef.current = null
+        executionIdRef.current = null
+        addLog('ERROR', errMsg)
+        setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
+      },
+    )
+    closeStreamRef.current = unsubscribe
+  }, [addLog])
+
+  return { state, runTest, stopTest, clearLog, attachToExecution }
 }

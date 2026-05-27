@@ -23,12 +23,20 @@ public class AllureAutoPublisher {
     private static final Path ALLURE_HTML_DIR =
             Paths.get("build", "reports", "allure-report", "allureReport");
 
+    private static final Path DEPLOY_LOCK =
+            Paths.get("build", "netlify-deploy.lock");
+
     public static String generateAndPublish() throws Exception {
         log.info("[AllureAutoPublisher] generateAndPublish() invoked.");
 
         if (!IS_DEPLOY_ENABLED) {
             log.info("[AllureAutoPublisher] Netlify deploy disabled (-DdeployToNetlify=false). Skipping.");
             return "";
+        }
+
+        if (Files.exists(DEPLOY_LOCK)) {
+            log.info("[AllureAutoPublisher] Deploy lock exists — ya se publicó en esta ejecución. Leyendo URL guardada.");
+            return AllureUrlStore.readUrl();
         }
 
         Path index = ALLURE_HTML_DIR.resolve("index.html");
@@ -50,6 +58,7 @@ public class AllureAutoPublisher {
 
         log.info("[AllureAutoPublisher] Published. URL: {}", finalUrl);
         AllureUrlStore.saveUrl(finalUrl);
+        writeDeployLock();
         return finalUrl;
     }
 
@@ -203,5 +212,28 @@ public class AllureAutoPublisher {
     private static String escapeForHtml(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    /** Called at test plan start to allow a fresh deploy in the new run. */
+    public static void resetDeployLock() {
+        try {
+            if (Files.deleteIfExists(DEPLOY_LOCK)) {
+                log.debug("[AllureAutoPublisher] Deploy lock cleared.");
+            }
+        } catch (Exception e) {
+            log.warn("[AllureAutoPublisher] Could not clear deploy lock: {}", e.getMessage());
+        }
+    }
+
+    private static void writeDeployLock() {
+        try {
+            Files.createDirectories(DEPLOY_LOCK.getParent());
+            Files.writeString(DEPLOY_LOCK, "deployed",
+                    java.nio.charset.StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (Exception e) {
+            log.warn("[AllureAutoPublisher] Could not write deploy lock: {}", e.getMessage());
+        }
     }
 }
