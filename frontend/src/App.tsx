@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES } from './data'
+import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES, getRandomSmokeTests } from './data'
 import { useTestRunner }    from './hooks/useTestRunner'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { useDeviceStore }   from './hooks/useDeviceStore'
@@ -24,6 +24,7 @@ export default function App() {
   const [env,        setEnv]        = useState(ENVIRONMENTS[0])
   const [suite,      setSuite]      = useState(SUITES[0])
   const [drillSuite,    setDrillSuite]    = useState<string | null>(null)
+  const [smokeTests,    setSmokeTests]    = useState(() => getRandomSmokeTests())
   const [videoEnabled,  setVideoEnabled]  = useState(false)
 
   // Device comes from the store (persisted, configurable)
@@ -113,7 +114,7 @@ export default function App() {
             // Drill-down: show individual tests for a suite
             if (drillSuite) {
               const suite = allKnownCards.find(s => s.id === drillSuite)!
-              const tests = SUITE_TESTS[drillSuite] ?? []
+              const tests = drillSuite === 'smoke' ? smokeTests : (SUITE_TESTS[drillSuite] ?? [])
               return (
                 <SuiteDetailPage
                   suite={suite}
@@ -128,8 +129,14 @@ export default function App() {
             }
 
             const handleCardRun = (id: string) => {
-              if (SUITE_TESTS[id]) setDrillSuite(id)
-              else runTest(id, env, effectiveDevice, country, videoEnabled)
+              if (id === 'smoke') {
+                setSmokeTests(getRandomSmokeTests())
+                setDrillSuite('smoke')
+              } else if (SUITE_TESTS[id]) {
+                setDrillSuite(id)
+              } else {
+                runTest(id, env, effectiveDevice, country, videoEnabled)
+              }
             }
 
             // No suites defined for this country yet

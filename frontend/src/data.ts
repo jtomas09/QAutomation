@@ -306,6 +306,9 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'cl-alimento-parquepremium', title: 'Alimento — Parque Arauco Premium', description: 'Compra alimento sin sesión en Cine Parque Arauco Premium' },
   ],
 
+  // smoke entry required so SUITE_TESTS['smoke'] is truthy (drill-down guard in App.tsx)
+  'smoke': [],
+
   'alimentos-tradicional': [
     { id: 'trad-t01', title: 'Maxi Combo Familiar — Takis + Refrescos',    description: 'Maxi Combo Familiar con Palomitas Takis y Refrescos' },
     { id: 'trad-t02', title: 'Maxi Combo Familiar — Refrescos variados',   description: 'Maxi Combo Familiar con Refrescos variados' },
@@ -359,3 +362,28 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'trad-t50', title: 'Maxicombo Mix — Hot Dog Jumbo',              description: 'Maxicombo Mix con Hot Dog Jumbo' },
   ],
 };
+
+// ── Smoke Test — pool de 152 casos individuales para selección aleatoria ──────
+const SMOKE_POOL: IndividualTest[] = [
+  ...SUITE_TESTS['asientos'],
+  ...SUITE_TESTS['flujo-completo'],
+  ...SUITE_TESTS['checkout'],
+  ...SUITE_TESTS['alimentos-atmosfera'],
+  ...SUITE_TESTS['alimentos-coffee'],
+  ...SUITE_TESTS['alimentos-micine'],
+  ...SUITE_TESTS['alimentos-tradicional'],
+  ...SUITE_TESTS['alimentos-vip'],
+]
+
+/**
+ * Devuelve `count` casos elegidos al azar del pool completo.
+ * Usa Fisher-Yates shuffle; cada llamada produce una selección diferente.
+ */
+export function getRandomSmokeTests(count = 50): IndividualTest[] {
+  const pool = [...SMOKE_POOL]
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+  }
+  return pool.slice(0, Math.min(count, pool.length))
+}
