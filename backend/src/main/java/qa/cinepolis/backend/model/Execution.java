@@ -18,8 +18,9 @@ public class Execution {
     private int             failed;
     private int             skipped;
     private int             total;
-    private List<LogEvent>  logs = new CopyOnWriteArrayList<>();
-    private String          allureUrl;
+    private List<LogEvent>       logs      = new CopyOnWriteArrayList<>();
+    private List<TestCaseResult> testCases = new CopyOnWriteArrayList<>();
+    private String               allureUrl;
     private boolean         videoEnabled;
     private String          testClass;
 
@@ -47,9 +48,11 @@ public class Execution {
     public void            setSkipped(int v)             { this.skipped = v; }
     public int             getTotal()                    { return total; }
     public void            setTotal(int v)               { this.total = v; }
-    public List<LogEvent>  getLogs()                     { return logs; }
-    public void            setLogs(List<LogEvent> v)     { this.logs = v; }
-    public String          getAllureUrl()                 { return allureUrl; }
+    public List<LogEvent>       getLogs()                          { return logs; }
+    public void                 setLogs(List<LogEvent> v)          { this.logs = v; }
+    public List<TestCaseResult> getTestCases()                     { return testCases; }
+    public void                 setTestCases(List<TestCaseResult> v){ this.testCases = v; }
+    public String               getAllureUrl()                      { return allureUrl; }
     public void            setAllureUrl(String v)        { this.allureUrl = v; }
     public boolean         isVideoEnabled()              { return videoEnabled; }
     public void            setVideoEnabled(boolean v)   { this.videoEnabled = v; }

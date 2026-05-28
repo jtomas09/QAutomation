@@ -2,8 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   BarChart3, CheckCircle2, XCircle, MinusCircle, Clock, ShieldCheck,
-  ExternalLink, FileText, Download, GitCompare, SlidersHorizontal,
-  Settings, TrendingUp, TrendingDown, ChevronDown, X,
+  ExternalLink, FileText, GitCompare, SlidersHorizontal,
+  Settings, TrendingUp, TrendingDown, ChevronDown, ChevronRight, X,
   CheckSquare, Square, Archive, Table2, FileCode2, AlignLeft,
 } from 'lucide-react'
 import {
@@ -11,7 +11,7 @@ import {
   Tooltip as RTooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts'
 import { getExecutions } from '../api'
-import type { ExecutionSummary } from '../types'
+import type { ExecutionSummary, TestCaseResult } from '../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TABS = [
@@ -189,6 +189,46 @@ function ExportRow({ icon, label }: { icon: React.ReactNode; label: string }) {
   )
 }
 
+function TestCasesPanel({ testCases }: { testCases: TestCaseResult[] }) {
+  const passed  = testCases.filter(t => t.status === 'PASS')
+  const failed  = testCases.filter(t => t.status === 'FAIL')
+  const skipped = testCases.filter(t => t.status === 'SKIP')
+
+  const col = (items: TestCaseResult[], color: string, label: string, icon: React.ReactNode) => (
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-1.5 mb-2">
+        <span style={{ color }}>{icon}</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color }}>
+          {label} ({items.length})
+        </span>
+      </div>
+      {items.length === 0
+        ? <div className="text-[10px] text-slate-600 italic">Ninguno</div>
+        : (
+          <div className="flex flex-wrap gap-1">
+            {items.map((t, i) => (
+              <span key={i}
+                className="text-[10px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+                style={{ background: `${color}15`, color, border: `1px solid ${color}30` }}>
+                {t.name}
+              </span>
+            ))}
+          </div>
+        )
+      }
+    </div>
+  )
+
+  return (
+    <div className="px-5 py-3 flex gap-6"
+      style={{ background: 'rgba(0,0,0,0.2)', borderTop: '1px solid var(--panel-divide)' }}>
+      {col(passed,  '#10b981', 'Exitosos',  <CheckCircle2 size={11} />)}
+      {col(failed,  '#f43f5e', 'Fallados',  <XCircle size={11} />)}
+      {skipped.length > 0 && col(skipped, '#f59e0b', 'Omitidos', <MinusCircle size={11} />)}
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ReportsPage() {
   const [activeTab,  setActiveTab]  = useState<Tab>('Resumen')
@@ -200,6 +240,9 @@ export default function ReportsPage() {
   const [suite,   setSuite]   = useState('Todas')
   const [device,  setDevice]  = useState('Todos')
   const [status,  setStatus]  = useState('Todos')
+
+  // Expanded execution for test-case details
+  const [expandedExec, setExpandedExec] = useState<string | null>(null)
 
   // Allure toggles
   const [allure, setAllure] = useState({
@@ -531,7 +574,7 @@ export default function ReportsPage() {
             ) : recent.length === 0 ? (
               <div className="py-8 text-center text-xs text-slate-600">Sin ejecuciones en el período seleccionado</div>
             ) : (
-              <div className="divide-y divide-[var(--panel-border)]">
+              <div>
                 {recent.map((e, i) => {
                   const dur = execDurationMs(e)
                   const isToday = new Date(e.startTime).toDateString() === new Date().toDateString()
@@ -539,24 +582,54 @@ export default function ReportsPage() {
                     hour: '2-digit', minute: '2-digit', hour12: true,
                     ...(!isToday ? { month: 'short', day: 'numeric' } : {}),
                   })
+                  const isExpanded = expandedExec === e.executionId
+                  const hasTests   = (e.testCases?.length ?? 0) > 0
                   return (
                     <div key={e.executionId}
-                      className="flex items-center gap-4 px-5 py-3"
                       style={{ borderTop: i === 0 ? 'none' : '1px solid var(--panel-divide)' }}>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-indigo-400">{e.executionId}</span>
-                          <span className="text-xs font-semibold text-slate-300 truncate">— {e.suite}</span>
+                      <div className="flex items-center gap-4 px-5 py-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-indigo-400">{e.executionId}</span>
+                            <span className="text-xs font-semibold text-slate-300 truncate">— {e.suite}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-600 mt-0.5">
+                            {e.device}{e.env ? ` • ${e.env}` : ''}
+                          </div>
                         </div>
-                        <div className="text-[10px] text-slate-600 mt-0.5">
-                          {e.device}{e.env ? ` • ${e.env}` : ''}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] text-slate-500">
+                            <span style={{ color: '#10b981' }}>{e.passed}✓</span>
+                            {e.failed > 0 && <span className="ml-1" style={{ color: '#f43f5e' }}>{e.failed}✗</span>}
+                            {e.skipped > 0 && <span className="ml-1" style={{ color: '#f59e0b' }}>{e.skipped}−</span>}
+                          </span>
+                          <StatusBadge status={e.status} />
+                          <span className="text-[10px] text-slate-600 whitespace-nowrap">
+                            {isToday ? 'Hoy, ' : ''}{dateStr}
+                            {dur > 0 && <span className="ml-1.5 text-slate-700">• {formatDuration(dur)}</span>}
+                          </span>
+                          {hasTests && (
+                            <button
+                              onClick={() => setExpandedExec(isExpanded ? null : e.executionId)}
+                              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-all"
+                              style={{
+                                background: isExpanded ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+                                border: `1px solid ${isExpanded ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                                color: isExpanded ? '#818cf8' : '#475569',
+                              }}
+                            >
+                              {isExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                              {e.testCases!.length} casos
+                            </button>
+                          )}
+                          {!hasTests && (
+                            <span className="text-[10px] text-slate-700 px-2">sin detalle</span>
+                          )}
                         </div>
                       </div>
-                      <StatusBadge status={e.status} />
-                      <span className="text-[10px] text-slate-600 whitespace-nowrap">
-                        {isToday ? 'Hoy, ' : ''}{dateStr}
-                        {dur > 0 && <span className="ml-1.5 text-slate-700">• {formatDuration(dur)}</span>}
-                      </span>
+                      {isExpanded && hasTests && (
+                        <TestCasesPanel testCases={e.testCases!} />
+                      )}
                     </div>
                   )
                 })}
@@ -740,14 +813,15 @@ export default function ReportsPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--panel-divide)' }}>
-                    {['ID', 'Suite', 'Dispositivo', 'Env', 'País', 'Estado', 'Total', 'Exitosos', 'Fallados', 'Omitidos', 'Duración', 'Inicio'].map(h => (
+                    {['ID', 'Suite', 'Dispositivo', 'Env', 'País', 'Estado', 'Total', 'Exitosos', 'Fallados', 'Omitidos', 'Duración', 'Inicio', ''].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((e, i) => (
-                    <tr key={e.executionId}
+                      <React.Fragment key={e.executionId}>
+                    <tr
                       style={{ borderBottom: '1px solid var(--panel-divide)', background: i % 2 ? 'rgba(255,255,255,0.012)' : 'transparent' }}>
                       <td className="px-4 py-2.5 font-bold text-indigo-400">{e.executionId}</td>
                       <td className="px-4 py-2.5 text-slate-300 max-w-[130px] truncate">{e.suite}</td>
@@ -765,7 +839,31 @@ export default function ReportsPage() {
                           hour: '2-digit', minute: '2-digit', hour12: true, month: 'short', day: 'numeric',
                         })}
                       </td>
+                      <td className="px-4 py-2.5">
+                        {(e.testCases?.length ?? 0) > 0 && (
+                          <button
+                            onClick={() => setExpandedExec(expandedExec === e.executionId ? null : e.executionId)}
+                            className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg transition-all"
+                            style={{
+                              background: expandedExec === e.executionId ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+                              border: `1px solid ${expandedExec === e.executionId ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                              color: expandedExec === e.executionId ? '#818cf8' : '#475569',
+                            }}
+                          >
+                            {expandedExec === e.executionId ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                            {e.testCases!.length}
+                          </button>
+                        )}
+                      </td>
                     </tr>
+                    {expandedExec === e.executionId && (e.testCases?.length ?? 0) > 0 && (
+                      <tr style={{ borderBottom: '1px solid var(--panel-divide)' }}>
+                        <td colSpan={13}>
+                          <TestCasesPanel testCases={e.testCases!} />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

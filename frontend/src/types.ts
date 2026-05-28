@@ -62,6 +62,11 @@ export interface DeviceConfig {
   isActive:        boolean
 };
 
+export interface TestCaseResult {
+  name: string;
+  status: 'PASS' | 'FAIL' | 'SKIP';
+}
+
 export interface ExecutionSummary {
   executionId: string;
   suite: string;
@@ -76,4 +81,5 @@ export interface ExecutionSummary {
   skipped: number;
   total: number;
   allureUrl: string | null;
+  testCases?: TestCaseResult[];
 }

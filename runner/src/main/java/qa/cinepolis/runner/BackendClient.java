@@ -2,12 +2,15 @@ package qa.cinepolis.runner;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import qa.cinepolis.runner.model.JobDto;
+import qa.cinepolis.runner.model.TestCaseResult;
 
 import java.net.URI;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -77,10 +80,15 @@ public class BackendClient {
     }
 
     /** Reports final execution results. Throws on HTTP error. */
-    public void sendResult(String executionId, int passed, int failed, int skipped, String allureUrl) throws Exception {
-        Map<String, Object> payload = allureUrl != null
-                ? Map.of("executionId", executionId, "passed", passed, "failed", failed, "skipped", skipped, "allureUrl", allureUrl)
-                : Map.of("executionId", executionId, "passed", passed, "failed", failed, "skipped", skipped);
+    public void sendResult(String executionId, int passed, int failed, int skipped,
+                           String allureUrl, List<TestCaseResult> testCases) throws Exception {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("executionId", executionId);
+        payload.put("passed",      passed);
+        payload.put("failed",      failed);
+        payload.put("skipped",     skipped);
+        if (allureUrl  != null)                          payload.put("allureUrl",  allureUrl);
+        if (testCases  != null && !testCases.isEmpty())  payload.put("testCases",  testCases);
         String body = json.writeValueAsString(payload);
         HttpResponse<String> res = post("/api/results", body);
         if (res.statusCode() != 200)

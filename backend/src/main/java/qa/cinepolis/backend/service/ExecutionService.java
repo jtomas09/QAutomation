@@ -56,6 +56,11 @@ public class ExecutionService {
     }
 
     public void complete(String executionId, int passed, int failed, int skipped, String allureUrl) {
+        complete(executionId, passed, failed, skipped, allureUrl, null);
+    }
+
+    public void complete(String executionId, int passed, int failed, int skipped,
+                         String allureUrl, List<qa.cinepolis.backend.model.TestCaseResult> testCases) {
         store.findById(executionId).ifPresent(e -> {
             e.setPassed(passed);
             e.setFailed(failed);
@@ -63,7 +68,8 @@ public class ExecutionService {
             e.setTotal(passed + failed + skipped);
             e.setStatus(failed == 0 ? ExecutionStatus.PASSED : ExecutionStatus.FAILED);
             e.setEndTime(Instant.now());
-            if (allureUrl != null && !allureUrl.isBlank()) e.setAllureUrl(allureUrl);
+            if (allureUrl  != null && !allureUrl.isBlank())  e.setAllureUrl(allureUrl);
+            if (testCases  != null && !testCases.isEmpty())  e.setTestCases(testCases);
 
             sse.broadcast(executionId, "done", Map.of(
                     "passed",  passed,

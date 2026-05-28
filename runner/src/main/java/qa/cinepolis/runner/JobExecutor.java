@@ -2,6 +2,7 @@ package qa.cinepolis.runner;
 
 import qa.cinepolis.runner.model.JobDto;
 import qa.cinepolis.runner.model.RunnerConfig;
+import qa.cinepolis.runner.model.TestCaseResult;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -289,6 +290,7 @@ public class JobExecutor {
         AtomicInteger passed  = new AtomicInteger(0);
         AtomicInteger failed  = new AtomicInteger(0);
         AtomicInteger skipped = new AtomicInteger(0);
+        List<TestCaseResult> testCases = new ArrayList<>();
 
         try {
             client.sendLog(job.executionId, "INFO",
@@ -360,9 +362,9 @@ public class JobExecutor {
                     String level = detectLevel(line);
                     client.sendLog(job.executionId, level, line);
                     System.out.println("[" + level + "] " + line);
-                    if      ("PASS".equals(level)) passed.incrementAndGet();
-                    else if ("FAIL".equals(level)) failed.incrementAndGet();
-                    else if ("SKIP".equals(level)) skipped.incrementAndGet();
+                    if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); }
+                    else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); }
+                    else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); }
                 }
             }
 
@@ -395,7 +397,7 @@ public class JobExecutor {
             uploadVideos(job.executionId, job.suite);
             String allureUrl = generateAllureReport(job.executionId);
             client.sendResult(job.executionId,
-                    passed.get(), failed.get(), skipped.get(), allureUrl);
+                    passed.get(), failed.get(), skipped.get(), allureUrl, testCases);
             System.out.println("[Executor] ✓ Finalizado: " + job.executionId);
 
         } catch (Exception e) {
@@ -405,7 +407,7 @@ public class JobExecutor {
                     "❌ Error interno del runner: " + e.getMessage());
             try {
                 client.sendResult(job.executionId,
-                        passed.get(), Math.max(failed.get(), 1), skipped.get(), null);
+                        passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
             } catch (Exception ignored) {}
         }
     }
@@ -718,6 +720,22 @@ public class JobExecutor {
         if (upper.contains("[WARNING]") || upper.startsWith("W: "))  return "WARN";
 
         return "INFO";
+    }
+
+    // Parses "MenuCoffeTree > comprarAmericano() PASSED" → "comprarAmericano"
+    static String extractTestName(String line) {
+        if (line == null) return "unknown";
+        int sep = line.indexOf(" > ");
+        if (sep < 0) return line.trim();
+        String after = line.substring(sep + 3).trim();
+        for (String suffix : new String[]{" PASSED", " FAILED", " SKIPPED"}) {
+            if (after.toUpperCase().endsWith(suffix)) {
+                after = after.substring(0, after.length() - suffix.length()).trim();
+                break;
+            }
+        }
+        if (after.endsWith("()")) after = after.substring(0, after.length() - 2);
+        return after.isEmpty() ? "unknown" : after;
     }
 
     private static String nvl(String s) { return s != null ? s : ""; }
