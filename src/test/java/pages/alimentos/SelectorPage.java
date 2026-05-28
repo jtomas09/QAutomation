@@ -948,32 +948,35 @@ public class SelectorPage extends BasePage {
             WebElement content = driver.findElement(By.id("android:id/content"));
             org.openqa.selenium.Rectangle r = content.getRect();
 
-            int x = r.getX() + (r.getWidth() / 2);
+            // Slightly left of center to avoid Compose gesture interceptors
+            int x = r.getX() + (int) (r.getWidth() * 0.46);
 
-            // margen superior e inferior para no tocar header/bottom nav
-            int startY = r.getY() + (int) (r.getHeight() * 0.80);
-            int endY   = r.getY() + (int) (r.getHeight() * 0.25);
+            // Agressive full-range swipe: 90%→10% for Compose LazyColumn
+            int startY = r.getY() + (int) (r.getHeight() * 0.90);
+            int endY   = r.getY() + (int) (r.getHeight() * 0.10);
 
             // fallback de seguridad si el rect viene raro
             if (startY <= endY) {
                 org.openqa.selenium.Dimension size = driver.manage().window().getSize();
-                x = (int) (size.width * 0.5);
-                startY = (int) (size.height * 0.78);
-                endY   = (int) (size.height * 0.28);
+                x = (int) (size.width * 0.46);
+                startY = (int) (size.height * 0.88);
+                endY   = (int) (size.height * 0.10);
             }
 
             swipeW3C(x, startY, x, endY, durationMs);
+            try { Thread.sleep(350); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
 
         } catch (Exception e) {
             rethrowIfAborted(e);
 
             // fallback: swipe por pantalla completa
             org.openqa.selenium.Dimension size = driver.manage().window().getSize();
-            int x = (int) (size.width * 0.5);
-            int startY = (int) (size.height * 0.78);
-            int endY   = (int) (size.height * 0.28);
+            int x = (int) (size.width * 0.46);
+            int startY = (int) (size.height * 0.88);
+            int endY   = (int) (size.height * 0.10);
 
             swipeW3C(x, startY, x, endY, durationMs);
+            try { Thread.sleep(350); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
         }
     }
     protected void findVisibleOrScrollDownManySwipesAndClickProducto(
@@ -1027,10 +1030,7 @@ public class SelectorPage extends BasePage {
                     return;
                 }
 
-                swipeUpInMainContent(650);
-                try { Thread.sleep(220); } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
+                swipeUpInMainContent(950);
             }
 
             // Último check

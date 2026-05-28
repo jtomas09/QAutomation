@@ -31,9 +31,9 @@ public final class Constantes {
 
     public static final int SWIPES_VERTICAL_MAX   = 20;
     public static final int SWIPES_HORIZONTAL_MAX = 20;
-    public static final int SWIPE_LENTO_MS        = 580;
+    public static final int SWIPE_LENTO_MS        = 950;
     public static final int SWIPE_RAPIDO_MS       = 270;
-    public static final int PAUSA_POST_SWIPE_MS   = 80;
+    public static final int PAUSA_POST_SWIPE_MS   = 320;
 
     // ─── Límites de negocio ───────────────────────────────────────────────────
 

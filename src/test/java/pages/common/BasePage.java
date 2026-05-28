@@ -415,9 +415,11 @@ public class BasePage {
     protected void slowSwipeUp() {
         ensureAppIsInForegroundOrRecover();
         Dimension size = driver.manage().window().getSize();
-        int x = size.getWidth() / 2;
-        int startY = (int) (size.getHeight() * 0.70);
-        int endY   = (int) (size.getHeight() * 0.45);
+        // Slightly left of center (46%) to avoid Compose gesture interceptors
+        int x = (int) (size.getWidth() * 0.46);
+        // Full-range swipe: 88%→12% avoids gesture nav bar (bottom) and status bar (top)
+        int startY = (int) (size.getHeight() * 0.88);
+        int endY   = (int) (size.getHeight() * 0.12);
         swipeW3C(x, startY, x, endY, SLOW_SWIPE_WAIT_MS);
         sleep(SLOW_SWIPE_SLEEP_MS);
     }
@@ -425,9 +427,9 @@ public class BasePage {
     protected void slowSwipeDown() {
         ensureAppIsInForegroundOrRecover();
         Dimension size = driver.manage().window().getSize();
-        int x = size.getWidth() / 2;
-        int startY = (int) (size.getHeight() * 0.45);
-        int endY   = (int) (size.getHeight() * 0.70);
+        int x = (int) (size.getWidth() * 0.46);
+        int startY = (int) (size.getHeight() * 0.12);
+        int endY   = (int) (size.getHeight() * 0.88);
         swipeW3C(x, startY, x, endY, SLOW_SWIPE_WAIT_MS);
         sleep(SLOW_SWIPE_SLEEP_MS);
     }
