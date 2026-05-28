@@ -1,5 +1,6 @@
 package tests.Chile;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,6 +41,12 @@ public class NoAfectacionChile extends BaseTest {
         driver = DriverFactory.getDriver();
         new CinemasHelper(driver).dismissLocationPopupIfPresent();
         new SelectorsHome(driver).cambiarPaisChile();
+    }
+
+    @AfterAll
+    void restaurarPaisMexico() {
+        try { new SelectorsHome(driver).cambiarPaisMexico(); } catch (Exception ignored) {}
+        resetSuiteFlags();
     }
 
     @BeforeEach

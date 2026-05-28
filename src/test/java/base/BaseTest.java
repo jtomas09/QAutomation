@@ -105,6 +105,12 @@ public class BaseTest {
         }
     }
 
+    protected static void resetSuiteFlags() {
+        MEXICO_CINEMA_CHECKED.set(false);
+        lastAlimentosCinema = null;
+        log.info("[BaseTest] Suite flags reset (country changed by non-Mexico class).");
+    }
+
     private static void clearDirectory(Path dir) throws Exception {
         if (dir == null || !Files.exists(dir) || !Files.isDirectory(dir)) return;
 
@@ -304,6 +310,8 @@ public class BaseTest {
                     lastAlimentosCinema = targetCinema;
                 } catch (Exception e) {
                     log.warn("[BaseTest] ensureCinemaSelectedFromAlimentos({}) falló: {}", targetCinema, e.getMessage());
+                    // Dismiss cinema selector overlay so it doesn't block test navigation
+                    try { driver.navigate().back(); Thread.sleep(800); } catch (Exception ignored) {}
                 }
             }
         }
