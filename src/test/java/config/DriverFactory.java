@@ -194,6 +194,13 @@ public class DriverFactory {
         if (!udid.isBlank()) {
             validateAdbDevice(udid);
             if (!pkg.isBlank()) validatePackageInstalled(udid, pkg);
+            // Kill any leftover UIA2 server from a previous session to free systemPort
+            try {
+                String[] killCmd = {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server"};
+                Process p = Runtime.getRuntime().exec(killCmd);
+                p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+                log.debug("[DriverFactory] UIA2 server stopped on device {} to free systemPort.", udid);
+            } catch (Exception ignored) {}
         }
 
         // ── Platform ─────────────────────────────────────────────

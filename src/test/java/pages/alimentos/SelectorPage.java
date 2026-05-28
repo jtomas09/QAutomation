@@ -33,12 +33,20 @@ public class SelectorPage extends BasePage {
     }
 
     public void abrirMenu() {
+        // UiSelector works from any screen (home or already on alimentos tab)
+        try {
+            driver.findElement(AppiumBy.androidUIAutomator(
+                "new UiSelector().text(\"Alimentos\")"
+            )).click();
+            sleep(800);
+            return;
+        } catch (Exception ignored) {}
+        // Fallback: Compose xpath for bottom-nav Alimentos tab from home/cartelera screen
         try {
             this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]/android.view.View/android.view.View[2]/android.view.View[3]"));
-        } catch (Exception var2) {
+        } catch (Exception e) {
             this.fallbackTap("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]/android.view.View/android.view.View[2]/android.view.View[3]");
         }
-
     }
 
     public void clickAmericano() {
