@@ -55,8 +55,11 @@ public class AllureReportSender {
 
     private static final Logger log = LoggerFactory.getLogger(AllureReportSender.class);
 
-    /** Set -DsendMail=true to enable email delivery after each suite run. */
-    private static final boolean IS_MAIL_ENABLED = Boolean.parseBoolean(System.getProperty("sendMail", "false"));
+    /** Returns true when sendMail=true OR mail.enabled=SI (launcher config). Evaluated per call so it picks up runtime changes. */
+    private static boolean isMailEnabled() {
+        return Boolean.parseBoolean(System.getProperty("sendMail", "false"))
+            || "SI".equalsIgnoreCase(System.getProperty("mail.enabled", "NO"));
+    }
 
     private static final Path FINAL_MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
     private static final Path MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
@@ -112,7 +115,7 @@ public class AllureReportSender {
             String mergedPdfName
     ) throws Exception {
 
-        if (!IS_MAIL_ENABLED) {
+        if (!isMailEnabled()) {
             log.info("[AllureReportSender] Email delivery disabled (-DsendMail=false). Skipping.");
             return;
         }
@@ -224,6 +227,15 @@ public class AllureReportSender {
         if (mailToEnv != null && !mailToEnv.isBlank()) {
             to = mailToEnv.trim();
             log.info("[AllureReportSender] Destinatarios sobreescritos por MAIL_TO env: {}", to);
+        }
+
+        // Fallback: launcher config property (mail.recipients set from config dialog)
+        if (to.isBlank()) {
+            String launcherRecipients = System.getProperty("mail.recipients", "");
+            if (!launcherRecipients.isBlank()) {
+                to = launcherRecipients.trim();
+                log.info("[AllureReportSender] Destinatarios tomados de mail.recipients: {}", to);
+            }
         }
 
         if (smtpPass.isBlank()) {
@@ -478,8 +490,41 @@ public class AllureReportSender {
     public static Path generateAllureOverviewPdf() {
         HttpServer server = null;
         try {
+            // Discover project root — the EXE may run from build/launch4j/, not the project root
+            File projectRootFile = new File(System.getProperty("cinepolis.project.root",
+                    System.getProperty("user.dir")));
+            if (!new File(projectRootFile, "gradlew.bat").exists()) {
+                File candidate = projectRootFile;
+                while (candidate != null && !new File(candidate, "gradlew.bat").exists()) {
+                    candidate = candidate.getParentFile();
+                }
+                if (candidate != null) projectRootFile = candidate;
+            }
+            final String projectDir = projectRootFile.getAbsolutePath();
+            log.info("[AllureReportSender] Project root resolved to: {}", projectDir);
+
+            // When running as EXE, allure-results land in user.dir (build/launch4j/allure-results/).
+            // Copy them to {projectRoot}/build/allure-results/ so gradlew allureReport can find them.
+            Path userDirResults = Paths.get(System.getProperty("user.dir"), "allure-results");
+            Path projectResults = Paths.get(projectDir, "build", "allure-results");
+            if (Files.exists(userDirResults)
+                    && !userDirResults.toAbsolutePath().equals(projectResults.toAbsolutePath())) {
+                try {
+                    Files.createDirectories(projectResults);
+                    Files.walk(userDirResults).forEach(src -> {
+                        try {
+                            Path dst = projectResults.resolve(userDirResults.relativize(src));
+                            if (Files.isDirectory(src)) Files.createDirectories(dst);
+                            else Files.copy(src, dst, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        } catch (Exception ignored) {}
+                    });
+                    log.info("[AllureReportSender] Copied allure-results to: {}", projectResults);
+                } catch (Exception e) {
+                    log.warn("[AllureReportSender] Could not copy allure-results: {}", e.getMessage());
+                }
+            }
+
             try {
-                String projectDir = System.getProperty("user.dir");
                 log.info("[AllureReportSender] Running gradlew allureReport --clean in: {}", projectDir);
 
                 ProcessBuilder pbAllure = new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport", "--clean");
@@ -503,7 +548,7 @@ public class AllureReportSender {
                 log.warn("[AllureReportSender] Could not run gradlew allureReport: {}", e.getMessage());
             }
 
-            Path reportDir = Paths.get("build", "reports", "allure-report", "allureReport");
+            Path reportDir = Paths.get(projectDir, "build", "reports", "allure-report", "allureReport");
             Path indexHtml = reportDir.resolve("index.html");
             if (!Files.exists(indexHtml)) {
                 log.error("[AllureReportSender] index.html not found at: {}", indexHtml);

@@ -43,20 +43,9 @@ public class TopNavbar extends GradientPanel {
         JPanel brand = buildBrand();
         left.add(brand);
 
-        // Divider
-        left.add(Box.createRigidArea(new Dimension(20, 0)));
-        JLabel div = new JLabel("|");
-        div.setFont(new Font("Dialog", Font.PLAIN, 18));
-        div.setForeground(new Color(40, 58, 100));
-        left.add(div);
-        left.add(Box.createRigidArea(new Dimension(20, 0)));
-
-        // Status pills
+        // Status pills (allocated for API compatibility, not shown in UI)
         backendPill = new StatusBadge("Backend: verificando...", StatusBadge.Status.CHECKING);
         runnerPill  = new StatusBadge("Runner: offline", StatusBadge.Status.OFFLINE);
-        left.add(backendPill);
-        left.add(Box.createRigidArea(new Dimension(8, 0)));
-        left.add(runnerPill);
 
         // ── CENTER: Search bar ────────────────────────────────────
         JPanel center = new JPanel(new GridBagLayout());

@@ -153,8 +153,22 @@ private static final Color BORDER     = new Color(25, 35, 65);
 
     // ─── Entry point ──────────────────────────────────────────────
     public static void main(String[] args) {
+        discoverAndSetProjectRoot();
         if (GraphicsEnvironment.isHeadless()) runConsole();
         else SwingUtilities.invokeLater(Main::buildGui);
+    }
+
+    private static void discoverAndSetProjectRoot() {
+        File dir = new File(System.getProperty("user.dir"));
+        while (dir != null && !new File(dir, "gradlew.bat").exists()) {
+            dir = dir.getParentFile();
+        }
+        if (dir != null) {
+            System.setProperty("cinepolis.project.root", dir.getAbsolutePath());
+            // Tell Allure JUnit5 to write results where gradlew allureReport will find them
+            System.setProperty("allure.results.directory",
+                new File(dir, "build/allure-results").getAbsolutePath());
+        }
     }
 
     // ══════════════════════════════════════════════════════════════

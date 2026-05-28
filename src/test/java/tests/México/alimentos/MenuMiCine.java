@@ -6,6 +6,7 @@ import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
+import pages.common.CinemasHelper;
 import utils.TestSteps;
 
 /**
@@ -40,6 +41,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboMix() {
         //new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("El Prado Morelia");
+        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("El Prado Morelia");
         TestSteps.run("Seleccionar y personalizar Maxi Combo Mix", () -> {
             page.clickMaxiComboMix();
             page.personalizar();
