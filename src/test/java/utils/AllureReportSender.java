@@ -98,7 +98,7 @@ public class AllureReportSender {
 
     private static final String CHROME_PATH = System.getenv().getOrDefault(
             "CHROME_PATH",
-            "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe"
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     );
 
     /**
@@ -114,6 +114,11 @@ public class AllureReportSender {
             String executedTests,
             String mergedPdfName
     ) throws Exception {
+
+        log.info("[AllureReportSender] sendFinalSuiteReport — sendMail={} mail.enabled={} MAIL_TO={}",
+                System.getProperty("sendMail", "<not set>"),
+                System.getProperty("mail.enabled", "<not set>"),
+                System.getenv("MAIL_TO") != null ? System.getenv("MAIL_TO") : "<not set>");
 
         if (!isMailEnabled()) {
             log.info("[AllureReportSender] Email delivery disabled (-DsendMail=false). Skipping.");
@@ -193,8 +198,8 @@ public class AllureReportSender {
     ) throws Exception {
 
         if (allurePdf == null || !Files.exists(allurePdf)) {
-            log.error("[AllureReportSender] Allure PDF not found: {}", allurePdf);
-            return false;
+            log.warn("[AllureReportSender] Allure PDF not generated — sending email without PDF attachment.");
+            allurePdf = null;
         }
 
         SmtpConfig cfg;
@@ -248,7 +253,7 @@ public class AllureReportSender {
         }
 
         log.info("[AllureReportSender] Sending via SMTP. host={} port={} from={} to={}", smtpHost, smtpPort, from, to);
-        log.info("[AllureReportSender] Attaching PDF: {}", allurePdf.toAbsolutePath());
+        log.info("[AllureReportSender] PDF adjunto: {}", allurePdf != null ? allurePdf.toAbsolutePath() : "ninguno");
         log.info("[AllureReportSender] Interactive link: {}", reportUrl);
 
         Properties props = new Properties();
@@ -421,11 +426,15 @@ public class AllureReportSender {
         Multipart multipart = new MimeMultipart();
         multipart.addBodyPart(htmlPart);
 
-        // Adjunto 1: Allure Overview + Behaviors PDF
-        MimeBodyPart allurePart = new MimeBodyPart();
-        allurePart.attachFile(allurePdf.toFile());
-        allurePart.setFileName("Reporte_Allure_" + sanitizeFileName(projectName) + ".pdf");
-        multipart.addBodyPart(allurePart);
+        // Adjunto 1: Allure Overview + Behaviors PDF (optional — skip if generation failed)
+        if (allurePdf != null && Files.exists(allurePdf)) {
+            MimeBodyPart allurePart = new MimeBodyPart();
+            allurePart.attachFile(allurePdf.toFile());
+            allurePart.setFileName("Reporte_Allure_" + sanitizeFileName(projectName) + ".pdf");
+            multipart.addBodyPart(allurePart);
+        } else {
+            log.warn("[AllureReportSender] Skipping Allure PDF attachment (not generated).");
+        }
 
         // Adjunto 2: PDFs por test (merged de build/reportes-pdf/)
         Path testsPdf = mergeTestPdfs(projectName);
@@ -527,7 +536,7 @@ public class AllureReportSender {
             try {
                 log.info("[AllureReportSender] Running gradlew allureReport --clean in: {}", projectDir);
 
-                ProcessBuilder pbAllure = new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport", "--clean");
+                ProcessBuilder pbAllure = new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport", "--clean", "--no-daemon");
                 pbAllure.directory(new File(projectDir));
                 pbAllure.redirectErrorStream(true);
 
