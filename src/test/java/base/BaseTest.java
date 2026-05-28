@@ -343,8 +343,15 @@ public class BaseTest {
             }
 
             if (REUSE_DRIVER) {
-                log.info("[BaseTest] Relaunching app after test (REUSE_DRIVER=true)...");
-                relaunchAppSafe();
+                try {
+                    if (driver != null) {
+                        String pkg = getAppPackageSafe();
+                        if (pkg != null && !pkg.isBlank()) {
+                            try { driver.terminateApp(pkg); } catch (Exception ignored) {}
+                            log.info("[BaseTest] App terminada tras test; próximo setUp la relanzará.");
+                        }
+                    }
+                } catch (Exception ignored) {}
             }
 
             BaseTestStatusRegistry.clear(testKey);
