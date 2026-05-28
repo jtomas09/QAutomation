@@ -273,19 +273,22 @@ public class BaseTest {
         }
 
         // ── Escenario México: selecciona cine si no hay uno pre-seleccionado (solo 1 vez por suite)
+        // Skipped for alimentos menus — they manage their own cinema via ensureCinemaSelectedFromAlimentos
+        String simpleClass = getClass().getSimpleName();
         String testClass = testInfo.getTestClass().map(Class::getName).orElse("");
         if ((testClass.contains("México") || testClass.contains("Mexico"))
+                && !MenuCinemaResolver.isAlimentosMenu(simpleClass)
                 && MEXICO_CINEMA_CHECKED.compareAndSet(false, true)) {
             log.info("[BaseTest] Test México detectado -> verificando selección de cine...");
             try {
                 new CinemasHelper(driver).ensureMexicoCinemaSelected();
             } catch (Exception e) {
                 log.warn("[BaseTest] ensureMexicoCinemaSelected falló (no bloquea): {}", e.getMessage());
+                try { driver.navigate().back(); Thread.sleep(800); } catch (Exception ignored) {}
             }
         }
 
         // ── Alimentos menus: auto-selecciona el cine correcto antes de CADA test
-        String simpleClass = getClass().getSimpleName();
         if (MenuCinemaResolver.isAlimentosMenu(simpleClass)) {
             String targetCinema = null;
             // Priority 1: @Cinema annotation on the method (per-test override, e.g. MenuAtmosfera)
