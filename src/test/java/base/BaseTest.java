@@ -337,15 +337,14 @@ public class BaseTest {
             if (finalFailed) {
                 failedTests++;
                 log.warn("[BaseTest] TEST FAILED: {}", testInfo.getDisplayName());
-
-                if (REUSE_DRIVER) {
-                    log.info("[BaseTest] Relaunching app after test failure...");
-                    relaunchAppSafe();
-                }
-
             } else {
                 passedTests++;
                 log.info("[BaseTest] TEST PASSED: {}", testInfo.getDisplayName());
+            }
+
+            if (REUSE_DRIVER) {
+                log.info("[BaseTest] Relaunching app after test (REUSE_DRIVER=true)...");
+                relaunchAppSafe();
             }
 
             BaseTestStatusRegistry.clear(testKey);
