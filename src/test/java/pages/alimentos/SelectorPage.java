@@ -836,23 +836,23 @@ public class SelectorPage extends BasePage {
         try {
             findVisibleOrScrollToXpathAndClick(xpathText, Math.min(longTimeoutSeconds, 10));
             return;
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
 
         try {
             findVisibleOrScrollToXpathAndClick(xpathParent, Math.min(longTimeoutSeconds, 10));
             return;
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
 
         // ✅ 4) Si no salió con vertical, 1 sola pasada V/H y FIN (fast-fail)
         try {
             findVisibleOrScrollDownAndRightSlowToXpathAndClick(xpathText, Math.min(longTimeoutSeconds, 10), 5);
             return;
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
 
         try {
             findVisibleOrScrollDownAndRightSlowToXpathAndClick(xpathParent, Math.min(longTimeoutSeconds, 10), 5);
             return;
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
 
         // ✅ 5) Último intento “barato” con tap antes de lanzar error
         if (isVisibleQuick(byText)) {
@@ -910,7 +910,7 @@ public class SelectorPage extends BasePage {
                 } catch (Exception ignored) {}
                 return;
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
 
         throw new RuntimeException("No se encontró el elemento (Texto/Desc): '" + visibleText + "' tras búsqueda rápida.");
     }
