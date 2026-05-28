@@ -42,8 +42,8 @@ public class MenuMiCine extends BaseTest {
     void comprarMaxiComboMix() {
         //new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("El Prado Morelia");
         new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("El Prado Morelia");
-        TestSteps.run("Seleccionar y personalizar Maxi Combo Mix", () -> {
-            page.clickMaxiComboMix();
+         TestSteps.run("Buscar y seleccionar Maxi Combo Mix", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("personalizar Maxi Combo Mix", () -> {
             page.personalizar();
             page.Caramelo();
             page.Siguiente();

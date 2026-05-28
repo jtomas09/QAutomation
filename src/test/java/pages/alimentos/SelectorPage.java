@@ -390,6 +390,69 @@ public class SelectorPage extends BasePage {
         this.click(By.xpath("//android.widget.TextView[@text='Té caliente']"));
     }
 
+     public void buscarAmericano() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "Americano"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Americano']"));
+    }
+
+     public void buscarMokaObscuro() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "Moka Obscuro"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Moka Obscuro']"));
+    }
+
+       public void buscarCapuccino() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "Capuccino"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Capuccino']"));
+    }
+    
+       public void buscarChocolate() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "Chocolate"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Chocolate']"));
+    }
+     public void buscarPretzel() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "Pretzel"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Pretzel']"));
+    }
+       public void buscarCheeseCake() {
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+        // Foco en el campo de texto y escritura
+        this.click(By.className("android.widget.EditText"));
+        this.driver.executeScript("mobile: type", Map.of("text", "Cheesecake"));
+        this.sleep(1500);
+        this.click(By.xpath("//android.widget.TextView[@text='Cheesecake']"));
+    }
     public void TeMentaManzanilla() {
         this.clickCardByTextWithFallback("Té Menta Manzanilla", 10);
     }

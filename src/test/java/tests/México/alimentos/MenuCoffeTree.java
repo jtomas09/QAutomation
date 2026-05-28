@@ -37,18 +37,18 @@ public class MenuCoffeTree extends BaseTest {
         }, driver);
     }
 
+    // ── Bebidas Calientes ─────────────────────────────────────────
+
     @Test
     @Order(1)
     @DisplayName("Comprar Americano Grande con Coco")
     @Story("Bebidas Calientes")
     void comprarAmericano() {
-      new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Escala Morelia");
-        TestSteps.run("Seleccionar y personalizar Americano", () -> {
-            page.clickAmericano();
-            page.personalizar();
-            page.Coco();
-            page.Siguiente();
-        }, driver);
+        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Escala Morelia");
+        TestSteps.run("Buscar y seleccionar Americano", () -> page.clickAmericano(), driver);
+        TestSteps.run("Personalizar Americano", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -57,13 +57,11 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Americano Descafeinado con Crema Irlandesa")
     @Story("Bebidas Calientes")
     void comprarAmericanoG() {
-        TestSteps.run("Seleccionar y personalizar Americano Descafeinado", () -> {
-            page.clickAmericano();
-            page.personalizar();
-            page.CafeDescafeinado();
-            page.CremaIrlandesa();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Americano", () -> page.clickAmericano(), driver);
+        TestSteps.run("Personalizar Americano", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar café Descafeinado", () -> page.CafeDescafeinado(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -72,13 +70,11 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Americano Mediano con Menta")
     @Story("Bebidas Calientes")
     void comprarAmericanoGM() {
-        TestSteps.run("Seleccionar y personalizar Americano Mediano", () -> {
-            page.clickAmericano();
-            page.personalizar();
-            page.CafeMediano();
-            page.EsenciaMenta();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Americano", () -> page.clickAmericano(), driver);
+        TestSteps.run("Personalizar Americano", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.CafeMediano(), driver);
+        TestSteps.run("Seleccionar Esencia Menta", () -> page.EsenciaMenta(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -87,13 +83,11 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Americano Mediano con Vainilla")
     @Story("Bebidas Calientes")
     void comprarAmericanoGMV() {
-        TestSteps.run("Seleccionar y personalizar Americano Mediano", () -> {
-            page.clickAmericano();
-            page.personalizar();
-            page.CafeMediano();
-            page.EsenciaVainilla();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Americano", () -> page.clickAmericano(), driver);
+        TestSteps.run("Personalizar Americano", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.CafeMediano(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -102,12 +96,10 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Moka Oscuro con Coco")
     @Story("Bebidas Calientes")
     void comprarMokaOscuro() {
-        TestSteps.run("Seleccionar y personalizar Moka Oscuro", () -> {
-            page.clickMokaOscuro();
-            page.personalizar();
-            page.Coco();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Moka Oscuro", () -> page.clickMokaOscuro(), driver);
+        TestSteps.run("Personalizar Moka Oscuro", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -116,14 +108,12 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Moka Oscuro Descafeinado con Leche Deslactosada")
     @Story("Bebidas Calientes")
     void comprarMokaOscuroG() {
-        TestSteps.run("Seleccionar y personalizar Moka Oscuro Descafeinado", () -> {
-            page.clickMokaOscuro();
-            page.personalizar();
-            page.CafeDescafeinado();
-            page.LecheDeslactosada();
-            page.CremaIrlandesa();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Moka Oscuro", () -> page.buscarMokaObscuro(), driver);
+        TestSteps.run("Personalizar Moka Oscuro", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar café Descafeinado", () -> page.CafeDescafeinado(), driver);
+        TestSteps.run("Seleccionar Leche Deslactosada", () -> page.LecheDeslactosada(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -132,14 +122,12 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Moka Oscuro Mediano con Leche de Almendra")
     @Story("Bebidas Calientes")
     void comprarMokaOscuroM() {
-        TestSteps.run("Seleccionar y personalizar Moka Oscuro Mediano", () -> {
-            page.clickMokaOscuro();
-            page.personalizar();
-            page.CafeMediano();
-            page.LecheAlmendra();
-            page.CremaIrlandesa();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Moka Oscuro", () -> page.buscarMokaObscuro(), driver);
+        TestSteps.run("Personalizar Moka Oscuro", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.CafeMediano(), driver);
+        TestSteps.run("Seleccionar Leche de Almendra", () -> page.LecheAlmendra(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -148,13 +136,11 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Moka Oscuro Mediano con Vainilla")
     @Story("Bebidas Calientes")
     void comprarMokaOscuroMD() {
-        TestSteps.run("Seleccionar y personalizar Moka Oscuro Mediano", () -> {
-            page.clickMokaOscuro();
-            page.personalizar();
-            page.CafeMediano();
-            page.EsenciaVainilla();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Moka Oscuro", () -> page.buscarMokaObscuro(), driver);
+        TestSteps.run("Personalizar Moka Oscuro", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.CafeMediano(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -163,12 +149,10 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Capuccino con Coco")
     @Story("Bebidas Calientes")
     void comprarCapuccino() {
-        TestSteps.run("Seleccionar y personalizar Capuccino", () -> {
-            page.clickCapuccino();
-            page.personalizar();
-            page.Coco();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Capuccino", () -> page.buscarCapuccino(), driver);
+        TestSteps.run("Personalizar Capuccino", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -177,13 +161,11 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Té Caliente de Jamaica con Coco")
     @Story("Bebidas Calientes")
     void comprarTe() {
-        TestSteps.run("Seleccionar y personalizar Té Caliente", () -> {
-            page.clickTeCaliente();
-            page.personalizar();
-            page.TeJamaica();
-            page.Coco();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Jamaica", () -> page.TeJamaica(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -192,13 +174,11 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Té Caliente Mediano con Menta")
     @Story("Bebidas Calientes")
     void comprarTeM() {
-        TestSteps.run("Seleccionar y personalizar Té Caliente Mediano", () -> {
-            page.clickTeCaliente();
-            page.personalizar();
-            page.TeMediano();
-            page.EsenciaMenta();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
+        TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.TeMediano(), driver);
+        TestSteps.run("Seleccionar Esencia Menta", () -> page.EsenciaMenta(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -207,12 +187,10 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Chocolate con Coco")
     @Story("Bebidas Calientes")
     void comprarChocolate() {
-        TestSteps.run("Seleccionar y personalizar Chocolate", () -> {
-            page.clickChocolate();
-            page.personalizar();
-            page.Coco();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Chocolate", () -> page.buscarChocolate(), driver);
+        TestSteps.run("Personalizar Chocolate", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -221,24 +199,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Chocolate Mediano con Crema Irlandesa")
     @Story("Bebidas Calientes")
     void comprarChocolateM() {
-        TestSteps.run("Seleccionar y personalizar Chocolate Mediano", () -> {
-            page.clickChocolate();
-            page.personalizar();
-            page.ChocolateMediano();
-            page.CremaIrlandesa();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Chocolate", () -> page.buscarChocolate(), driver);
+        TestSteps.run("Personalizar Chocolate", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.ChocolateMediano(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
+
+    // ── Postres y Helados ─────────────────────────────────────────
 
     @Test
     @Order(14)
     @DisplayName("Comprar Pretzel")
     @Story("Postres y Helados")
     void comprarPretzel() {
-        TestSteps.run("Seleccionar y personalizar Chocolate Mediano", () -> {
-            page.clickPretzel();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Pretzel", () -> page.buscarPretzel(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -247,7 +223,7 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Cheese Cake")
     @Story("Postres y Helados")
     void comprarCheeseCake() {
-        TestSteps.run("Seleccionar Cheese Cake", page::clickCheeseCake, driver);
+        TestSteps.run("Buscar y seleccionar Cheese Cake", () -> page.buscarCheeseCake(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -256,20 +232,20 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Cornetto")
     @Story("Postres y Helados")
     void comprarCornetto() {
-        TestSteps.run("Seleccionar y personalizar Cornetto", () -> {
-            page.clickCornetto();
-            page.personalizar();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Cornetto", () -> page.clickCornetto(), driver);
+        TestSteps.run("Personalizar Cornetto", () -> page.personalizar(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
+
+    // ── Dulces y Chocolates ───────────────────────────────────────
 
     @Test
     @Order(17)
     @DisplayName("Comprar Skwinkles Chunks")
     @Story("Dulces y Chocolates")
     void comprarSkwinkles() {
-        TestSteps.run("Seleccionar Skwinkles", page::clickSkwinkles, driver);
+        TestSteps.run("Buscar y seleccionar Skwinkles Chunks", () -> page.clickSkwinkles(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -278,11 +254,9 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar M&M's")
     @Story("Dulces y Chocolates")
     void comprarMM() {
-        TestSteps.run("Seleccionar y personalizar M&M's", () -> {
-            page.clickMM();
-            page.personalizar();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar M&M's", () -> page.clickMM(), driver);
+        TestSteps.run("Personalizar M&M's", () -> page.personalizar(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -291,7 +265,7 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Hershey's")
     @Story("Dulces y Chocolates")
     void comprarHersheys() {
-        TestSteps.run("Seleccionar Hershey's", page::clickHersheys, driver);
+        TestSteps.run("Buscar y seleccionar Hershey's", () -> page.clickHersheys(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -300,20 +274,20 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Snickers")
     @Story("Dulces y Chocolates")
     void comprarSnickers() {
-        TestSteps.run("Seleccionar Snickers", page::clickSnickers, driver);
+        TestSteps.run("Buscar y seleccionar Snickers", () -> page.clickSnickers(), driver);
         agregarAlCarritoYValidar();
     }
+
+    // ── Crepas ────────────────────────────────────────────────────
 
     @Test
     @Order(21)
     @DisplayName("Comprar Crepa Dulce Premium")
     @Story("Crepas")
     void comprarCrepas() {
-        TestSteps.run("Seleccionar y personalizar Crepa Dulce", () -> {
-            page.clickCrepasDulces();
-            page.personalizar();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce Premium", () -> page.clickCrepasDulces(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -322,12 +296,10 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Crepa de Manzana Canela")
     @Story("Crepas")
     void comprarCrepasM() {
-        TestSteps.run("Seleccionar y personalizar Crepa de Manzana Canela", () -> {
-            page.clickCrepasDulces();
-            page.personalizar();
-            page.ManzanaCanela();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce", () -> page.clickCrepasDulces(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Manzana Canela", () -> page.ManzanaCanela(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -336,11 +308,9 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Crepa Salada Premium Hawaiana")
     @Story("Crepas")
     void comprarCrepasS() {
-        TestSteps.run("Seleccionar y personalizar Crepa Salada Hawaiana", () -> {
-            page.clickCrepaSalada();
-            page.personalizar();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada Hawaiana", () -> page.clickCrepaSalada(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -349,12 +319,10 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Crepa Salada de Champiqueso")
     @Story("Crepas")
     void comprarCrepasSP() {
-        TestSteps.run("Seleccionar y personalizar Crepa de Champiqueso", () -> {
-            page.clickCrepaSalada();
-            page.personalizar();
-            page.Champiqueso();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada", () -> page.clickCrepaSalada(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Champiqueso", () -> page.Champiqueso(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
@@ -363,39 +331,33 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Crepa Salada Italiana con Queso Manchego")
     @Story("Crepas")
     void comprarCrepasSI() {
-        TestSteps.run("Seleccionar y personalizar Crepa Italiana", () -> {
-            page.clickCrepaSalada();
-            page.personalizar();
-            page.ChampiquesoManchego();
-            page.Siguiente();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada Italiana", () -> page.clickCrepaSalada(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Champiqueso con Manchego", () -> page.ChampiquesoManchego(), driver);
+        TestSteps.run("Confirmar personalización", () -> page.Siguiente(), driver);
         agregarAlCarritoYValidar();
     }
 
-    // --- Tests de Combos Refactorizados ---
+    // ── Combos ────────────────────────────────────────────────────
 
     @Test
     @Order(26)
     @DisplayName("Combo Crepa Salada con Queso y Frappé con Coco")
     @Story("Combos")
     void comprarCrepasFrappe() {
-        TestSteps.run("Añadir Crepa Salada con Queso Philadelphia", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé con Coco", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Coco();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -406,22 +368,18 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Salada de Pavo y Frappé de Sandía")
     @Story("Combos")
     void comprarCrepasFrappeM() {
-        TestSteps.run("Añadir Crepa Salada de Jamón de Pavo", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada de Jamón de Pavo", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Sandía Pelonada", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.SandiaPelonada();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Sandía Pelonada", () -> page.SandiaPelonada(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -432,25 +390,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Tocino y Frappé con Crema Irlandesa")
     @Story("Combos")
     void comprarCrepasFrappeG() {
-        TestSteps.run("Añadir Crepa de Queso Philadelphia con Tocino", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.Tocino();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Seleccionar extra Tocino", () -> page.Tocino(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé Grande con Crema Irlandesa", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Grande();
-            page.CremaIrlandesa();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua Grande", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -461,24 +415,20 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Champiñón y Frappé de Mango Tajín")
     @Story("Combos")
     void comprarCrepasFrapeMA() {
-        TestSteps.run("Añadir Crepa de Queso Manchego con Champiñón", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoManchego();
-            page.Champinon();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Manchego", () -> page.QuesoManchego(), driver);
+        TestSteps.run("Seleccionar extra Champiñón", () -> page.Champinon(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Mango Tajín", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.MangoTajin();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Mango Tajín", () -> page.MangoTajin(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -489,26 +439,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con extras y Frappé con Vainilla")
     @Story("Combos")
     void comprarCrepasFrappeS() {
-        TestSteps.run("Añadir Crepa de Queso Manchego con Jamón y Tocino", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoManchego();
-            page.ExtraJamonPavo();
-            page.Tocino();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Manchego", () -> page.QuesoManchego(), driver);
+        TestSteps.run("Seleccionar extra Jamón de Pavo", () -> page.ExtraJamonPavo(), driver);
+        TestSteps.run("Seleccionar extra Tocino", () -> page.Tocino(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Sandía con Vainilla", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.SandiaPelonada();
-            page.EsenciaVainilla();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Sandía Pelonada", () -> page.SandiaPelonada(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -519,24 +465,20 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Jamón y Frappé con extras")
     @Story("Combos")
     void comprarCrepasFrappeJP() {
-        TestSteps.run("Añadir Crepa de Jamón de Pavo con extra", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.ExtraJamonPavo();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada de Jamón de Pavo", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar extra Jamón de Pavo", () -> page.ExtraJamonPavo(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé con Coco y Vainilla", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Coco();
-            page.EsenciaVainilla();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -547,23 +489,19 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Tocino y Frappé de Leche con Chocolate")
     @Story("Combos")
     void comprarCrepasFrappeL() {
-        TestSteps.run("Añadir Crepa de Jamón de Pavo con Tocino", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.Tocino();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada de Jamón de Pavo", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar extra Tocino", () -> page.Tocino(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche con Salsa de Chocolate", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.SalsaChocolate();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar Salsa de Chocolate", () -> page.SalsaChocolate(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -574,25 +512,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Queso y Frappé de Leche Deslactosada")
     @Story("Combos")
     void comprarCrepasFrappeLD() {
-        TestSteps.run("Añadir Crepa de Queso Philadelphia", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada con Queso Philadelphia", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Moka Caramelo Mediano", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Mediano();
-            page.MokaCaramelo();
-            page.LecheDeslactosada();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.Mediano(), driver);
+        TestSteps.run("Seleccionar sabor Moka Caramelo", () -> page.MokaCaramelo(), driver);
+        TestSteps.run("Seleccionar Leche Deslactosada", () -> page.LecheDeslactosada(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -603,26 +537,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa de Manchego y Frappé de Leche con Vainilla")
     @Story("Combos")
     void comprarCrepasFrapp() {
-        TestSteps.run("Añadir Crepa de Queso Manchego con extra", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoManchego();
-            page.ExtraQuesoManchego();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada con Queso Manchego", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Manchego", () -> page.QuesoManchego(), driver);
+        TestSteps.run("Seleccionar extra Queso Manchego", () -> page.ExtraQuesoManchego(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé Grande con Esencia de Vainilla", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Grande();
-            page.MokaCaramelo();
-            page.EsenciaVainilla();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Grande", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Seleccionar sabor Moka Caramelo", () -> page.MokaCaramelo(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -633,25 +563,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Champiñón y Frappé de Leche con Coco")
     @Story("Combos")
     void comprarCrepasFrappess() {
-        TestSteps.run("Añadir Crepa de Queso Philadelphia con Champiñón", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.Champinon();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada con Queso Philadelphia", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Seleccionar extra Champiñón", () -> page.Champinon(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche Deslactosada con Coco", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.LecheDeslactosada();
-            page.Coco();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar Leche Deslactosada", () -> page.LecheDeslactosada(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -662,26 +588,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa con Tocino/Queso y Frappé de Leche Mediano")
     @Story("Combos")
     void comprarCrepasFrappesC() {
-        TestSteps.run("Añadir Crepa de Jamón de Pavo con extras", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.Tocino();
-            page.ExtraQuesoPhiladelphia();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada de Jamón de Pavo", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar extra Tocino", () -> page.Tocino(), driver);
+        TestSteps.run("Seleccionar extra Queso Philadelphia", () -> page.ExtraQuesoPhiladelphia(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Chocolate Blanco Mediano", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Mediano();
-            page.ChocolateBlanco();
-            page.CremaIrlandesa();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Mediano", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.Mediano(), driver);
+        TestSteps.run("Seleccionar sabor Chocolate Blanco", () -> page.ChocolateBlanco(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -692,22 +614,18 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa de Manchego y Frappé de Leche Capuccino")
     @Story("Combos")
     void comprarCrepasFrappesOnly() {
-        TestSteps.run("Añadir Crepa de Queso Manchego", () -> {
-            page.clickCrepaSalada1();
-            page.personalizar();
-            page.QuesoManchego();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Salada con Queso Manchego", () -> page.clickCrepaSalada1(), driver);
+        TestSteps.run("Personalizar Crepa Salada", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Manchego", () -> page.QuesoManchego(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Salada al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche Capuccino", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Capuccino", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -718,23 +636,19 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. y Frappé con Crema Irlandesa")
     @Story("Combos")
     void comprarCrepas2Frappes() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ingredientes con extra Manzana", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.ExtraManzana();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar extra Manzana", () -> page.ExtraManzana(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Agua con Crema Irlandesa", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.CremaIrlandesa();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -742,28 +656,24 @@ public class MenuCoffeTree extends BaseTest {
 
     @Test
     @Order(39)
-    @DisplayName("Combo Crepa Dulce 2 Ing. Nutella y Frappé con Menta")
+    @DisplayName("Combo Crepa Dulce 2 Ing. Nutella y Frappé de Sandía")
     @Story("Combos")
     void comprarCrepas2Frappe() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ingredientes con Nutella", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.seleccionarSaborPorContentDesc2("Nutella®");
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Nutella", () -> page.seleccionarSaborPorContentDesc2("Nutella®"), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé Mediano de Sandía con Menta", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Mediano();
-            page.SandiaPelonada();
-            page.EsenciaMenta();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua Mediano", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.Mediano(), driver);
+        TestSteps.run("Seleccionar sabor Sandía Pelonada", () -> page.SandiaPelonada(), driver);
+        TestSteps.run("Seleccionar Esencia Menta", () -> page.EsenciaMenta(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -774,25 +684,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Fresa/Nutella y Frappé Grande")
     @Story("Combos")
     void comprarCrepas2FrappeFre() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con extras", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.Nutella();
-            page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2);
-            page.ExtraMermeladaFresa();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Nutella", () -> page.Nutella(), driver);
+        TestSteps.run("Seleccionar sabor Mermelada de Fresa", () -> page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2), driver);
+        TestSteps.run("Seleccionar extra Mermelada de Fresa", () -> page.ExtraMermeladaFresa(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Agua Grande", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Grande();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua Grande", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -803,25 +709,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Queso y Frappé con Coco")
     @Story("Combos")
     void comprarCrepas2FrappePH() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Queso Philadelphia", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.ExtraQuesoPhiladelphia();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Seleccionar extra Queso Philadelphia", () -> page.ExtraQuesoPhiladelphia(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Mango Tajín con Coco", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.MangoTajin();
-            page.Coco();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua con Mango Tajín", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Mango Tajín", () -> page.MangoTajin(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -832,26 +734,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Nutella/Fresa y Frappé con Vainilla")
     @Story("Combos")
     void comprarCrepas2FrappeZ() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Nutella y extra Fresa", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.Nutella();
-            page.ExtraMermeladaFresa();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Nutella", () -> page.Nutella(), driver);
+        TestSteps.run("Seleccionar extra Mermelada de Fresa", () -> page.ExtraMermeladaFresa(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé Grande de Sandía con Vainilla", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Grande();
-            page.SandiaPelonada();
-            page.EsenciaVainilla();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua Grande", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Seleccionar sabor Sandía Pelonada", () -> page.SandiaPelonada(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -862,26 +760,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. con múltiples extras y Frappé con Coco")
     @Story("Combos")
     void comprarCrepas2FrappeME() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Nutella, Fresa y Manzana", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.Nutella();
-            page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2);
-            page.ExtraManzana();
-            page.ExtraMermeladaFresa();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Nutella", () -> page.Nutella(), driver);
+        TestSteps.run("Seleccionar sabor Mermelada de Fresa", () -> page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2), driver);
+        TestSteps.run("Seleccionar extra Manzana", () -> page.ExtraManzana(), driver);
+        TestSteps.run("Seleccionar extra Mermelada de Fresa", () -> page.ExtraMermeladaFresa(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Agua con Coco", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Coco();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -892,24 +786,20 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Queso/Nuez y Frappé de Leche")
     @Story("Combos")
     void comprarCrepas2FrappeNu() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Queso y Nuez", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.seleccionarSaborPorContentDesc2("Nuez");
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Seleccionar sabor Nuez", () -> page.seleccionarSaborPorContentDesc2("Nuez"), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche con Salsa de Chocolate", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.SalsaChocolate();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche con Chocolate", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar Salsa de Chocolate", () -> page.SalsaChocolate(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -920,27 +810,23 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Fresa/Manzana y Frappé de Leche")
     @Story("Combos")
     void comprarCrepas2FrappeFr() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Fresa y extra Manzana", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2);
-            page.ExtraManzana();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Mermelada de Fresa", () -> page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2), driver);
+        TestSteps.run("Seleccionar extra Manzana", () -> page.ExtraManzana(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé Grande de Chocolate Blanco", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Grande();
-            page.ChocolateBlanco();
-            page.LecheDeslactosada();
-            page.EsenciaVainilla();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Grande con Chocolate Blanco", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Seleccionar sabor Chocolate Blanco", () -> page.ChocolateBlanco(), driver);
+        TestSteps.run("Seleccionar Leche Deslactosada", () -> page.LecheDeslactosada(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -951,26 +837,22 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Nutella/Queso y Frappé de Leche")
     @Story("Combos")
     void comprarCrepas2FrappeP() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Nutella y Queso", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.Nutella();
-            page.seleccionarSaborPorContentDesc("Queso Philadelphia®", 2);
-            page.ExtraQuesoPhiladelphia();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Nutella", () -> page.Nutella(), driver);
+        TestSteps.run("Seleccionar sabor Queso Philadelphia", () -> page.seleccionarSaborPorContentDesc("Queso Philadelphia®", 2), driver);
+        TestSteps.run("Seleccionar extra Queso Philadelphia", () -> page.ExtraQuesoPhiladelphia(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche Mediano", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Mediano();
-            page.MokaCaramelo();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Mediano", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Mediano", () -> page.Mediano(), driver);
+        TestSteps.run("Seleccionar sabor Moka Caramelo", () -> page.MokaCaramelo(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -981,24 +863,20 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Nutella y Frappé de Leche con Coco")
     @Story("Combos")
     void comprarCrepas2FrappeNM() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Nutella", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.Nutella();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Nutella", () -> page.Nutella(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche Deslactosada con Coco", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.LecheDeslactosada();
-            page.Coco();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Deslactosada", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar Leche Deslactosada", () -> page.LecheDeslactosada(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -1009,28 +887,24 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Fresa/Manzana y Frappé de Leche con extras")
     @Story("Combos")
     void comprarCrepas2FrappeMC() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Fresa y extra Manzana", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2);
-            page.ExtraManzana();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar sabor Mermelada de Fresa", () -> page.seleccionarSaborPorContentDesc("Mermelada de fresa", 2), driver);
+        TestSteps.run("Seleccionar extra Manzana", () -> page.ExtraManzana(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Leche Grande con múltiples extras", () -> {
-            page.clickFrappeLeche();
-            page.personalizar();
-            page.Grande();
-            page.MokaCaramelo();
-            page.Coco();
-            page.CremaIrlandesa();
-            page.EsenciaVainilla();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Leche Grande con múltiples extras", () -> page.clickFrappeLeche(), driver);
+        TestSteps.run("Personalizar Frappé de Leche", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Seleccionar sabor Moka Caramelo", () -> page.MokaCaramelo(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Seleccionar Crema Irlandesa", () -> page.CremaIrlandesa(), driver);
+        TestSteps.run("Seleccionar Esencia Vainilla", () -> page.EsenciaVainilla(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -1041,25 +915,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Crepa Dulce 2 Ing. Queso y Frappé con extras")
     @Story("Combos")
     void comprarCrepas2FrappeQ() {
-        TestSteps.run("Añadir Crepa Dulce 2 Ing. con Queso Philadelphia", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.QuesoPhiladelphia();
-            page.ExtraQuesoPhiladelphia();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar relleno Queso Philadelphia", () -> page.QuesoPhiladelphia(), driver);
+        TestSteps.run("Seleccionar extra Queso Philadelphia", () -> page.ExtraQuesoPhiladelphia(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Frappé de Agua con Menta y Coco", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.EsenciaMenta();
-            page.Coco();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua con Menta y Coco", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar Esencia Menta", () -> page.EsenciaMenta(), driver);
+        TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
@@ -1070,25 +940,21 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Combo Frappé con Menta y Crepa Dulce 2 Ing. Zarzamora")
     @Story("Combos")
     void comprarCrepas2FrappeZA() {
-        TestSteps.run("Añadir Frappé Grande de Sandía con Menta", () -> {
-            page.clickFrappeAgua();
-            page.personalizar();
-            page.Grande();
-            page.SandiaPelonada();
-            page.EsenciaMenta();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Frappé de Agua Grande", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Personalizar Frappé", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar tamaño Grande", () -> page.Grande(), driver);
+        TestSteps.run("Seleccionar sabor Sandía Pelonada", () -> page.SandiaPelonada(), driver);
+        TestSteps.run("Seleccionar Esencia Menta", () -> page.EsenciaMenta(), driver);
+        TestSteps.run("Confirmar personalización Frappé", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Regresar y añadir Crepa Dulce 2 Ing. con extra Zarzamora", () -> {
-            page.clickCrepaDulce2();
-            page.personalizar();
-            page.ExtraMermeladaZarzamora();
-            page.Siguiente();
-            page.agregarCarrito();
-        }, driver);
+        TestSteps.run("Buscar y seleccionar Crepa Dulce 2 Ingredientes", () -> page.clickCrepaDulce2(), driver);
+        TestSteps.run("Personalizar Crepa Dulce", () -> page.personalizar(), driver);
+        TestSteps.run("Seleccionar extra Mermelada de Zarzamora", () -> page.ExtraMermeladaZarzamora(), driver);
+        TestSteps.run("Confirmar personalización Crepa", () -> page.Siguiente(), driver);
+        TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Validar Carrito Final", () -> {
+        TestSteps.run("Abrir carrito y validar", () -> {
             page.abrirCarrito();
             page.validarElementoVisible(AlimentosLocators.BTN_REGRESARMENU);
         }, driver);
