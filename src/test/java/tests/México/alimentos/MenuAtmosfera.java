@@ -223,7 +223,6 @@ public class MenuAtmosfera extends BaseTest {
     @Story("Bebidas Calientes")
     @Cinema("Patio Santa Fe")
     void comprarTeCalienteManzanillaPatioSantaFe() {
-        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Patio Santa Fe");
         TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
         TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
         TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->
@@ -244,7 +243,6 @@ public class MenuAtmosfera extends BaseTest {
     @Story("Bebidas Calientes")
     @Cinema("Arcos Bosques")
     void comprarTeCalienteManzanillaArcosBosques() {
-        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Arcos Bosques");
         TestSteps.run("Buscar y seleccionar Té Caliente", () -> page.buscarTeCaliente(), driver);
         TestSteps.run("Personalizar Té Caliente", () -> page.personalizar(), driver);
         TestSteps.run("Validar tamaño Grande Caliente por defecto", () ->

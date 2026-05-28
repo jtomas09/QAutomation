@@ -76,6 +76,7 @@ public class BaseTest {
 
     private static final AtomicBoolean RUN_INIT_DONE         = new AtomicBoolean(false);
     private static final AtomicBoolean MEXICO_CINEMA_CHECKED = new AtomicBoolean(false);
+    private static volatile String     lastAlimentosCinema   = null;
 
     @BeforeAll
     public static void beforeAllSuite() {
@@ -91,6 +92,7 @@ public class BaseTest {
             envWritten = false;
             driverCreatedOnce = false;
             MEXICO_CINEMA_CHECKED.set(false);
+            lastAlimentosCinema = null;
 
             try { clearDirectory(Paths.get("build", "reportes-pdf")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "reports", "allure-report")); } catch (Exception ignored) {}
@@ -273,6 +275,36 @@ public class BaseTest {
                 new CinemasHelper(driver).ensureMexicoCinemaSelected();
             } catch (Exception e) {
                 log.warn("[BaseTest] ensureMexicoCinemaSelected falló (no bloquea): {}", e.getMessage());
+            }
+        }
+
+        // ── Alimentos menus: auto-selecciona el cine correcto antes de CADA test
+        String simpleClass = getClass().getSimpleName();
+        if (MenuCinemaResolver.isAlimentosMenu(simpleClass)) {
+            String targetCinema = null;
+            // Priority 1: @Cinema annotation on the method (per-test override, e.g. MenuAtmosfera)
+            try {
+                final String[] annotCinema = {null};
+                testInfo.getTestMethod().ifPresent(m -> {
+                    Cinema c = m.getAnnotation(Cinema.class);
+                    if (c != null && c.value() != null && !c.value().isBlank()) {
+                        annotCinema[0] = c.value().trim();
+                    }
+                });
+                targetCinema = annotCinema[0];
+            } catch (Exception ignored) {}
+            // Priority 2: class-level mapping (MenuCoffeTree, MenuMiCine, MenuVIP, MenuTradicional)
+            if (targetCinema == null) {
+                targetCinema = MenuCinemaResolver.resolve(simpleClass);
+            }
+            if (targetCinema != null && !targetCinema.equals(lastAlimentosCinema)) {
+                log.info("[BaseTest] Alimentos cinema: {} → {}", lastAlimentosCinema, targetCinema);
+                try {
+                    new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos(targetCinema);
+                    lastAlimentosCinema = targetCinema;
+                } catch (Exception e) {
+                    log.warn("[BaseTest] ensureCinemaSelectedFromAlimentos({}) falló: {}", targetCinema, e.getMessage());
+                }
             }
         }
 

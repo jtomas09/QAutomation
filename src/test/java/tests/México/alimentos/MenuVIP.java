@@ -6,7 +6,6 @@ import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
-import pages.common.CinemasHelper;
 import utils.TestSteps;
 
 /**
@@ -40,8 +39,6 @@ public class MenuVIP extends BaseTest {
     @DisplayName("Comprar Palomitas Clásicas de Mantequilla")
     @Story("Palomitas")
     void comprarPalomitasClasicasMantequilla() {
-       // new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Espacio Las Américas");
-       new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Espacio Las Américas");
         TestSteps.run("Seleccionar y personalizar Palomitas", () -> {
             page.clickPalomitas();
             page.personalizar();

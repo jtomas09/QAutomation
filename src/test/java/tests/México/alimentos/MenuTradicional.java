@@ -6,7 +6,6 @@ import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
-import pages.common.CinemasHelper;
 import utils.TestSteps;
 
 /**
@@ -40,8 +39,6 @@ public class MenuTradicional extends BaseTest {
     @DisplayName("Comprar Maxi Combo Familiar con Palomitas Takis y Refrescos")
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliar() {
-        //new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Escala La Huerta");
-        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Escala La Huerta");
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
             page.clickMaxiComboFamiliar();
             page.personalizar();

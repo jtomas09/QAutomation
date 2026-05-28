@@ -6,7 +6,6 @@ import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.AlimentosPagina;
-import pages.common.CinemasHelper;
 import utils.TestSteps;
 
 /**
@@ -44,7 +43,6 @@ public class MenuCoffeTree extends BaseTest {
     @DisplayName("Comprar Americano Grande con Coco")
     @Story("Bebidas Calientes")
     void comprarAmericano() {
-        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("Escala Morelia");
         TestSteps.run("Buscar y seleccionar Americano", () -> page.clickAmericano(), driver);
         TestSteps.run("Personalizar Americano", () -> page.personalizar(), driver);
         TestSteps.run("Seleccionar sabor Coco", () -> page.Coco(), driver);
