@@ -676,16 +676,18 @@ public class CinemasHelper extends BasePage {
             }
 
             log.info("[CinemasHelper][ClubGuard] Visible -> attempting dismiss...");
-            boolean closedReturn = dismissClubLoginIfPresent(); // ✅ tu lógica existente
-            boolean stillVisible = isClubLoginVisible();
+            boolean closedReturn = dismissClubLoginIfPresent();
+
+            // Solo chequeamos stillVisible si dismissClubLoginIfPresent() falló (return false)
+            // para evitar una consulta de elemento lenta cuando ya sabemos que cerró.
+            boolean stillVisible = !closedReturn && isClubLoginVisible();
 
             log.info("[CinemasHelper][ClubGuard] closedReturn={} stillVisible={}", closedReturn, stillVisible);
 
             if (stillVisible) {
-                // Último recurso: tap directo al botón "back" del UI de Club (ya existe en tu clase)
-                log.warn("[CinemasHelper][ClubGuard] STILL visible -> last resort tapBackFromClubUI()");
+                log.warn("[CinemasHelper][ClubGuard] STILL visible -> last resort navigate.back()");
                 try {
-                    tapBackFromClubUI();
+                    driver.navigate().back();
                     safeSleep(700);
                 } catch (Exception ignored) {}
                 log.debug("[CinemasHelper][ClubGuard] after last resort stillVisible={}", isClubLoginVisible());
@@ -864,8 +866,9 @@ public class CinemasHelper extends BasePage {
     }
 
     /**
-     * Cierra la pantalla de Club Cinépolis SIN usar BACK del sistema (porque puede cerrar la app).
-     * Usa: botón back de la UI (si existe) y fallback por coordenadas (top-left).
+     * Cierra la pantalla de Club Cinépolis.
+     * Intenta: botón back UI → content-desc → navigate().back().
+     * navigate().back() es seguro: Club tiene su propia Activity y back vuelve al main sin cerrar la app.
      */
     public boolean dismissClubLoginIfPresent() {
         if (!isClubLoginVisible()) return false;
@@ -874,25 +877,35 @@ public class CinemasHelper extends BasePage {
 
         for (int i = 1; i <= 3; i++) {
             try {
-                // 1) Intento más seguro: tap al botón BACK real (por bounds del elemento)
-                if (tapBackFromClubUI()) {
-                    sleep(700);
-                }
-
-                // 2) Intento por botón con content-desc (Atrás / Navigate up)
-                if (isClubLoginVisible() && tapIfPresent(CLUB_BACK_BUTTON_A11Y)) {
-                    sleep(700);
-                }
-
-                // ⚠️ OJO: evitamos tap "a ciegas" por coordenadas porque puede pegarle a Notificaciones en Cartelera
-                // (si tu app re-renderiza rápido y la pantalla ya cambió).
-
+                // 1) Tap botón back real (por bounds del elemento en la UI)
+                tapBackFromClubUI();
+                sleep(400);
                 if (!isClubLoginVisible()) {
-                    log.info("[CinemasHelper] Pantalla Club cerrada OK.");
+                    log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI).");
                     return true;
                 }
+
+                // 2) Tap por content-desc (Atrás / Navigate up)
+                tapIfPresent(CLUB_BACK_BUTTON_A11Y);
+                sleep(400);
+                if (!isClubLoginVisible()) {
+                    log.info("[CinemasHelper] Pantalla Club cerrada OK (A11Y).");
+                    return true;
+                }
+
+                // 3) navigate().back() — tecla Back del sistema; Club tiene su propia Activity
+                //    así que vuelve al main sin cerrar la app.
+                try {
+                    driver.navigate().back();
+                    sleep(700);
+                } catch (Exception ignored) {}
+                if (!isClubLoginVisible()) {
+                    log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
+                    return true;
+                }
+
             } catch (Exception e) {
-                // no reventar tu flujo
+                // no reventar el flujo
             }
         }
 
@@ -1107,9 +1120,9 @@ public class CinemasHelper extends BasePage {
                     int cx = r.getX() + (r.getWidth() / 2);
                     int cy = r.getY() + (r.getHeight() / 2);
 
-                    // sanity: debe estar en el cuadrante superior-izquierdo
+                    // sanity: debe estar en la mitad superior-izquierda (relaxed para Galaxy A56/Compose)
                     org.openqa.selenium.Dimension d = driver.manage().window().getSize();
-                    if (cx > d.width * 0.35 || cy > d.height * 0.25) {
+                    if (cx > d.width * 0.50 || cy > d.height * 0.40) {
                         continue;
                     }
 
