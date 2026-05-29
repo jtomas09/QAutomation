@@ -23,14 +23,18 @@ public class AllureMailListener implements TestExecutionListener {
 
     private long startMs;
 
-    private final Set<String> executedMenus = new LinkedHashSet<>();
-    private final AtomicInteger failedCount  = new AtomicInteger(0);
-    private final Set<String>  failedMenus   = new LinkedHashSet<>();
+    private final Set<String>    executedMenus = new LinkedHashSet<>();
+    private final AtomicInteger  totalCount    = new AtomicInteger(0);
+    private final AtomicInteger  passedCount   = new AtomicInteger(0);
+    private final AtomicInteger  failedCount   = new AtomicInteger(0);
+    private final Set<String>    failedMenus   = new LinkedHashSet<>();
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
         startMs = System.currentTimeMillis();
         executedMenus.clear();
+        totalCount.set(0);
+        passedCount.set(0);
         failedCount.set(0);
         failedMenus.clear();
         log.info("[AllureMailListener] Suite execution started.");
@@ -49,6 +53,8 @@ public class AllureMailListener implements TestExecutionListener {
     public void executionFinished(TestIdentifier testIdentifier, TestExecutionResult result) {
         if (!testIdentifier.isTest()) return;
 
+        // Contar cada test que terminó (PASSED, FAILED o ABORTED)
+        totalCount.incrementAndGet();
         testIdentifier.getSource().ifPresent(this::extractAndStoreMenu);
 
         TestExecutionResult.Status status = result.getStatus();
@@ -56,6 +62,8 @@ public class AllureMailListener implements TestExecutionListener {
                 || status == TestExecutionResult.Status.ABORTED) {
             failedCount.incrementAndGet();
             testIdentifier.getSource().ifPresent(src -> extractMenuName(src, failedMenus));
+        } else if (status == TestExecutionResult.Status.SUCCESSFUL) {
+            passedCount.incrementAndGet();
         }
     }
 
@@ -79,18 +87,22 @@ public class AllureMailListener implements TestExecutionListener {
     @Override
     public void testPlanExecutionFinished(TestPlan testPlan) {
         long duration    = System.currentTimeMillis() - startMs;
+        int  total       = totalCount.get();
+        int  passed      = passedCount.get();
         int  failed      = failedCount.get();
         String executedTests = executedMenus.stream().collect(Collectors.joining(" | "));
 
-        log.info("[AllureMailListener] Menus executed: {} | failedTests: {} | failedMenus: {}",
-                executedTests, failed, failedMenus);
+        log.info("[AllureMailListener] Menus executed: {} | total: {} | passed: {} | failed: {} | failedMenus: {}",
+                executedTests, total, passed, failed, failedMenus);
 
         // Logs de diagnóstico del correo
         log.info("[EMAIL] ExecutionId detectado: {}", System.getProperty("executionName", "Cinepolis"));
-        log.info("[EMAIL] Tests ejecutados (menus): {}", executedMenus.size());
-        log.info("[EMAIL] Failed detectados (JUnit events): {}", failed);
+        log.info("[EMAIL] Total tests encontrados (JUnit events): {}", total);
+        log.info("[EMAIL] Passed encontrados (JUnit events): {}", passed);
+        log.info("[EMAIL] Failed encontrados (JUnit events): {}", failed);
+        log.info("[EMAIL] Duración real del run: {}ms", duration);
         log.info("[EMAIL] Fuente de datos: AllureMailListener via JUnit TestExecutionResult");
-        log.info("[EMAIL] Resultado calculado por JUnit: {}", failed > 0 ? "FAILED" : "PASSED");
+        log.info("[EMAIL] Resultado calculado por JUnit: {}", failed > 0 ? "FAILED" : (total == 0 ? "UNKNOWN" : "PASSED"));
 
         String netlifyUrl = "";
         try {
@@ -101,11 +113,14 @@ public class AllureMailListener implements TestExecutionListener {
         }
 
         try {
+            // Pasar los conteos REALES de JUnit (total y passed ahora son precisos).
+            // sendFinalSuiteReport usará estos valores directamente y solo recurrirá a
+            // AllureSummaryReader si total == 0 (modo compatibilidad / AllureMailRunner).
             AllureReportSender.sendFinalSuiteReport(
                     "Cinepolis",
-                    0,
-                    0,
-                    failed,      // conteo real desde TestExecutionResult
+                    total,
+                    passed,
+                    failed,
                     duration,
                     executedTests,
                     netlifyUrl
@@ -120,12 +135,12 @@ public class AllureMailListener implements TestExecutionListener {
     // =====================================================================
 
     /**
-     * Elimina archivos de resultados de ejecuciones anteriores para garantizar que el correo
-     * refleje ÚNICAMENTE la ejecución actual.
+     * Elimina archivos de resultados de ejecuciones anteriores para garantizar que
+     * readAllureFailures() en el correo muestre ÚNICAMENTE los fallos del run actual.
      *
      * Limpia:
-     *  - build/allure-results/  → JSONs de resultados/contenedores/adjuntos de tests anteriores
-     *  - build/reportes-pdf/    → PDFs de tests anteriores que contaminarían el adjunto del correo
+     *  - build/allure-results/  → JSONs de resultados/contenedores/adjuntos anteriores
+     *  - build/reportes-pdf/    → PDFs de tests anteriores que contaminarían el adjunto
      *  - build/reportes-pdf/suite-metrics.properties → métricas de la suite anterior
      */
     private static void cleanForNewRun() {
@@ -134,8 +149,8 @@ public class AllureMailListener implements TestExecutionListener {
         cleanAllureResultsDir();
         cleanReportesPdfDir();
 
-        // suite-metrics.properties: si existe de una ejecución anterior PdfReportExtension
-        // no lo sobreescribiría (solo escribe si no existe), causando métricas incorrectas.
+        // suite-metrics.properties: PdfReportExtension solo lo escribe si NO existe;
+        // si queda de una ejecución anterior, SuiteMailer usaría métricas incorrectas.
         try {
             Path metricsFile = Paths.get("build", "reportes-pdf", "suite-metrics.properties");
             if (Files.deleteIfExists(metricsFile)) {
@@ -145,7 +160,7 @@ public class AllureMailListener implements TestExecutionListener {
             log.warn("[AllureMailListener] No se pudo eliminar suite-metrics.properties: {}", e.getMessage());
         }
 
-        log.info("[AllureMailListener] Limpieza completada. Run actual comenzará con directorio limpio.");
+        log.info("[AllureMailListener] Limpieza completada. Run actual comenzará con estado limpio.");
     }
 
     /**
@@ -155,7 +170,7 @@ public class AllureMailListener implements TestExecutionListener {
     private static void cleanAllureResultsDir() {
         Path dir = Paths.get("build", "allure-results");
         if (!Files.exists(dir)) {
-            log.debug("[AllureMailListener] allure-results no existe todavía; no se requiere limpieza.");
+            log.debug("[AllureMailListener] allure-results no existe; no requiere limpieza.");
             return;
         }
         try {
@@ -165,15 +180,12 @@ public class AllureMailListener implements TestExecutionListener {
                     String name = p.getFileName().toString();
                     boolean isResult    = name.endsWith("-result.json");
                     boolean isContainer = name.endsWith("-container.json");
-                    // adjuntos Allure: UUID (36 chars con guiones) seguido de cualquier extensión
+                    // adjuntos: UUID de 36 chars seguido de cualquier extensión
                     boolean isAttachment = name.matches(
                             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*");
 
                     if (isResult || isContainer || isAttachment) {
-                        try {
-                            Files.deleteIfExists(p);
-                            count++;
-                        } catch (Exception ignored) {}
+                        try { Files.deleteIfExists(p); count++; } catch (Exception ignored) {}
                     }
                 }
             }
@@ -190,7 +202,7 @@ public class AllureMailListener implements TestExecutionListener {
     private static void cleanReportesPdfDir() {
         Path dir = Paths.get("build", "reportes-pdf");
         if (!Files.exists(dir)) {
-            log.debug("[AllureMailListener] reportes-pdf no existe todavía; no se requiere limpieza.");
+            log.debug("[AllureMailListener] reportes-pdf no existe; no requiere limpieza.");
             return;
         }
         try {
@@ -198,10 +210,7 @@ public class AllureMailListener implements TestExecutionListener {
             try (var stream = Files.list(dir)) {
                 for (Path p : (Iterable<Path>) stream::iterator) {
                     if (p.getFileName().toString().endsWith(".pdf")) {
-                        try {
-                            Files.deleteIfExists(p);
-                            count++;
-                        } catch (Exception ignored) {}
+                        try { Files.deleteIfExists(p); count++; } catch (Exception ignored) {}
                     }
                 }
             }

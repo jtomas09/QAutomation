@@ -274,35 +274,46 @@ public class AllureReportSender {
         message.setFrom(new InternetAddress(from));
         message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
 
-        // Guardar el conteo JUnit ANTES de que AllureSummaryReader pueda sobreescribirlo.
-        // El conteo JUnit viene de TestExecutionResult (fuente autorizada).
+        // Conteos pasados como parámetros (fuente primaria).
+        // Cuando vienen de AllureMailListener son los conteos REALES de JUnit TestExecutionResult:
+        // total y passed se calculan ahora en el listener, failed siempre fue preciso.
+        final int junitTotal  = totalTests;
+        final int junitPassed = passedTests;
         final int junitFailed = failedTests;
-        log.info("[EMAIL] Diagnóstico — suiteName='{}' total(param)={} passed(param)={} failed(JUnit)={} duration={}ms",
-                suiteName, totalTests, passedTests, junitFailed, durationMillis);
+        log.info("[EMAIL] Diagnóstico — suiteName='{}' total(JUnit)={} passed(JUnit)={} failed(JUnit)={} duration={}ms",
+                suiteName, junitTotal, junitPassed, junitFailed, durationMillis);
 
-        try {
-            AllureSummaryReader.Stats stats = AllureSummaryReader.readAuto();
-            log.info("[EMAIL] AllureSummaryReader — total={} passed={} failed={} broken={} skipped={} durationMs={}",
-                    stats.total, stats.passed, stats.failed, stats.broken, stats.skipped, stats.durationMs);
-
-            if (stats.total > 0) {
-                totalTests  = stats.total;
-                passedTests = stats.passed;
-                failedTests = stats.failed + stats.broken;
-                if (stats.durationMs > 0) durationMillis = stats.durationMs;
-                log.info("[EMAIL] Fuente de datos: AllureSummaryReader (total={}).", stats.total);
-            } else {
-                log.warn("[EMAIL] AllureSummaryReader retornó total=0 — usando valores JUnit como fallback.");
+        if (junitTotal > 0) {
+            // Los conteos JUnit son autoritativos. NO llamamos a AllureSummaryReader para evitar
+            // que un summary.json de un run anterior sobreescriba los valores correctos del run actual.
+            // Esto resuelve: asunto FAILED con test PASSED, "590h" de duración, 17 fallos históricos, etc.
+            log.info("[EMAIL] Fuente de datos: JUnit events (total={} > 0). AllureSummaryReader OMITIDO.", junitTotal);
+        } else {
+            // Fallback: total==0 → llamado desde AllureMailRunner (CI) o desde PdfReportExtension
+            // que aún no migró. En ese caso AllureSummaryReader puede ser útil.
+            log.info("[EMAIL] total(JUnit)=0 → intentando AllureSummaryReader como fallback...");
+            try {
+                AllureSummaryReader.Stats stats = AllureSummaryReader.readAuto();
+                log.info("[EMAIL] AllureSummaryReader (fallback) — total={} passed={} failed={} broken={} skipped={} durationMs={}",
+                        stats.total, stats.passed, stats.failed, stats.broken, stats.skipped, stats.durationMs);
+                if (stats.total > 0) {
+                    totalTests    = stats.total;
+                    passedTests   = stats.passed;
+                    failedTests   = stats.failed + stats.broken;
+                    if (stats.durationMs > 0) durationMillis = stats.durationMs;
+                    log.info("[EMAIL] Fuente de datos: AllureSummaryReader (fallback).");
+                } else {
+                    log.warn("[EMAIL] AllureSummaryReader también retornó total=0; se usarán valores en 0.");
+                }
+            } catch (Exception e) {
+                log.warn("[EMAIL] AllureSummaryReader no disponible (fallback): {}", e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("[EMAIL] No se pudo leer summary.json — usando valores JUnit como fallback: {}", e.getMessage());
         }
 
         int total   = totalTests;
         int passed  = passedTests;
         int failed  = failedTests;
-        // Para el ASUNTO usamos el máximo de ambas fuentes: evita un "PASSED" falso cuando
-        // AllureSummaryReader lee un summary.json obsoleto que no refleja la ejecución actual.
+        // subjectFailed = max(allure, junit): el asunto nunca puede decir PASSED si JUnit reportó fallos
         int subjectFailed = Math.max(failed, junitFailed);
         int skipped = Math.max(0, total - passed - failed);
         log.info("[EMAIL] Resultado consolidado — total={} passed={} failed={} skipped={} subjectFailed={}",
