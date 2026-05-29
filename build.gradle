@@ -215,6 +215,15 @@ tasks.register('runAllureMailRunner', JavaExec) {
     systemProperties System.getProperties()
 }
 
+// ---------- DIAGNÓSTICO SMTP ----------
+tasks.register('testEmail', JavaExec) {
+    group = "reporting"
+    description = "Prueba la conexión SMTP y envía un correo de prueba"
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "utils.EmailTester"
+    systemProperties System.getProperties()
+}
+
 tasks.register('ciAllureEmail') {
     group = "reporting"
     description = "Tests + Allure Report + Email"
