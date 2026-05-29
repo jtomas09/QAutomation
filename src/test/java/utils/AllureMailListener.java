@@ -23,11 +23,11 @@ public class AllureMailListener implements TestExecutionListener {
 
     private long startMs;
 
-    private final Set<String>    executedMenus = new LinkedHashSet<>();
-    private final AtomicInteger  totalCount    = new AtomicInteger(0);
-    private final AtomicInteger  passedCount   = new AtomicInteger(0);
-    private final AtomicInteger  failedCount   = new AtomicInteger(0);
-    private final Set<String>    failedMenus   = new LinkedHashSet<>();
+    private final Set<String>   executedMenus = new LinkedHashSet<>();
+    private final AtomicInteger totalCount    = new AtomicInteger(0);
+    private final AtomicInteger passedCount   = new AtomicInteger(0);
+    private final AtomicInteger failedCount   = new AtomicInteger(0);
+    private final Set<String>   failedMenus   = new LinkedHashSet<>();
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
@@ -38,6 +38,15 @@ public class AllureMailListener implements TestExecutionListener {
         failedCount.set(0);
         failedMenus.clear();
         log.info("[AllureMailListener] Suite execution started.");
+
+        // Resetear BaseTestStatusRegistry desde aquí como seguridad adicional:
+        // PdfReportExtension.beforeAll() también lo hace antes del primer test, pero
+        // si se corre sin esa extensión, este reset garantiza un estado limpio.
+        try {
+            BaseTestStatusRegistry.resetForRun(System.getProperty("executionName", "Cinepolis"));
+        } catch (Exception e) {
+            log.warn("[AllureMailListener] Could not reset BaseTestStatusRegistry: {}", e.getMessage());
+        }
 
         try {
             AllureReportSender.resetMailLock();
@@ -53,7 +62,8 @@ public class AllureMailListener implements TestExecutionListener {
     public void executionFinished(TestIdentifier testIdentifier, TestExecutionResult result) {
         if (!testIdentifier.isTest()) return;
 
-        // Contar cada test que terminó (PASSED, FAILED o ABORTED)
+        // Conteos propios (nivel Platform). Se usan como fallback si BaseTestStatusRegistry
+        // no está disponible (no se usa PdfReportExtension).
         totalCount.incrementAndGet();
         testIdentifier.getSource().ifPresent(this::extractAndStoreMenu);
 
@@ -87,22 +97,57 @@ public class AllureMailListener implements TestExecutionListener {
     @Override
     public void testPlanExecutionFinished(TestPlan testPlan) {
         long duration    = System.currentTimeMillis() - startMs;
-        int  total       = totalCount.get();
-        int  passed      = passedCount.get();
-        int  failed      = failedCount.get();
         String executedTests = executedMenus.stream().collect(Collectors.joining(" | "));
 
-        log.info("[AllureMailListener] Menus executed: {} | total: {} | passed: {} | failed: {} | failedMenus: {}",
-                executedTests, total, passed, failed, failedMenus);
+        // ---------------------------------------------------------------
+        // Fuente de conteos: BaseTestStatusRegistry (nivel Jupiter)
+        //
+        // PdfReportExtension implementa TestWatcher (JUnit Jupiter) y actualiza
+        // BaseTestStatusRegistry en testFailed()/testSuccessful(). Este nivel es
+        // más fiable que los eventos Platform porque:
+        //  1. El latch "ya fallado" evita que un retry exitoso marque como passed
+        //     un test que falló en un intento anterior.
+        //  2. Es el mismo origen que usa el PDF, garantizando consistencia.
+        //
+        // Fallback: si BaseTestStatusRegistry está vacío (PdfReportExtension no activo),
+        // se usan los conteos propios del listener de plataforma.
+        // ---------------------------------------------------------------
+        int registryTotal  = BaseTestStatusRegistry.getTotal();
+        int registryPassed = BaseTestStatusRegistry.getPassed();
+        int registryFailed = BaseTestStatusRegistry.getFailed();
+
+        int total;
+        int passed;
+        int failed;
+
+        if (registryTotal > 0) {
+            // BaseTestStatusRegistry tiene datos reales del run actual → usarlo
+            total  = registryTotal;
+            passed = registryPassed;
+            failed = registryFailed;
+            // Seguridad adicional: si el listener Platform vio más fallos que Jupiter, prevalece el mayor
+            if (failedCount.get() > failed) {
+                log.info("[AllureMailListener] failedCount(Platform)={} > BaseTestStatusRegistry.failed={}" +
+                         " — usando el mayor.", failedCount.get(), failed);
+                failed = failedCount.get();
+            }
+            log.info("[AllureMailListener] Fuente: BaseTestStatusRegistry — total={} passed={} failed={}",
+                    total, passed, failed);
+        } else {
+            // Fallback: sin PdfReportExtension
+            total  = totalCount.get();
+            passed = passedCount.get();
+            failed = failedCount.get();
+            log.info("[AllureMailListener] Fuente: conteos propios (fallback) — total={} passed={} failed={}",
+                    total, passed, failed);
+        }
+
+        log.info("[AllureMailListener] Menus executed: {} | failedMenus: {}", executedTests, failedMenus);
 
         // Logs de diagnóstico del correo
-        log.info("[EMAIL] ExecutionId detectado: {}", System.getProperty("executionName", "Cinepolis"));
-        log.info("[EMAIL] Total tests encontrados (JUnit events): {}", total);
-        log.info("[EMAIL] Passed encontrados (JUnit events): {}", passed);
-        log.info("[EMAIL] Failed encontrados (JUnit events): {}", failed);
-        log.info("[EMAIL] Duración real del run: {}ms", duration);
-        log.info("[EMAIL] Fuente de datos: AllureMailListener via JUnit TestExecutionResult");
-        log.info("[EMAIL] Resultado calculado por JUnit: {}", failed > 0 ? "FAILED" : (total == 0 ? "UNKNOWN" : "PASSED"));
+        log.info("[EMAIL] ExecutionId: {}", System.getProperty("executionName", "Cinepolis"));
+        log.info("[EMAIL] Total={} | Passed={} | Failed={} | Duration={}ms", total, passed, failed, duration);
+        log.info("[EMAIL] Resultado final: {}", failed > 0 ? "FAILED" : (total == 0 ? "UNKNOWN" : "PASSED"));
 
         String netlifyUrl = "";
         try {
@@ -113,9 +158,6 @@ public class AllureMailListener implements TestExecutionListener {
         }
 
         try {
-            // Pasar los conteos REALES de JUnit (total y passed ahora son precisos).
-            // sendFinalSuiteReport usará estos valores directamente y solo recurrirá a
-            // AllureSummaryReader si total == 0 (modo compatibilidad / AllureMailRunner).
             AllureReportSender.sendFinalSuiteReport(
                     "Cinepolis",
                     total,
