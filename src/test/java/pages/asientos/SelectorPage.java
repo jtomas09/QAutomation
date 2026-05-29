@@ -646,6 +646,7 @@ public class SelectorPage extends BasePage {
 
                 if (clicSeguroEnHorario(horario)) {
                     sleep(800);
+                    aceptarAlertaAtencionSiPresente();
                     return hora;
                 }
 
@@ -656,6 +657,7 @@ public class SelectorPage extends BasePage {
                     int y = relocalizado.getRect().getY() + (relocalizado.getRect().getHeight() / 2);
                     tapW3C(x, y);
                     sleep(800);
+                    aceptarAlertaAtencionSiPresente();
                     return hora;
                 }
 
@@ -709,6 +711,12 @@ public class SelectorPage extends BasePage {
 
                     sleep(1000);
 
+                    // Alerta "Atención" (movimientos/vibraciones): aceptar y continuar al flujo de asientos
+                    if (aceptarAlertaAtencionSiPresente()) {
+                        log.info("[SelectorPage] Alerta 'Atención' aceptada para horario '{}'.", hora);
+                        return hora;
+                    }
+
                     if (hayAlertaHorarioInesperada()) {
                         log.warn("[SelectorPage] Alerta tras '{}': descartando y probando siguiente horario.", hora);
                         descartarAlertaHorario();
@@ -732,9 +740,8 @@ public class SelectorPage extends BasePage {
 
     private boolean hayAlertaHorarioInesperada() {
         try {
+            // "Atención" (movimientos/vibraciones) se acepta, no se descarta — excluir de aquí
             if (estaVisibleAlertaRestricciones()) return true;
-            if (!driver.findElements(By.xpath(
-                    "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) return true;
             return false;
         } catch (Exception ignored) {
             return false;
@@ -826,6 +833,7 @@ public class SelectorPage extends BasePage {
 
                 if (clicSeguroEnHorario(horarioRandom)) {
                     sleep(1500);
+                    aceptarAlertaAtencionSiPresente();
                     return hora;
                 }
             }
@@ -1595,6 +1603,55 @@ public class SelectorPage extends BasePage {
         sleep(300);
 
         log.info("[SelectorPage] Botón '{}' pulsado en alerta de Restricciones.", textoBoton);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Alerta: Atención (movimientos y vibraciones repentinas)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Devuelve {@code true} si la alerta de Atención (movimientos y vibraciones)
+     * está visible en pantalla. Se distingue por su título "Atención" y la mención
+     * de vibraciones o restricción de menores de 4 años.
+     */
+    public boolean estaVisibleAlertaAtencion() {
+        try {
+            boolean tituloVisible = !driver.findElements(By.xpath(
+                    "//*[contains(@text,'Atención') or contains(@text,'Atencion')]"
+            )).isEmpty();
+            if (!tituloVisible) return false;
+            return !driver.findElements(By.xpath(
+                    "//*[contains(@text,'vibraciones') or contains(@text,'menores de 4')]"
+            )).isEmpty();
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    /**
+     * Si la alerta de Atención está visible, toca "Aceptar y continuar" para
+     * proceder al flujo de selección de asientos.
+     *
+     * @return {@code true} si la alerta fue encontrada y aceptada.
+     */
+    public boolean aceptarAlertaAtencionSiPresente() {
+        if (!estaVisibleAlertaAtencion()) return false;
+        try {
+            List<WebElement> botones = driver.findElements(
+                    By.xpath("//*[contains(@text,'Aceptar y continuar')]"));
+            for (WebElement b : botones) {
+                try {
+                    if (!b.isDisplayed()) continue;
+                    tapW3C(b.getRect().getX() + b.getRect().getWidth() / 2,
+                           b.getRect().getY() + b.getRect().getHeight() / 2);
+                    sleep(500);
+                    log.info("[SelectorPage] Alerta 'Atención' aceptada con 'Aceptar y continuar'.");
+                    return true;
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            log.warn("[SelectorPage] Error aceptando alerta Atención: {}", e.getMessage());
+        }
+        return false;
     }
 
     public String cambiarHorarioEnPantallaAsientos() {
