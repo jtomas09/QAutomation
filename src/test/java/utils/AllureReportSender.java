@@ -313,14 +313,28 @@ public class AllureReportSender {
         int total   = totalTests;
         int passed  = passedTests;
         int failed  = failedTests;
-        // subjectFailed = max(allure, junit): el asunto nunca puede decir PASSED si JUnit reportó fallos
-        int subjectFailed = Math.max(failed, junitFailed);
+
+        // ── Cross-validación contra allure-results JSON (fuente de verdad absoluta) ──
+        // Siempre contar fallos reales en build/allure-results/*.json aunque
+        // BaseTestStatusRegistry o el fallback digan 0. Esto previene falsos PASSED
+        // cuando el registry queda desincronizado (ej. retries de Allure, race con
+        // el listener de plataforma, o PdfReportExtension no activo en ese run).
+        int allureResultsFailed = countAllureResultFailures();
+        if (allureResultsFailed > failed) {
+            log.warn("[EMAIL] BaseTestStatusRegistry.failed={} PERO allure-results JSON detecta {} fallos — corrigiendo.",
+                    failed, allureResultsFailed);
+            failed = allureResultsFailed;
+            passed = Math.max(0, total - failed);
+        }
+
+        // subjectFailed = máximo entre todas las fuentes para que el asunto nunca sea falso PASSED
+        int subjectFailed = Math.max(Math.max(failed, junitFailed), allureResultsFailed);
         int skipped = Math.max(0, total - passed - failed);
-        log.info("[EMAIL] Resultado consolidado — total={} passed={} failed={} skipped={} subjectFailed={}",
-                total, passed, failed, skipped, subjectFailed);
+        log.info("[EMAIL] Resultado consolidado — total={} passed={} failed={} skipped={} subjectFailed={} allureResultsFailed={}",
+                total, passed, failed, skipped, subjectFailed, allureResultsFailed);
         String durationPretty = formatDurationPretty(durationMillis);
 
-        List<FailureInfo> failureDetails = failed > 0 ? readAllureFailures() : List.of();
+        List<FailureInfo> failureDetails = subjectFailed > 0 ? readAllureFailures() : List.of();
         String failuresSection = buildFailuresHtml(failureDetails);
 
         String conclusionText;
@@ -840,6 +854,26 @@ public class AllureReportSender {
         } catch (Exception e) {
             log.warn("[AllureReportSender] Error revisando allure-results para fallos Atmosfera: {}", e.getMessage());
             return false;
+        }
+    }
+
+    private static int countAllureResultFailures() {
+        Path resultsDir = Paths.get("build", "allure-results");
+        if (!Files.exists(resultsDir)) return 0;
+        ObjectMapper mapper = new ObjectMapper();
+        try (var stream = Files.list(resultsDir)) {
+            return (int) stream
+                    .filter(p -> p.getFileName().toString().endsWith("-result.json"))
+                    .filter(p -> {
+                        try {
+                            String status = mapper.readTree(p.toFile()).path("status").asText("");
+                            return "failed".equals(status) || "broken".equals(status);
+                        } catch (Exception ignored) { return false; }
+                    })
+                    .count();
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] No se pudieron contar fallos en allure-results: {}", e.getMessage());
+            return 0;
         }
     }
 
