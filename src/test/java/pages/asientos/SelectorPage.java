@@ -2521,12 +2521,40 @@ public class SelectorPage extends BasePage {
      * Fase 2: sondea hasta que los elementos numéricos del mapa aparecen y los devuelve
      *         ya filtrados y deduplicados — listos para usar directamente.
      */
+    /**
+     * Si la animación/hint "Seats gesture" está visible al cargar el mapa de asientos,
+     * hace tap en el centro de la pantalla para descartarla.
+     * El hint no siempre aparece; si no está presente, no hace nada.
+     */
+    private void descartarHintGestosAsientosSiPresente() {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            boolean visible = !driver.findElements(By.xpath(
+                    "//*[@content-desc='Seats gesture' or " +
+                    "contains(@text,'2 dedos para acercar') or " +
+                    "contains(@text,'mapa de asientos')]"
+            )).isEmpty();
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            if (visible) {
+                int cx = driver.manage().window().getSize().getWidth() / 2;
+                int cy = driver.manage().window().getSize().getHeight() / 2;
+                tapW3C(cx, cy);
+                sleep(400);
+                log.info("[SelectorPage] Hint 'Seats gesture' descartado con tap.");
+            }
+        } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            log.debug("[SelectorPage] No se pudo verificar hint de gestos: {}", e.getMessage());
+        }
+    }
+
     private List<WebElement> esperarYObtenerAsientosDelMapa() {
         return esperarYObtenerAsientosDelMapa(10000);
     }
 
     private List<WebElement> esperarYObtenerAsientosDelMapa(long timeoutMs) {
         log.info("[SelectorPage] Escaneando mapa de asientos...");
+        descartarHintGestosAsientosSiPresente();
 
         int screenHeight = driver.manage().window().getSize().getHeight();
         int mapTop    = (int)(screenHeight * 0.30);
