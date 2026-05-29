@@ -1,4 +1,4 @@
-﻿package pages.common;
+package pages.common;
 import org.openqa.selenium.interactions.Pause;
 import org.opentest4j.TestAbortedException;
 import io.appium.java_client.AppiumBy;
