@@ -1,4 +1,4 @@
-package pages.common;
+﻿package pages.common;
 import org.openqa.selenium.interactions.Pause;
 import org.opentest4j.TestAbortedException;
 import io.appium.java_client.AppiumBy;
@@ -411,7 +411,7 @@ public class BasePage {
         swipe(startX, startY, startX, endY);
     }
 
-    // Swipes “slow” como BasePage2
+    // Swipes "slow" como BasePage2
     protected void slowSwipeUp() {
         ensureAppIsInForegroundOrRecover();
         Dimension size = driver.manage().window().getSize();
@@ -861,8 +861,34 @@ protected List<WebElement> safeFindElements(By locator) {
         }
     }
 
+    /**
+     * Fingerprint enriquecido para scroll en pantallas Compose/LazyColumn.
+     * Captura @text Y @content-desc de los primeros 10 elementos visibles,
+     * cubriendo tanto views nativos como nodos Compose que no exponen TextView.
+     */
+    private String richFingerPrint() {
+        try {
+            List<WebElement> els = driver.findElements(By.xpath(
+                "(//*[string-length(@text)>0 or string-length(@content-desc)>0])[position()<=10]"
+            ));
+            if (els == null || els.isEmpty()) return "EMPTY";
+            StringBuilder sb = new StringBuilder();
+            for (WebElement el : els) {
+                try {
+                    String txt  = el.getAttribute("text");
+                    String desc = el.getAttribute("content-desc");
+                    if (txt  != null && !txt.isBlank())  { sb.append(txt.trim()).append("|"); }
+                    else if (desc != null && !desc.isBlank()) { sb.append(desc.trim()).append("|"); }
+                } catch (Exception ignore) {}
+            }
+            return sb.length() > 0 ? sb.toString() : "EMPTY";
+        } catch (Exception ignore) {
+            return "ERR";
+        }
+    }
+
     // =========================================================
-    // =========== BÚSQUEDAS “ONE SHOT” (FAST-FAIL) =============
+    // =========== BÚSQUEDAS "ONE SHOT" (FAST-FAIL) =============
     // =========================================================
 
     protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipes) {
@@ -871,45 +897,80 @@ protected List<WebElement> safeFindElements(By locator) {
         return isVisible(locator) || oneShotVerticalSearch(locator, maxVerticalSwipes);
     }
 
+    // Cuántos fingerprints iguales consecutivos se necesitan para declarar fin real de lista.
+    // Con 1 (original) se producían falsos positivos en Compose/LazyColumn.
+    // Con 2 se tolera 1 swipe "sin cambio aparente" antes de rendirse.
+    private static final int SCROLL_STALL_THRESHOLD = 2;
+
     private boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
         if (isVisible(locator)) return true;
 
-        String lastFinger = "";
         int allowed = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
+        int stalledCount = 0;
+
+        log.debug("[scroll-v] buscando {} | presupuesto={}", locator, allowed);
 
         for (int i = 0; i < allowed; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
+            if (isVisible(locator)) {
+                log.debug("[scroll-v] encontrado en swipe {}/{}", i + 1, allowed);
+                return true;
+            }
 
-            String before = viewportFingerPrint();
+            String before = richFingerPrint();
+            log.debug("[scroll-v] swipe {}/{} | antes=[{}] stalled={}", i + 1, allowed, before, stalledCount);
+
             slowSwipeUp();
-            String after = viewportFingerPrint();
 
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
+            String after = richFingerPrint();
+            log.debug("[scroll-v] swipe {}/{} | despues=[{}]", i + 1, allowed, after);
+
+            if (after.equals(before)) {
+                stalledCount++;
+                if (stalledCount >= SCROLL_STALL_THRESHOLD) {
+                    log.debug("[scroll-v] fin real de lista – {} fingerprints iguales consecutivos en swipe {}/{}",
+                            SCROLL_STALL_THRESHOLD, i + 1, allowed);
+                    break;
+                }
+            } else {
+                stalledCount = 0;
+            }
         }
-        return isVisible(locator);
+
+        boolean found = isVisible(locator);
+        log.debug("[scroll-v] terminado | encontrado={}", found);
+        return found;
     }
 
     private boolean oneShotHorizontalSearch(By locator, int maxRightSwipes, int[] budgetH) {
         if (isVisible(locator)) return true;
 
-        String lastFinger = "";
         int allowed = maxRightSwipes;
-
         if (budgetH != null) {
             allowed = Math.min(maxRightSwipes, budgetH[0]);
             if (allowed <= 0) return isVisible(locator);
         }
 
+        int stalledCount = 0;
+
         for (int i = 0; i < allowed; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
+            if (isVisible(locator)) return true;
 
-            String before = viewportFingerPrint();
+            String before = richFingerPrint();
             slowSwipeLeft();
-            String after = viewportFingerPrint();
+            String after = richFingerPrint();
 
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
+            log.debug("[scroll-h] swipe {}/{} | antes=[{}] despues=[{}]", i + 1, allowed, before, after);
+
+            if (after.equals(before)) {
+                stalledCount++;
+                if (stalledCount >= SCROLL_STALL_THRESHOLD) {
+                    log.debug("[scroll-h] fin de fila – {} fingerprints iguales en swipe {}/{}",
+                            SCROLL_STALL_THRESHOLD, i + 1, allowed);
+                    break;
+                }
+            } else {
+                stalledCount = 0;
+            }
 
             if (budgetH != null) {
                 budgetH[0]--;
@@ -922,24 +983,47 @@ protected List<WebElement> safeFindElements(By locator) {
     private boolean oneShotVerticalAndHorizontal(By locator, int maxDownSwipes, int maxRightSwipesPerRow) {
         if (isVisible(locator)) return true;
 
-        String lastFinger = "";
         int allowedV = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
         int[] budgetH = new int[]{TOTAL_HORIZONTAL_SWIPE_BUDGET};
+        int stalledCount = 0;
+
+        log.debug("[scroll-vh] buscando {} | presupuesto v={} h={}", locator, allowedV, TOTAL_HORIZONTAL_SWIPE_BUDGET);
 
         for (int i = 0; i < allowedV; i++) {
-            if (i % 2 == 0 && isVisible(locator)) return true;
+            if (isVisible(locator)) {
+                log.debug("[scroll-vh] encontrado en fila {}/{}", i + 1, allowedV);
+                return true;
+            }
 
             if (oneShotHorizontalSearch(locator, maxRightSwipesPerRow, budgetH)) return true;
-            if (budgetH[0] <= 0) break;
+            if (budgetH[0] <= 0) {
+                log.debug("[scroll-vh] presupuesto horizontal agotado");
+                break;
+            }
 
-            String before = viewportFingerPrint();
+            String before = richFingerPrint();
+            log.debug("[scroll-vh] swipe-v {}/{} | antes=[{}] stalled={}", i + 1, allowedV, before, stalledCount);
+
             slowSwipeUp();
-            String after = viewportFingerPrint();
 
-            if (after.equals(before) || after.equals(lastFinger)) break;
-            lastFinger = after;
+            String after = richFingerPrint();
+            log.debug("[scroll-vh] swipe-v {}/{} | despues=[{}]", i + 1, allowedV, after);
+
+            if (after.equals(before)) {
+                stalledCount++;
+                if (stalledCount >= SCROLL_STALL_THRESHOLD) {
+                    log.debug("[scroll-vh] fin real – {} fingerprints iguales en swipe {}/{}",
+                            SCROLL_STALL_THRESHOLD, i + 1, allowedV);
+                    break;
+                }
+            } else {
+                stalledCount = 0;
+            }
         }
-        return isVisible(locator);
+
+        boolean found = isVisible(locator);
+        log.debug("[scroll-vh] terminado | encontrado={}", found);
+        return found;
     }
 
     protected void findVisibleOrScrollToXpathAndClick(String xpath, int maxSwipesEachDirection) {
