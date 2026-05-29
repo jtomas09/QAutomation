@@ -9,6 +9,9 @@ import org.junit.platform.engine.support.descriptor.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,6 +40,9 @@ public class AllureMailListener implements TestExecutionListener {
         } catch (Exception e) {
             log.warn("[AllureMailListener] Could not reset mail lock: {}", e.getMessage());
         }
+
+        // Limpiar resultados de ejecuciones anteriores para evitar contaminación del correo.
+        cleanForNewRun();
     }
 
     @Override
@@ -79,6 +85,13 @@ public class AllureMailListener implements TestExecutionListener {
         log.info("[AllureMailListener] Menus executed: {} | failedTests: {} | failedMenus: {}",
                 executedTests, failed, failedMenus);
 
+        // Logs de diagnóstico del correo
+        log.info("[EMAIL] ExecutionId detectado: {}", System.getProperty("executionName", "Cinepolis"));
+        log.info("[EMAIL] Tests ejecutados (menus): {}", executedMenus.size());
+        log.info("[EMAIL] Failed detectados (JUnit events): {}", failed);
+        log.info("[EMAIL] Fuente de datos: AllureMailListener via JUnit TestExecutionResult");
+        log.info("[EMAIL] Resultado calculado por JUnit: {}", failed > 0 ? "FAILED" : "PASSED");
+
         String netlifyUrl = "";
         try {
             netlifyUrl = AllureUrlStore.readUrl();
@@ -99,6 +112,102 @@ public class AllureMailListener implements TestExecutionListener {
             );
         } catch (Exception e) {
             log.error("[AllureMailListener] Failed to send final suite email: {}", e.getMessage(), e);
+        }
+    }
+
+    // =====================================================================
+    // Limpieza de resultados antes de cada nueva ejecución
+    // =====================================================================
+
+    /**
+     * Elimina archivos de resultados de ejecuciones anteriores para garantizar que el correo
+     * refleje ÚNICAMENTE la ejecución actual.
+     *
+     * Limpia:
+     *  - build/allure-results/  → JSONs de resultados/contenedores/adjuntos de tests anteriores
+     *  - build/reportes-pdf/    → PDFs de tests anteriores que contaminarían el adjunto del correo
+     *  - build/reportes-pdf/suite-metrics.properties → métricas de la suite anterior
+     */
+    private static void cleanForNewRun() {
+        log.info("[AllureMailListener] Limpiando resultados de ejecuciones anteriores...");
+
+        cleanAllureResultsDir();
+        cleanReportesPdfDir();
+
+        // suite-metrics.properties: si existe de una ejecución anterior PdfReportExtension
+        // no lo sobreescribiría (solo escribe si no existe), causando métricas incorrectas.
+        try {
+            Path metricsFile = Paths.get("build", "reportes-pdf", "suite-metrics.properties");
+            if (Files.deleteIfExists(metricsFile)) {
+                log.info("[AllureMailListener] suite-metrics.properties eliminado (datos de run anterior).");
+            }
+        } catch (Exception e) {
+            log.warn("[AllureMailListener] No se pudo eliminar suite-metrics.properties: {}", e.getMessage());
+        }
+
+        log.info("[AllureMailListener] Limpieza completada. Run actual comenzará con directorio limpio.");
+    }
+
+    /**
+     * Elimina archivos de resultados de Allure ({uuid}-result.json, -container.json y adjuntos)
+     * pero conserva environment.properties y executor.json.
+     */
+    private static void cleanAllureResultsDir() {
+        Path dir = Paths.get("build", "allure-results");
+        if (!Files.exists(dir)) {
+            log.debug("[AllureMailListener] allure-results no existe todavía; no se requiere limpieza.");
+            return;
+        }
+        try {
+            int count = 0;
+            try (var stream = Files.list(dir)) {
+                for (Path p : (Iterable<Path>) stream::iterator) {
+                    String name = p.getFileName().toString();
+                    boolean isResult    = name.endsWith("-result.json");
+                    boolean isContainer = name.endsWith("-container.json");
+                    // adjuntos Allure: UUID (36 chars con guiones) seguido de cualquier extensión
+                    boolean isAttachment = name.matches(
+                            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*");
+
+                    if (isResult || isContainer || isAttachment) {
+                        try {
+                            Files.deleteIfExists(p);
+                            count++;
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            log.info("[AllureMailListener] allure-results limpiado: {} archivo(s) eliminado(s).", count);
+        } catch (Exception e) {
+            log.warn("[AllureMailListener] No se pudo limpiar allure-results: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Elimina PDFs de tests anteriores de build/reportes-pdf/ para que el adjunto del correo
+     * contenga únicamente los PDFs generados durante la ejecución actual.
+     */
+    private static void cleanReportesPdfDir() {
+        Path dir = Paths.get("build", "reportes-pdf");
+        if (!Files.exists(dir)) {
+            log.debug("[AllureMailListener] reportes-pdf no existe todavía; no se requiere limpieza.");
+            return;
+        }
+        try {
+            int count = 0;
+            try (var stream = Files.list(dir)) {
+                for (Path p : (Iterable<Path>) stream::iterator) {
+                    if (p.getFileName().toString().endsWith(".pdf")) {
+                        try {
+                            Files.deleteIfExists(p);
+                            count++;
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            log.info("[AllureMailListener] reportes-pdf limpiado: {} PDF(s) eliminado(s).", count);
+        } catch (Exception e) {
+            log.warn("[AllureMailListener] No se pudo limpiar reportes-pdf: {}", e.getMessage());
         }
     }
 }
