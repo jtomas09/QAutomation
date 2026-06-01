@@ -1349,7 +1349,7 @@ public class SelectorPage extends BasePage {
 
         takeScreenshot("Sin asientos especiales");
         org.junit.jupiter.api.Assumptions.abort(
-                "SKIPPED: No se encontró ningún asiento especial disponible en esta sala.");
+                "En esta función no se detectaron asientos especiales, se omite la prueba. Intente con otra función.");
         return null; // inalcanzable, requerido por el compilador
     }
 
@@ -1634,6 +1634,12 @@ public class SelectorPage extends BasePage {
      * @return {@code true} si la alerta fue encontrada y aceptada.
      */
     public boolean aceptarAlertaAtencionSiPresente() {
+        // Espera hasta 2s para que la alerta aparezca tras el tap en el horario
+        long deadline = System.currentTimeMillis() + 2000;
+        while (System.currentTimeMillis() < deadline) {
+            if (estaVisibleAlertaAtencion()) break;
+            try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+        }
         if (!estaVisibleAlertaAtencion()) return false;
         try {
             List<WebElement> botones = driver.findElements(

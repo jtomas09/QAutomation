@@ -165,7 +165,8 @@ public class AllureMailListener implements TestExecutionListener {
                     failed,
                     duration,
                     executedTests,
-                    netlifyUrl
+                    netlifyUrl,
+                    startMs
             );
         } catch (Exception e) {
             log.error("[AllureMailListener] Failed to send final suite email: {}", e.getMessage(), e);

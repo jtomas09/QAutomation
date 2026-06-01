@@ -114,6 +114,20 @@ public class AllureReportSender {
             String executedTests,
             String mergedPdfName
     ) throws Exception {
+        sendFinalSuiteReport(suiteName, totalTests, passedTests, failedTests,
+                durationMillis, executedTests, mergedPdfName, 0L);
+    }
+
+    public static void sendFinalSuiteReport(
+            String suiteName,
+            int totalTests,
+            int passedTests,
+            int failedTests,
+            long durationMillis,
+            String executedTests,
+            String mergedPdfName,
+            long runStartMs
+    ) throws Exception {
 
         log.info("[AllureReportSender] sendFinalSuiteReport — sendMail={} mail.enabled={} MAIL_TO={}",
                 System.getProperty("sendMail", "<not set>"),
@@ -173,7 +187,8 @@ public class AllureReportSender {
                 failedTests,
                 durationMillis,
                 executedTests,
-                reportUrl
+                reportUrl,
+                runStartMs
         );
 
         if (sent) {
@@ -194,7 +209,8 @@ public class AllureReportSender {
             int failedTests,
             long durationMillis,
             String executedTests,
-            String reportUrl
+            String reportUrl,
+            long runStartMs
     ) throws Exception {
 
         if (allurePdf == null || !Files.exists(allurePdf)) {
@@ -315,11 +331,9 @@ public class AllureReportSender {
         int failed  = failedTests;
 
         // ── Cross-validación contra allure-results JSON (fuente de verdad absoluta) ──
-        // Siempre contar fallos reales en build/allure-results/*.json aunque
-        // BaseTestStatusRegistry o el fallback digan 0. Esto previene falsos PASSED
-        // cuando el registry queda desincronizado (ej. retries de Allure, race con
-        // el listener de plataforma, o PdfReportExtension no activo en ese run).
-        int allureResultsFailed = countAllureResultFailures();
+        // Solo cuenta archivos escritos DESPUÉS de que inició el run actual (runStartMs)
+        // para evitar contaminar el correo con fallos de ejecuciones anteriores de otras suites.
+        int allureResultsFailed = countAllureResultFailures(runStartMs);
         if (allureResultsFailed > failed) {
             log.warn("[EMAIL] BaseTestStatusRegistry.failed={} PERO allure-results JSON detecta {} fallos — corrigiendo.",
                     failed, allureResultsFailed);
@@ -334,7 +348,7 @@ public class AllureReportSender {
                 total, passed, failed, skipped, subjectFailed, allureResultsFailed);
         String durationPretty = formatDurationPretty(durationMillis);
 
-        List<FailureInfo> failureDetails = subjectFailed > 0 ? readAllureFailures() : List.of();
+        List<FailureInfo> failureDetails = subjectFailed > 0 ? readAllureFailures(runStartMs) : List.of();
         String failuresSection = buildFailuresHtml(failureDetails);
 
         String conclusionText;
@@ -857,7 +871,7 @@ public class AllureReportSender {
         }
     }
 
-    private static int countAllureResultFailures() {
+    private static int countAllureResultFailures(long runStartMs) {
         Path resultsDir = Paths.get("build", "allure-results");
         if (!Files.exists(resultsDir)) return 0;
         ObjectMapper mapper = new ObjectMapper();
@@ -865,6 +879,13 @@ public class AllureReportSender {
             return (int) stream
                     .filter(p -> p.getFileName().toString().endsWith("-result.json"))
                     .filter(p -> {
+                        // Solo archivos del run actual (escritos después de startMs con 30s de margen)
+                        if (runStartMs > 0) {
+                            try {
+                                long modified = Files.getLastModifiedTime(p).toMillis();
+                                if (modified < runStartMs - 30_000) return false;
+                            } catch (Exception ignored) {}
+                        }
                         try {
                             String status = mapper.readTree(p.toFile()).path("status").asText("");
                             return "failed".equals(status) || "broken".equals(status);
@@ -877,7 +898,7 @@ public class AllureReportSender {
         }
     }
 
-    private static List<FailureInfo> readAllureFailures() {
+    private static List<FailureInfo> readAllureFailures(long runStartMs) {
         List<FailureInfo> failures = new ArrayList<>();
         Path resultsDir = Paths.get("build", "allure-results");
         if (!Files.exists(resultsDir)) return failures;
@@ -886,6 +907,12 @@ public class AllureReportSender {
         try {
             Files.walk(resultsDir, 1)
                  .filter(p -> p.getFileName().toString().endsWith("-result.json"))
+                 .filter(p -> {
+                     if (runStartMs <= 0) return true;
+                     try {
+                         return Files.getLastModifiedTime(p).toMillis() >= runStartMs - 30_000;
+                     } catch (Exception ignored) { return true; }
+                 })
                  .forEach(p -> {
                      try {
                          JsonNode root = mapper.readTree(p.toFile());
