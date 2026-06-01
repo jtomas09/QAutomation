@@ -330,15 +330,20 @@ public class AllureReportSender {
         int passed  = passedTests;
         int failed  = failedTests;
 
-        // ── Cross-validación contra allure-results JSON (fuente de verdad absoluta) ──
-        // Solo cuenta archivos escritos DESPUÉS de que inició el run actual (runStartMs)
-        // para evitar contaminar el correo con fallos de ejecuciones anteriores de otras suites.
+        // ── Cross-validación contra allure-results JSON ───────────────────────────
+        // allure-results ya fue purgado de archivos obsoletos en AllureMailListener.purgeStaleAllureResults().
+        // Solo actualizamos `failed` si allure detecta más fallos que el registry;
+        // `passed` NO se recalcula (se preserva el valor del registry para evitar que
+        //  passed = total - failed = 9 - 20 = 0 cuando hay archivos de runs anteriores).
         int allureResultsFailed = countAllureResultFailures(runStartMs);
         if (allureResultsFailed > failed) {
-            log.warn("[EMAIL] BaseTestStatusRegistry.failed={} PERO allure-results JSON detecta {} fallos — corrigiendo.",
+            log.warn("[EMAIL] BaseTestStatusRegistry.failed={} PERO allure-results JSON detecta {} fallos — corrigiendo failed.",
                     failed, allureResultsFailed);
             failed = allureResultsFailed;
-            passed = Math.max(0, total - failed);
+            // passed: solo ajustamos hacia abajo si passed + failed > total
+            if (passed + failed > total) {
+                passed = Math.max(0, total - failed);
+            }
         }
 
         // subjectFailed = máximo entre todas las fuentes para que el asunto nunca sea falso PASSED

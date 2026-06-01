@@ -144,6 +144,13 @@ public class AllureMailListener implements TestExecutionListener {
 
         log.info("[AllureMailListener] Menus executed: {} | failedMenus: {}", executedTests, failedMenus);
 
+        // ── Purgar archivos de allure-results de runs anteriores ──────────────
+        // Se hace al FINAL (todos los tests completaron) para que solo queden
+        // archivos del run actual. cleanForNewRun() al inicio es el primer nivel
+        // de defensa; esta purga es el segundo nivel por si Allure escribió
+        // archivos post-cleanup de un run anterior.
+        purgeStaleAllureResults(startMs);
+
         // Logs de diagnóstico del correo
         log.info("[EMAIL] ExecutionId: {}", System.getProperty("executionName", "Cinepolis"));
         log.info("[EMAIL] Total={} | Passed={} | Failed={} | Duration={}ms", total, passed, failed, duration);
@@ -170,6 +177,41 @@ public class AllureMailListener implements TestExecutionListener {
             );
         } catch (Exception e) {
             log.error("[AllureMailListener] Failed to send final suite email: {}", e.getMessage(), e);
+        }
+    }
+
+    // =====================================================================
+    // Purga de archivos obsoletos justo antes de enviar el correo
+    // =====================================================================
+
+    /**
+     * Elimina de build/allure-results/ cualquier *-result.json cuya fecha de
+     * modificación sea anterior a runStartMs. Se llama al FINAL del plan (todos
+     * los tests ya completaron), por lo que solo permanecerán archivos del run actual.
+     * Es el segundo nivel de defensa tras cleanForNewRun() al inicio.
+     */
+    private static void purgeStaleAllureResults(long runStartMs) {
+        if (runStartMs <= 0) return;
+        Path dir = Paths.get("build", "allure-results");
+        if (!Files.exists(dir)) return;
+        int removed = 0;
+        try (var stream = Files.list(dir)) {
+            for (Path p : (Iterable<Path>) stream::iterator) {
+                String name = p.getFileName().toString();
+                if (!name.endsWith("-result.json") && !name.endsWith("-container.json")) continue;
+                try {
+                    long modified = Files.getLastModifiedTime(p).toMillis();
+                    if (modified < runStartMs) {
+                        Files.deleteIfExists(p);
+                        removed++;
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            log.warn("[AllureMailListener] No se pudo purgar allure-results obsoletos: {}", e.getMessage());
+        }
+        if (removed > 0) {
+            log.info("[AllureMailListener] Purgados {} archivo(s) de allure-results de runs anteriores.", removed);
         }
     }
 
