@@ -200,8 +200,27 @@ public class AllureMailListener implements TestExecutionListener {
                 String name = p.getFileName().toString();
                 if (!name.endsWith("-result.json") && !name.endsWith("-container.json")) continue;
                 try {
-                    long modified = Files.getLastModifiedTime(p).toMillis();
-                    if (modified < runStartMs) {
+                    boolean isStale = false;
+
+                    // Primero: intentar leer el campo "start" del JSON (criterio primario)
+                    if (name.endsWith("-result.json")) {
+                        try {
+                            com.fasterxml.jackson.databind.JsonNode root =
+                                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(p.toFile());
+                            long testStart = root.path("start").asLong(0);
+                            if (testStart > 0) {
+                                isStale = testStart < runStartMs;
+                            }
+                        } catch (Exception ignored) {}
+                    }
+
+                    // Fallback: usar lastModified si no hay campo start
+                    if (!isStale) {
+                        long modified = Files.getLastModifiedTime(p).toMillis();
+                        isStale = modified < runStartMs;
+                    }
+
+                    if (isStale) {
                         Files.deleteIfExists(p);
                         removed++;
                     }

@@ -884,15 +884,16 @@ public class AllureReportSender {
             return (int) stream
                     .filter(p -> p.getFileName().toString().endsWith("-result.json"))
                     .filter(p -> {
-                        // Solo archivos del run actual (escritos después de startMs con 30s de margen)
-                        if (runStartMs > 0) {
-                            try {
-                                long modified = Files.getLastModifiedTime(p).toMillis();
-                                if (modified < runStartMs - 30_000) return false;
-                            } catch (Exception ignored) {}
-                        }
                         try {
-                            String status = mapper.readTree(p.toFile()).path("status").asText("");
+                            JsonNode root = mapper.readTree(p.toFile());
+                            // Filtrar por el campo "start" del JSON de Allure:
+                            // es el timestamp real de inicio del test, escrito por Allure mismo.
+                            // Mucho más fiable que lastModified del filesystem (impreciso en Windows).
+                            if (runStartMs > 0) {
+                                long testStart = root.path("start").asLong(0);
+                                if (testStart > 0 && testStart < runStartMs) return false;
+                            }
+                            String status = root.path("status").asText("");
                             return "failed".equals(status) || "broken".equals(status);
                         } catch (Exception ignored) { return false; }
                     })
@@ -912,15 +913,14 @@ public class AllureReportSender {
         try {
             Files.walk(resultsDir, 1)
                  .filter(p -> p.getFileName().toString().endsWith("-result.json"))
-                 .filter(p -> {
-                     if (runStartMs <= 0) return true;
-                     try {
-                         return Files.getLastModifiedTime(p).toMillis() >= runStartMs - 30_000;
-                     } catch (Exception ignored) { return true; }
-                 })
                  .forEach(p -> {
                      try {
                          JsonNode root = mapper.readTree(p.toFile());
+                         // Filtrar por campo "start" del JSON (más fiable que lastModified)
+                         if (runStartMs > 0) {
+                             long testStart = root.path("start").asLong(0);
+                             if (testStart > 0 && testStart < runStartMs) return;
+                         }
                          String status = root.path("status").asText("");
                          if (!status.equals("failed") && !status.equals("broken")) return;
 
