@@ -23,16 +23,18 @@ public class AllureMailListener implements TestExecutionListener {
 
     private long startMs;
 
-    private final Set<String>   executedMenus = new LinkedHashSet<>();
-    private final AtomicInteger totalCount    = new AtomicInteger(0);
-    private final AtomicInteger passedCount   = new AtomicInteger(0);
-    private final AtomicInteger failedCount   = new AtomicInteger(0);
-    private final Set<String>   failedMenus   = new LinkedHashSet<>();
+    private final Set<String>   executedMenus   = new LinkedHashSet<>();
+    private final Set<String>   executedClasses = new LinkedHashSet<>(); // clases reales del run actual
+    private final AtomicInteger totalCount      = new AtomicInteger(0);
+    private final AtomicInteger passedCount     = new AtomicInteger(0);
+    private final AtomicInteger failedCount     = new AtomicInteger(0);
+    private final Set<String>   failedMenus     = new LinkedHashSet<>();
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
         startMs = System.currentTimeMillis();
         executedMenus.clear();
+        executedClasses.clear();
         totalCount.set(0);
         passedCount.set(0);
         failedCount.set(0);
@@ -79,6 +81,15 @@ public class AllureMailListener implements TestExecutionListener {
 
     private void extractAndStoreMenu(TestSource source) {
         extractMenuName(source, executedMenus);
+        // También registrar el nombre simple de la clase (para filtrar allure-results)
+        try {
+            if (source instanceof MethodSource ms) {
+                String className = ms.getClassName();
+                if (className != null) {
+                    executedClasses.add(className.substring(className.lastIndexOf('.') + 1));
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private void extractMenuName(TestSource source, Set<String> target) {
@@ -173,7 +184,8 @@ public class AllureMailListener implements TestExecutionListener {
                     duration,
                     executedTests,
                     netlifyUrl,
-                    startMs
+                    startMs,
+                    executedClasses
             );
         } catch (Exception e) {
             log.error("[AllureMailListener] Failed to send final suite email: {}", e.getMessage(), e);

@@ -128,6 +128,21 @@ public class AllureReportSender {
             String mergedPdfName,
             long runStartMs
     ) throws Exception {
+        sendFinalSuiteReport(suiteName, totalTests, passedTests, failedTests,
+                durationMillis, executedTests, mergedPdfName, runStartMs, java.util.Set.of());
+    }
+
+    public static void sendFinalSuiteReport(
+            String suiteName,
+            int totalTests,
+            int passedTests,
+            int failedTests,
+            long durationMillis,
+            String executedTests,
+            String mergedPdfName,
+            long runStartMs,
+            java.util.Set<String> executedClasses
+    ) throws Exception {
 
         log.info("[AllureReportSender] sendFinalSuiteReport — sendMail={} mail.enabled={} MAIL_TO={}",
                 System.getProperty("sendMail", "<not set>"),
@@ -188,7 +203,8 @@ public class AllureReportSender {
                 durationMillis,
                 executedTests,
                 reportUrl,
-                runStartMs
+                runStartMs,
+                executedClasses
         );
 
         if (sent) {
@@ -210,7 +226,8 @@ public class AllureReportSender {
             long durationMillis,
             String executedTests,
             String reportUrl,
-            long runStartMs
+            long runStartMs,
+            java.util.Set<String> executedClasses
     ) throws Exception {
 
         if (allurePdf == null || !Files.exists(allurePdf)) {
@@ -326,34 +343,23 @@ public class AllureReportSender {
             }
         }
 
+        // ── Counts: fuente autoritativa = BaseTestStatusRegistry (mismo origen que el PDF) ──
+        // NO se sobreescriben con allure-results para evitar contaminación de runs anteriores.
+        // allure-results solo se usa para el DETALLE de fallos (nombres, mensajes de error).
         int total   = totalTests;
         int passed  = passedTests;
         int failed  = failedTests;
 
-        // ── Cross-validación contra allure-results JSON ───────────────────────────
-        // allure-results ya fue purgado de archivos obsoletos en AllureMailListener.purgeStaleAllureResults().
-        // Solo actualizamos `failed` si allure detecta más fallos que el registry;
-        // `passed` NO se recalcula (se preserva el valor del registry para evitar que
-        //  passed = total - failed = 9 - 20 = 0 cuando hay archivos de runs anteriores).
-        int allureResultsFailed = countAllureResultFailures(runStartMs);
-        if (allureResultsFailed > failed) {
-            log.warn("[EMAIL] BaseTestStatusRegistry.failed={} PERO allure-results JSON detecta {} fallos — corrigiendo failed.",
-                    failed, allureResultsFailed);
-            failed = allureResultsFailed;
-            // passed: solo ajustamos hacia abajo si passed + failed > total
-            if (passed + failed > total) {
-                passed = Math.max(0, total - failed);
-            }
-        }
-
-        // subjectFailed = máximo entre todas las fuentes para que el asunto nunca sea falso PASSED
-        int subjectFailed = Math.max(Math.max(failed, junitFailed), allureResultsFailed);
+        // subjectFailed: máximo entre registry y conteos de plataforma JUnit
+        int subjectFailed = Math.max(failed, junitFailed);
         int skipped = Math.max(0, total - passed - failed);
-        log.info("[EMAIL] Resultado consolidado — total={} passed={} failed={} skipped={} subjectFailed={} allureResultsFailed={}",
-                total, passed, failed, skipped, subjectFailed, allureResultsFailed);
+        log.info("[EMAIL] Resultado consolidado — total={} passed={} failed={} skipped={} subjectFailed={}",
+                total, passed, failed, skipped, subjectFailed);
         String durationPretty = formatDurationPretty(durationMillis);
 
-        List<FailureInfo> failureDetails = subjectFailed > 0 ? readAllureFailures(runStartMs) : List.of();
+        // Detalle de fallos: filtrado por clases del run actual Y por timestamp start del JSON
+        List<FailureInfo> failureDetails = subjectFailed > 0
+                ? readAllureFailures(runStartMs, executedClasses) : List.of();
         String failuresSection = buildFailuresHtml(failureDetails);
 
         String conclusionText;
@@ -904,7 +910,8 @@ public class AllureReportSender {
         }
     }
 
-    private static List<FailureInfo> readAllureFailures(long runStartMs) {
+    private static List<FailureInfo> readAllureFailures(long runStartMs,
+                                                          java.util.Set<String> executedClasses) {
         List<FailureInfo> failures = new ArrayList<>();
         Path resultsDir = Paths.get("build", "allure-results");
         if (!Files.exists(resultsDir)) return failures;
@@ -916,11 +923,36 @@ public class AllureReportSender {
                  .forEach(p -> {
                      try {
                          JsonNode root = mapper.readTree(p.toFile());
-                         // Filtrar por campo "start" del JSON (más fiable que lastModified)
+
+                         // Filtro 1: timestamp start del JSON (descarta archivos de runs anteriores)
                          if (runStartMs > 0) {
                              long testStart = root.path("start").asLong(0);
                              if (testStart > 0 && testStart < runStartMs) return;
                          }
+
+                         // Filtro 2: clase del test (descarta tests de otras suites en la misma sesión)
+                         if (executedClasses != null && !executedClasses.isEmpty()) {
+                             boolean perteneceAlRun = false;
+                             JsonNode labels = root.path("labels");
+                             if (labels.isArray()) {
+                                 for (JsonNode lbl : labels) {
+                                     String lblName = lbl.path("name").asText("");
+                                     if ("testClass".equals(lblName) || "suite".equals(lblName)) {
+                                         String lblValue = lbl.path("value").asText("");
+                                         String simpleVal = lblValue.contains(".")
+                                                 ? lblValue.substring(lblValue.lastIndexOf('.') + 1)
+                                                 : lblValue;
+                                         if (executedClasses.contains(simpleVal)
+                                                 || executedClasses.contains(lblValue)) {
+                                             perteneceAlRun = true;
+                                             break;
+                                         }
+                                     }
+                                 }
+                             }
+                             if (!perteneceAlRun) return; // test de otra suite → ignorar
+                         }
+
                          String status = root.path("status").asText("");
                          if (!status.equals("failed") && !status.equals("broken")) return;
 
