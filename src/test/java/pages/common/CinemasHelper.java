@@ -867,8 +867,9 @@ public class CinemasHelper extends BasePage {
 
     /**
      * Cierra la pantalla de Club Cinépolis.
-     * Intenta: botón back UI → content-desc → navigate().back().
-     * navigate().back() es seguro: Club tiene su propia Activity y back vuelve al main sin cerrar la app.
+     * Orden: navigate().back() → botón back UI → content-desc.
+     * navigate().back() va primero: es un solo comando WebDriver (~200ms),
+     * no requiere buscar elementos en la UI de Compose (que puede tardar 10+ s mientras carga).
      */
     public boolean dismissClubLoginIfPresent() {
         if (!isClubLoginVisible()) return false;
@@ -877,15 +878,26 @@ public class CinemasHelper extends BasePage {
 
         for (int i = 1; i <= 3; i++) {
             try {
-                // 1) Tap botón back real (por bounds del elemento en la UI)
-                tapBackFromClubUI();
-                sleep(400);
-                if (!isClubLoginVisible()) {
-                    log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI).");
-                    return true;
+                // 1) navigate().back() — el más rápido, no busca elementos
+                try {
+                    driver.navigate().back();
+                    sleep(600);
+                    if (!isClubLoginVisible()) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
+                        return true;
+                    }
+                } catch (Exception ignored) {}
+
+                // 2) Tap botón back real (por bounds del elemento en la UI)
+                if (tapBackFromClubUI()) {
+                    sleep(400);
+                    if (!isClubLoginVisible()) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI).");
+                        return true;
+                    }
                 }
 
-                // 2) Tap por content-desc (Atrás / Navigate up)
+                // 3) Tap por content-desc (Atrás / Navigate up)
                 tapIfPresent(CLUB_BACK_BUTTON_A11Y);
                 sleep(400);
                 if (!isClubLoginVisible()) {
@@ -992,9 +1004,13 @@ public class CinemasHelper extends BasePage {
             }
 
             // Si el bottom nav ya es visible, el guard terminó
-            if (isMainNavVisible()) {
-                log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={}", pass, where);
-                return;
+            try {
+                if (isMainNavVisible()) {
+                    log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={}", pass, where);
+                    return;
+                }
+            } catch (Exception e) {
+                log.warn("[CinemasHelper][PromosGuard] isMainNavVisible error (pass={}): {}", pass, e.getMessage());
             }
 
             // Si no se cerró nada y el nav aún no aparece, intento genérico de dismiss
@@ -1098,10 +1114,9 @@ public class CinemasHelper extends BasePage {
     /**
      * Encuentra el botón back de la pantalla Club (android.widget.Button instance(0) / primer Button)
      * y hace tap al centro del elemento (sin coordenadas fijas).
+     * El caller ya verificó isClubLoginVisible() — no se repite aquí para evitar latencia.
      */
     private boolean tapBackFromClubUI() {
-        if (!isClubLoginVisible()) return false;
-
         try {
             List<WebElement> candidates = driver.findElements(CLUB_BACK_BUTTON_UIAUTO);
             if (candidates == null || candidates.isEmpty()) {
