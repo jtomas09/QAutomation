@@ -189,6 +189,12 @@ public class DriverFactory {
         String act     = prop("appActivity",     "");
         String apkPath = prop("apkPath",         "");
 
+        // Auto-detect launcher activity via ADB when set to "auto" or left blank.
+        // This survives app updates that rename the obfuscated activity class.
+        if ((act.isBlank() || "auto".equalsIgnoreCase(act)) && !udid.isBlank() && !pkg.isBlank()) {
+            act = resolveAppActivity(udid, pkg);
+        }
+
         // ── Pre-flight validations ───────────────────────────────
         validateAppiumServer(hubUrl);
         if (!udid.isBlank()) {
@@ -482,6 +488,37 @@ public class DriverFactory {
             log.error("[Diagnose] La app {} no esta instalada.", prop("appPackage", "?"));
             log.error("  Instala con: adb install app.apk");
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Auto-detect launcher activity
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static String resolveAppActivity(String udid, String pkg) {
+        try {
+            String[] cmd = {"adb", "-s", udid, "shell", "cmd", "package",
+                            "resolve-activity", "--brief",
+                            "-a", "android.intent.action.MAIN",
+                            "-c", "android.intent.category.LAUNCHER", pkg};
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            p.waitFor();
+
+            for (String line : out.split("\\n")) {
+                line = line.trim();
+                if (line.startsWith(pkg + "/")) {
+                    String activity = line.substring(line.indexOf('/') + 1);
+                    if (!activity.isBlank()) {
+                        log.info("[DriverFactory] appActivity auto-detectada via ADB: {}", activity);
+                        return activity;
+                    }
+                }
+            }
+            log.warn("[DriverFactory] No se pudo auto-detectar appActivity. Output ADB: {}", out);
+        } catch (Exception e) {
+            log.warn("[DriverFactory] Error en resolveAppActivity: {}", e.getMessage());
+        }
+        return "";
     }
 
     // ──────────────────────────────────────────────────────────────────────────
