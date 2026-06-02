@@ -1296,23 +1296,20 @@ public class SelectorPage extends BasePage {
 
         if (!asientos.isEmpty()) {
             Map<Integer, List<WebElement>> filas = agruparAsientosPorFilaFlexible(asientos);
+            // Solo extremos de fila: los asientos especiales siempre están al inicio/fin de fila.
+            // Probar el interior dispara taps innecesarios y alarga el test varios minutos.
             List<WebElement> prioritarios = new ArrayList<>();
-            List<WebElement> restantes    = new ArrayList<>();
 
             for (List<WebElement> fila : filas.values()) {
                 fila.sort((a, b) -> Integer.compare(a.getRect().getX(), b.getRect().getX()));
                 if (!fila.isEmpty()) {
                     prioritarios.add(fila.get(0));
                     if (fila.size() > 1) prioritarios.add(fila.get(fila.size() - 1));
-                    for (int k = 1; k < fila.size() - 1; k++) restantes.add(fila.get(k));
                 }
             }
 
-            Collections.shuffle(restantes);
             List<WebElement> orden = new ArrayList<>(prioritarios);
-            orden.addAll(restantes);
-
-            int maxIntentos = Math.min(orden.size(), 50);
+            int maxIntentos = Math.min(orden.size(), 25);
 
             for (int i = 0; i < maxIntentos; i++) {
                 WebElement asiento = orden.get(i);
@@ -1437,7 +1434,13 @@ public class SelectorPage extends BasePage {
 
             log.debug("[SelectorPage] Fase3: candidatos únicos: {}", unicos.size());
 
-            for (int[] coord : unicos) {
+            // Cap de Fase 3: evita iterar cientos de View vacíos si no hay asiento especial.
+            int maxFase3 = Math.min(unicos.size(), 20);
+            if (unicos.size() > maxFase3)
+                log.debug("[SelectorPage] Fase3: acotando a {} de {} candidatos", maxFase3, unicos.size());
+
+            for (int fi3 = 0; fi3 < maxFase3; fi3++) {
+                int[] coord = unicos.get(fi3);
                 int cx = coord[0], cy = coord[1];
                 try {
                     log.debug("[SelectorPage] Fase3: tap en ({},{}) size={}x{}", cx, cy, coord[2], coord[3]);
