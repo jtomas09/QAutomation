@@ -17,7 +17,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 public class SelectorPage extends BasePage {
 
@@ -262,54 +265,30 @@ public class SelectorPage extends BasePage {
     }
 
     public List<String> seleccionar3AsientosRandomDisponibles() {
-        int cantidad = 3;
+        SeatMap map = buildSeatMap();
+        log.info("[SelectorPage] {}", map.getSummary());
 
-        List<WebElement> asientos = esperarYObtenerAsientosDelMapa();
-
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDisponiblesVisibles();
+        SeatMap.SelectionResult result = map.selectAnyN(3);
+        if (result == null) {
+            org.junit.jupiter.api.Assumptions.abort(
+                "Menos de 3 asientos disponibles. Se omite la prueba.");
+            return null;
         }
 
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDelMapaAmplio();
-        }
-
-        if (asientos.isEmpty()) {
-            throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
-        }
-
-        Collections.shuffle(asientos);
+        log.info("[SelectorPage] Estrategia: {}", result.strategy);
 
         List<String> seleccionados = new ArrayList<>();
-        List<String> usados = new ArrayList<>();
-
-        int maxIntentos = Math.min(asientos.size(), 15);
-
-        for (int i = 0; i < maxIntentos && seleccionados.size() < cantidad; i++) {
-
-            WebElement asiento = asientos.get(i);
-            String key = construirKeyAsiento(asiento);
-            String info = describirAsiento(asiento);
-
-            if (usados.contains(key)) continue;
-            usados.add(key);
-
-            log.debug("[SelectorPage] Intentando asiento (3x): {}", info);
-
-            if (tapRapidoEnButacaDesdeLabel(asiento)) {
+        for (SeatMap.Seat seat : result.seats) {
+            if (tapRapidoEnButacaDesdeLabel(seat.element)) {
                 sleep(80);
-
-                if (!seleccionados.contains(info)) {
-                    seleccionados.add(info);
-                    log.info("[SelectorPage] Asiento agregado: {}", info);
-                }
+                seleccionados.add(seat.toString());
+                log.info("[SelectorPage] Asiento agregado: {}", seat);
             }
         }
 
-        if (seleccionados.size() < cantidad) {
+        if (seleccionados.size() < 3) {
             throw new RuntimeException(
-                    "Solo se pudieron seleccionar " + seleccionados.size() + " de 3 asientos."
-            );
+                "Solo se pudieron seleccionar " + seleccionados.size() + " de 3 asientos.");
         }
 
         log.info("[SelectorPage] 3 asientos seleccionados: {}", seleccionados);
@@ -482,80 +461,32 @@ public class SelectorPage extends BasePage {
         return false;
     }
     public List<String> seleccionar3AsientosConsecutivosDisponibles() {
-        int cantidad = 3;
+        SeatMap map = buildSeatMap();
+        log.info("[SelectorPage] {}", map.getSummary());
+        map.logMap();
 
-        List<WebElement> asientos = esperarYObtenerAsientosDelMapa();
-
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDisponiblesVisibles();
-        }
-
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDelMapaAmplio();
-        }
-
-        if (asientos.isEmpty()) {
-            throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
-        }
-
-        Map<Integer, List<WebElement>> filas = agruparAsientosPorFilaFlexible(asientos);
-        List<List<WebElement>> bloquesConsecutivos = new ArrayList<>();
-
-        for (List<WebElement> fila : filas.values()) {
-            fila.sort((a, b) -> Integer.compare(a.getRect().getX(), b.getRect().getX()));
-
-            for (int i = 0; i <= fila.size() - cantidad; i++) {
-                List<WebElement> bloque = new ArrayList<>();
-                bloque.add(fila.get(i));
-
-                boolean consecutivos = true;
-                int numeroAnterior = obtenerNumeroAsientoSeguro(fila.get(i));
-
-                for (int j = 1; j < cantidad; j++) {
-                    WebElement actual = fila.get(i + j);
-                    int numeroActual = obtenerNumeroAsientoSeguro(actual);
-
-                    if (numeroActual == -1 || numeroAnterior == -1 || numeroActual != numeroAnterior + 1) {
-                        consecutivos = false;
-                        break;
-                    }
-
-                    bloque.add(actual);
-                    numeroAnterior = numeroActual;
-                }
-
-                if (consecutivos) {
-                    bloquesConsecutivos.add(bloque);
-                }
-            }
-        }
-
-        if (bloquesConsecutivos.isEmpty()) {
+        SeatMap.SelectionResult result = map.selectN(3);
+        if (result == null) {
             org.junit.jupiter.api.Assumptions.abort(
-                "Sin bloques de 3 asientos consecutivos disponibles — función posiblemente agotada o asientos dispersos. Se omite la prueba.");
-            return null; // inalcanzable, requerido por el compilador
+                "Menos de 3 asientos disponibles. Se omite la prueba.");
+            return null;
         }
 
-        Collections.shuffle(bloquesConsecutivos);
-        List<WebElement> bloqueSeleccionado = bloquesConsecutivos.get(0);
+        log.info("[SelectorPage] Estrategia aplicada: {}", result.strategy);
 
         List<String> seleccionados = new ArrayList<>();
-
-        for (WebElement asiento : bloqueSeleccionado) {
-            String info = describirAsiento(asiento);
-            log.debug("[SelectorPage] Intentando asiento consecutivo (3): {}", info);
-
-            if (tapRapidoEnButacaDesdeLabel(asiento)) {
+        for (SeatMap.Seat seat : result.seats) {
+            if (tapRapidoEnButacaDesdeLabel(seat.element)) {
                 sleep(80);
-                seleccionados.add(info);
-                log.info("[SelectorPage] Asiento consecutivo seleccionado OK: {}", info);
+                seleccionados.add(seat.toString());
+                log.info("[SelectorPage] Asiento seleccionado OK: {}", seat);
             } else {
-                throw new RuntimeException("No se pudo seleccionar el asiento consecutivo: " + info);
+                throw new RuntimeException("No se pudo seleccionar el asiento: " + seat);
             }
         }
 
-        log.info("[SelectorPage] 3 asientos consecutivos seleccionados: {}", seleccionados);
-        takeScreenshot("3 asientos consecutivos seleccionados");
+        log.info("[SelectorPage] 3 asientos seleccionados ({}): {}", result.strategy, seleccionados);
+        takeScreenshot("3 asientos - " + result.strategy);
         return seleccionados;
     }
     private boolean estaEnDetalleDePelicula() {
@@ -1047,112 +978,59 @@ public class SelectorPage extends BasePage {
         }
     }
     public List<String> seleccionarYDeseleccionar3AsientosConsecutivosDisponibles() {
-        final int cantidad = 3;
+        SeatMap map = buildSeatMap();
+        log.info("[SelectorPage] {}", map.getSummary());
+        map.logMap();
 
-        // ── Fase 1: selección ──────────────────────────────────────────────────
-        List<WebElement> asientos = esperarYObtenerAsientosDelMapa();
-        if (asientos.isEmpty()) asientos = obtenerAsientosDisponiblesVisibles();
-        if (asientos.isEmpty()) asientos = obtenerAsientosDelMapaAmplio();
-        if (asientos.isEmpty()) throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
-
-        // Pre-caché de X por elemento: evita llamadas a getRect() dentro del comparador del sort
-        // (sin caché, el sort hace O(N log N) round-trips WebDriver)
-        Map<WebElement, Integer> xCache = new LinkedHashMap<>();
-        for (WebElement el : asientos) {
-            try { xCache.put(el, el.getRect().getX()); } catch (Exception ignored) {}
-        }
-
-        Map<Integer, List<WebElement>> filas = agruparAsientosPorFilaFlexible(asientos);
-        List<List<WebElement>> bloquesConsecutivos = new ArrayList<>();
-
-        for (List<WebElement> fila : filas.values()) {
-            // Usar el caché para el sort, sin llamadas WebDriver extra
-            fila.sort((a, b) -> Integer.compare(
-                    xCache.getOrDefault(a, 0),
-                    xCache.getOrDefault(b, 0)
-            ));
-
-            for (int i = 0; i <= fila.size() - cantidad; i++) {
-                List<WebElement> bloque = new ArrayList<>();
-                bloque.add(fila.get(i));
-                boolean consecutivos = true;
-                int numAnterior = obtenerNumeroAsientoSeguro(fila.get(i));
-
-                for (int j = 1; j < cantidad; j++) {
-                    WebElement actual = fila.get(i + j);
-                    int numActual = obtenerNumeroAsientoSeguro(actual);
-                    if (numActual == -1 || numAnterior == -1 || numActual != numAnterior + 1) {
-                        consecutivos = false;
-                        break;
-                    }
-                    bloque.add(actual);
-                    numAnterior = numActual;
-                }
-                if (consecutivos) bloquesConsecutivos.add(bloque);
-            }
-        }
-
-        if (bloquesConsecutivos.isEmpty()) {
+        SeatMap.SelectionResult result = map.selectN(3);
+        if (result == null) {
             org.junit.jupiter.api.Assumptions.abort(
-                "Sin bloques de 3 asientos consecutivos disponibles — función posiblemente agotada o asientos dispersos. Se omite la prueba.");
-            return null; // inalcanzable, requerido por el compilador
+                "Menos de 3 asientos disponibles. Se omite la prueba.");
+            return null;
         }
 
-        Collections.shuffle(bloquesConsecutivos);
-        List<WebElement> bloqueSeleccionado = bloquesConsecutivos.get(0);
+        log.info("[SelectorPage] Estrategia aplicada: {}", result.strategy);
 
-        // Seleccionar y guardar las coordenadas exactas de cada tap
-        // La clave del fix: usar estas coordenadas para deseleccionar, no buscar por número
-        List<int[]> coordenadasTap = new ArrayList<>();
-        List<String> infoSeleccionados = new ArrayList<>();
+        // ── Fase 1: selección — guardar coordenadas exactas ───────────────────
+        List<int[]> coords = new ArrayList<>();
+        List<String> seleccionados = new ArrayList<>();
 
-        for (WebElement asiento : bloqueSeleccionado) {
-            org.openqa.selenium.Rectangle r = asiento.getRect();
-            int tapX = r.getX() + (r.getWidth() / 2);
-            int tapY = r.getY() + (r.getHeight() / 2);
-            String txt = obtenerTextoSeguro(asiento);
-
-            log.info("[SelectorPage] Seleccionando asiento consecutivo: {} en ({},{})", txt, tapX, tapY);
-            tapW3C(tapX, tapY);
+        for (SeatMap.Seat seat : result.seats) {
+            log.info("[SelectorPage] Seleccionando: {} en ({},{})", seat, seat.x, seat.y);
+            tapW3C(seat.x, seat.y);
             sleep(80);
-
-            coordenadasTap.add(new int[]{tapX, tapY});
-            infoSeleccionados.add("asiento=" + txt);
+            coords.add(new int[]{seat.x, seat.y});
+            seleccionados.add(seat.toString());
         }
 
-        log.info("[SelectorPage] Asientos seleccionados: {}", infoSeleccionados);
-
-        // ── Fase 2: deselección por coordenadas exactas ────────────────────────
-        // Se usan las mismas coordenadas del tap original: no hay re-escaneo del mapa
-        // ni búsqueda por número (lo que causaba que se seleccionaran asientos equivocados
-        // cuando varios asientos de distintas filas comparten el mismo número)
+        log.info("[SelectorPage] Asientos seleccionados: {}", seleccionados);
         sleep(400);
-        log.info("[SelectorPage] Iniciando deselección por coordenadas exactas...");
 
-        for (int[] coords : coordenadasTap) {
-            log.debug("[SelectorPage] Deseleccionando en ({},{})", coords[0], coords[1]);
-            tapW3C(coords[0], coords[1]);
+        // ── Fase 2: deselección por coordenadas exactas ───────────────────────
+        log.info("[SelectorPage] Iniciando deselección por coordenadas exactas...");
+        for (int[] c : coords) {
+            log.debug("[SelectorPage] Deseleccionando en ({},{})", c[0], c[1]);
+            tapW3C(c[0], c[1]);
             sleep(150);
         }
 
-        log.info("[SelectorPage] Selección/deselección finalizada: {}", infoSeleccionados);
-        takeScreenshot("Asientos deseleccionados");
-        return infoSeleccionados;
+        log.info("[SelectorPage] Selección/deselección finalizada ({}): {}", result.strategy, seleccionados);
+        takeScreenshot("Asientos deseleccionados - " + result.strategy);
+        return seleccionados;
     }
     public List<String> seleccionarMasDe10AsientosYValidarAlerta() {
-        List<WebElement> asientos = esperarYObtenerAsientosDelMapa();
+        SeatMap map = buildSeatMap();
+        log.info("[SelectorPage] {}", map.getSummary());
 
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDisponiblesVisibles();
+        if (map.getTotalSeats() < 11) {
+            org.junit.jupiter.api.Assumptions.abort(
+                "Menos de 11 asientos disponibles (detectados: " + map.getTotalSeats() + "). Se omite la prueba.");
+            return null;
         }
 
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDelMapaAmplio();
-        }
-
-        if (asientos.isEmpty()) {
-            throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
-        }
+        List<WebElement> asientos = map.allSeats().stream()
+            .map(s -> s.element)
+            .collect(Collectors.toList());
 
         Collections.shuffle(asientos);
 
@@ -2210,46 +2088,30 @@ public class SelectorPage extends BasePage {
     // =========================
 
     public String seleccionarAsientoRandomDisponible() {
-        List<WebElement> asientos = esperarYObtenerAsientosDelMapa();
+        SeatMap map = buildSeatMap();
+        log.info("[SelectorPage] {}", map.getSummary());
 
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDisponiblesVisibles();
-        }
-
-        if (asientos.isEmpty()) {
-            asientos = obtenerAsientosDelMapaAmplio();
-        }
-
-        if (asientos.isEmpty()) {
+        if (map.isEmpty()) {
             throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
         }
 
-        Collections.shuffle(asientos);
+        List<SeatMap.Seat> seats = map.allSeats();
+        Collections.shuffle(seats);
 
-        int maxIntentos = Math.min(6, asientos.size());
-
+        int maxIntentos = Math.min(6, seats.size());
         for (int i = 0; i < maxIntentos; i++) {
-            WebElement asiento = asientos.get(i);
-            String info = describirAsiento(asiento);
+            SeatMap.Seat seat = seats.get(i);
+            log.info("[SelectorPage] Intentando seleccionar asiento rápido: {}", seat);
 
-            log.info("[SelectorPage] Intentando seleccionar asiento rápido: {}", info);
-
-            if (tapRapidoEnButacaDesdeLabel(asiento)) {
+            if (tapRapidoEnButacaDesdeLabel(seat.element)) {
                 sleep(150);
-
-                if (huboCambioVisualAsiento() || asientoQuedoSeleccionado(asiento)) {
-                    log.info("[SelectorPage] Asiento seleccionado OK: {}", info);
-                    takeScreenshot("Asiento seleccionado");
-                    return info;
-                }
-
-                log.info("[SelectorPage] Tap realizado sobre asiento: {}", info);
+                log.info("[SelectorPage] Asiento seleccionado OK: {}", seat);
                 takeScreenshot("Asiento seleccionado");
-                return info;
+                return seat.toString();
             }
         }
 
-        throw new RuntimeException("Se detectaron asientos, pero no se pudo seleccionar ninguno rápidamente.");
+        throw new RuntimeException("Se detectaron asientos, pero no se pudo seleccionar ninguno.");
     }
     private List<WebElement> obtenerAsientosDelMapaAmplio() {
         Map<String, WebElement> unicos = new LinkedHashMap<>();
@@ -2599,6 +2461,17 @@ public class SelectorPage extends BasePage {
 
         log.warn("[SelectorPage] Tiempo agotado escaneando el mapa.");
         return Collections.emptyList();
+    }
+
+    /**
+     * Construye un {@link SeatMap} a partir del estado actual del mapa de asientos.
+     * Ejecuta el escaneo principal y dos fallbacks antes de devolver el modelo.
+     */
+    private SeatMap buildSeatMap() {
+        List<WebElement> raw = esperarYObtenerAsientosDelMapa();
+        if (raw.isEmpty()) raw = obtenerAsientosDisponiblesVisibles();
+        if (raw.isEmpty()) raw = obtenerAsientosDelMapaAmplio();
+        return new SeatMap(raw);
     }
 
     // UIAutomator2 filtra por texto numérico EN EL DISPOSITIVO → solo devuelve asientos reales.
