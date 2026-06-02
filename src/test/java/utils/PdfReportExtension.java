@@ -119,7 +119,8 @@ public class PdfReportExtension implements
 
     @Override
     public void testAborted(ExtensionContext context, Throwable cause) {
-        BaseTestStatusRegistry.markFailed(context.getDisplayName(), cause);
+        // Test abortado vía Assumptions.abort() → se cuenta como skipped, NO como fallido.
+        // El conteo skipped se deriva de (total - passed - failed); no incrementar FAILED aquí.
     }
 
     @Override

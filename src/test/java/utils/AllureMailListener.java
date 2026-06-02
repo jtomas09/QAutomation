@@ -70,13 +70,14 @@ public class AllureMailListener implements TestExecutionListener {
         testIdentifier.getSource().ifPresent(this::extractAndStoreMenu);
 
         TestExecutionResult.Status status = result.getStatus();
-        if (status == TestExecutionResult.Status.FAILED
-                || status == TestExecutionResult.Status.ABORTED) {
+        if (status == TestExecutionResult.Status.FAILED) {
             failedCount.incrementAndGet();
             testIdentifier.getSource().ifPresent(src -> extractMenuName(src, failedMenus));
         } else if (status == TestExecutionResult.Status.SUCCESSFUL) {
             passedCount.incrementAndGet();
         }
+        // ABORTED (Assumptions.abort) = skipped; no incrementar failedCount.
+        // El conteo skipped se deriva de (total - passed - failed) en el correo.
     }
 
     private void extractAndStoreMenu(TestSource source) {
