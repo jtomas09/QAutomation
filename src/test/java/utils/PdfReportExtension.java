@@ -12,9 +12,11 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 
 public class PdfReportExtension implements
         BeforeAllCallback,
@@ -26,7 +28,8 @@ public class PdfReportExtension implements
 
     private static final Logger log = LoggerFactory.getLogger(PdfReportExtension.class);
 
-    private static final StringBuilder EXECUTED_TESTS = new StringBuilder();
+    private static final StringBuilder EXECUTED_TESTS   = new StringBuilder();
+    private static final Set<String>   EXECUTED_CLASSES = new LinkedHashSet<>();
 
     private static final Path REPORT_DIR = Paths.get("build", "reportes-pdf");
     private static final Path METRICS_PATH = REPORT_DIR.resolve("suite-metrics.properties");
@@ -48,6 +51,7 @@ public class PdfReportExtension implements
             suiteStartMillis = System.currentTimeMillis();
 
             EXECUTED_TESTS.setLength(0);
+            EXECUTED_CLASSES.clear();
             BaseTestStatusRegistry.resetForRun(executionNameFinal);
 
             try { Files.createDirectories(REPORT_DIR); } catch (Exception ignored) {}
@@ -70,6 +74,8 @@ public class PdfReportExtension implements
 
         if (EXECUTED_TESTS.length() > 0) EXECUTED_TESTS.append(" | ");
         EXECUTED_TESTS.append(testName);
+
+        context.getTestClass().map(Class::getSimpleName).ifPresent(EXECUTED_CLASSES::add);
 
         TestSteps.startScenario(testName);
 
@@ -216,7 +222,9 @@ public class PdfReportExtension implements
                                 suiteName, total, passed, failed);
 
                         AllureReportSender.sendFinalSuiteReport(
-                                suiteName, total, passed, failed, dur, executed, mergedPdfName
+                                suiteName, total, passed, failed, dur, executed, mergedPdfName,
+                                suiteStartMillis,
+                                java.util.Collections.unmodifiableSet(EXECUTED_CLASSES)
                         );
 
                         channel.write(StandardCharsets.UTF_8.encode("SENT"));
