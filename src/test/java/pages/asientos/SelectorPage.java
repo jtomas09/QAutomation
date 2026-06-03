@@ -1498,13 +1498,117 @@ public class SelectorPage extends BasePage {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Alerta genérica: cualquier modal con botón "Aceptar y continuar"
+    // Cubre: clasificación C/B/B15, Atención (vibraciones), y cualquier otra
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Detecta y acepta CUALQUIER alerta modal con botón "Aceptar y continuar",
+     * sin importar su título ni contenido (clasificación C/B/B15, Atención, etc.).
+     *
+     * Estrategias de tap en orden hasta que la alerta desaparezca:
+     *   1. Tap en el TextView con el texto del botón
+     *   2. Tap en el padre del TextView (contenedor Compose)
+     *   3. Tap en el android.widget.Button hermano (enabled aunque clickable=false)
+     *
+     * @return true si se detectó y aceptó una alerta.
+     */
+    public boolean aceptarAlertaAceptarYContinuarSiPresente() {
+        final long TIMEOUT_MS = 2000;
+        long deadline = System.currentTimeMillis() + TIMEOUT_MS;
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                List<WebElement> textos = driver.findElements(
+                    By.xpath("//*[contains(@text,'Aceptar y continuar')]"));
+                for (WebElement txt : textos) {
+                    try {
+                        if (!txt.isDisplayed()) continue;
+
+                        // Detectar título de la alerta para el log
+                        String tituloAlerta = detectarTituloAlerta();
+                        int cx = txt.getRect().getX() + txt.getRect().getWidth()  / 2;
+                        int cy = txt.getRect().getY() + txt.getRect().getHeight() / 2;
+
+                        // Estrategia 1: tap directo en el texto
+                        tapW3C(cx, cy);
+                        sleep(400);
+                        if (driver.findElements(By.xpath(
+                                "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) {
+                            log.info("[SelectorPage] Alerta'{}' aceptada (tap texto).", tituloAlerta);
+                            return true;
+                        }
+
+                        // Estrategia 2: tap en el padre (contenedor Compose/View)
+                        try {
+                            WebElement parent = txt.findElement(By.xpath(".."));
+                            tapW3C(parent.getRect().getX() + parent.getRect().getWidth()  / 2,
+                                   parent.getRect().getY() + parent.getRect().getHeight() / 2);
+                            sleep(400);
+                            if (driver.findElements(By.xpath(
+                                    "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) {
+                                log.info("[SelectorPage] Alerta '{}' aceptada (tap padre).", tituloAlerta);
+                                return true;
+                            }
+                        } catch (Exception ignored) {}
+
+                        // Estrategia 3: android.widget.Button hermano (clickable=false pero enabled=true)
+                        try {
+                            WebElement parent = txt.findElement(By.xpath(".."));
+                            List<WebElement> btns = parent.findElements(
+                                By.xpath(".//android.widget.Button"));
+                            for (WebElement btn : btns) {
+                                tapW3C(btn.getRect().getX() + btn.getRect().getWidth()  / 2,
+                                       btn.getRect().getY() + btn.getRect().getHeight() / 2);
+                                sleep(400);
+                                if (driver.findElements(By.xpath(
+                                        "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) {
+                                    log.info("[SelectorPage] Alerta '{}' aceptada (tap Button).", tituloAlerta);
+                                    return true;
+                                }
+                            }
+                        } catch (Exception ignored) {}
+
+                        // Al menos un tap se ejecutó — asumir que funcionó
+                        log.info("[SelectorPage] Alerta '{}' tapeada con 'Aceptar y continuar'.", tituloAlerta);
+                        sleep(300);
+                        return true;
+
+                    } catch (Exception ignored) {}
+                }
+                sleep(200);
+            }
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+        return false;
+    }
+
+    /** Intenta leer el título del diálogo visible para logging. */
+    private String detectarTituloAlerta() {
+        try {
+            // Primeras líneas de texto visibles en el área superior del diálogo
+            List<WebElement> textos = driver.findElements(
+                By.xpath("//*[@text and string-length(@text) > 3 and string-length(@text) < 60]"));
+            for (WebElement el : textos) {
+                try {
+                    String t = el.getText().trim();
+                    if (!t.isBlank() && !t.contains("Aceptar") && !t.contains("Cancelar")) {
+                        return t.length() > 40 ? t.substring(0, 40) + "…" : t;
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return "desconocida";
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Alerta: Atención (movimientos y vibraciones repentinas)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Devuelve {@code true} si la alerta de Atención (movimientos y vibraciones)
-     * está visible en pantalla. Se distingue por su título "Atención" y la mención
-     * de vibraciones o restricción de menores de 4 años.
+     * está visible en pantalla.
      */
     public boolean estaVisibleAlertaAtencion() {
         try {
@@ -1520,36 +1624,11 @@ public class SelectorPage extends BasePage {
     }
 
     /**
-     * Si la alerta de Atención está visible, toca "Aceptar y continuar" para
-     * proceder al flujo de selección de asientos.
-     *
-     * @return {@code true} si la alerta fue encontrada y aceptada.
+     * Si hay una alerta visible con "Aceptar y continuar", la acepta.
+     * Mantiene el nombre original para compatibilidad; delega al método general.
      */
     public boolean aceptarAlertaAtencionSiPresente() {
-        // Espera hasta 2s para que la alerta aparezca tras el tap en el horario
-        long deadline = System.currentTimeMillis() + 2000;
-        while (System.currentTimeMillis() < deadline) {
-            if (estaVisibleAlertaAtencion()) break;
-            try { Thread.sleep(200); } catch (InterruptedException ignored) {}
-        }
-        if (!estaVisibleAlertaAtencion()) return false;
-        try {
-            List<WebElement> botones = driver.findElements(
-                    By.xpath("//*[contains(@text,'Aceptar y continuar')]"));
-            for (WebElement b : botones) {
-                try {
-                    if (!b.isDisplayed()) continue;
-                    tapW3C(b.getRect().getX() + b.getRect().getWidth() / 2,
-                           b.getRect().getY() + b.getRect().getHeight() / 2);
-                    sleep(500);
-                    log.info("[SelectorPage] Alerta 'Atención' aceptada con 'Aceptar y continuar'.");
-                    return true;
-                } catch (Exception ignored) {}
-            }
-        } catch (Exception e) {
-            log.warn("[SelectorPage] Error aceptando alerta Atención: {}", e.getMessage());
-        }
-        return false;
+        return aceptarAlertaAceptarYContinuarSiPresente();
     }
 
     public String cambiarHorarioEnPantallaAsientos() {
@@ -2128,52 +2207,7 @@ public class SelectorPage extends BasePage {
     }
 
 
-    private List<WebElement> obtenerAsientosDelMapaRapido() {
-        List<WebElement> resultado = new ArrayList<>();
-        Map<String, WebElement> unicos = new LinkedHashMap<>();
 
-        // Deshabilitar implicit wait: evita que cada findElements espere N segundos si no hay resultados
-        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-        try {
-            int screenHeight = driver.manage().window().getSize().getHeight();
-            int mapTop    = (int) (screenHeight * 0.30);
-            int mapBottom = (int) (screenHeight * 0.93);
-
-            List<WebElement> candidatos;
-            try {
-                candidatos = driver.findElements(
-                        By.xpath("//android.widget.TextView[@text and string-length(normalize-space(@text)) <= 2]")
-                );
-            } catch (Exception e) {
-                return resultado;
-            }
-
-            for (WebElement el : candidatos) {
-                try {
-                    String txt = obtenerTextoSeguro(el);
-                    if (!txt.matches("^\\d{1,2}$")) continue;
-
-                    // Cachear el Rectangle: evita llamar el.getRect() múltiples veces
-                    // (cada llamada es un round-trip WebDriver independiente)
-                    org.openqa.selenium.Rectangle r = el.getRect();
-                    int centerY = r.getY() + (r.getHeight() / 2);
-                    if (centerY < mapTop || centerY > mapBottom) continue;
-
-                    int centerX = r.getX() + (r.getWidth() / 2);
-                    if (centerX < 20) continue;
-
-                    unicos.putIfAbsent(txt + "|" + r.getX() + "|" + r.getY(), el);
-
-                } catch (Exception ignored) {}
-            }
-        } finally {
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-        }
-
-        resultado.addAll(unicos.values());
-        log.debug("[SelectorPage] Asientos rápidos detectados: {}", resultado.size());
-        return resultado;
-    }
 
     private List<WebElement> obtenerAsientosDisponiblesVisibles() {
         Map<String, WebElement> unicos = new LinkedHashMap<>();
@@ -2214,58 +2248,7 @@ public class SelectorPage extends BasePage {
         return resultado;
     }
 
-    private List<WebElement> obtenerAsientosParaConsecutivos() {
-        List<WebElement> resultado = new ArrayList<>();
-        Map<String, WebElement> unicos = new LinkedHashMap<>();
 
-        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-        try {
-            int screenHeight = driver.manage().window().getSize().getHeight();
-            int mapTop    = (int) (screenHeight * 0.28);
-            int mapBottom = (int) (screenHeight * 0.94);
-
-            List<By> candidatos = List.of(
-                    By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"),
-                    By.xpath("//*[@text and normalize-space(@text)!='']")
-            );
-
-            for (By locator : candidatos) {
-                try {
-                    List<WebElement> elementos = driver.findElements(locator);
-
-                    for (WebElement el : elementos) {
-                        try {
-                            String txt = obtenerTextoSeguro(el);
-                            if (!txt.matches("^\\d{1,2}$")) continue;
-
-                            int numero = Integer.parseInt(txt);
-                            if (numero < 1 || numero > 30) continue;
-
-                            // Cachear el Rectangle: una sola llamada para Y, X y la clave
-                            org.openqa.selenium.Rectangle r = el.getRect();
-                            int centerY = r.getY() + (r.getHeight() / 2);
-                            if (centerY < mapTop || centerY > mapBottom) continue;
-
-                            int centerX = r.getX() + (r.getWidth() / 2);
-                            if (centerX < 15) continue;
-
-                            unicos.putIfAbsent(txt + "|" + r.getX() + "|" + r.getY(), el);
-
-                        } catch (Exception ignored) {}
-                    }
-
-                    if (!unicos.isEmpty()) break;
-
-                } catch (Exception ignored) {}
-            }
-        } finally {
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-        }
-
-        resultado.addAll(unicos.values());
-        log.debug("[SelectorPage] Asientos para consecutivos detectados: {}", resultado.size());
-        return resultado;
-    }
 
     private boolean tapRapidoEnButacaDesdeLabel(WebElement el) {
         try {
@@ -2483,9 +2466,7 @@ public class SelectorPage extends BasePage {
 
 
 
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
-    }
+
 
     private String safeLower(String value) {
         return value == null ? "" : value.trim().toLowerCase();
