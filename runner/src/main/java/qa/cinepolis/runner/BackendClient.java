@@ -55,7 +55,12 @@ public class BackendClient {
         }
     }
 
-    /** Returns true if the execution has been marked ABORTED by the backend. Does not throw. */
+    /**
+     * Retorna true si la ejecución fue marcada ABORTED o ABORTING por el backend.
+     * ABORTING = el usuario pidió cancelar, el runner debe matar Gradle.
+     * ABORTED  = confirmación final (también detiene el runner por si acaso).
+     * Does not throw.
+     */
     public boolean isJobAborted(String executionId) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -64,9 +69,20 @@ public class BackendClient {
                     .GET()
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            return res.statusCode() == 200 && res.body().contains("\"ABORTED\"");
+            if (res.statusCode() != 200) return false;
+            String body = res.body();
+            return body.contains("\"ABORTED\"") || body.contains("\"ABORTING\"");
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /** Notifica al backend que el proceso Gradle fue terminado (confirma el aborto). Does not throw. */
+    public void confirmAbort(String executionId) {
+        try {
+            post("/api/executions/" + executionId + "/abort-confirm", "{}");
+        } catch (Exception e) {
+            System.err.println("[BackendClient] confirmAbort error: " + e.getMessage());
         }
     }
 

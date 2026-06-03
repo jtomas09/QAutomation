@@ -81,7 +81,30 @@ public class ExecutionService {
         });
     }
 
+    /**
+     * Marca la ejecución como ABORTING (señal al runner para que detenga el proceso).
+     * El runner cambia el estado a ABORTED cuando confirma que Gradle fue terminado.
+     * Si no hay runner activo (ejecución QUEUED), pasa directo a ABORTED.
+     */
     public void abort(String executionId) {
+        store.findById(executionId).ifPresent(e -> {
+            if (e.getStatus() == ExecutionStatus.RUNNING) {
+                // Hay un runner activo; marcar ABORTING y esperar confirmación del runner
+                e.setStatus(ExecutionStatus.ABORTING);
+                sse.broadcast(executionId, "status", Map.of("status", "ABORTING"));
+            } else {
+                // QUEUED u otro estado — no hay runner, abortar directamente
+                e.setStatus(ExecutionStatus.ABORTED);
+                e.setEndTime(Instant.now());
+                sse.broadcast(executionId, "done",
+                        Map.of("aborted", true, "passed", 0, "failed", 0, "skipped", 0, "total", 0));
+                sse.complete(executionId);
+            }
+        });
+    }
+
+    /** Confirma el aborto (llamado por el runner tras matar Gradle). */
+    public void confirmAbort(String executionId) {
         store.findById(executionId).ifPresent(e -> {
             e.setStatus(ExecutionStatus.ABORTED);
             e.setEndTime(Instant.now());
@@ -103,13 +126,23 @@ public class ExecutionService {
 
     private volatile Instant lastRunnerPing = Instant.EPOCH;
 
-    /** Called every time the runner agent polls GET /api/run/pending. */
+    /** Called every time the runner agent polls GET /api/jobs/next or GET /api/run/pending. */
     public void recordRunnerPing() {
         lastRunnerPing = Instant.now();
     }
 
-    /** True if the runner pinged within the last 30 seconds. */
+    /**
+     * El runner se considera ONLINE si:
+     *  - Ping reciente (últimos 30 s) — estado nominal en reposo
+     *  - O hay una ejecución RUNNING activa — durante tests el runner está bloqueado
+     *    en execute() y puede tardar >30 s sin poll; si hay job activo, el runner existe
+     *  - O el último ping fue en los últimos 5 min — tolerancia para suites largas
+     *    donde el heartbeat puede fallar por red sin que el runner muera
+     */
     public boolean isRunnerOnline() {
-        return lastRunnerPing.isAfter(Instant.now().minusSeconds(30));
+        if (lastRunnerPing.isAfter(Instant.now().minusSeconds(30))) return true;
+        if (isRunning()) return true;  // ejecución activa → runner necesariamente vivo
+        if (lastRunnerPing.isAfter(Instant.now().minusSeconds(300))) return true; // 5 min tolerancia
+        return false;
     }
 }

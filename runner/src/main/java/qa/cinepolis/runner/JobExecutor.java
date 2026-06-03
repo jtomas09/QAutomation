@@ -36,10 +36,21 @@ public class JobExecutor {
      *   tests.RunAllTests  (JUnit Platform Suite that selects @SelectPackages("tests"))
      */
     private static final Map<String, String> SUITE_MAP;
+
+    /**
+     * Pool de todos los métodos-de-test de México disponibles para el Smoke.
+     * Se construye una sola vez desde SUITE_MAP filtrando los filtros con
+     * 4+ puntos y prefijo "tests.México." (selector a nivel de método).
+     */
+    static final List<String> MEXICO_SMOKE_POOL = new ArrayList<>();
+
+    /** Número de casos seleccionados para una ejecución Smoke. */
+    static final int SMOKE_SIZE = 50;
+
     static {
         SUITE_MAP = new HashMap<>();
-        // Full suites
-        SUITE_MAP.put("smoke tests",          "tests.RunAllTests");
+        // Full suites — smoke apunta a lógica propia, NO a RunAllTests
+        SUITE_MAP.put("smoke tests",          "§smoke§");   // manejado por buildSmokeCommand()
         SUITE_MAP.put("full suite",           "tests.RunAllTests");
         SUITE_MAP.put("regresión",            "tests.RunAllTests");
         SUITE_MAP.put("regresion",            "tests.RunAllTests");
@@ -260,6 +271,16 @@ public class JobExecutor {
         SUITE_MAP.put("cl-ticket-parquepremium",     "tests.Chile.NoAfectacionChile.compraTicketParqueAraucoPremium");
         SUITE_MAP.put("cl-mix-parquepremium",        "tests.Chile.NoAfectacionChile.compraMixParqueAraucoPremium");
         SUITE_MAP.put("cl-alimento-parquepremium",   "tests.Chile.NoAfectacionChile.compraAlimentoParqueAraucoPremium");
+
+        // Poblar pool de smoke: todos los métodos-de-test de México (4+ puntos en el filtro)
+        for (String filter : SUITE_MAP.values()) {
+            if (filter.startsWith("tests.México.")
+                    && filter.chars().filter(c -> c == '.').count() >= 4
+                    && !filter.endsWith(".*")
+                    && !MEXICO_SMOKE_POOL.contains(filter)) {
+                MEXICO_SMOKE_POOL.add(filter);
+            }
+        }
     }
 
     private final RunnerConfig  config;
@@ -277,9 +298,42 @@ public class JobExecutor {
         Process p = activeProcess;
         if (p != null && p.isAlive()) {
             System.out.println("\n[Runner] Shutdown detectado — terminando proceso Gradle...");
-            p.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
-            p.destroyForcibly();
+            forceKillProcessTree(p);
             System.out.println("[Runner] Proceso Gradle terminado.");
+        }
+    }
+
+    /**
+     * Mata el árbol de procesos de forma confiable en Windows y Linux/Mac.
+     * Estrategia dual:
+     *  1. Java ProcessHandle.descendants().destroyForcibly() (cross-platform)
+     *  2. Windows: taskkill /F /T /PID para matar subárboles que Java puede perder
+     *     (gradlew.bat → cmd.exe → java.exe → java.exe (test fork))
+     */
+    private void forceKillProcessTree(Process process) {
+        long pid = process.pid();
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+
+        // Paso 1: Java ProcessHandle (funciona en todos los SO)
+        try {
+            process.toHandle().descendants().forEach(h -> {
+                try { h.destroyForcibly(); } catch (Exception ignored) {}
+            });
+            process.destroyForcibly();
+        } catch (Exception e) {
+            System.err.println("[Executor] Error matando proceso (Java): " + e.getMessage());
+        }
+
+        // Paso 2: Windows taskkill como refuerzo (mata el árbol completo incluyendo cmd.exe wrappers)
+        if (isWindows) {
+            try {
+                new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(pid))
+                    .redirectErrorStream(true)
+                    .start()
+                    .waitFor(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                System.err.println("[Executor] taskkill falló: " + e.getMessage());
+            }
         }
     }
 
@@ -337,17 +391,20 @@ public class JobExecutor {
             Process process = pb.start();
             activeProcess = process;
 
-            // Abort watcher — polls backend every 3 s; kills Gradle if ABORTED
+            // Abort watcher — polls backend every 1s; kills Gradle tree si ABORTING/ABORTED
             AtomicBoolean wasAborted = new AtomicBoolean(false);
             Thread abortWatcher = new Thread(() -> {
                 while (process.isAlive()) {
-                    try { Thread.sleep(3_000); } catch (InterruptedException e) { return; }
+                    try { Thread.sleep(1_000); } catch (InterruptedException e) { return; }
                     if (client.isJobAborted(job.executionId)) {
                         wasAborted.set(true);
+                        client.sendLog(job.executionId, "WARN",
+                            "🛑 Aborto recibido — deteniendo proceso Gradle...");
                         System.out.println("\n[Executor] Aborto detectado — terminando árbol de procesos Gradle");
-                        // Kill all child processes first (JVM spawned by gradlew.bat on Windows)
-                        process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);
-                        process.destroyForcibly();
+                        forceKillProcessTree(process);
+                        // Confirmar al backend que el proceso fue terminado
+                        client.confirmAbort(job.executionId);
+                        client.sendLog(job.executionId, "WARN", "⛔ Ejecución abortada correctamente.");
                         return;
                     }
                 }
@@ -415,14 +472,19 @@ public class JobExecutor {
     // ── Gradle command builder ─────────────────────────────────────────────────
 
     private List<String> buildCommand(JobDto job) {
+        String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
+
+        // Smoke usa su propio comando con selección aleatoria de SMOKE_SIZE tests
+        if ("smoke tests".equals(key) || "smoke".equals(key)) {
+            return buildSmokeCommand(job);
+        }
+
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
         String  testFilter = resolveTestFilter(job.suite, job.testClass);
 
         List<String> cmd = new ArrayList<>();
         if (isWindows) {
-            cmd.add("cmd");
-            cmd.add("/c");
-            cmd.add("gradlew.bat");
+            cmd.add("cmd"); cmd.add("/c"); cmd.add("gradlew.bat");
         } else {
             cmd.add("./gradlew");
         }
@@ -433,8 +495,65 @@ public class JobExecutor {
         cmd.add("--rerun-tasks");
         cmd.add("--no-daemon");
 
-        // build.gradle contains: systemProperties System.getProperties()
-        // so -D flags on the Gradle JVM are visible to tests as System.getProperty()
+        addCommonDFlags(cmd, job);
+        if (job.testClass != null && !job.testClass.isBlank())
+            cmd.add("-DtestClass=" + job.testClass);
+
+        return cmd;
+    }
+
+    /**
+     * Construye el comando Gradle para la suite Smoke:
+     *  1. Toma el pool de tests México (143 métodos aprox.)
+     *  2. Baraja aleatoriamente y selecciona SMOKE_SIZE (50)
+     *  3. Genera un --tests por cada método seleccionado
+     *
+     * Garantías:
+     *  - PASSED + FAILED + SKIPPED == SMOKE_SIZE (Gradle solo ejecuta lo seleccionado)
+     *  - La selección varía en cada ejecución (diversidad de cobertura)
+     *  - Nunca más de SMOKE_SIZE tests, aunque el pool crezca
+     */
+    private List<String> buildSmokeCommand(JobDto job) {
+        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+
+        // Selección aleatoria
+        List<String> pool = new ArrayList<>(MEXICO_SMOKE_POOL);
+        java.util.Collections.shuffle(pool, new java.util.Random());
+        int count = Math.min(SMOKE_SIZE, pool.size());
+        List<String> selected = pool.subList(0, count);
+
+        // Log de selección
+        client.sendLog(job.executionId, "INFO",
+            "🔀 Smoke seleccionado: " + count + " casos aleatorios de " + pool.size() + " disponibles");
+        StringBuilder sb = new StringBuilder("Casos elegidos:");
+        for (int i = 0; i < selected.size(); i++) {
+            String s = selected.get(i);
+            sb.append("\n  ").append(i + 1).append(". ")
+              .append(s.substring(s.lastIndexOf('.') + 1));
+        }
+        client.sendLog(job.executionId, "INFO", sb.toString());
+
+        List<String> cmd = new ArrayList<>();
+        if (isWindows) {
+            cmd.add("cmd"); cmd.add("/c"); cmd.add("gradlew.bat");
+        } else {
+            cmd.add("./gradlew");
+        }
+
+        cmd.add("test");
+        for (String test : selected) {
+            cmd.add("--tests");
+            cmd.add(test);
+        }
+        cmd.add("--rerun-tasks");
+        cmd.add("--no-daemon");
+
+        addCommonDFlags(cmd, job);
+        return cmd;
+    }
+
+    /** Añade los -D flags comunes a cualquier comando Gradle de test. */
+    private void addCommonDFlags(List<String> cmd, JobDto job) {
         cmd.add("-DdeviceName="    + nvl(job.device,  "Galaxy A56 5G"));
         cmd.add("-Denv="           + nvl(job.env,     "QA"));
         cmd.add("-Dcountry="       + nvl(job.country, "mexico"));
@@ -443,30 +562,26 @@ public class JobExecutor {
         cmd.add("-DREUSE_DRIVER=true");
         if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
         if (job.sendMail)     cmd.add("-DsendMail=true");
-        if (job.testClass != null && !job.testClass.isBlank())
-            cmd.add("-DtestClass=" + job.testClass);
-
-        return cmd;
     }
 
     private static String resolveTestFilter(String suiteName, String testClass) {
         if (suiteName == null || suiteName.isBlank()) return "tests.RunAllTests";
 
-        // When a specific class is requested within a suite, target it directly
+        // Cuando se pide una clase específica dentro de una suite
         if (testClass != null && !testClass.isBlank()) {
             String key = suiteName.toLowerCase().trim();
             String base = SUITE_MAP.getOrDefault(key, null);
-            if (base != null) {
-                // Strip the trailing .* wildcard and append the class name
+            if (base != null && !base.startsWith("§")) {
                 String pkg = base.endsWith(".*") ? base.substring(0, base.length() - 2) : base;
                 return pkg + "." + testClass;
             }
-            // Fallback: derive package from suite directly
             return "tests.México.alimentos." + testClass;
         }
 
         String key = suiteName.toLowerCase().trim();
-        return SUITE_MAP.getOrDefault(key, "tests.RunAllTests");
+        String filter = SUITE_MAP.getOrDefault(key, "tests.RunAllTests");
+        // §smoke§ no debería llegar aquí (manejado en buildCommand), pero por seguridad:
+        return filter.startsWith("§") ? "tests.RunAllTests" : filter;
     }
 
     // ── Pre-flight: ADB ────────────────────────────────────────────────────────

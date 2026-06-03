@@ -365,24 +365,21 @@ public class BaseTest {
 
             totalTests++;
 
-            boolean junitFailed = BaseTestStatusRegistry.isFailed(testKey);
-
-            // Si el driver es null aquí significa que setUp() falló antes de crearlo
+            // @AfterEach corre ANTES de TestWatcher.testFailed (orden JUnit 5).
+            // Por eso isFailed() aún es false aunque el test haya fallado por assert.
+            // El resultado real lo reporta JUnit → BaseTestStatusRegistry (vía testFailed/testSuccessful).
+            // Aquí solo detectamos fallos de setup (driver no creado).
             boolean setupFailed = (driver == null && !REUSE_DRIVER)
                     || (REUSE_DRIVER && !driverCreatedOnce);
 
-            boolean finalFailed = junitFailed || setupFailed;
-
             if (setupFailed) {
-                log.error("[BaseTest] TEST FAILED (setUp falló — driver no creado): {}", testInfo.getDisplayName());
-            }
-
-            if (finalFailed) {
                 failedTests++;
-                log.warn("[BaseTest] TEST FAILED: {}", testInfo.getDisplayName());
+                log.error("[BaseTest] TEST FAILED (setUp — driver no creado): {}", testInfo.getDisplayName());
+                BaseTestStatusRegistry.markFailed(testKey, new RuntimeException("Driver not created"));
             } else {
-                passedTests++;
-                log.info("[BaseTest] TEST PASSED: {}", testInfo.getDisplayName());
+                // No podemos saber el resultado aquí (TestWatcher aún no corrió).
+                // El conteo definitivo lo hace PdfReportExtension.SuiteMailer desde BaseTestStatusRegistry.
+                log.info("[BaseTest] TEST ENDING: {}", testInfo.getDisplayName());
             }
 
             if (REUSE_DRIVER) {

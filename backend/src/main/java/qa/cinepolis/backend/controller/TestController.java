@@ -35,10 +35,21 @@ public class TestController {
                 : ResponseEntity.noContent().build();
     }
 
-    /** DELETE /api/run/{id} — aborts a pending or running execution. */
+    /** DELETE /api/run/{id} — solicita abortar una ejecución pendiente o en curso. */
     @DeleteMapping("/run/{id}")
     public Map<String, String> abortRun(@PathVariable String id) {
         execService.abort(id);
+        return Map.of("result", "aborting", "executionId", id);
+    }
+
+    /**
+     * POST /api/executions/{id}/abort-confirm
+     * El runner llama este endpoint tras matar el proceso Gradle,
+     * confirmando que la ejecución está realmente detenida (ABORTED).
+     */
+    @PostMapping("/executions/{id}/abort-confirm")
+    public Map<String, String> confirmAbort(@PathVariable String id) {
+        execService.confirmAbort(id);
         return Map.of("result", "aborted", "executionId", id);
     }
 

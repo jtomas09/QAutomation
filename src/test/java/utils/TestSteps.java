@@ -85,9 +85,15 @@ public class TestSteps {
         } catch (Throwable t) {
             String screenshotPath = captureEvidence(driver, name + "_ERROR", "Screenshot on error");
 
-            StringWriter sw = new StringWriter();
-            t.printStackTrace(new PrintWriter(sw));
-            Allure.addAttachment("Stacktrace completo", "text/plain", sw.toString());
+            // Guardamos el stacktrace en Allure; si el UUID del test ya no existe
+            // (e.g. lifecycle fuera de orden) el catch evita un error secundario.
+            try {
+                StringWriter sw = new StringWriter();
+                t.printStackTrace(new PrintWriter(sw));
+                Allure.addAttachment("Stacktrace completo", "text/plain", sw.toString());
+            } catch (Exception allureEx) {
+                log.debug("[TestSteps] Allure UUID no disponible al adjuntar stacktrace: {}", allureEx.getMessage());
+            }
 
             steps.get().add(new StepResult(name, "ERROR", screenshotPath));
 
