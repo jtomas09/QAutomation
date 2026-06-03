@@ -206,6 +206,30 @@ tasks.register('buildDist') {
     }
 }
 
+// ---------- RUNNER AGENT (Maven) ----------
+// Recompila runner/target/cinepolis-runner.jar desde las fuentes Maven.
+// Ejecutar: .\gradlew buildRunner
+// Se ejecuta automáticamente como parte de buildDist.
+tasks.register('buildRunner', Exec) {
+    group = 'build'
+    description = 'Recompila runner/target/cinepolis-runner.jar (Maven)'
+    workingDir "$projectDir/runner"
+
+    boolean isWindows = System.getProperty('os.name', '').toLowerCase().contains('win')
+    commandLine isWindows
+        ? ['cmd', '/c', 'mvn', '-q', 'clean', 'package', '-DskipTests']
+        : ['mvn', '-q', 'clean', 'package', '-DskipTests']
+
+    outputs.upToDateWhen { false }
+
+    doLast {
+        def jar = file("$projectDir/runner/target/cinepolis-runner.jar")
+        println jar.exists()
+            ? "  ✅ Runner JAR generado: runner/target/cinepolis-runner.jar (${jar.length() / 1024} KB)"
+            : "  ❌ Runner JAR NO fue generado. Revisa runner/pom.xml"
+    }
+}
+
 // ---------- RUNNER PARA ENVIAR CORREO DESDE CI ----------
 tasks.register('runAllureMailRunner', JavaExec) {
     group = "reporting"
