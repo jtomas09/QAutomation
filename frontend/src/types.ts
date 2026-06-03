@@ -36,6 +36,8 @@ export interface RunState {
   failed: number;
   skipped: number;
   total: number;
+  /** Total de tests esperados para esta ejecución (0 = desconocido). */
+  totalExpected: number;
   lastRun: string | null;
   logs: LogEntry[];
   activeSuite: string | null;

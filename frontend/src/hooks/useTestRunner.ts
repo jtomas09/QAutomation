@@ -3,15 +3,16 @@ import type { RunState, LogLevel, LogEntry } from '../types'
 import { postRun, streamExecution, stopExecution, ApiError } from '../api'
 
 const initState: RunState = {
-  status:      'idle',
-  passed:      0,
-  failed:      0,
-  skipped:     0,
-  total:       0,
-  lastRun:     null,
-  logs:        [],
-  activeSuite: null,
-  executionId: null,
+  status:        'idle',
+  passed:        0,
+  failed:        0,
+  skipped:       0,
+  total:         0,
+  totalExpected: 0,
+  lastRun:       null,
+  logs:          [],
+  activeSuite:   null,
+  executionId:   null,
 }
 
 export function useTestRunner() {
@@ -26,7 +27,21 @@ export function useTestRunner() {
       level,
       message,
     }
-    setState(prev => ({ ...prev, logs: [...prev.logs, entry] }))
+    setState(prev => {
+      // Actualizar contadores en vivo con cada resultado de test
+      let { passed, failed, skipped, total, totalExpected } = prev
+      if (level === 'PASS') { passed++; total++ }
+      if (level === 'FAIL') { failed++; total++ }
+      if (level === 'SKIP') { skipped++; total++ }
+
+      // Detectar total esperado enviado por el runner (⚡ TOTAL_ESPERADO:N)
+      if (level === 'INFO') {
+        const m = message.match(/TOTAL_ESPERADO:(\d+)/)
+        if (m) totalExpected = parseInt(m[1], 10)
+      }
+
+      return { ...prev, logs: [...prev.logs, entry], passed, failed, skipped, total, totalExpected }
+    })
   }, [])
 
   const runTest = useCallback(async (
@@ -38,13 +53,14 @@ export function useTestRunner() {
   ) => {
     setState(prev => ({
       ...prev,
-      status:      'running',
-      passed:      0,
-      failed:      0,
-      skipped:     0,
-      total:       0,
-      activeSuite: suiteId,
-      executionId: null,
+      status:        'running',
+      passed:        0,
+      failed:        0,
+      skipped:       0,
+      total:         0,
+      totalExpected: 0,
+      activeSuite:   suiteId,
+      executionId:   null,
     }))
     addLog('INFO', `▶ Ejecutando suite: ${suiteId}  |  Env: ${env}  |  Device: ${device}`)
 
@@ -113,14 +129,15 @@ export function useTestRunner() {
     executionIdRef.current = executionId
     setState(prev => ({
       ...prev,
-      status:      'running',
-      passed:      0,
-      failed:      0,
-      skipped:     0,
-      total:       0,
-      activeSuite: suiteName,
+      status:        'running',
+      passed:        0,
+      failed:        0,
+      skipped:       0,
+      total:         0,
+      totalExpected: 0,
+      activeSuite:   suiteName,
       executionId,
-      logs:        [],
+      logs:          [],
     }))
     addLog('INFO', `📡 Ejecución programada detectada: ${executionId} — suite: ${suiteName}`)
 

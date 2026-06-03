@@ -13,6 +13,12 @@ interface Props {
   status:          RunStatus
   executionId:     string | null
   videoEnabled:    boolean
+  /** Contadores en vivo actualizados con cada evento PASS/FAIL/SKIP del stream */
+  passed:          number
+  failed:          number
+  skipped:         number
+  /** Total esperado enviado por el runner (0 = desconocido) */
+  totalExpected:   number
   onSuiteChange:   (v: string) => void
   onEnvChange:     (v: string) => void
   onDeviceChange:  (v: string) => void
@@ -27,12 +33,83 @@ const COUNTRY_ISO: Record<string, string> = {
   colombia: 'CO', peru: 'PE', espana: 'ES',
 }
 
+// ── Barra de progreso de ejecución ───────────────────────────────────────────
+
+interface ProgressBarProps {
+  completed: number
+  total:     number
+  passed:    number
+  failed:    number
+  skipped:   number
+}
+
+function ProgressBar({ completed, total, passed, failed, skipped }: ProgressBarProps) {
+  const pctPassed  = total > 0 ? (passed  / total) * 100 : 0
+  const pctFailed  = total > 0 ? (failed  / total) * 100 : 0
+  const pctSkipped = total > 0 ? (skipped / total) * 100 : 0
+  const allGood    = failed === 0
+
+  return (
+    <div className="px-1 pt-1 pb-0.5">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          Progreso
+        </span>
+        <span className="text-[13px] font-black tabular-nums"
+          style={{ color: allGood ? '#34d399' : '#f87171' }}>
+          {completed}
+          <span className="text-[11px] font-semibold text-slate-500">/{total}</span>
+        </span>
+      </div>
+
+      {/* Barra segmentada: verde | rojo | amarillo | gris restante */}
+      <div className="relative h-2.5 rounded-full overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.07)' }}>
+        <div className="absolute inset-y-0 left-0 transition-all duration-500"
+          style={{ width: `${pctPassed}%`, background: '#22c55e' }} />
+        <div className="absolute inset-y-0 transition-all duration-500"
+          style={{ left: `${pctPassed}%`, width: `${pctFailed}%`, background: '#ef4444' }} />
+        <div className="absolute inset-y-0 transition-all duration-500"
+          style={{ left: `${pctPassed + pctFailed}%`, width: `${pctSkipped}%`, background: '#f59e0b' }} />
+      </div>
+
+      {/* Chips */}
+      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+        {passed > 0 && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ color: '#22c55e', background: 'rgba(34,197,94,0.12)' }}>
+            ✓ {passed} ok
+          </span>
+        )}
+        {failed > 0 && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)' }}>
+            ✗ {failed} fail
+          </span>
+        )}
+        {skipped > 0 && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ color: '#fbbf24', background: 'rgba(245,158,11,0.12)' }}>
+            ⏭ {skipped} skip
+          </span>
+        )}
+        {completed < total && (
+          <span className="text-[10px] text-slate-600 ml-auto">
+            {total - completed} restantes
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function RunTestsPanel(props: Props) {
   const { suite, env, device, country, status, executionId,
-          videoEnabled, onVideoToggle,
+          videoEnabled, onVideoToggle, passed, failed, skipped, totalExpected,
           onSuiteChange, onEnvChange, onDeviceChange, onCountryChange, onRun, onStop } = props
   const [advanced, setAdvanced] = useState(false)
   const running = status === 'running'
+  const completed = passed + failed + skipped
 
   return (
     <div
@@ -161,6 +238,18 @@ export default function RunTestsPanel(props: Props) {
                 ▶ EJECUTAR PRUEBAS
               </motion.button>
             )}
+
+            {/* Barra de progreso — visible solo cuando hay ejecución activa */}
+            {running && totalExpected > 0 && (
+              <ProgressBar
+                completed={completed}
+                total={totalExpected}
+                passed={passed}
+                failed={failed}
+                skipped={skipped}
+              />
+            )}
+
             <p className="text-center text-[11px] text-slate-600">
               {executionId
                 ? <span style={{ color: '#818cf8' }}>ID: {executionId}</span>

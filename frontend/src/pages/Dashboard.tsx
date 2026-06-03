@@ -176,6 +176,10 @@ export default function Dashboard({
           onSuiteChange={onSuiteChange}     onEnvChange={onEnvChange}
           onDeviceChange={onDeviceChange}   onCountryChange={onCountryChange}
           onRun={onRun}           onStop={onStop}
+          passed={state.passed}
+          failed={state.failed}
+          skipped={state.skipped}
+          totalExpected={state.totalExpected}
         />
         <RecentExecutions onViewAll={onViewAll} />
       </div>

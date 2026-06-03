@@ -293,6 +293,28 @@ public class JobExecutor {
         this.client = client;
     }
 
+    /**
+     * Devuelve el número de tests esperados para la suite dada:
+     *  - smoke  → SMOKE_SIZE (50)
+     *  - método individual (4+ puntos) → 1
+     *  - asientos (9 métodos fijos)    → 9
+     *  - desconocido / clase completa  → -1 (no se muestra progreso)
+     */
+    private int resolveExpectedTestCount(JobDto job) {
+        String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
+        if ("smoke tests".equals(key) || "smoke".equals(key)) {
+            return Math.min(SMOKE_SIZE, MEXICO_SMOKE_POOL.size());
+        }
+        if ("asientos".equals(key)) return 9;
+        // Método individual en SUITE_MAP (filtro con 4+ puntos = ClassName.methodName)
+        String filter = SUITE_MAP.getOrDefault(key, "");
+        if (!filter.isBlank() && !filter.startsWith("§")
+                && filter.chars().filter(c -> c == '.').count() >= 4) {
+            return 1;
+        }
+        return -1;
+    }
+
     /** Kills the currently running Gradle process tree. Called by the shutdown hook. */
     public void killActiveProcess() {
         Process p = activeProcess;
@@ -358,6 +380,12 @@ public class JobExecutor {
             // ── Pre-flight ────────────────────────────────────────────────────
             checkAdbDevices(job.executionId);
             checkAppiumServer(job.executionId);
+
+            // Notificar al dashboard cuántos tests se esperan (para barra de progreso)
+            int expectedCount = resolveExpectedTestCount(job);
+            if (expectedCount > 0) {
+                client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + expectedCount);
+            }
 
             // ── Pre-clean locked test-results to avoid file-lock failures ────
             preCleanTestResults(job.executionId);
