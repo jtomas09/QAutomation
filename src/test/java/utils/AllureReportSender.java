@@ -504,13 +504,30 @@ public class AllureReportSender {
         }
 
         // Adjunto 2: PDFs por test (merged de build/reportes-pdf/)
+        // Solo se adjunta si el tamaño total no supera el límite SMTP de AWS SES (~10 MB).
+        // Base64 encoding infla ~33%, así que el límite real de datos crudos es ~7.5 MB.
+        // Si el PDF mergeado es demasiado grande, se omite y se notifica en el correo.
+        final long SMTP_MAX_ATTACH_BYTES = 7L * 1024 * 1024; // 7 MB
         Path testsPdf = mergeTestPdfs(projectName);
         if (testsPdf != null && Files.exists(testsPdf)) {
-            MimeBodyPart testsPart = new MimeBodyPart();
-            testsPart.attachFile(testsPdf.toFile());
-            testsPart.setFileName("Reporte_Tests_" + sanitizeFileName(projectName) + ".pdf");
-            multipart.addBodyPart(testsPart);
-            log.info("[AllureReportSender] Per-test PDF attached: {}", testsPdf.getFileName());
+            long allureBytes = (allurePdf != null && Files.exists(allurePdf))
+                    ? allurePdf.toFile().length() : 0L;
+            long testsBytes  = testsPdf.toFile().length();
+            long totalBytes  = allureBytes + testsBytes;
+
+            if (totalBytes <= SMTP_MAX_ATTACH_BYTES) {
+                MimeBodyPart testsPart = new MimeBodyPart();
+                testsPart.attachFile(testsPdf.toFile());
+                testsPart.setFileName("Reporte_Tests_" + sanitizeFileName(projectName) + ".pdf");
+                multipart.addBodyPart(testsPart);
+                log.info("[AllureReportSender] Per-test PDF attached: {} ({} KB)",
+                        testsPdf.getFileName(), testsBytes / 1024);
+            } else {
+                log.warn("[AllureReportSender] Per-test PDF omitido: tamaño total {}/{} KB supera límite SMTP.",
+                        totalBytes / 1024, SMTP_MAX_ATTACH_BYTES / 1024);
+                // El correo ya incluye el Allure PDF; informar al destinatario
+                // que el PDF de tests individuales no se adjuntó por tamaño.
+            }
         }
 
         message.setContent(multipart);
