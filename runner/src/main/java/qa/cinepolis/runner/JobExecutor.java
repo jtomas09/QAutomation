@@ -47,6 +47,15 @@ public class JobExecutor {
     /** Número de casos seleccionados para una ejecución Smoke. */
     static final int SMOKE_SIZE = 50;
 
+    /**
+     * Mapa de filtro Gradle → número de tests que ejecutará.
+     * Calculado automáticamente desde SUITE_MAP:
+     *  - Filtro de método (4+ puntos)   → 1
+     *  - Filtro de clase  (3 puntos)    → número de métodos de esa clase en SUITE_MAP
+     *  - Filtro wildcard  (.*)          → suma de métodos de todas las clases del paquete
+     */
+    static final Map<String, Integer> SUITE_FILTER_SIZE = new HashMap<>();
+
     static {
         SUITE_MAP = new HashMap<>();
         // Full suites — smoke apunta a lógica propia, NO a RunAllTests
@@ -281,6 +290,40 @@ public class JobExecutor {
                 MEXICO_SMOKE_POOL.add(filter);
             }
         }
+
+        // ── Calcular SUITE_FILTER_SIZE: cuántos tests ejecuta cada filtro ────────
+        // Paso 1: contar métodos por clase (filtros de 4+ puntos → extraer la clase padre)
+        Map<String, Integer> classMethodCount = new HashMap<>();
+        for (String f : SUITE_MAP.values()) {
+            if (f == null || f.startsWith("§") || !f.startsWith("tests.")) continue;
+            long dots = f.chars().filter(c -> c == '.').count();
+            if (dots >= 4 && !f.endsWith(".*")) {
+                // Filtro de método → clase es todo menos el último segmento
+                String cls = f.substring(0, f.lastIndexOf('.'));
+                classMethodCount.merge(cls, 1, Integer::sum);
+            }
+        }
+        // Paso 2: construir mapa filtro → count para los tres tipos de filtro
+        for (String f : SUITE_MAP.values()) {
+            if (f == null || f.startsWith("§") || f.equals("tests.RunAllTests")) continue;
+            long dots = f.chars().filter(c -> c == '.').count();
+            if (!f.endsWith(".*") && dots >= 4) {
+                // Método individual
+                SUITE_FILTER_SIZE.put(f, 1);
+            } else if (!f.endsWith(".*") && dots == 3) {
+                // Clase completa → buscar conteo de métodos
+                Integer cnt = classMethodCount.get(f);
+                if (cnt != null) SUITE_FILTER_SIZE.put(f, cnt);
+            } else if (f.endsWith(".*")) {
+                // Wildcard de paquete → sumar métodos de todas las clases del paquete
+                String pkg = f.substring(0, f.length() - 2) + "."; // "tests.xxx.alimentos."
+                int total = 0;
+                for (Map.Entry<String, Integer> e : classMethodCount.entrySet()) {
+                    if (e.getKey().startsWith(pkg)) total += e.getValue();
+                }
+                if (total > 0) SUITE_FILTER_SIZE.put(f, total);
+            }
+        }
     }
 
     private final RunnerConfig  config;
@@ -294,25 +337,31 @@ public class JobExecutor {
     }
 
     /**
-     * Devuelve el número de tests esperados para la suite dada:
-     *  - smoke  → SMOKE_SIZE (50)
-     *  - método individual (4+ puntos) → 1
-     *  - asientos (9 métodos fijos)    → 9
-     *  - desconocido / clase completa  → -1 (no se muestra progreso)
+     * Devuelve el número de tests esperados para la suite dada usando SUITE_FILTER_SIZE.
+     * Cubre automáticamente todas las suites registradas en SUITE_MAP:
+     *  - smoke               → SMOKE_SIZE (50, selección aleatoria)
+     *  - clase completa      → número de métodos de esa clase en SUITE_MAP
+     *  - wildcard de paquete → suma de todos los métodos del paquete
+     *  - método individual   → 1
+     *  - full suite / RunAllTests → -1 (desconocido, sin barra de progreso)
      */
     private int resolveExpectedTestCount(JobDto job) {
         String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
+
+        // Smoke: selección aleatoria de tamaño fijo
         if ("smoke tests".equals(key) || "smoke".equals(key)) {
             return Math.min(SMOKE_SIZE, MEXICO_SMOKE_POOL.size());
         }
-        if ("asientos".equals(key)) return 9;
-        // Método individual en SUITE_MAP (filtro con 4+ puntos = ClassName.methodName)
+
+        // Buscar el filtro Gradle para esta suite
         String filter = SUITE_MAP.getOrDefault(key, "");
-        if (!filter.isBlank() && !filter.startsWith("§")
-                && filter.chars().filter(c -> c == '.').count() >= 4) {
-            return 1;
+        if (filter.isEmpty() || filter.startsWith("§") || filter.equals("tests.RunAllTests")) {
+            return -1;
         }
-        return -1;
+
+        // Lookup en el mapa precalculado
+        Integer count = SUITE_FILTER_SIZE.get(filter);
+        return count != null ? count : -1;
     }
 
     /** Kills the currently running Gradle process tree. Called by the shutdown hook. */
