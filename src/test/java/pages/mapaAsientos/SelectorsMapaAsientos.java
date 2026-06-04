@@ -311,7 +311,7 @@ public class SelectorsMapaAsientos extends BasePage {
         }
 
         if (input == null) {
-            throw new org.opentest4j.AssertionError(
+            throw new AssertionError(
                 "No se encontró el campo de folio en la pantalla de boletos");
         }
 
@@ -348,7 +348,7 @@ public class SelectorsMapaAsientos extends BasePage {
                 driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
             }
         }
-        throw new org.opentest4j.AssertionError("No se encontró el botón Aplicar del folio");
+        throw new AssertionError("No se encontró el botón Aplicar del folio");
     }
 
     /**
@@ -370,11 +370,11 @@ public class SelectorsMapaAsientos extends BasePage {
             if (!errores.isEmpty()) {
                 String msg = errores.get(0).getText();
                 log.error("[PaseAnual] Error al aplicar folio: {}", msg);
-                throw new org.opentest4j.AssertionError(
+                throw new AssertionError(
                     "El folio fue rechazado por la aplicación: " + msg);
             }
             log.info("[PaseAnual] Folio aplicado sin errores detectados");
-        } catch (org.opentest4j.AssertionError ae) {
+        } catch (AssertionError ae) {
             throw ae;
         } catch (Exception e) {
             driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
