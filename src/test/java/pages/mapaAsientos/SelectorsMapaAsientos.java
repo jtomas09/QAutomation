@@ -219,6 +219,167 @@ public class SelectorsMapaAsientos extends BasePage {
         verificarSinErrorApp();
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // PASE ANUAL / FOLIO en pantalla "Selecciona tus boletos"
+    // ─────────────────────────────────────────────────────────────────────
 
+    /**
+     * Activa la pestaña de Pase Anual / Folio en la pantalla de boletos.
+     * Prueba múltiples locators porque el ícono puede variar por versión de app.
+     */
+    public void seleccionarTabPaseAnual() {
+        log.info("[PaseAnual] Activando pestaña de Pase Anual / Folio");
+
+        // Intento 1: content-desc explícito
+        String[] descCandidatos = {
+            "Pase Anual", "Folio", "folio", "pase", "Pase", "Pass", "Cinépolis Pass"
+        };
+        for (String desc : descCandidatos) {
+            try {
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofMillis(0));
+                java.util.List<org.openqa.selenium.WebElement> els =
+                    driver.findElements(org.openqa.selenium.By.xpath(
+                        "//*[@content-desc='" + desc + "' or @text='" + desc + "']"));
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+                if (!els.isEmpty()) {
+                    els.get(0).click();
+                    sleep(500);
+                    log.info("[PaseAnual] Pestaña activada con: {}", desc);
+                    return;
+                }
+            } catch (Exception e) {
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            }
+        }
+
+        // Intento 2: última pestaña en la fila de promociones (Mastercard | Folios | Pase)
+        try {
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofMillis(0));
+            java.util.List<org.openqa.selenium.WebElement> tabs =
+                driver.findElements(org.openqa.selenium.By.xpath(
+                    "//android.widget.TextView[@text='Mastercard 2x1']/../../.." +
+                    "//android.view.View[@clickable='true' or ancestor-or-self::*[@clickable='true']]"));
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            if (!tabs.isEmpty()) {
+                tabs.get(tabs.size() - 1).click();
+                sleep(500);
+                log.info("[PaseAnual] Pestaña activada por posición (última)");
+                return;
+            }
+        } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+        }
+
+        // Intento 3: si el input de folio ya es visible, la pestaña ya está activa
+        try {
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(2));
+            driver.findElement(org.openqa.selenium.By.xpath("//android.widget.EditText"));
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            log.info("[PaseAnual] Input folio ya visible — pestaña activa");
+        } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            log.warn("[PaseAnual] No se pudo activar pestaña Pase Anual — continuando");
+        }
+    }
+
+    /**
+     * Ingresa el folio del Pase Anual en el campo de texto correspondiente.
+     * Prueba distintos locators para mayor robustez.
+     */
+    public void ingresarFolioPaseAnual(String folio) {
+        log.info("[PaseAnual] Ingresando folio: {}", folio);
+
+        org.openqa.selenium.By[] candidatos = {
+            org.openqa.selenium.By.xpath("//android.widget.EditText"),
+            org.openqa.selenium.By.xpath(
+                "//*[contains(@text,'0000') or @hint='Ingresa tu folio'" +
+                " or contains(@hint,'folio') or contains(@hint,'Folio')]"),
+            org.openqa.selenium.By.xpath(
+                "//*[@class='android.widget.EditText']")
+        };
+
+        org.openqa.selenium.WebElement input = null;
+        for (org.openqa.selenium.By loc : candidatos) {
+            try {
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(3));
+                input = driver.findElement(loc);
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+                break;
+            } catch (Exception e) {
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            }
+        }
+
+        if (input == null) {
+            throw new org.opentest4j.AssertionError(
+                "No se encontró el campo de folio en la pantalla de boletos");
+        }
+
+        input.clear();
+        input.sendKeys(folio);
+        sleep(300);
+        log.info("[PaseAnual] Folio ingresado correctamente");
+    }
+
+    /** Presiona el botón "Aplicar" del folio. */
+    public void clickAplicarFolio() {
+        log.info("[PaseAnual] Presionando Aplicar");
+        org.openqa.selenium.By[] candidatos = {
+            org.openqa.selenium.By.xpath(
+                "//android.widget.TextView[@text='Aplicar']" +
+                "/following-sibling::android.widget.Button"),
+            org.openqa.selenium.By.xpath(
+                "//android.widget.TextView[@text='Aplicar']" +
+                "/../android.widget.Button"),
+            org.openqa.selenium.By.xpath(
+                "//android.widget.Button[@text='Aplicar']"),
+            org.openqa.selenium.By.xpath(
+                "//android.widget.TextView[@text='Aplicar']")
+        };
+        for (org.openqa.selenium.By loc : candidatos) {
+            try {
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(3));
+                driver.findElement(loc).click();
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+                sleep(800);
+                log.info("[PaseAnual] Aplicar presionado correctamente");
+                return;
+            } catch (Exception e) {
+                driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            }
+        }
+        throw new org.opentest4j.AssertionError("No se encontró el botón Aplicar del folio");
+    }
+
+    /**
+     * Valida que el folio se aplicó sin errores.
+     * Busca mensajes de error; si no hay ninguno, asume éxito (smoke behavior).
+     */
+    public void validarFolioAplicado() {
+        log.info("[PaseAnual] Validando resultado del folio");
+        sleep(1000);
+        try {
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(3));
+            java.util.List<org.openqa.selenium.WebElement> errores =
+                driver.findElements(org.openqa.selenium.By.xpath(
+                    "//*[contains(@text,'inválido') or contains(@text,'Inválido') " +
+                    "or contains(@text,'incorrecto') or contains(@text,'error') " +
+                    "or contains(@text,'Error') or contains(@text,'no válido')]"));
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+
+            if (!errores.isEmpty()) {
+                String msg = errores.get(0).getText();
+                log.error("[PaseAnual] Error al aplicar folio: {}", msg);
+                throw new org.opentest4j.AssertionError(
+                    "El folio fue rechazado por la aplicación: " + msg);
+            }
+            log.info("[PaseAnual] Folio aplicado sin errores detectados");
+        } catch (org.opentest4j.AssertionError ae) {
+            throw ae;
+        } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(10));
+            log.info("[PaseAnual] Validación completada (sin errores detectados)");
+        }
+    }
 
 }

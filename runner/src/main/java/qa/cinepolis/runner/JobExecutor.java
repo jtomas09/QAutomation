@@ -66,6 +66,10 @@ public class JobExecutor {
         SUITE_MAP.put("sanity",               "tests.RunAllTests");
         SUITE_MAP.put("flujo completo",       "tests.México.E2E.FlujosCompraNoLogin");
         SUITE_MAP.put("flujo-completo",       "tests.México.E2E.FlujosCompraNoLogin");
+        SUITE_MAP.put("pase anual",           "tests.México.E2E.CompraPaseAnual");
+        SUITE_MAP.put("pase-anual",           "tests.México.E2E.CompraPaseAnual");
+        SUITE_MAP.put("compra pase anual",    "tests.México.E2E.CompraPaseAnual");
+        SUITE_MAP.put("compra-pase-anual",    "tests.México.E2E.CompraPaseAnual");
         SUITE_MAP.put("asientos",             "tests.México.asientos.SeleccionAsientos");
         SUITE_MAP.put("alimentos",            "tests.México.alimentos.*");
         SUITE_MAP.put("alimentos — todo",     "tests.México.alimentos.*");
@@ -337,6 +341,42 @@ public class JobExecutor {
     }
 
     /**
+     * Calcula el total esperado DESDE EL COMANDO GRADLE ya construido, garantizando
+     * que el valor enviado al dashboard coincide exactamente con lo que se ejecutará.
+     *
+     *  - Smoke / múltiples --tests individuales → número de flags --tests (1 por método)
+     *  - Suite de clase (1 flag --tests ClassName) → lookup en SUITE_FILTER_SIZE
+     *  - Wildcard (1 flag --tests pkg.*) → lookup en SUITE_FILTER_SIZE
+     *  - Desconocido → -1 (sin barra de progreso)
+     */
+    private int resolveExpectedCountFromCommand(JobDto job, List<String> cmd) {
+        String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
+
+        // Contar cuántos flags --tests tiene el comando
+        long testsFlags = cmd.stream().filter("--tests"::equals).count();
+
+        // Smoke y múltiples métodos individuales: cada flag = 1 test real
+        if ("smoke tests".equals(key) || "smoke".equals(key) || testsFlags > 1) {
+            return (int) testsFlags;
+        }
+
+        // 1 flag → clase o método
+        if (testsFlags == 1) {
+            int idx = cmd.indexOf("--tests");
+            if (idx >= 0 && idx + 1 < cmd.size()) {
+                String filter = cmd.get(idx + 1);
+                Integer count = SUITE_FILTER_SIZE.get(filter);
+                if (count != null) return count;
+                // 4+ puntos sin .* = selector de método → 1 test
+                if (filter.chars().filter(c -> c == '.').count() >= 4
+                        && !filter.endsWith(".*")) return 1;
+            }
+        }
+
+        return -1;
+    }
+
+    /**
      * Devuelve el número de tests esperados para la suite dada usando SUITE_FILTER_SIZE.
      * Cubre automáticamente todas las suites registradas en SUITE_MAP:
      *  - smoke               → SMOKE_SIZE (50, selección aleatoria)
@@ -430,17 +470,21 @@ public class JobExecutor {
             checkAdbDevices(job.executionId);
             checkAppiumServer(job.executionId);
 
-            // Notificar al dashboard cuántos tests se esperan (para barra de progreso)
-            int expectedCount = resolveExpectedTestCount(job);
-            if (expectedCount > 0) {
-                client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + expectedCount);
-            }
-
             // ── Pre-clean locked test-results to avoid file-lock failures ────
             preCleanTestResults(job.executionId);
 
             // ── Build Gradle command ──────────────────────────────────────────
             List<String> cmd = buildCommand(job);
+
+            // Notificar TOTAL_ESPERADO DESPUÉS de construir el comando para usar
+            // el conteo real: para smoke = número de --tests flags seleccionados;
+            // para clases = lookup en SUITE_FILTER_SIZE. Esto garantiza que
+            // la barra de progreso siempre coincide con lo que realmente se ejecuta.
+            int expectedCount = resolveExpectedCountFromCommand(job, cmd);
+            if (expectedCount > 0) {
+                client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + expectedCount);
+                client.sendLog(job.executionId, "INFO", "📊 Casos seleccionados: " + expectedCount);
+            }
             client.sendLog(job.executionId, "INFO",
                     "🔧 Comando: " + String.join(" ", cmd));
             System.out.println("[Executor] Comando: " + String.join(" ", cmd));

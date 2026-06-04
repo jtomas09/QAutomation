@@ -554,45 +554,115 @@ public class SelectorPage extends BasePage {
         this.clickIfPresent(By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.widget.Button"));
     }
 
+    /**
+     * Abre el carrito de compras usando múltiples estrategias para evitar fallos
+     * por ausencia del badge "1" en la ventana de tiempo inicial.
+     *
+     * Estrategias (en orden):
+     *   1. Badge numérico visible (cualquier número 1-9)
+     *   2. Ícono de carrito por content-desc o resource-id
+     *   3. Coordenada fija del ícono (esquina superior derecha del header)
+     *
+     * Cada estrategia verifica que la pantalla de carrito se abrió realmente.
+     * Se realizan hasta 3 intentos antes de fallar.
+     */
     public void abrirCarrito() {
         log.info("[abrirCarrito] Intentando abrir carrito...");
+        Exception lastError = null;
 
-        By badge = By.xpath("//android.widget.TextView[@text='1']");
+        for (int intento = 1; intento <= 3; intento++) {
+            try {
+                if (intentarAbrirCarritoInterno(intento)) {
+                    log.info("[abrirCarrito] Carrito abierto correctamente (intento {})", intento);
+                    return;
+                }
+                log.warn("[abrirCarrito] Intento {} ejecutado pero pantalla no detectada.", intento);
+            } catch (Exception e) {
+                lastError = e;
+                log.warn("[abrirCarrito] Intento {} fallido: {}", intento, e.getMessage());
+            }
+            sleep(800);
+        }
+        throw new RuntimeException("No se pudo abrir el carrito correctamente tras 3 intentos", lastError);
+    }
 
+    private boolean intentarAbrirCarritoInterno(int intento) {
+        // Estrategia 1: badge numérico en el header (cualquier número 1-9)
         try {
-            WebElement badgeElement = new WebDriverWait(driver, Duration.ofSeconds(10))
-                    .until(ExpectedConditions.visibilityOfElementLocated(badge));
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            java.util.List<WebElement> badges = driver.findElements(By.xpath(
+                "//android.widget.TextView[@text='1' or @text='2' or @text='3' " +
+                "or @text='4' or @text='5' or @text='6' or @text='7' or @text='8' or @text='9']"));
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
 
-            log.info("[abrirCarrito] Badge encontrado");
-
-            Rectangle rect = badgeElement.getRect();
-            int centerX = rect.getX() + (rect.getWidth() / 2);
-            int centerY = rect.getY() + (rect.getHeight() / 2);
-
-            log.info("[abrirCarrito] Tap coordenadas -> X:{} Y:{}", centerX, centerY);
-
-            PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
-            Sequence tap = new Sequence(finger, 1);
-            tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), centerX, centerY));
-            tap.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
-            tap.addAction(new Pause(finger, Duration.ofMillis(120)));
-            tap.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
-
-            driver.perform(Collections.singletonList(tap));
-            log.info("[abrirCarrito] Tap ejecutado correctamente");
-
-            new WebDriverWait(driver, Duration.ofSeconds(8))
-                    .until(ExpectedConditions.or(
-                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Carrito')]")),
-                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Continuar')]")),
-                            ExpectedConditions.presenceOfElementLocated(By.xpath("//*[contains(@text,'Ir a pagar')]"))
-                    ));
-
-            log.info("[abrirCarrito] Carrito abierto correctamente");
-
+            for (WebElement badge : badges) {
+                try {
+                    Rectangle r = badge.getRect();
+                    int cx = r.getX() + r.getWidth() / 2;
+                    int cy = r.getY() + r.getHeight() / 2;
+                    if (cy < driver.manage().window().getSize().getHeight() * 0.15) {
+                        log.info("[abrirCarrito] Badge encontrado en ({},{})", cx, cy);
+                        tapCarrito(cx, cy);
+                        if (estaEnPantallaCarrito()) return true;
+                    }
+                } catch (Exception ignored) {}
+            }
         } catch (Exception e) {
-            log.error("[abrirCarrito] Error abriendo carrito", e);
-            throw new RuntimeException("No se pudo abrir el carrito correctamente", e);
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+
+        // Estrategia 2: ícono de carrito por content-desc / resource-id
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(2));
+            WebElement icon = driver.findElement(By.xpath(
+                "//*[@content-desc='Carrito' or @content-desc='Cart' or " +
+                "contains(@resource-id,'cart') or contains(@resource-id,'carrito') or " +
+                "@content-desc='carrito' or @content-desc='basket']"));
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            Rectangle r = icon.getRect();
+            log.info("[abrirCarrito] Ícono carrito encontrado por content-desc ({},{})",
+                    r.getX() + r.getWidth() / 2, r.getY() + r.getHeight() / 2);
+            tapCarrito(r.getX() + r.getWidth() / 2, r.getY() + r.getHeight() / 2);
+            if (estaEnPantallaCarrito()) return true;
+        } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+
+        // Estrategia 3: coordenada fija del ícono (esquina superior derecha, ~94% × 6.7%)
+        Dimension screen = driver.manage().window().getSize();
+        int cartX = (int)(screen.getWidth()  * 0.945);
+        int cartY = (int)(screen.getHeight() * 0.067);
+        log.info("[abrirCarrito] Estrategia por coordenada fija: ({},{})", cartX, cartY);
+        tapCarrito(cartX, cartY);
+        sleep(600);
+        return estaEnPantallaCarrito();
+    }
+
+    private void tapCarrito(int x, int y) {
+        log.info("[abrirCarrito] Tap coordenadas -> X:{} Y:{}", x, y);
+        PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
+        Sequence tap = new Sequence(finger, 1);
+        tap.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), x, y));
+        tap.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
+        tap.addAction(new Pause(finger, Duration.ofMillis(120)));
+        tap.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
+        driver.perform(Collections.singletonList(tap));
+        log.info("[abrirCarrito] Tap ejecutado correctamente");
+    }
+
+    private boolean estaEnPantallaCarrito() {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(5));
+            boolean en = !driver.findElements(By.xpath(
+                "//*[contains(@text,'Carrito') or contains(@text,'carrito') " +
+                "or contains(@text,'Continuar') or contains(@text,'Ir a pagar') " +
+                "or contains(@text,'tu orden') or contains(@text,'Boletos')]")).isEmpty();
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            if (en) log.info("[abrirCarrito] Pantalla carrito detectada");
+            return en;
+        } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            return false;
         }
     }
 

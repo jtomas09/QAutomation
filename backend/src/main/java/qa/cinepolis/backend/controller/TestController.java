@@ -67,7 +67,7 @@ public class TestController {
     public Map<String, Object> config() {
         return Map.of(
                 "environments", new String[]{"QA", "PROD", "STG"},
-                "suites",       new String[]{"Smoke Tests", "Asientos", "Alimentos", "Checkout", "Full Suite"},
+                "suites",       new String[]{"Smoke Tests", "Asientos", "Alimentos", "Checkout", "Pase Anual", "Full Suite"},
                 "devices",      new String[]{"Galaxy A56 5G", "Galaxy S23", "Pixel 7", "BrowserStack"}
         );
     }
