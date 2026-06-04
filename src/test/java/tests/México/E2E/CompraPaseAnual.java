@@ -17,13 +17,13 @@ import utils.TestSteps;
 /**
  * Flujo automatizado de Compra con Pase Anual.
  *
- * Arquitectura equivalente a FlujosCompraNoLogin:
- *   1. BaseTest gestiona driver + selección de cine México (@BeforeEach)
- *   2. seleccionarPeliculaRandomYHorarioDescartandoAlertas() navega a la
- *      función y descarta alertas de clasificación, Atención, etc.
- *   3. seleccionarAsiento() + clickContinuarMapaAsientos() llegan al
- *      selector de boletos.
- *   4. Pestaña Pase Anual → ingresar folio → Aplicar → validar.
+ * Patrón:
+ *   1. BaseTest gestiona driver + cine México (@BeforeEach heredado)
+ *   2. seleccionarPeliculaRandomYHorarioDescartandoAlertas() navega al mapa
+ *      descartando alertas de clasificación, Atención, etc.
+ *   3. seleccionarAsientoRandomDisponible() usa SeatMap (60 s + fallbacks)
+ *   4. clickContinuarMapaAsientos() verifica que el selector de boletos cargó
+ *   5. Pestaña Pase Anual → folio → Aplicar → validar
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @Epic("Compra con Pase Anual - México")
@@ -49,26 +49,29 @@ public class CompraPaseAnual extends BaseTest {
     void compraPaseAnual() {
         String folio = System.getProperty("paseAnualFolio", FOLIO_DEFAULT);
 
-        // Paso 1: seleccionar película y horario, descartando cualquier alerta
-        // (clasificación C, Atención/vibraciones, Restricciones, etc.)
+        // Paso 1 — seleccionar película + función descartando alertas de clasificación
         TestSteps.run("Seleccionar película y función", () ->
             asientosPagina.seleccionarPeliculaRandomYHorarioDescartandoAlertas()
         , driver);
 
-        // Paso 2: seleccionar asiento y continuar al selector de boletos
-        TestSteps.run("Seleccionar asiento", () -> {
-            mapa.seleccionarAsiento();
-            mapa.clickContinuarMapaAsientos();
-        }, driver);
+        // Paso 2 — seleccionar asiento usando SeatMap (60 s + estrategias S1-S4)
+        TestSteps.run("Seleccionar asiento", () ->
+            asientosPagina.seleccionarAsientoRandomDisponible()
+        , driver);
 
-        // Paso 3: pestaña Pase Anual → ingresar folio → Aplicar
+        // Paso 3 — continuar al selector de boletos (verifica que la pantalla cargó)
+        TestSteps.run("Continuar al selector de boletos", () ->
+            mapa.clickContinuarMapaAsientos()
+        , driver);
+
+        // Paso 4 — activar pestaña Pase Anual, ingresar folio y aplicar
         TestSteps.run("Ingresar folio Pase Anual", () -> {
             mapa.seleccionarTabPaseAnual();
             mapa.ingresarFolioPaseAnual(folio);
             mapa.clickAplicarFolio();
         }, driver);
 
-        // Paso 4: validar que el folio fue aceptado sin errores
+        // Paso 5 — validar que no hubo error de folio
         TestSteps.run("Validar folio aplicado correctamente", () ->
             mapa.validarFolioAplicado()
         , driver);

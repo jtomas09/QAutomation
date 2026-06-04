@@ -155,6 +155,7 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'e2e-ticket-vip',     title: 'Compra Ticket — VIP',            description: 'Compra ticket sin sesión en sala VIP' },
     { id: 'e2e-mix-vip',        title: 'Compra Mix — VIP',               description: 'Compra ticket + alimento sin sesión, VIP' },
     { id: 'e2e-alimento-vip',   title: 'Compra Alimento — VIP',          description: 'Solo alimento sin sesión en sala VIP' },
+    { id: 'pase-anual',         title: 'Compra con Pase Anual',          description: 'Aplica folio de Pase Anual Cinépolis en la pantalla de boletos' },
   ],
 
   'checkout': [
