@@ -46,6 +46,13 @@ export const TEST_SUITES: TestSuite[] = [
     accent: '#14b8a6',
   },
   {
+    id: 'pase-anual',
+    title: 'Pase Anual',
+    description: 'Valida el flujo de compra aplicando un folio de Pase Anual Cinépolis.',
+    icon: '🎫',
+    accent: '#ec4899',
+  },
+  {
     id: 'smoke',
     title: 'Smoke Tests',
     description: 'Suite rápida para validar funcionalidades críticas de la aplicación.',
@@ -304,6 +311,14 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'cl-ticket-parquepremium',   title: 'Ticket — Parque Arauco Premium',description: 'Compra ticket sin sesión en Cine Parque Arauco Premium' },
     { id: 'cl-mix-parquepremium',      title: 'Mix — Parque Arauco Premium',   description: 'Compra mix sin sesión en Cine Parque Arauco Premium' },
     { id: 'cl-alimento-parquepremium', title: 'Alimento — Parque Arauco Premium', description: 'Compra alimento sin sesión en Cine Parque Arauco Premium' },
+  ],
+
+  'pase-anual': [
+    {
+      id:          'compra-pase-anual',
+      title:       'Compra con Pase Anual — Aplicar Folio',
+      description: 'Selecciona función y asiento, luego aplica un folio de Pase Anual en la pantalla de boletos.',
+    },
   ],
 
   // smoke entry required so SUITE_TESTS['smoke'] is truthy (drill-down guard in App.tsx)
