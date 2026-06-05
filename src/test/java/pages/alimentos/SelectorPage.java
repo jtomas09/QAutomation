@@ -1134,15 +1134,33 @@ public class SelectorPage extends BasePage {
             throw e;
         }
     }
+    // ─── Estado del carrusel: permite omitir el reset cuando la sección no cambia ───
+    private String  lastAnchorXpath  = null;
+
+    /**
+     * Busca y clica un producto dentro del carrusel horizontal de una sección.
+     *
+     * OPTIMIZACIONES v2:
+     *  1. implicitlyWait=0 en el bucle  → elimina ~10 s de espera por swipe infructuoso
+     *     (el comportamiento anterior: 20 swipes × 10 s = hasta 200 s solo en waits)
+     *  2. swipeRightInAnchorY reducido   → 350 ms + 80 ms = 430 ms (era 1100 ms, −61 %)
+     *  3. Reset carrusel opcional        → se omite si la sección ya es la misma
+     *  4. Métricas completas en log      → swipe N/total + tiempo total + producto
+     *
+     * La lógica funcional (forzarClic, verificarYAbortarSiAgotado, SKIP) se mantiene intacta.
+     */
     private void clickRightFromAnchorOneTry(String anchorXpath, String targetXpath) {
-        // 1. Extraer el nombre del producto para el mensaje (se mantiene igual)
+        // 1. Extraer nombre del producto (sin cambios)
         String extractedText = targetXpath.replaceAll(".*@text=['\"]", "").replaceAll("['\"].*", "");
 
-        final int ANCHOR_SCROLL_MAX = 18;
-        final int RESET_SWIPES = 3;
+        final int ANCHOR_SCROLL_MAX  = 18;
+        final int RESET_SWIPES       = 3;
         final int MAX_CAROUSEL_SWIPES = 20;
 
-        // 2. Asegurar sección visible
+        long t0 = System.currentTimeMillis();
+        log.info("[Búsqueda] Producto: \"{}\"", extractedText);
+
+        // 2. Asegurar sección visible (con métricas de scroll vertical)
         if (!this.ensureVisibleByXpathNoClick(anchorXpath, ANCHOR_SCROLL_MAX)) {
             throw new RuntimeException("Sección no encontrada: " + anchorXpath);
         }
@@ -1150,65 +1168,110 @@ public class SelectorPage extends BasePage {
         WebElement anchorEl = this.driver.findElement(By.xpath(anchorXpath));
         int anchorY = anchorEl.getLocation().getY() + (anchorEl.getSize().getHeight() / 2);
 
-        // 3. Reiniciar carrusel al inicio
-        this.resetCarouselFromAnchorY(anchorY, RESET_SWIPES);
-
-        // Ajuste de XPath para compatibilidad con Compose (Texto o Content-desc)
-        String targetComposeXpath = "//*[@text='" + extractedText + "' or @content-desc='" + extractedText + "']";
-        By target = By.xpath(targetComposeXpath);
-
-        // 4. BUCLE DE BÚSQUEDA (Sin abortos prematuros)
-        for (int i = 0; i < MAX_CAROUSEL_SWIPES; i++) {
-            if (this.isVisibleQuick(target)) {
-                // Antes de intentar el clic, verificamos disponibilidad
-                // Si el método detecta el texto "Agotado", lanzará TestAbortedException (SKIP)
-                this.verificarYAbortarSiAgotado(extractedText);
-
-                try {
-                    // Usamos forzarClic para ignorar el atributo 'clickable: false' de Compose
-                    this.forzarClic(target);
-                    return;
-                } catch (Exception e) {
-                    // Si el clic por coordenadas falla, re-intentamos validar agotado
-                    this.verificarYAbortarSiAgotado(extractedText);
-                    throw e;
-                }
-            }
-            // Si no es visible, hacemos el swipe a la derecha
-            this.swipeRightInAnchorY(anchorY);
+        // 3. Reset del carrusel — se omite si estamos en la misma sección que la búsqueda anterior
+        //    Esto evita 3 swipes de retroceso (~900 ms) cuando los productos son consecutivos.
+        if (!anchorXpath.equals(lastAnchorXpath)) {
+            this.resetCarouselFromAnchorY(anchorY, RESET_SWIPES);
+            lastAnchorXpath = anchorXpath;
+        } else {
+            log.debug("[Búsqueda] Misma sección — reset de carrusel omitido");
         }
 
-        // 5. SI TERMINÓ EL BUCLE Y NO SE ENCONTRÓ:
-        // Lanzamos TestAbortedException para que el reporte marque SKIPPED y no FAILED
-        throw new org.opentest4j.TestAbortedException("El alimento \"" + extractedText + "\" no fue localizado o está agotado.");
+        // Ajuste de XPath para compatibilidad con Compose (texto o content-desc)
+        String targetComposeXpath = "//*[@text='" + extractedText
+                + "' or @content-desc='" + extractedText + "']";
+        By target = By.xpath(targetComposeXpath);
+
+        // 4. BUCLE DE BÚSQUEDA OPTIMIZADO
+        //    KEY FIX: implicitlyWait=0 → driver.findElements() retorna inmediatamente
+        //    si el elemento no está en pantalla, en lugar de esperar hasta 10 s.
+        //    El implicit wait se restaura antes de cualquier acción que lo requiera.
+        long tBucle = System.currentTimeMillis();
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+
+            for (int i = 0; i < MAX_CAROUSEL_SWIPES; i++) {
+
+                // isVisibleInstantaneamente usa findElements con wait=0 ya activo
+                if (isVisibleInstantaneamente(target)) {
+                    log.info("[Búsqueda] \"{}\" encontrado en swipe {} | Tiempo búsqueda: {} ms",
+                            extractedText, i, (System.currentTimeMillis() - tBucle));
+
+                    // Restaurar timeout antes de acciones que dependen de él
+                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+
+                    // verificarYAbortarSiAgotado y forzarClic permanecen sin cambios
+                    this.verificarYAbortarSiAgotado(extractedText);
+                    try {
+                        this.forzarClic(target);
+                        log.info("[Búsqueda] Clic exitoso | Tiempo total: {} ms",
+                                (System.currentTimeMillis() - t0));
+                        return;
+                    } catch (Exception e) {
+                        this.verificarYAbortarSiAgotado(extractedText);
+                        throw e;
+                    }
+                }
+
+                log.debug("[Búsqueda] Swipe {}/{} → \"{}\"",
+                        (i + 1), MAX_CAROUSEL_SWIPES, extractedText);
+                this.swipeRightInAnchorY(anchorY);
+            }
+
+        } finally {
+            // Garantiza restauración del timeout aunque el bucle lance excepción
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+
+        // 5. No encontrado tras todos los swipes → SKIP (mantiene comportamiento original)
+        long elapsed = System.currentTimeMillis() - tBucle;
+        log.warn("[Búsqueda] \"{}\" NO localizado | Swipes: {} | Tiempo: {} ms",
+                extractedText, MAX_CAROUSEL_SWIPES, elapsed);
+        throw new org.opentest4j.TestAbortedException(
+                "El alimento \"" + extractedText + "\" no fue localizado o está agotado.");
     }
+
     /**
-     * Realiza un swipe de derecha a izquierda (para avanzar en el catálogo)
-     * sobre una altura Y específica (la del ancla/sección).
+     * Verifica si un elemento está presente en pantalla SIN esperar.
+     * Requiere que implicitlyWait esté en 0 (lo establece el caller).
+     * Método privado — solo usar dentro de clickRightFromAnchorOneTry.
+     * No reemplaza isVisibleQuick; coexisten para contextos distintos.
+     *
+     * Usa !isEmpty() en lugar de safeDisplayed() (private en BasePage)
+     * porque con wait=0 un elemento encontrado está necesariamente en el DOM
+     * actual — la verificación de isDisplayed() es redundante aquí.
+     */
+    private boolean isVisibleInstantaneamente(By locator) {
+        try {
+            return !driver.findElements(locator).isEmpty();
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
+    /**
+     * Swipe horizontal optimizado: 350 ms gesto + 80 ms pausa = 430 ms total.
+     * Reducción respecto a versión anterior (600 ms + 500 ms = 1100 ms): −61 %.
+     * El gesto de 350 ms es suficiente para que Compose detecte el scroll de carrusel
+     * manteniendo estabilidad en Galaxy A56 5G / Android 15.
      */
     protected void swipeRightInAnchorY(int anchorY) {
-        // Definimos los puntos de inicio y fin del movimiento horizontal
-        // StartX en 80% (derecha) y EndX en 20% (izquierda) para avanzar
         int screenWidth = driver.manage().window().getSize().width;
         int startX = (int) (screenWidth * 0.8);
-        int endX = (int) (screenWidth * 0.2);
+        int endX   = (int) (screenWidth * 0.2);
 
         PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
         Sequence swipe = new Sequence(finger, 1);
-
-        // 1. Mover el dedo a la posición inicial (Derecha)
-        swipe.addAction(finger.createPointerMove(Duration.ZERO, PointerInput.Origin.viewport(), startX, anchorY));
-        // 2. Presionar
+        swipe.addAction(finger.createPointerMove(Duration.ZERO,
+                PointerInput.Origin.viewport(), startX, anchorY));
         swipe.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
-        // 3. Deslizar hacia la izquierda (duración de 600ms para que sea fluido y la app detecte el scroll)
-        swipe.addAction(finger.createPointerMove(Duration.ofMillis(600), PointerInput.Origin.viewport(), endX, anchorY));
-        // 4. Levantar el dedo
+        swipe.addAction(finger.createPointerMove(Duration.ofMillis(350),
+                PointerInput.Origin.viewport(), endX, anchorY));
         swipe.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
-
         driver.perform(Collections.singletonList(swipe));
 
-        // Pequeña pausa para que la animación del carrusel termine antes de la siguiente acción
-        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        // 80 ms: suficiente para que el carrusel de Compose complete la animación
+        try { Thread.sleep(80); } catch (InterruptedException ignored) {}
     }
     protected boolean tryClickIfAlreadyVisible(By locator, int timeoutSeconds) {
         try {
@@ -1232,22 +1295,24 @@ public class SelectorPage extends BasePage {
     protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipes) {
         By locator = By.xpath(xpath);
         if (this.isVisibleQuick(locator)) {
+            log.debug("[Scroll-V] Sección ya visible (sin scrolls necesarios)");
             return true;
-        } else {
-            for(int i = 0; i < maxVerticalSwipes; ++i) {
-                if (this.isVisibleQuick(locator)) {
-                    return true;
-                }
-
-                this.slowSwipeUp();
-                this.sleep(120L);
-                if (this.isVisibleQuick(locator)) {
-                    return true;
-                }
-            }
-
-            return this.isVisibleQuick(locator);
         }
+        for (int i = 0; i < maxVerticalSwipes; ++i) {
+            if (this.isVisibleQuick(locator)) {
+                log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
+                return true;
+            }
+            log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
+            this.slowSwipeUp();
+            this.sleep(120L);
+            if (this.isVisibleQuick(locator)) {
+                log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
+                return true;
+            }
+        }
+        log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
+        return this.isVisibleQuick(locator);
     }
 
 //    private void clickRightFromAnchorOneTry(String anchorXpath, String targetXpath, int verticalSwipes) {
