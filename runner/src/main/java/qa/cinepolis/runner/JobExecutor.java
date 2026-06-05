@@ -328,6 +328,18 @@ public class JobExecutor {
                 if (total > 0) SUITE_FILTER_SIZE.put(f, total);
             }
         }
+
+        // ── Correcciones de conteo real vs entradas en SUITE_MAP ─────────────
+        // SUITE_MAP solo registra los métodos usados para ejecución individual,
+        // pero las clases pueden tener más @Test. Verificado con:
+        //   grep -c "^    @Test$" ClassName.java
+        //
+        // MenuCoffeTree: 50 @Test reales, 30 en SUITE_MAP (coffee-t01..t30)
+        SUITE_FILTER_SIZE.put("tests.México.alimentos.MenuCoffeTree",  50);
+        // MenuMiCine:    50 @Test reales, 40 en SUITE_MAP (micine-t01..t40)
+        SUITE_FILTER_SIZE.put("tests.México.alimentos.MenuMiCine",     50);
+        // MenuTradicional: 50 reales = 50 en SUITE_MAP (trad-t01..t50) — ya correcto
+        // MenuVIP / MenuAtmosfera: 2 reales ≈ entradas en SUITE_MAP — ya correcto
     }
 
     private final RunnerConfig  config;
