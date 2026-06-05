@@ -46,13 +46,6 @@ export const TEST_SUITES: TestSuite[] = [
     accent: '#14b8a6',
   },
   {
-    id: 'pase-anual',
-    title: 'Pase Anual',
-    description: 'Valida el flujo de compra aplicando un folio de Pase Anual Cinépolis.',
-    icon: '🎫',
-    accent: '#ec4899',
-  },
-  {
     id: 'smoke',
     title: 'Smoke Tests',
     description: 'Suite rápida para validar funcionalidades críticas de la aplicación.',
