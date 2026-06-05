@@ -104,18 +104,21 @@ public class CinemasHelper extends BasePage {
             By.xpath("//*[contains(@text,'Inicia sesi\u00f3n') or contains(@text,'Inicia sesion')]");
     private static final By CLUB_LOGIN_LOGO =
             By.xpath("//*[contains(@text,'CLUB') and (contains(@text,'cin\u00e9polis') or contains(@text,'cinepolis'))]");
-    // Flecha/back de la pantalla (puede variar por device)
+    // Flecha/back de la pantalla — orden de prioridad:
+    // 1. ImageButton/ImageView con content-desc "Atrás/Navigate up" (nativo Android)
     private static final By CLUB_BACK_BUTTON_A11Y =
             By.xpath("//android.widget.ImageButton[contains(@content-desc,'Atrás') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]" +
                     " | //android.widget.ImageView[contains(@content-desc,'Atrás') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]");
 
-    // En tu inspector, esta pantalla trae un android.widget.Button (instance(0)) que representa la flecha/back
+    // 2. android.widget.Button con texto VACÍO (la flecha ← no tiene texto;
+    //    "Inicia sesión" y "Crear tu Cuenta" SÍ tienen texto → quedan excluidos)
     private static final By CLUB_BACK_BUTTON_UIAUTO =
-            AppiumBy.androidUIAutomator("new UiSelector().className(\"android.widget.Button\").instance(0)");
+            AppiumBy.androidUIAutomator(
+                "new UiSelector().className(\"android.widget.Button\").text(\"\").instance(0)");
 
-    // Fallback xpath simple (primer botón en la pantalla)
+    // 3. Fallback: primer Button sin texto por XPath
     private static final By CLUB_BACK_BUTTON_XPATH =
-            By.xpath("(//android.widget.Button)[1]");
+            By.xpath("(//android.widget.Button[not(@text) or @text=''])[1]");
     // Tab alterno por content-desc (bottom nav en algunos builds)
     private static final By TAB_ALIMENTOS_ALT =
             By.xpath("//*[@content-desc='Alimentos' or @text='Alimentos']");
@@ -1270,9 +1273,13 @@ public class CinemasHelper extends BasePage {
                     int cx = r.getX() + (r.getWidth() / 2);
                     int cy = r.getY() + (r.getHeight() / 2);
 
-                    // sanity: debe estar en la mitad superior-izquierda (relaxed para Galaxy A56/Compose)
+                    // Sanity: la flecha ← está en la esquina superior-izquierda.
+                    // cx ≈ 4% del ancho, cy ≈ 3% del alto (Galaxy A56 5G 1080×2340).
+                    // Límite amplio (20% × 12%) para cubrir distintos dispositivos sin
+                    // aceptar "Inicia sesión" ni "Crear tu Cuenta" (botones centrados).
                     org.openqa.selenium.Dimension d = driver.manage().window().getSize();
-                    if (cx > d.width * 0.50 || cy > d.height * 0.40) {
+                    if (cx > d.width * 0.20 || cy > d.height * 0.12) {
+                        log.debug("[ClubBack] Botón descartado: posición ({},{}) fuera del área back", cx, cy);
                         continue;
                     }
 
