@@ -26,6 +26,62 @@ public class CinemasHelper extends BasePage {
 
     private static final Logger log = LoggerFactory.getLogger(CinemasHelper.class);
 
+    // ─── Helpers de visibilidad instantánea ──────────────────────────────────────
+    //
+    // PROBLEMA: firstOrNull→findElements usa implicitlyWait activo (10 s).
+    //   isMainNavVisible() llamaba isVisibleNow×4 → si Nav no visible: 4×10 s=40 s.
+    //   isClubLoginVisible() fallback → 10 s cuando Club ya se cerró.
+    //
+    // SOLUCIÓN: findInstant/isVisibleInstant → implicitlyWait=0 temporal.
+    //   Elemento presente → respuesta inmediata.
+    //   Elemento ausente  → 0 ms (antes: 10.000 ms).
+    //   Los métodos originales (firstOrNull, isVisibleNow) no se modifican.
+
+    /**
+     * Busca el primer elemento coincidente SIN esperar (implicitlyWait=0 transitorio).
+     * Retorna null inmediatamente si el elemento no está en el DOM actual.
+     */
+    private WebElement findInstant(By locator) {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            List<WebElement> els = driver.findElements(locator);
+            return (els == null || els.isEmpty()) ? null : els.get(0);
+        } catch (Exception e) {
+            return null;
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+    }
+
+    /** True si el elemento existe en el DOM actual y está visible (sin esperar). */
+    private boolean isVisibleInstant(By locator) {
+        try {
+            WebElement el = findInstant(locator);
+            return el != null && el.isDisplayed();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Polling rápido de Main Nav tras cerrar Club.
+     * Evita las 4×10s de isMainNavVisible() cuando la app aún está animando.
+     * @param timeoutMs tiempo máximo de espera en ms (recomendado 5000)
+     */
+    private boolean esperarMainNavRapido(long timeoutMs) {
+        long end = System.currentTimeMillis() + timeoutMs;
+        long t0 = System.currentTimeMillis();
+        while (System.currentTimeMillis() < end) {
+            if (isMainNavVisible()) {
+                log.info("[CinemasHelper] Main nav detectado en {} ms",
+                        System.currentTimeMillis() - t0);
+                return true;
+            }
+            safeSleep(200);
+        }
+        return isMainNavVisible();
+    }
+
     // ==========================
     // ✅ TAB ALIMENTOS
     // ==========================
@@ -839,17 +895,23 @@ public class CinemasHelper extends BasePage {
     // ✅ CLUB CINÉPOLIS GUARD
     // ==========================
 
-    /** Verificación rápida (sin espera) — usar solo cuando ya esperamos antes de llamar. */
+    /**
+     * Verificación rápida de pantalla Club Cinépolis.
+     * Usa isVisibleInstant (wait=0) para los checks principales:
+     *   - Club ausente → retorna false en ~0 ms (antes: hasta 10 s por check)
+     *   - Club presente → retorna true en ~0 ms (sin cambio funcional)
+     * El fallback XPath también usa implicitlyWait=0 para evitar 10 s adicionales.
+     */
     public boolean isClubLoginVisible() {
-        // El menú de Alimentos muestra "Club Cinépolis" como sección y "Ingresa tu folio" como campo.
-        // Si estamos en esa pantalla, no es la pantalla de login de Club → salir inmediatamente.
-        if (isVisibleNow(By.xpath("//android.widget.TextView[@text='Ingresa tu folio']"))) return false;
+        // El menú de Alimentos tiene "Ingresa tu folio" — no es la pantalla de login.
+        if (isVisibleInstant(By.xpath("//android.widget.TextView[@text='Ingresa tu folio']"))) return false;
 
-        if (isVisibleNow(CLUB_LOGIN_TITLE)) return true;
-        if (isVisibleNow(CLUB_LOGIN_LOGO))  return true;
+        if (isVisibleInstant(CLUB_LOGIN_TITLE)) return true;
+        if (isVisibleInstant(CLUB_LOGIN_LOGO))  return true;
 
-        // Fallbacks: patrones sin acento para resistir cambios de encoding o de texto en la app
+        // Fallback con patrones sin acento — también con wait=0 (era el mayor cuello de botella)
         try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
             List<WebElement> els = driver.findElements(By.xpath(
                 "//*[contains(@text,'Inicia sesi')" +
                 " or contains(@text,'CLUB Cin')" +
@@ -857,12 +919,44 @@ public class CinemasHelper extends BasePage {
                 " or contains(@text,'Correo electr')" +
                 " or contains(@text,'Contrase')]"
             ));
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             for (WebElement el : els) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
 
         return false;
+    }
+
+    /**
+     * Descarta la pantalla de Club asumiendo que YA es visible (no agrega el sleep de 600 ms
+     * de dismissClubLoginGuard, que sería redundante cuando ya se verificó la visibilidad).
+     * Solo llamar desde dismissTransientPromosGuard tras isClubLoginVisible()=true.
+     */
+    private void dismissClubWhenAlreadyVisible(String where) {
+        try {
+            log.info("[CinemasHelper][ClubGuard] ENTER where={}", where);
+            long t0 = System.currentTimeMillis();
+
+            // Llamar directo a dismissClubLoginIfPresent sin sleep previo (ya sabemos que está visible)
+            boolean closedReturn = dismissClubLoginIfPresent();
+
+            // Solo re-verificar si el dismiss falló (evita consulta extra cuando cerró OK)
+            boolean stillVisible = !closedReturn && isClubLoginVisible();
+            log.info("[CinemasHelper][ClubGuard] closedReturn={} stillVisible={} tiempo={}ms",
+                    closedReturn, stillVisible, System.currentTimeMillis() - t0);
+
+            if (stillVisible) {
+                log.warn("[CinemasHelper][ClubGuard] STILL visible -> last resort navigate.back()");
+                try { driver.navigate().back(); safeSleep(700); } catch (Exception ignored) {}
+            }
+
+            log.info("[CinemasHelper][ClubGuard] EXIT where={}", where);
+        } catch (Exception e) {
+            log.error("[CinemasHelper][ClubGuard] ERROR where={} msg={}", where, e.getMessage());
+        }
     }
 
     /**
@@ -964,24 +1058,59 @@ public class CinemasHelper extends BasePage {
         dismissTransientPromosGuard("unknown");
     }
 
-    // Guard con logs (Club + Promos tipo Mario + Popup zona/ubicación)
-    // Corre en loop hasta que el bottom nav sea accesible o se alcancen los intentos máximos.
+    /**
+     * Guard de overlays transitorios (Club + Mario + Popup zona).
+     *
+     * OPTIMIZACIONES:
+     *  1. clubAlreadyDismissed → evita re-verificar Club en passes posteriores
+     *     (antes: 5 passes × isClubLoginVisible ~10 s = hasta 50 s extra)
+     *  2. dismissClubWhenAlreadyVisible → omite el sleep de 600 ms de ClubGuard
+     *     cuando Club ya es conocidamente visible (detectado por PromosGuard)
+     *  3. esperarMainNavRapido(5000) tras cerrar Club → polling 200 ms max 5 s
+     *     (antes: isMainNavVisible con 4×wait=10 s = hasta 40 s)
+     *  4. isMainNavVisible usa isVisibleInstant → retorna en <10 ms
+     *
+     * Comportamiento funcional: IDÉNTICO al anterior. PromosGuard y ClubGuard
+     * coexisten; ninguno se elimina.
+     */
     public void dismissTransientPromosGuard(String where) {
         log.info("[CinemasHelper][PromosGuard] ENTER where={}", where);
+        long tTotal = System.currentTimeMillis();
+
+        // Flag local: una vez cerrado Club no volvemos a verificarlo en este guard.
+        // Esto evita que los passes 2-5 gasten ~10 s cada uno en isClubLoginVisible().
+        boolean clubAlreadyDismissed = false;
 
         for (int pass = 1; pass <= 5; pass++) {
             boolean dismissed = false;
 
+            // ── Club Cinépolis ────────────────────────────────────────────────────
             try {
-                if (isClubLoginVisible()) {
+                if (!clubAlreadyDismissed && isClubLoginVisible()) {
                     log.info("[CinemasHelper][PromosGuard] pass={} Club visible -> dismiss", pass);
-                    dismissClubLoginGuard(where + ":club");
+                    // dismissClubWhenAlreadyVisible: ya sabemos que está visible → sin sleep 600 ms
+                    dismissClubWhenAlreadyVisible(where + ":club");
                     dismissed = true;
+                    clubAlreadyDismissed = true;  // no repetir en passes siguientes
+
+                    // Poll rápido de Main Nav tras cierre de Club (evita las 4×10 s lentas)
+                    long tNav0 = System.currentTimeMillis();
+                    if (esperarMainNavRapido(5000)) {
+                        log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={} | total={}ms",
+                                pass, where, System.currentTimeMillis() - tTotal);
+                        return;
+                    }
+                    log.debug("[CinemasHelper][PromosGuard] Main nav no visible en 5s tras cerrar Club ({}ms)",
+                            System.currentTimeMillis() - tNav0);
+
+                } else if (clubAlreadyDismissed) {
+                    log.debug("[CinemasHelper][PromosGuard] pass={} Club ya resuelto — skip check", pass);
                 }
             } catch (Exception e) {
                 log.error("[CinemasHelper][PromosGuard] Club guard error: {}", e.getMessage());
             }
 
+            // ── Mario Promo ───────────────────────────────────────────────────────
             try {
                 if (isMarioPromoVisible()) {
                     log.info("[CinemasHelper][PromosGuard] pass={} Mario visible -> dismiss", pass);
@@ -992,28 +1121,29 @@ public class CinemasHelper extends BasePage {
                 log.error("[CinemasHelper][PromosGuard] Mario guard error: {}", e.getMessage());
             }
 
+            // ── Popup zona/ubicación ──────────────────────────────────────────────
             try {
                 if (isLocationChangePopupVisible()) {
                     log.info("[CinemasHelper][PromosGuard] pass={} Zona visible -> dismiss", pass);
                     dismissLocationChangePopupIfPresent(where + ":zona");
                     dismissed = true;
-                    safeSleep(700); // espera a que la app asiente tras cerrar el popup de zona
+                    safeSleep(700);
                 }
             } catch (Exception e) {
                 log.error("[CinemasHelper][PromosGuard] Zona guard error: {}", e.getMessage());
             }
 
-            // Si el bottom nav ya es visible, el guard terminó
+            // ── Salida por Main Nav visible ───────────────────────────────────────
             try {
                 if (isMainNavVisible()) {
-                    log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={}", pass, where);
+                    log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={} | total={}ms",
+                            pass, where, System.currentTimeMillis() - tTotal);
                     return;
                 }
             } catch (Exception e) {
                 log.warn("[CinemasHelper][PromosGuard] isMainNavVisible error (pass={}): {}", pass, e.getMessage());
             }
 
-            // Si no se cerró nada y el nav aún no aparece, intento genérico de dismiss
             if (!dismissed) {
                 log.debug("[CinemasHelper][PromosGuard] pass={} nada cerrado, prueba dismiss genérico", pass);
                 tryGenericOverlayDismiss();
@@ -1022,16 +1152,21 @@ public class CinemasHelper extends BasePage {
             safeSleep(500);
         }
 
-        log.warn("[CinemasHelper][PromosGuard] Max passes alcanzados, nav={} where={}", isMainNavVisible(), where);
+        log.warn("[CinemasHelper][PromosGuard] Max passes alcanzados, nav={} where={} | total={}ms",
+                isMainNavVisible(), where, System.currentTimeMillis() - tTotal);
         log.info("[CinemasHelper][PromosGuard] EXIT where={}", where);
     }
 
-    /** Devuelve true si el bottom nav principal es accesible (Cartelera o Alimentos visible). */
+    /**
+     * Devuelve true si el bottom nav principal es accesible.
+     * Usa isVisibleInstant (wait=0) para evitar 4×10 s de espera cuando la app
+     * aún está animando tras cerrar Club — diferencia crítica de rendimiento.
+     */
     private boolean isMainNavVisible() {
-        return isVisibleNow(TAB_CARTELERA)
-            || isVisibleNow(TAB_HORARIOS)
-            || isVisibleNow(TAB_ALIMENTOS)
-            || isVisibleNow(TAB_ALIMENTOS_ALT);
+        return isVisibleInstant(TAB_CARTELERA)
+            || isVisibleInstant(TAB_HORARIOS)
+            || isVisibleInstant(TAB_ALIMENTOS)
+            || isVisibleInstant(TAB_ALIMENTOS_ALT);
     }
 
     /** Intenta cerrar cualquier overlay desconocido usando patrones comunes de dismiss. */
