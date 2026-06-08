@@ -64,6 +64,21 @@ public class CinemasHelper extends BasePage {
     }
 
     /**
+     * Toca un elemento solo si está INSTANTÁNEAMENTE visible (implicitlyWait=0 transitorio).
+     * Idéntico a tapIfPresent() pero usa findInstant() en lugar de firstOrNull().
+     * Retorna false inmediatamente si el elemento no está en el DOM actual.
+     * Usar en tryGenericOverlayDismiss() para evitar 4×10s de espera cuando no hay overlay.
+     */
+    private boolean tapInstant(By locator) {
+        WebElement el = findInstant(locator);
+        if (el == null) return false;
+        try { if (!el.isDisplayed()) return false; } catch (Exception ignored) {}
+        try { el.click(); return true; } catch (Exception ignored) {}
+        try { tapCenter(el); return true; } catch (Exception ignored) {}
+        return false;
+    }
+
+    /**
      * Polling rápido de Main Nav tras cerrar Club.
      * Evita las 4×10s de isMainNavVisible() cuando la app aún está animando.
      * @param timeoutMs tiempo máximo de espera en ms (recomendado 5000)
@@ -278,6 +293,7 @@ public class CinemasHelper extends BasePage {
 
     public void ensureCinemaSelectedFromAlimentos(String targetCinema) {
         log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> '{}'", targetCinema);
+        long t0Total = System.currentTimeMillis();
 
         // Track cinema for PDF and Allure reporting
         TestSteps.setCinema(targetCinema);
@@ -286,100 +302,127 @@ public class CinemasHelper extends BasePage {
         // Navegar a Alimentos primero (desde cualquier pantalla) para poder leer el cine actual
         goToAlimentosTab();
 
-        // Validar si el cine ya está correctamente seleccionado antes de abrir el selector
-        boolean cinemaSelected = !isVisibleNow(CINES_SIN_SELECCION);
+        // Validar si el cine ya está correctamente seleccionado antes de abrir el selector.
+        // isVisibleInstant(wait=0): evita 10s de espera cuando el chip "Selecciona uno o más cines"
+        // NO está presente (caso normal en que ya hay un cine seleccionado).
+        boolean cinemaSelected = !isVisibleInstant(CINES_SIN_SELECCION);
         if (cinemaSelected) {
-            // Intento 1: leer el nombre del cine del chip
+            // Intento 1: leer el nombre del cine del chip (ahora con implicitlyWait=0 interno)
             String currentCinema = getCurrentCinemaName();
             if (currentCinema != null && !currentCinema.isBlank()) {
                 log.info("[CinemasHelper] Cine actual detectado: '{}'", currentCinema);
                 if (cinemaMatches(currentCinema, targetCinema)) {
-                    log.info("[CinemasHelper] El cine ya coincide con '{}' — continuando flujo.", targetCinema);
+                    log.info("[CinemasHelper] El cine ya coincide con '{}' — continuando flujo. | Total: {}ms",
+                            targetCinema, System.currentTimeMillis() - t0Total);
                     return;
                 }
                 log.info("[CinemasHelper] Cambiando cine de '{}' a '{}'", currentCinema, targetCinema);
             } else {
-                // Intento 2: verificar si el texto del cine objetivo ya es visible en el chip
+                // Intento 2: verificar si el texto del cine objetivo ya es visible en el chip.
+                // isVisibleInstant(wait=0): evita 10s de espera adicional cuando el nombre no está
                 String xpathTarget = "//android.widget.TextView[contains(@text,'"
                         + escapeXpath(targetCinema) + "')]"
                         + " | //android.view.View[contains(@content-desc,'"
                         + escapeXpath(targetCinema) + "')]";
-                if (isVisibleNow(By.xpath(xpathTarget))) {
+                if (isVisibleInstant(By.xpath(xpathTarget))) {
                     log.info("[CinemasHelper] Cine '{}' ya visible en pantalla — continuando flujo.", targetCinema);
                     return;
                 }
-                log.info("[CinemasHelper] Hay cine seleccionado pero no se pudo leer su nombre — " +
-                         "procediendo con selección de '{}'.", targetCinema);
+                log.info("[CinemasHelper] Hay cine seleccionado pero no se pudo leer su nombre ({}ms) — " +
+                         "procediendo con selección de '{}'.",
+                         System.currentTimeMillis() - t0Total, targetCinema);
             }
         } else {
             log.info("[CinemasHelper] No hay cine seleccionado — configurando: '{}'", targetCinema);
         }
 
         // El cine no coincide o no hay uno seleccionado — abrir selector y seleccionar
+        long t0Search = System.currentTimeMillis();
+        log.info("[PERF] Paso: Inicio búsqueda cine | Inicio: {}", t0Search);
         openSelectorFromAlimentosIfNeeded();
         waitSelectorScreenOrThrow();
-
         typeInSearchBoxULTRA(targetCinema);
+        log.info("[PERF] Paso: Fin búsqueda cine | Fin: {} | Duración: {}ms",
+                System.currentTimeMillis(), System.currentTimeMillis() - t0Search);
 
+        long t0Pick = System.currentTimeMillis();
+        log.info("[PERF] Paso: Inicio aplicación selección | Inicio: {}", t0Pick);
         pickCinemaFromResults(targetCinema);
         acceptAlertsIfPresent();
-
         clickAplicarSeleccion();
         acceptAlertsIfPresent();
+        log.info("[PERF] Paso: Fin aplicación selección | Fin: {} | Duración: {}ms",
+                System.currentTimeMillis(), System.currentTimeMillis() - t0Pick);
 
         dismissClubLoginIfPresent();
         goToAlimentosTab();
 
-        log.info("[CinemasHelper] Cine configurado correctamente -> '{}'", targetCinema);
+        log.info("[CinemasHelper] Cine configurado correctamente -> '{}' | Total: {}ms",
+                targetCinema, System.currentTimeMillis() - t0Total);
     }
 
     /**
      * Intenta leer el nombre del cine actualmente seleccionado desde el chip del menú de alimentos.
      * El chip muestra el nombre del cine como TextView hermano o ancestro de la etiqueta "Cines".
+     *
+     * OPTIMIZACIÓN: todos los findElements usan implicitlyWait=0 para evitar 3×10s de espera
+     * cuando el chip existe pero las estrategias de lectura no encuentran el nombre.
+     * Si el elemento "Cines" SÍ existe, retorna inmediatamente con el resultado.
      */
     private String getCurrentCinemaName() {
-        // 1) TextView hermano anterior o posterior a la etiqueta "Cines"
+        long t0 = System.currentTimeMillis();
+        log.info("[PERF] Paso: Inicio lectura cine actual | Inicio: {}", t0);
         try {
-            List<WebElement> siblings = driver.findElements(By.xpath(
-                "//android.widget.TextView[@text='Cines']/preceding-sibling::android.widget.TextView" +
-                " | //android.widget.TextView[@text='Cines']/following-sibling::android.widget.TextView"
-            ));
-            for (WebElement el : siblings) {
-                try {
-                    String t = el.getText();
-                    if (t != null && !t.trim().isEmpty() && !t.equals("Cines")) return t.trim();
-                } catch (Exception ignored) {}
-            }
-        } catch (Exception ignored) {}
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
 
-        // 2) content-desc del contenedor padre del chip de cines
-        try {
-            WebElement cinesLabel = firstOrNull(By.xpath("//android.widget.TextView[@text='Cines']"));
-            if (cinesLabel != null) {
-                WebElement parent = cinesLabel.findElement(By.xpath(".."));
-                String desc = parent.getAttribute("content-desc");
-                if (desc != null && !desc.isBlank()) {
-                    String cleaned = desc.replace("Cines", "").replace(",", "").trim();
-                    if (!cleaned.isEmpty()) return cleaned;
+            // 1) TextView hermano anterior o posterior a la etiqueta "Cines"
+            try {
+                List<WebElement> siblings = driver.findElements(By.xpath(
+                    "//android.widget.TextView[@text='Cines']/preceding-sibling::android.widget.TextView" +
+                    " | //android.widget.TextView[@text='Cines']/following-sibling::android.widget.TextView"
+                ));
+                for (WebElement el : siblings) {
+                    try {
+                        String t = el.getText();
+                        if (t != null && !t.trim().isEmpty() && !t.equals("Cines")) return t.trim();
+                    } catch (Exception ignored) {}
                 }
-            }
-        } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
 
-        // 3) Cualquier TextView visible dentro del chip de cines (excluye "Cines")
-        try {
-            List<WebElement> candidates = driver.findElements(By.xpath(
-                "//android.widget.TextView[@text='Cines']/ancestor::android.view.View[1]" +
-                "//android.widget.TextView[@text != 'Cines']"
-            ));
-            for (WebElement el : candidates) {
-                try {
-                    String t = el.getText();
-                    if (t != null && !t.trim().isEmpty()) return t.trim();
-                } catch (Exception ignored) {}
-            }
-        } catch (Exception ignored) {}
+            // 2) content-desc del contenedor padre del chip de cines
+            try {
+                List<WebElement> cinesLabels = driver.findElements(
+                    By.xpath("//android.widget.TextView[@text='Cines']"));
+                if (cinesLabels != null && !cinesLabels.isEmpty()) {
+                    WebElement parent = cinesLabels.get(0).findElement(By.xpath(".."));
+                    String desc = parent.getAttribute("content-desc");
+                    if (desc != null && !desc.isBlank()) {
+                        String cleaned = desc.replace("Cines", "").replace(",", "").trim();
+                        if (!cleaned.isEmpty()) return cleaned;
+                    }
+                }
+            } catch (Exception ignored) {}
 
-        return null;
+            // 3) Cualquier TextView visible dentro del chip de cines (excluye "Cines")
+            try {
+                List<WebElement> candidates = driver.findElements(By.xpath(
+                    "//android.widget.TextView[@text='Cines']/ancestor::android.view.View[1]" +
+                    "//android.widget.TextView[@text != 'Cines']"
+                ));
+                for (WebElement el : candidates) {
+                    try {
+                        String t = el.getText();
+                        if (t != null && !t.trim().isEmpty()) return t.trim();
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception ignored) {}
+
+            return null;
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            log.info("[PERF] Paso: Fin lectura cine actual | Fin: {} | Duración: {}ms",
+                    System.currentTimeMillis(), System.currentTimeMillis() - t0);
+        }
     }
 
     /** Compara dos nombres de cine ignorando acentos, mayúsculas y espacios extra. */
@@ -471,11 +514,12 @@ public class CinemasHelper extends BasePage {
     }
 
     private boolean isSelectorOpen() {
-        return isVisibleNow(TITLE_SELECCIONAR_CINES) || isVisibleNow(SEARCH_HINT);
+        // isVisibleInstant(wait=0): retorna en <10ms en lugar de 2×10s cuando aún no se abrió
+        return isVisibleInstant(TITLE_SELECCIONAR_CINES) || isVisibleInstant(SEARCH_HINT);
     }
 
     private boolean isChangeCinemaAlertOpen() {
-        return isVisibleNow(ALERT_CAMBIAR_CINE_TITLE);
+        return isVisibleInstant(ALERT_CAMBIAR_CINE_TITLE);
     }
 
     private boolean isAfterCinesTapScreenOpen() {
@@ -766,15 +810,16 @@ public class CinemasHelper extends BasePage {
         long end = System.currentTimeMillis() + 4500;
 
         while (System.currentTimeMillis() < end) {
-
-            if (isVisibleNow(ALERT_CAMBIAR_CIUDAD_TITLE)) {
+            // isVisibleInstant(wait=0): el polling ya está acotado a 4500ms;
+            // sin esto, cada isVisibleNow bloqueaba hasta 10s y desbordaba el timeout.
+            if (isVisibleInstant(ALERT_CAMBIAR_CIUDAD_TITLE)) {
                 log.info("[CinemasHelper] Alerta ciudad -> Aceptar (last())");
                 if (!tapIfPresent(ALERT_ACEPTAR_LAST)) clickIfPresent(ALERT_ACEPTAR_LAST);
                 sleep(450);
                 return;
             }
 
-            if (isVisibleNow(ALERT_CAMBIAR_CINE_TITLE)) {
+            if (isVisibleInstant(ALERT_CAMBIAR_CINE_TITLE)) {
                 log.info("[CinemasHelper] Alerta cambiar cine -> Sí, cambiar de cine (CLICKABLE ANCESTOR)");
 
                 if (tapIfPresent(BTN_SI_CAMBIAR_CINE_CLICKABLE_ANCESTOR)) { sleep(650); return; }
@@ -1022,12 +1067,18 @@ public class CinemasHelper extends BasePage {
         return false;
     }
     private boolean isMarioPromoVisible() {
+        // implicitlyWait=0: evita 10s de espera por pass cuando la promo no está presente.
+        // Era el principal cuello de botella en PromosGuard (5 passes × 10s = 50s extra).
         try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
             // ✅ SOLO si existe el CTA específico de la promo
-            return !driver.findElements(By.xpath(
+            boolean found = !driver.findElements(By.xpath(
                     "//*[normalize-space(@text)='CONSULTA CARTELERA' or contains(@text,'CONSULTA CARTELERA')]"
             )).isEmpty();
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            return found;
         } catch (Exception e) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             return false;
         }
     }
@@ -1080,6 +1131,11 @@ public class CinemasHelper extends BasePage {
         log.info("[CinemasHelper][PromosGuard] ENTER where={}", where);
         long tTotal = System.currentTimeMillis();
 
+        // Acumuladores de tiempo por componente (para el reporte final)
+        long msClub    = 0;
+        long msZona    = 0;
+        long msMainNav = 0;
+
         // Flag local: una vez cerrado Club no volvemos a verificarlo en este guard.
         // Esto evita que los passes 2-5 gasten ~10 s cada uno en isClubLoginVisible().
         boolean clubAlreadyDismissed = false;
@@ -1089,24 +1145,31 @@ public class CinemasHelper extends BasePage {
 
             // ── Club Cinépolis ────────────────────────────────────────────────────
             try {
-                if (!clubAlreadyDismissed && isClubLoginVisible()) {
-                    log.info("[CinemasHelper][PromosGuard] pass={} Club visible -> dismiss", pass);
-                    // dismissClubWhenAlreadyVisible: ya sabemos que está visible → sin sleep 600 ms
-                    dismissClubWhenAlreadyVisible(where + ":club");
-                    dismissed = true;
-                    clubAlreadyDismissed = true;  // no repetir en passes siguientes
+                if (!clubAlreadyDismissed) {
+                    long t0Club = System.currentTimeMillis();
+                    boolean clubVisible = isClubLoginVisible();
+                    if (clubVisible) {
+                        log.info("[CinemasHelper][PromosGuard] pass={} Club visible -> dismiss", pass);
+                        // dismissClubWhenAlreadyVisible: ya sabemos que está visible → sin sleep 600 ms
+                        dismissClubWhenAlreadyVisible(where + ":club");
+                        dismissed = true;
+                        clubAlreadyDismissed = true;  // no repetir en passes siguientes
 
-                    // Poll rápido de Main Nav tras cierre de Club (evita las 4×10 s lentas)
-                    long tNav0 = System.currentTimeMillis();
-                    if (esperarMainNavRapido(5000)) {
-                        log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={} | total={}ms",
-                                pass, where, System.currentTimeMillis() - tTotal);
-                        return;
+                        // Poll rápido de Main Nav tras cierre de Club (evita las 4×10 s lentas)
+                        long tNav0 = System.currentTimeMillis();
+                        if (esperarMainNavRapido(5000)) {
+                            msClub    += System.currentTimeMillis() - t0Club;
+                            msMainNav += System.currentTimeMillis() - tNav0;
+                            log.info("[PromosGuard] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | EXIT pass={} where={}",
+                                    msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, pass, where);
+                            return;
+                        }
+                        log.debug("[CinemasHelper][PromosGuard] Main nav no visible en 5s tras cerrar Club ({}ms)",
+                                System.currentTimeMillis() - tNav0);
+                        msMainNav += System.currentTimeMillis() - tNav0;
                     }
-                    log.debug("[CinemasHelper][PromosGuard] Main nav no visible en 5s tras cerrar Club ({}ms)",
-                            System.currentTimeMillis() - tNav0);
-
-                } else if (clubAlreadyDismissed) {
+                    msClub += System.currentTimeMillis() - t0Club;
+                } else {
                     log.debug("[CinemasHelper][PromosGuard] pass={} Club ya resuelto — skip check", pass);
                 }
             } catch (Exception e) {
@@ -1126,23 +1189,28 @@ public class CinemasHelper extends BasePage {
 
             // ── Popup zona/ubicación ──────────────────────────────────────────────
             try {
+                long t0Zona = System.currentTimeMillis();
                 if (isLocationChangePopupVisible()) {
                     log.info("[CinemasHelper][PromosGuard] pass={} Zona visible -> dismiss", pass);
                     dismissLocationChangePopupIfPresent(where + ":zona");
                     dismissed = true;
                     safeSleep(700);
                 }
+                msZona += System.currentTimeMillis() - t0Zona;
             } catch (Exception e) {
                 log.error("[CinemasHelper][PromosGuard] Zona guard error: {}", e.getMessage());
             }
 
             // ── Salida por Main Nav visible ───────────────────────────────────────
             try {
+                long t0Nav = System.currentTimeMillis();
                 if (isMainNavVisible()) {
-                    log.info("[CinemasHelper][PromosGuard] Main nav visible, EXIT pass={} where={} | total={}ms",
-                            pass, where, System.currentTimeMillis() - tTotal);
+                    msMainNav += System.currentTimeMillis() - t0Nav;
+                    log.info("[PromosGuard] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | EXIT pass={} where={}",
+                            msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, pass, where);
                     return;
                 }
+                msMainNav += System.currentTimeMillis() - t0Nav;
             } catch (Exception e) {
                 log.warn("[CinemasHelper][PromosGuard] isMainNavVisible error (pass={}): {}", pass, e.getMessage());
             }
@@ -1155,8 +1223,8 @@ public class CinemasHelper extends BasePage {
             safeSleep(500);
         }
 
-        log.warn("[CinemasHelper][PromosGuard] Max passes alcanzados, nav={} where={} | total={}ms",
-                isMainNavVisible(), where, System.currentTimeMillis() - tTotal);
+        log.warn("[PromosGuard] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | Max passes where={}",
+                msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, where);
         log.info("[CinemasHelper][PromosGuard] EXIT where={}", where);
     }
 
@@ -1172,7 +1240,13 @@ public class CinemasHelper extends BasePage {
             || isVisibleInstant(TAB_ALIMENTOS_ALT);
     }
 
-    /** Intenta cerrar cualquier overlay desconocido usando patrones comunes de dismiss. */
+    /**
+     * Intenta cerrar cualquier overlay desconocido usando patrones comunes de dismiss.
+     *
+     * OPTIMIZACIÓN: usa tapInstant() (implicitlyWait=0) en lugar de tapIfPresent() (10s wait).
+     * Sin esto, 4 locators × 10s = 40s por llamada cuando no hay overlay presente.
+     * Con tapInstant(), retorna en <10ms si ningún elemento existe en el DOM actual.
+     */
     private void tryGenericOverlayDismiss() {
         // Botones de cierre más comunes en promos/modales de Cinépolis
         By[] dismissLocators = {
@@ -1182,7 +1256,7 @@ public class CinemasHelper extends BasePage {
             By.xpath("//android.widget.ImageButton[@content-desc='Atrás' or @content-desc='Atras' or @content-desc='Navigate up']"),
         };
         for (By loc : dismissLocators) {
-            if (tapIfPresent(loc)) {
+            if (tapInstant(loc)) {
                 log.info("[CinemasHelper][PromosGuard] Overlay genérico cerrado con: {}", loc);
                 safeSleep(500);
                 return;
@@ -1204,12 +1278,17 @@ public class CinemasHelper extends BasePage {
     }
 
     private boolean isLocationChangePopupVisible() {
+        // implicitlyWait=0: evita 10s de espera por pass cuando el popup no está presente.
         try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
             List<WebElement> els = driver.findElements(POPUP_ZONA_DETECTION);
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             for (WebElement el : els) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
         return false;
     }
 

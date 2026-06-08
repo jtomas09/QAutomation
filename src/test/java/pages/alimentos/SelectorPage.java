@@ -567,6 +567,9 @@ public class SelectorPage extends BasePage {
      * Se realizan hasta 3 intentos antes de fallar.
      */
     public void abrirCarrito() {
+        long t0 = System.currentTimeMillis();
+        log.info("[PERF] Paso: Abrir carrito");
+        log.info("[PERF] Inicio: {}", t0);
         log.info("[abrirCarrito] Intentando abrir carrito...");
         Exception lastError = null;
 
@@ -574,6 +577,8 @@ public class SelectorPage extends BasePage {
             try {
                 if (intentarAbrirCarritoInterno(intento)) {
                     log.info("[abrirCarrito] Carrito abierto correctamente (intento {})", intento);
+                    log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0);
+                    log.info("[PERF] Paso: Carrito abierto | Duración: {}ms", System.currentTimeMillis() - t0);
                     return;
                 }
                 log.warn("[abrirCarrito] Intento {} ejecutado pero pantalla no detectada.", intento);
@@ -583,6 +588,7 @@ public class SelectorPage extends BasePage {
             }
             sleep(800);
         }
+        log.info("[PERF] Fin: {} | Duración: {}ms (FALLO)", System.currentTimeMillis(), System.currentTimeMillis() - t0);
         throw new RuntimeException("No se pudo abrir el carrito correctamente tras 3 intentos", lastError);
     }
 
@@ -1293,25 +1299,41 @@ public class SelectorPage extends BasePage {
     }
 
     protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipes) {
+        long t0 = System.currentTimeMillis();
         By locator = By.xpath(xpath);
         if (this.isVisibleQuick(locator)) {
             log.debug("[Scroll-V] Sección ya visible (sin scrolls necesarios)");
+            log.info("[Scroll] Producto encontrado | Swipe 0/{} | Tiempo total búsqueda: {}ms",
+                    maxVerticalSwipes, System.currentTimeMillis() - t0);
             return true;
         }
+        String previousPageSource = "";
         for (int i = 0; i < maxVerticalSwipes; ++i) {
             if (this.isVisibleQuick(locator)) {
                 log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
+                log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
+                        (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
                 return true;
             }
+            log.info("[Scroll] Swipe {}/{}", (i + 1), maxVerticalSwipes);
             log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
-            this.slowSwipeUp();
-            this.sleep(120L);
+            this.swipeUpInMainContent(450);
+            String currentPageSource = driver.getPageSource();
+            if (currentPageSource.equals(previousPageSource)) {
+                log.info("[Scroll] Fin de catálogo detectado");
+                log.info("[Scroll] Tiempo total búsqueda: {}ms", System.currentTimeMillis() - t0);
+                break;
+            }
+            previousPageSource = currentPageSource;
             if (this.isVisibleQuick(locator)) {
                 log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
+                log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
+                        (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
                 return true;
             }
         }
         log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
+        log.info("[Scroll] Tiempo total búsqueda: {}ms", System.currentTimeMillis() - t0);
         return this.isVisibleQuick(locator);
     }
 

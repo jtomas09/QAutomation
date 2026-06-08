@@ -366,6 +366,10 @@ public void vincularOrdenEspaña() {
     }
 
     private void seleccionarAlimentoAleatorio(int reintentosRestantes) {
+        long t0Total = System.currentTimeMillis();
+        log.info("[PERF] Paso: Entrando a menú alimentos");
+        log.info("[PERF] Inicio: {}", t0Total);
+
         sleep(2000);
 
         // Esperar hasta 10 s a que aparezca la barra de categorías,
@@ -398,9 +402,32 @@ public void vincularOrdenEspaña() {
         }
 
         log.info("[Alimentos] Barra de categorías detectada, iniciando recolección de categorías para seleccionar una al azar");
+
+        long t0Tab = System.currentTimeMillis();
+        log.info("[PERF] Paso: Buscar categoría");
+        log.info("[PERF] Inicio: {}", t0Tab);
         seleccionarTabAleatorio();
+        log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0Tab);
+        log.info("[PERF] Paso: Categoría localizada | Duración: {}ms", System.currentTimeMillis() - t0Tab);
+
+        long t0Prod = System.currentTimeMillis();
+        log.info("[PERF] Paso: Buscar producto");
+        log.info("[PERF] Inicio: {}", t0Prod);
         seleccionarProductoEnSeccionActual();
+        log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0Prod);
+        log.info("[PERF] Paso: Producto seleccionado | Duración: {}ms", System.currentTimeMillis() - t0Prod);
+
+        long t0Pers = System.currentTimeMillis();
+        log.info("[PERF] Paso: Completar personalización");
+        log.info("[PERF] Inicio: {}", t0Pers);
         boolean exito = completarPersonalizacion();
+        log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0Pers);
+        if (exito) {
+            log.info("[PERF] Paso: Producto agregado | Duración: {}ms", System.currentTimeMillis() - t0Pers);
+        }
+
+        log.info("[PERF] Flujo alimentos total: {}ms", System.currentTimeMillis() - t0Total);
+
         if (!exito) {
             if (reintentosRestantes > 0) {
                 Allure.step("🔄 Reintentando selección de alimento...");
@@ -564,6 +591,7 @@ public void vincularOrdenEspaña() {
             "//android.widget.TextView[@text='Siguiente']/../android.widget.Button");
         // 30 pasos: margen para productos con muchas pantallas o transiciones lentas
         final int MAX_PASOS = 30;
+        int pasoPersonalizacion = 0;
 
         for (int paso = 0; paso < MAX_PASOS; paso++) {
             sleep(1000); // esperar a que la pantalla termine de renderizarse
@@ -571,9 +599,16 @@ public void vincularOrdenEspaña() {
 
             // Estado 1: pantalla de confirmación final — "Agregar al carrito"
             if (isVisibleQuick(TEXTO_AGREGAR_CARRITO)) {
+                long t0Agregar = System.currentTimeMillis();
+                log.info("[PERF] Paso: Agregar al carrito");
+                log.info("[PERF] Inicio: {}", t0Agregar);
                 click(BTN_AGREGAR_CARRITO);
                 boolean errorManejado = manejarErrorCarritoSiPresente();
-                if (!errorManejado) Allure.step("✅ Producto agregado al carrito");
+                log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0Agregar);
+                if (!errorManejado) {
+                    log.info("[PERF] Paso: Producto agregado | Duración: {}ms", System.currentTimeMillis() - t0Agregar);
+                    Allure.step("✅ Producto agregado al carrito");
+                }
                 return !errorManejado;
             }
 
@@ -586,22 +621,33 @@ public void vincularOrdenEspaña() {
 
             // Estado 3: pantalla de personalización con botón "Continuar"
             if (isVisibleQuick(BTN_CONTINUAR)) {
+                pasoPersonalizacion++;
+                long t0Pers = System.currentTimeMillis();
+                String labelPers = pasoPersonalizacion == 1 ? "Tamaño seleccionado" : "Complemento seleccionado (paso " + pasoPersonalizacion + ")";
+                log.info("[PERF] Paso: {}", labelPers);
+                log.info("[PERF] Inicio: {}", t0Pers);
                 seleccionarOpcionesAlAzar();
                 // Re-verificar que el botón sigue visible tras el scroll de selección
                 if (isVisibleQuick(BTN_CONTINUAR)) {
                     click(BTN_CONTINUAR);
                     sleep(1200); // dar tiempo a la transición entre pantallas
                 }
+                log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0Pers);
                 continue;
             }
 
             // Estado 4: pantalla de personalización de combo con botón "Siguiente"
             if (isVisibleQuick(BTN_SIGUIENTE)) {
+                pasoPersonalizacion++;
+                long t0Sig = System.currentTimeMillis();
+                log.info("[PERF] Paso: Complemento seleccionado (paso {})", pasoPersonalizacion);
+                log.info("[PERF] Inicio: {}", t0Sig);
                 seleccionarOpcionesAlAzar();
                 if (isVisibleQuick(BTN_SIGUIENTE)) {
                     click(BTN_SIGUIENTE);
                     sleep(1200);
                 }
+                log.info("[PERF] Fin: {} | Duración: {}ms", System.currentTimeMillis(), System.currentTimeMillis() - t0Sig);
                 continue;
             }
         }
