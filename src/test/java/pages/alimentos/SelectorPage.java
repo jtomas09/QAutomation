@@ -1159,7 +1159,7 @@ public class SelectorPage extends BasePage {
         // 1. Extraer nombre del producto (sin cambios)
         String extractedText = targetXpath.replaceAll(".*@text=['\"]", "").replaceAll("['\"].*", "");
 
-        final int ANCHOR_SCROLL_MAX  = 18;
+        final int ANCHOR_SCROLL_MAX  = 10;
         final int RESET_SWIPES       = 3;
         final int MAX_CAROUSEL_SWIPES = 20;
 
@@ -1307,7 +1307,9 @@ public class SelectorPage extends BasePage {
                     maxVerticalSwipes, System.currentTimeMillis() - t0);
             return true;
         }
-        String previousPageSource = "";
+        int screenH = driver.manage().window().getSize().getHeight();
+        int threshold = Math.max(30, screenH / 20); // 5% de pantalla
+        int swipesDone = 0;
         for (int i = 0; i < maxVerticalSwipes; ++i) {
             if (this.isVisibleQuick(locator)) {
                 log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
@@ -1315,16 +1317,43 @@ public class SelectorPage extends BasePage {
                         (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
                 return true;
             }
-            log.info("[Scroll] Swipe {}/{}", (i + 1), maxVerticalSwipes);
-            log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
-            this.swipeUpInMainContent(450);
-            String currentPageSource = driver.getPageSource();
-            if (currentPageSource.equals(previousPageSource)) {
-                log.info("[Scroll] Fin de catálogo detectado");
-                log.info("[Scroll] Tiempo total búsqueda: {}ms", System.currentTimeMillis() - t0);
-                break;
+            // Capturar último elemento visible para comparar posición tras el swipe (2 llamadas al driver)
+            WebElement refEl = null;
+            int refY = -1;
+            try {
+                driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+                java.util.List<WebElement> candidates =
+                        driver.findElements(By.className("android.widget.TextView"));
+                if (!candidates.isEmpty()) {
+                    refEl = candidates.get(candidates.size() - 1);
+                    try { refY = refEl.getLocation().getY(); } catch (Exception ignored) { refEl = null; }
+                }
+            } catch (Exception ignored) {
+            } finally {
+                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             }
-            previousPageSource = currentPageSource;
+            log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
+            long tSwipe = System.currentTimeMillis();
+            this.swipeUpInMainContent(450);
+            swipesDone++;
+            log.info("[Scroll] Swipe {}/{} — {}ms", (i + 1), maxVerticalSwipes,
+                    System.currentTimeMillis() - tSwipe);
+            // Detección de fin de catálogo por posición visual (sin getPageSource)
+            // Si el elemento de referencia no se movió → el scroll no tuvo efecto → fin de catálogo
+            // Si lanza StaleElementReferenceException → el elemento salió de pantalla → hay más contenido
+            if (refEl != null && refY >= 0) {
+                try {
+                    int newY = refEl.getLocation().getY();
+                    if (Math.abs(newY - refY) < threshold) {
+                        log.info("[Scroll] Fin de catálogo detectado");
+                        log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
+                                swipesDone, System.currentTimeMillis() - t0);
+                        break;
+                    }
+                } catch (Exception ignored) {
+                    // Elemento desapareció de pantalla → scroll funcionó → hay más contenido
+                }
+            }
             if (this.isVisibleQuick(locator)) {
                 log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
                 log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
@@ -1333,7 +1362,8 @@ public class SelectorPage extends BasePage {
             }
         }
         log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
-        log.info("[Scroll] Tiempo total búsqueda: {}ms", System.currentTimeMillis() - t0);
+        log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
+                swipesDone, System.currentTimeMillis() - t0);
         return this.isVisibleQuick(locator);
     }
 
