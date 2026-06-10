@@ -10,7 +10,8 @@ public final class Constantes {
 
     // ─── Aplicación ───────────────────────────────────────────────────────────
 
-    public static final String APP_PACKAGE    = "com.cinepolis.go";
+    public static final String APP_PACKAGE    = "com.cinepolis.go";   // Android
+    public static final String APP_BUNDLE_ID  = "com.cinepolis.ios";  // iOS — actualizar con el bundle ID real
     public static final int    TIMEOUT_SESION = 180; // segundos (newCommandTimeout)
 
     // ─── Timeouts de espera (segundos) ───────────────────────────────────────

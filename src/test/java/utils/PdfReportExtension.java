@@ -1,6 +1,6 @@
 package utils;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import org.junit.jupiter.api.extension.*;
 import org.slf4j.Logger;
@@ -242,14 +242,14 @@ public class PdfReportExtension implements
         }
     }
 
-    private Optional<AndroidDriver> getDriver(ExtensionContext context) {
+    private Optional<AppiumDriver> getDriver(ExtensionContext context) {
         return context.getTestInstance().flatMap(instance -> {
             try {
                 var field = instance.getClass().getDeclaredField("driver");
                 field.setAccessible(true);
                 Object value = field.get(instance);
-                if (value instanceof AndroidDriver) {
-                    return Optional.of((AndroidDriver) value);
+                if (value instanceof AppiumDriver) {
+                    return Optional.of((AppiumDriver) value);
                 }
             } catch (Exception ignored) {}
             return Optional.empty();

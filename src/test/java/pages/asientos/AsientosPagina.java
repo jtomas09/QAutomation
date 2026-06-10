@@ -1,6 +1,6 @@
 package pages.asientos;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 
 /**
  * Página de interacción con la pantalla de selección de asientos.
@@ -16,7 +16,7 @@ import io.appium.java_client.android.AndroidDriver;
  */
 public class AsientosPagina extends SelectorPage {
 
-    public AsientosPagina(AndroidDriver driver) {
+    public AsientosPagina(AppiumDriver driver) {
         super(driver);
     }
 }

@@ -1,6 +1,6 @@
 package flujos;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import pages.alimentos.AlimentosLocators;
 import pages.alimentos.SelectorsAlimentos;
@@ -26,7 +26,7 @@ public class AlimentosFlujo {
     private final SelectorsAlimentos paginaAleatoria;
     private final CinemasHelper cinemasHelper;
 
-    public AlimentosFlujo(AndroidDriver driver) {
+    public AlimentosFlujo(AppiumDriver driver) {
         this.pagina          = new SelectorPage(driver);
         this.paginaAleatoria = new SelectorsAlimentos(driver);
         this.cinemasHelper   = new CinemasHelper(driver);
@@ -79,7 +79,7 @@ public class AlimentosFlujo {
      * Agrega un producto al carrito y valida el carrito.
      * Patrón reutilizable para todos los tests de menú.
      */
-    public void agregarAlCarritoYValidar(AndroidDriver driver) {
+    public void agregarAlCarritoYValidar(AppiumDriver driver) {
         TestSteps.run("Agregar al carrito", () -> pagina.agregarCarrito(), driver);
         TestSteps.run("Abrir carrito y validar", () -> validarCarritoConProducto(), driver);
     }

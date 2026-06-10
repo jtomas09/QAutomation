@@ -1,7 +1,7 @@
 package pages.homeCartelera;
 
 import org.openqa.selenium.By;
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import pages.common.BasePage;
 import static pages.homeCartelera.LocatorsHome.*;
 import static pages.perfil.LocatorsPerfil.*;
@@ -12,7 +12,7 @@ public class SelectorsHome extends BasePage {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SelectorsHome.class);
 
-    public SelectorsHome(AndroidDriver driver) {
+    public SelectorsHome(AppiumDriver driver) {
         super(driver);
     }
 
@@ -212,13 +212,18 @@ public class SelectorsHome extends BasePage {
 
     private void terminarAppSinRelanzar() {
         try {
-            driver.runAppInBackground(java.time.Duration.ofSeconds(-1));
+            if (isIOS()) {
+                ((io.appium.java_client.ios.IOSDriver) driver).runAppInBackground(java.time.Duration.ofSeconds(-1));
+            } else {
+                ((io.appium.java_client.android.AndroidDriver) driver).runAppInBackground(java.time.Duration.ofSeconds(-1));
+            }
             System.out.println("[PAÍS] App enviada a background. @BeforeEach la relanzará con el país actualizado.");
         } catch (Exception e) {
             System.out.println("[PAÍS] runAppInBackground falló, intentando terminateApp: " + e.getMessage());
             try {
-                Object pkg = driver.getCapabilities().getCapability("appPackage");
-                if (pkg != null) driver.terminateApp(pkg.toString());
+                String key = isIOS() ? "bundleId" : "appPackage";
+                Object pkg = driver.getCapabilities().getCapability(key);
+                if (pkg != null) terminateApp(pkg.toString());
             } catch (Exception ignored) {}
         }
     }

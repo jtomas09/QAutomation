@@ -1,8 +1,10 @@
 package base;
 
 import config.DriverFactory;
+import io.appium.java_client.AppiumDriver;
 import io.appium.java_client.android.AndroidDriver;
 import io.appium.java_client.android.AndroidStartScreenRecordingOptions;
+import io.appium.java_client.ios.IOSStartScreenRecordingOptions;
 import io.qameta.allure.Allure;
 import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
@@ -36,7 +38,7 @@ public class BaseTest {
 
     private static final Logger log = LoggerFactory.getLogger(BaseTest.class);
 
-    protected AndroidDriver driver;
+    protected AppiumDriver driver;
     private static volatile boolean envWritten = false;
 
     private static long suiteStart;
@@ -123,14 +125,17 @@ public class BaseTest {
     }
 
     private String getAppPackageSafe() {
+        boolean ios = DriverFactory.isIOS();
+        // iOS uses bundleId; Android uses appPackage
+        String sysProp = ios ? System.getProperty("bundleId") : System.getProperty("appPackage");
         try {
-            String p = System.getProperty("appPackage");
-            if (p != null && !p.isBlank()) return p.trim();
+            if (sysProp != null && !sysProp.isBlank()) return sysProp.trim();
         } catch (Exception ignored) {}
 
         try {
             if (driver != null && driver.getCapabilities() != null) {
-                Object cap = driver.getCapabilities().getCapability("appPackage");
+                String capKey = ios ? "bundleId" : "appPackage";
+                Object cap = driver.getCapabilities().getCapability(capKey);
                 if (cap != null) {
                     String p = String.valueOf(cap).trim();
                     if (!p.isBlank()) return p;
@@ -147,8 +152,8 @@ public class BaseTest {
             String appPackage = getAppPackageSafe();
             if (appPackage == null || appPackage.isBlank()) return;
 
-            try { driver.terminateApp(appPackage); } catch (Exception ignored) {}
-            try { driver.activateApp(appPackage); } catch (Exception ignored) {}
+            DriverFactory.terminateApp(driver, appPackage);
+            DriverFactory.activateApp(driver, appPackage);
 
             try { Thread.sleep(300); } catch (InterruptedException ignored) {}
         } catch (Exception ignored) {}
@@ -161,14 +166,14 @@ public class BaseTest {
             if (appPackage == null || appPackage.isBlank()) return;
 
             try {
-                driver.activateApp(appPackage);
+                DriverFactory.activateApp(driver, appPackage);
             } catch (Exception e) {
                 relaunchAppSafe();
             }
         } catch (Exception ignored) {}
     }
 
-    private void quickSwipeUp(AndroidDriver driver) {
+    private void quickSwipeUp(AppiumDriver driver) {
         Dimension size = driver.manage().window().getSize();
         int width  = size.getWidth();
         int height = size.getHeight();
@@ -189,7 +194,7 @@ public class BaseTest {
         try { Thread.sleep(60); } catch (InterruptedException ignored) {}
     }
 
-    private boolean isAlimentosScreenVisible(AndroidDriver driver) {
+    private boolean isAlimentosScreenVisible(AppiumDriver driver) {
         if (driver == null) return false;
 
         By anchor = By.xpath(AUTO_SCROLL_ALIMENTOS_ANCHOR_XPATH);
@@ -209,7 +214,7 @@ public class BaseTest {
         return false;
     }
 
-    private void autoScrollOnAppOpen(AndroidDriver driver) {
+    private void autoScrollOnAppOpen(AppiumDriver driver) {
         if (!AUTO_SCROLL_ON_OPEN || driver == null) return;
 
         try {
@@ -387,7 +392,7 @@ public class BaseTest {
                     if (driver != null) {
                         String pkg = getAppPackageSafe();
                         if (pkg != null && !pkg.isBlank()) {
-                            try { driver.terminateApp(pkg); } catch (Exception ignored) {}
+                            DriverFactory.terminateApp(driver, pkg);
                             log.info("[BaseTest] App terminada tras test; próximo setUp la relanzará.");
                         }
                     }
@@ -479,11 +484,19 @@ public class BaseTest {
     private void startVideoRecording() {
         if (!isVideoEnabled() || driver == null) return;
         try {
-            driver.startRecordingScreen(
-                new AndroidStartScreenRecordingOptions()
-                    .withBitRate(2_000_000)
-                    .withTimeLimit(Duration.ofMinutes(15))
-            );
+            if (DriverFactory.isIOS()) {
+                ((io.appium.java_client.ios.IOSDriver) driver).startRecordingScreen(
+                    new IOSStartScreenRecordingOptions()
+                        .withVideoQuality(IOSStartScreenRecordingOptions.VideoQuality.MEDIUM)
+                        .withTimeLimit(Duration.ofMinutes(15))
+                );
+            } else {
+                ((AndroidDriver) driver).startRecordingScreen(
+                    new AndroidStartScreenRecordingOptions()
+                        .withBitRate(2_000_000)
+                        .withTimeLimit(Duration.ofMinutes(15))
+                );
+            }
             log.info("[Video] Grabacion iniciada");
         } catch (Exception e) {
             log.warn("[Video] No se pudo iniciar grabacion: {}", e.getMessage());
@@ -493,7 +506,12 @@ public class BaseTest {
     private void stopVideoRecording(TestInfo testInfo) {
         if (!isVideoEnabled() || driver == null) return;
         try {
-            String base64 = driver.stopRecordingScreen();
+            String base64;
+            if (DriverFactory.isIOS()) {
+                base64 = ((io.appium.java_client.ios.IOSDriver) driver).stopRecordingScreen();
+            } else {
+                base64 = ((AndroidDriver) driver).stopRecordingScreen();
+            }
             if (base64 == null || base64.isBlank()) return;
 
             byte[] videoBytes = Base64.getDecoder().decode(base64);

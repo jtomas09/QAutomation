@@ -1,7 +1,10 @@
 package config;
 
+import io.appium.java_client.AppiumDriver;
 import io.appium.java_client.android.AndroidDriver;
 import io.appium.java_client.android.options.UiAutomator2Options;
+import io.appium.java_client.ios.IOSDriver;
+import io.appium.java_client.ios.options.XCUITestOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,15 +21,13 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * Enterprise-grade AndroidDriver factory.
+ * Cross-platform AppiumDriver factory (Android + iOS).
  *
  * Features:
- *  - Pre-flight validation: Appium server, ADB device, package installed
- *  - Samsung / Android 14-15 specific timeouts
+ *  - Pre-flight validation: Appium server, ADB device (Android) / udid (iOS)
  *  - Automatic retry (up to MAX_RETRIES attempts)
- *  - Full root-cause logging and stack traces
  *  - Supports: local USB, BrowserStack, Sauce Labs
- *  - Capabilities use UiAutomator2Options (Appium 2 / W3C compliant)
+ *  - Set platformName=Android or platformName=iOS in appium.properties
  */
 public class DriverFactory {
 
@@ -35,19 +36,18 @@ public class DriverFactory {
     private static final int  MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 5_000L;
 
-    private static volatile AndroidDriver driver;
-    private static volatile Properties    props;
+    private static volatile AppiumDriver driver;
+    private static volatile Properties   props;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Public API
     // ──────────────────────────────────────────────────────────────────────────
 
-    /** Returns the current AndroidDriver, creating one if needed. Thread-safe. */
-    public static AndroidDriver getDriver() {
+    /** Returns the current AppiumDriver (Android or iOS), creating one if needed. Thread-safe. */
+    public static AppiumDriver getDriver() {
         if ("true".equals(System.getProperty("cinepolis.abort.requested")))
             throw new RuntimeException("Ejecucion abortada por el usuario");
 
-        // Detect and clear stale session
         if (driver != null && !isSessionAlive(driver)) {
             synchronized (DriverFactory.class) {
                 if (driver != null && !isSessionAlive(driver)) {
@@ -69,55 +69,93 @@ public class DriverFactory {
 
     /** Closes the current Appium session and clears the singleton. */
     public static void quitDriver() {
-        AndroidDriver d = driver;
+        AppiumDriver d = driver;
         if (d != null) {
             try { d.quit(); }
             catch (Exception e) { log.warn("[DriverFactory] quit() error: {}", e.getMessage()); }
             driver = null;
-            log.info("[DriverFactory] AndroidDriver session closed.");
+            log.info("[DriverFactory] AppiumDriver session closed.");
         }
     }
 
     /** Terminates and relaunches the app under test. */
     public static void relaunchApp() {
         if (driver == null) return;
-        String pkg = prop("appPackage", "");
-        if (pkg.isBlank()) return;
-        try { driver.terminateApp(pkg); } catch (Exception ignored) {}
-        try { driver.activateApp(pkg);  } catch (Exception ignored) {}
+        String appId = isIOS() ? prop("bundleId", "") : prop("appPackage", "");
+        if (appId.isBlank()) return;
+        terminateApp(driver, appId);
+        activateApp(driver, appId);
     }
 
     /** Brings the app to the foreground; relaunches if activation fails. */
     public static void ensureAppRunning() {
         if (driver == null) return;
-        String pkg = prop("appPackage", "");
-        if (pkg.isBlank()) return;
+        String appId = isIOS() ? prop("bundleId", "") : prop("appPackage", "");
+        if (appId.isBlank()) return;
         try {
-            driver.activateApp(pkg);
+            activateApp(driver, appId);
         } catch (Exception e) {
             log.warn("[DriverFactory] activateApp failed, attempting relaunch: {}", e.getMessage());
             relaunchApp();
         }
     }
 
+    /** Returns true if the current platform is iOS. */
+    public static boolean isIOS() {
+        return "iOS".equalsIgnoreCase(prop("platformName", "Android"));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Platform-aware app control helpers (AppiumDriver base lacks these methods)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public static void terminateApp(AppiumDriver d, String appId) {
+        if (d == null || appId == null || appId.isBlank()) return;
+        try {
+            if (isIOS()) ((IOSDriver) d).terminateApp(appId);
+            else         ((AndroidDriver) d).terminateApp(appId);
+        } catch (Exception ignored) {}
+    }
+
+    public static void activateApp(AppiumDriver d, String appId) {
+        if (d == null || appId == null || appId.isBlank()) return;
+        try {
+            if (isIOS()) ((IOSDriver) d).activateApp(appId);
+            else         ((AndroidDriver) d).activateApp(appId);
+        } catch (Exception ignored) {}
+    }
+
+    public static void hideKeyboard(AppiumDriver d) {
+        if (d == null) return;
+        try { d.executeScript("mobile: hideKeyboard"); } catch (Exception ignored) {}
+    }
+
+    public static void setClipboardText(AppiumDriver d, String text) {
+        if (d == null || text == null) return;
+        try {
+            if (!isIOS()) ((AndroidDriver) d).setClipboardText(text);
+        } catch (Exception ignored) {}
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Driver creation — retry loop
     // ──────────────────────────────────────────────────────────────────────────
 
-    private static AndroidDriver createDriverWithRetries() {
+    private static AppiumDriver createDriverWithRetries() {
         initProps();
-        String mode = prop("appium.mode", "local");
+        String mode     = prop("appium.mode",   "local");
+        String platform = prop("platformName",  "Android");
 
         Exception lastException = null;
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             log.info("");
             log.info("[DriverFactory] ══════════════════════════════════════════");
-            log.info("[DriverFactory]  Intento {}/{} — mode={}", attempt, MAX_RETRIES, mode);
+            log.info("[DriverFactory]  Intento {}/{} — mode={} platform={}", attempt, MAX_RETRIES, mode, platform);
             log.info("[DriverFactory] ══════════════════════════════════════════");
 
             try {
-                AndroidDriver d = attemptCreate(mode);
+                AppiumDriver d = attemptCreate(mode, platform);
                 if (attempt > 1)
                     log.info("[DriverFactory] Driver creado en intento {}.", attempt);
                 return d;
@@ -125,9 +163,9 @@ public class DriverFactory {
                 lastException = e;
                 log.error("[DriverFactory] Intento {} FALLIDO: {}", attempt, e.getMessage());
                 log.error("[DriverFactory] Causa raiz: {}", rootCause(e).getMessage());
-                e.printStackTrace();   // full stack trace as requested
+                e.printStackTrace();
 
-                diagnose(e);           // hint for the most common failures
+                diagnose(e, platform);
 
                 if (attempt < MAX_RETRIES) {
                     log.info("[DriverFactory] Esperando {} ms antes de reintentar...", RETRY_DELAY_MS);
@@ -136,22 +174,19 @@ public class DriverFactory {
             }
         }
 
-        // All retries exhausted
         String summary = String.format(
-            "[DriverFactory] Failed to create AndroidDriver after %d attempts.%n" +
+            "[DriverFactory] Failed to create AppiumDriver after %d attempts.%n" +
+            "  platform   = %s%n" +
             "  mode       = %s%n" +
             "  deviceName = %s%n" +
             "  udid       = %s%n" +
-            "  appPackage = %s%n" +
-            "  appActivity= %s%n" +
             "  hub        = %s%n" +
             "  rootCause  = %s",
             MAX_RETRIES,
+            platform,
             mode,
             prop("deviceName",  "?"),
             prop("udid",        "?"),
-            prop("appPackage",  "?"),
-            prop("appActivity", "?"),
             prop("appium.hub",  "?"),
             rootCause(lastException).getMessage()
         );
@@ -159,27 +194,42 @@ public class DriverFactory {
         throw new RuntimeException(summary, lastException);
     }
 
-    private static AndroidDriver attemptCreate(String mode) throws Exception {
-        UiAutomator2Options options = new UiAutomator2Options();
-        URL hub;
+    private static AppiumDriver attemptCreate(String mode, String platform) throws Exception {
+        boolean ios = "iOS".equalsIgnoreCase(platform);
 
-        switch (mode) {
-            case "browserstack" -> hub = buildBrowserStack(options);
-            case "saucelabs"    -> hub = buildSauceLabs(options);
-            default             -> hub = buildLocal(options);
+        if (ios) {
+            XCUITestOptions options = new XCUITestOptions();
+            URL hub;
+            switch (mode) {
+                case "browserstack" -> hub = buildBrowserStackIOS(options);
+                case "saucelabs"    -> hub = buildSauceLabsIOS(options);
+                default             -> hub = buildLocalIOS(options);
+            }
+            log.info("[DriverFactory] Hub URL : {}", hub);
+            log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
+            IOSDriver d = new IOSDriver(hub, options);
+            d.manage().timeouts().implicitlyWait(Duration.ZERO);
+            log.info("[DriverFactory] IOSDriver OK — sessionId={}", d.getSessionId());
+            return d;
+        } else {
+            UiAutomator2Options options = new UiAutomator2Options();
+            URL hub;
+            switch (mode) {
+                case "browserstack" -> hub = buildBrowserStack(options);
+                case "saucelabs"    -> hub = buildSauceLabs(options);
+                default             -> hub = buildLocal(options);
+            }
+            log.info("[DriverFactory] Hub URL : {}", hub);
+            log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
+            AndroidDriver d = new AndroidDriver(hub, options);
+            d.manage().timeouts().implicitlyWait(Duration.ZERO);
+            log.info("[DriverFactory] AndroidDriver OK — sessionId={}", d.getSessionId());
+            return d;
         }
-
-        log.info("[DriverFactory] Hub URL : {}", hub);
-        log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
-
-        AndroidDriver d = new AndroidDriver(hub, options);
-        d.manage().timeouts().implicitlyWait(Duration.ZERO);
-        log.info("[DriverFactory] AndroidDriver OK — sessionId={}", d.getSessionId());
-        return d;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // LOCAL — enterprise capabilities for Samsung / Android 14-15
+    // LOCAL ANDROID
     // ──────────────────────────────────────────────────────────────────────────
 
     private static URL buildLocal(UiAutomator2Options o) throws Exception {
@@ -189,27 +239,21 @@ public class DriverFactory {
         String act     = prop("appActivity",     "");
         String apkPath = prop("apkPath",         "");
 
-        // Auto-detect launcher activity via ADB when set to "auto" or left blank.
-        // This survives app updates that rename the obfuscated activity class.
         if ((act.isBlank() || "auto".equalsIgnoreCase(act)) && !udid.isBlank() && !pkg.isBlank()) {
             act = resolveAppActivity(udid, pkg);
         }
 
-        // ── Pre-flight validations ───────────────────────────────
         validateAppiumServer(hubUrl);
         if (!udid.isBlank()) {
             validateAdbDevice(udid);
             if (!pkg.isBlank()) validatePackageInstalled(udid, pkg);
-            // Kill any leftover UIA2 server from a previous session to free systemPort
             try {
                 String[] killCmd = {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server"};
                 Process p = Runtime.getRuntime().exec(killCmd);
                 p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
-                log.debug("[DriverFactory] UIA2 server stopped on device {} to free systemPort.", udid);
             } catch (Exception ignored) {}
         }
 
-        // ── Platform ─────────────────────────────────────────────
         o.setPlatformName("Android");
         o.setDeviceName(prop("deviceName", "Android Device"));
 
@@ -217,54 +261,82 @@ public class DriverFactory {
         if (!platformVersion.isBlank()) o.setPlatformVersion(platformVersion);
         if (!udid.isBlank())            o.setUdid(udid);
 
-        // ── App ───────────────────────────────────────────────────
-        if (!apkPath.isBlank()) {
-            o.setApp(apkPath);
-            o.setFullReset(false);
-        }
+        if (!apkPath.isBlank()) { o.setApp(apkPath); o.setFullReset(false); }
         if (!pkg.isBlank()) o.setAppPackage(pkg);
         if (!act.isBlank()) o.setAppActivity(act);
 
-        // ── Automation ────────────────────────────────────────────
         o.setAutomationName(prop("automationName", "UiAutomator2"));
         o.setNoReset(Boolean.parseBoolean(prop("noReset", "true")));
         o.setAutoGrantPermissions(true);
 
-        // ── Session timeout ───────────────────────────────────────
         long cmdTimeout = Long.parseLong(prop("newCommandTimeout", "300"));
         o.setNewCommandTimeout(Duration.ofSeconds(cmdTimeout));
 
-        // ── Samsung / Android 14-15 extended timeouts ─────────────
-        // UiAutomator2 server can take 60-90 s to install on Samsung
-        long uia2Launch  = Long.parseLong(prop("uia2LaunchTimeout",  "120"));  // seconds
-        long uia2Install = Long.parseLong(prop("uia2InstallTimeout", "120"));  // seconds
-        int  adbExec     = Integer.parseInt(prop("adbExecTimeout",   "90000")); // ms
-        int  apkInstall  = Integer.parseInt(prop("androidInstallTimeout", "90000")); // ms
+        long uia2Launch  = Long.parseLong(prop("uia2LaunchTimeout",  "120"));
+        long uia2Install = Long.parseLong(prop("uia2InstallTimeout", "120"));
+        int  adbExec     = Integer.parseInt(prop("adbExecTimeout",   "90000"));
+        int  apkInstall  = Integer.parseInt(prop("androidInstallTimeout", "90000"));
 
         o.setUiautomator2ServerLaunchTimeout(Duration.ofSeconds(uia2Launch));
         o.setUiautomator2ServerInstallTimeout(Duration.ofSeconds(uia2Install));
         o.setCapability("adbExecTimeout",        adbExec);
         o.setCapability("androidInstallTimeout", apkInstall);
 
-        // ── Stability / performance ───────────────────────────────
-        o.setCapability("disableWindowAnimation",   true);   // faster transitions
-        o.setCapability("ignoreUnimportantViews",   true);   // faster element lookup
-        o.setCapability("forceAppLaunch",           true);   // always cold-start
-        o.setCapability("skipServerInstallation",   false);  // reinstall UIA2 server
-        o.setCapability("skipDeviceInitialization", false);  // full device init
-        o.setCapability("ensureWebviewsHavePages",  false);  // native app only
-        o.setCapability("nativeWebScreenshot",      true);   // reliable screenshots
+        o.setCapability("disableWindowAnimation",   true);
+        o.setCapability("ignoreUnimportantViews",   true);
+        o.setCapability("forceAppLaunch",           true);
+        o.setCapability("skipServerInstallation",   false);
+        o.setCapability("skipDeviceInitialization", false);
+        o.setCapability("ensureWebviewsHavePages",  false);
+        o.setCapability("nativeWebScreenshot",      true);
 
-        // systemPort: must be unique per concurrent session
         int systemPort = Integer.parseInt(prop("systemPort", "8200"));
         o.setCapability("systemPort", systemPort);
 
-        // ── Hub URL (supports AWS Device Farm env override) ───────
         String envHub = System.getenv("APPIUM_SERVER_URL");
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
 
-        log.info("[DriverFactory] local → device={} udid={} pkg={} activity={} hub={}",
+        log.info("[DriverFactory] local Android → device={} udid={} pkg={} activity={} hub={}",
             prop("deviceName","?"), udid, pkg, act, finalHub);
+
+        return URI.create(finalHub).toURL();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // LOCAL iOS
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static URL buildLocalIOS(XCUITestOptions o) throws Exception {
+        String hubUrl   = prop("appium.hub",     "http://127.0.0.1:4723/wd/hub");
+        String udid     = prop("udid",           "");
+        String bundleId = prop("bundleId",       "");
+        String ipaPath  = prop("ipaPath",        "");
+
+        validateAppiumServer(hubUrl);
+
+        o.setPlatformName("iOS");
+        o.setDeviceName(prop("deviceName", "iPhone"));
+
+        String platformVersion = prop("platformVersion", "");
+        if (!platformVersion.isBlank()) o.setPlatformVersion(platformVersion);
+        if (!udid.isBlank())     o.setUdid(udid);
+        if (!bundleId.isBlank()) o.setBundleId(bundleId);
+        if (!ipaPath.isBlank())  o.setApp(ipaPath);
+
+        o.setAutomationName("XCUITest");
+        o.setNoReset(Boolean.parseBoolean(prop("noReset", "true")));
+
+        long cmdTimeout = Long.parseLong(prop("newCommandTimeout", "300"));
+        o.setNewCommandTimeout(Duration.ofSeconds(cmdTimeout));
+
+        o.setCapability("autoAcceptAlerts",   true);
+        o.setCapability("nativeWebScreenshot", true);
+
+        String envHub = System.getenv("APPIUM_SERVER_URL");
+        String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
+
+        log.info("[DriverFactory] local iOS → device={} udid={} bundleId={} hub={}",
+            prop("deviceName","?"), udid, bundleId, finalHub);
 
         return URI.create(finalHub).toURL();
     }
@@ -273,7 +345,6 @@ public class DriverFactory {
     // Pre-flight validations
     // ──────────────────────────────────────────────────────────────────────────
 
-    /** Verifies Appium server is reachable (tries /status and /wd/hub/status). */
     private static void validateAppiumServer(String hubUrl) {
         String base = hubUrl.replaceAll("/wd/hub$", "");
         String[] paths = {"/status", "/wd/hub/status"};
@@ -299,15 +370,12 @@ public class DriverFactory {
         throw new IllegalStateException(
             "[Preflight] Appium server NOT reachable at: " + base + "\n" +
             "  Solucion: appium --port 4723\n" +
-            "  Verifica drivers: appium driver list --installed\n" +
-            "  Instalar UiAutomator2: appium driver install uiautomator2"
+            "  Verifica drivers instalados:\n" +
+            "    Android: appium driver install uiautomator2\n" +
+            "    iOS:     appium driver install xcuitest"
         );
     }
 
-    /**
-     * Verifies the device is connected via ADB and USB debugging is authorized.
-     * Distinguishes between: not found, unauthorized, offline.
-     */
     private static void validateAdbDevice(String udid) {
         try {
             Process p = new ProcessBuilder("adb", "-s", udid, "get-state")
@@ -319,40 +387,25 @@ public class DriverFactory {
                 log.info("[Preflight] ADB device OK: {} (authorized)", udid);
                 return;
             }
-
             if ("unauthorized".equalsIgnoreCase(out)) {
                 throw new IllegalStateException(
                     "[Preflight] Device " + udid + " UNAUTHORIZED.\n" +
-                    "  Solucion:\n" +
-                    "    1. Ajustes > Opciones de desarrollador > Depuracion USB (activar)\n" +
-                    "    2. Acepta el dialogo 'Permitir depuracion USB' en el dispositivo\n" +
-                    "    3. Si no aparece el dialogo: adb kill-server && adb start-server"
+                    "  Solucion: Acepta el dialogo 'Permitir depuracion USB' en el dispositivo."
                 );
             }
-
             if ("offline".equalsIgnoreCase(out)) {
                 throw new IllegalStateException(
-                    "[Preflight] Device " + udid + " is OFFLINE.\n" +
-                    "  Solucion: desconecta y vuelve a conectar el cable USB."
-                );
+                    "[Preflight] Device " + udid + " is OFFLINE. Desconecta y vuelve a conectar.");
             }
-
-            // Unexpected output
             throw new IllegalStateException(
-                "[Preflight] Device " + udid + " NOT found (exit=" + exit + ", state='" + out + "').\n" +
-                "  Dispositivos disponibles: adb devices\n" +
-                "  UDID configurado en appium.properties: " + udid
-            );
-
+                "[Preflight] Device " + udid + " NOT found (exit=" + exit + ", state='" + out + "').");
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
-            // adb not in PATH — warn but don't block (will fail later with clearer Appium error)
             log.warn("[Preflight] adb check skipped ({}) — verifica que adb este en el PATH.", e.getMessage());
         }
     }
 
-    /** Checks whether the app package is installed on the device. */
     private static void validatePackageInstalled(String udid, String appPackage) {
         try {
             Process p = new ProcessBuilder(
@@ -360,13 +413,10 @@ public class DriverFactory {
                 .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             p.waitFor();
-
             if (out.contains("package:" + appPackage)) {
                 log.info("[Preflight] Package OK: {} instalado en {}.", appPackage, udid);
             } else {
-                log.warn("[Preflight] Package {} NO encontrado en {}.\n" +
-                    "  Instala la app manualmente: adb -s {} install app.apk",
-                    appPackage, udid, udid);
+                log.warn("[Preflight] Package {} NO encontrado en {}.", appPackage, udid);
             }
         } catch (Exception e) {
             log.warn("[Preflight] Package check skipped: {}", e.getMessage());
@@ -374,7 +424,7 @@ public class DriverFactory {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // BROWSERSTACK
+    // BROWSERSTACK — Android
     // ──────────────────────────────────────────────────────────────────────────
 
     private static URL buildBrowserStack(UiAutomator2Options o) throws Exception {
@@ -387,11 +437,9 @@ public class DriverFactory {
         String act    = prop("appActivity", "");
 
         if (user.isBlank() || key.isBlank())
-            throw new IllegalStateException(
-                "[BrowserStack] Configura browserstack.user y browserstack.key en appium.properties");
+            throw new IllegalStateException("[BrowserStack] Configura browserstack.user y browserstack.key en appium.properties");
         if (appId.isBlank())
-            throw new IllegalStateException(
-                "[BrowserStack] Sube el APK en browserstack.com/app-automate y configura browserstack.app.id");
+            throw new IllegalStateException("[BrowserStack] Configura browserstack.app.id con el ID del APK subido");
 
         o.setCapability("bstack:options", Map.of(
             "userName",    user,
@@ -410,12 +458,49 @@ public class DriverFactory {
         o.setAutoGrantPermissions(true);
         o.setNewCommandTimeout(Duration.ofSeconds(Long.parseLong(prop("newCommandTimeout", "300"))));
 
-        log.info("[DriverFactory] BrowserStack → device={} osVersion={}", device, osVer);
+        log.info("[DriverFactory] BrowserStack Android → device={} osVersion={}", device, osVer);
         return URI.create("https://hub-cloud.browserstack.com/wd/hub").toURL();
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // SAUCE LABS
+    // BROWSERSTACK — iOS
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static URL buildBrowserStackIOS(XCUITestOptions o) throws Exception {
+        String user     = prop("browserstack.user",       "");
+        String key      = prop("browserstack.key",        "");
+        String device   = prop("browserstack.ios.device", "iPhone 15");
+        String osVer    = prop("browserstack.ios.version","17");
+        String appId    = prop("browserstack.app.id",     "");
+        String bundleId = prop("bundleId",                "");
+
+        if (user.isBlank() || key.isBlank())
+            throw new IllegalStateException("[BrowserStack] Configura browserstack.user y browserstack.key en appium.properties");
+        if (appId.isBlank())
+            throw new IllegalStateException("[BrowserStack] Configura browserstack.app.id con el ID del IPA subido");
+
+        o.setCapability("bstack:options", Map.of(
+            "userName",    user,
+            "accessKey",   key,
+            "deviceName",  device,
+            "osVersion",   osVer,
+            "projectName", "Cinepolis Automation iOS",
+            "buildName",   "Build-iOS-" + LocalDate.now(),
+            "debug",       "true"
+        ));
+        o.setApp(appId);
+        if (!bundleId.isBlank()) o.setBundleId(bundleId);
+        o.setAutomationName("XCUITest");
+        o.setNoReset(true);
+        o.setCapability("autoAcceptAlerts", true);
+        o.setNewCommandTimeout(Duration.ofSeconds(Long.parseLong(prop("newCommandTimeout", "300"))));
+
+        log.info("[DriverFactory] BrowserStack iOS → device={} osVersion={}", device, osVer);
+        return URI.create("https://hub-cloud.browserstack.com/wd/hub").toURL();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // SAUCE LABS — Android
     // ──────────────────────────────────────────────────────────────────────────
 
     private static URL buildSauceLabs(UiAutomator2Options o) throws Exception {
@@ -429,18 +514,16 @@ public class DriverFactory {
         String act    = prop("appActivity", "");
 
         if (user.isBlank() || key.isBlank())
-            throw new IllegalStateException(
-                "[SauceLabs] Configura saucelabs.user y saucelabs.key en appium.properties");
+            throw new IllegalStateException("[SauceLabs] Configura saucelabs.user y saucelabs.key en appium.properties");
         if (appId.isBlank())
-            throw new IllegalStateException(
-                "[SauceLabs] Sube el APK en app.saucelabs.com y configura saucelabs.app.id");
+            throw new IllegalStateException("[SauceLabs] Configura saucelabs.app.id con el ID del APK subido");
 
         o.setCapability("sauce:options", Map.of(
             "username",        user,
             "accessKey",       key,
             "deviceName",      device,
             "platformVersion", osVer,
-            "name",            "Cinepolis-" + LocalDate.now()
+            "name",            "Cinepolis-Android-" + LocalDate.now()
         ));
         o.setApp(appId);
         if (!pkg.isBlank()) o.setAppPackage(pkg);
@@ -450,48 +533,80 @@ public class DriverFactory {
         o.setAutoGrantPermissions(true);
         o.setNewCommandTimeout(Duration.ofSeconds(Long.parseLong(prop("newCommandTimeout", "300"))));
 
-        log.info("[DriverFactory] SauceLabs → device={} region={}", device, region);
+        log.info("[DriverFactory] SauceLabs Android → device={} region={}", device, region);
         return URI.create("https://ondemand." + region + ".saucelabs.com/wd/hub").toURL();
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Diagnostics — maps common Appium errors to actionable messages
+    // SAUCE LABS — iOS
     // ──────────────────────────────────────────────────────────────────────────
 
-    private static void diagnose(Exception e) {
-        String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
-        String root = rootCause(e).getMessage() != null
-            ? rootCause(e).getMessage().toLowerCase() : "";
+    private static URL buildSauceLabsIOS(XCUITestOptions o) throws Exception {
+        String user     = prop("saucelabs.user",            "");
+        String key      = prop("saucelabs.key",             "");
+        String region   = prop("saucelabs.region",          "us-west-1");
+        String device   = prop("saucelabs.ios.device",      "iPhone 15 Simulator");
+        String osVer    = prop("saucelabs.ios.version",     "17.0");
+        String appId    = prop("saucelabs.app.id",          "");
+        String bundleId = prop("bundleId",                  "");
 
-        if (msg.contains("uiautomator2") && (msg.contains("not found") || msg.contains("not installed"))) {
-            log.error("[Diagnose] UiAutomator2 driver NOT installed in Appium.");
-            log.error("  Solucion: appium driver install uiautomator2");
-        } else if (msg.contains("could not start activity") || root.contains("could not start activity")) {
-            log.error("[Diagnose] Appium no pudo iniciar la actividad.");
-            log.error("  appActivity configurado: {}", prop("appActivity", "?"));
-            log.error("  Verifica con: adb shell dumpsys window | findstr mCurrentFocus");
-            log.error("  El valor correcto es la clase despues del '/': com.pkg/com.pkg.ACTIVITY -> ACTIVITY");
-        } else if (msg.contains("connection refused") || root.contains("connection refused")) {
-            log.error("[Diagnose] Appium server NO esta corriendo.");
-            log.error("  Solucion: appium --port 4723");
-        } else if (msg.contains("device") && msg.contains("not found")) {
-            log.error("[Diagnose] Dispositivo no encontrado.");
-            log.error("  udid configurado: {}", prop("udid", "?"));
-            log.error("  Dispositivos disponibles: adb devices");
-        } else if (msg.contains("unauthorized")) {
-            log.error("[Diagnose] Dispositivo no autorizado para depuracion USB.");
-            log.error("  Acepta el dialogo en el dispositivo y vuelve a intentar.");
-        } else if (msg.contains("timeout") || root.contains("timeout")) {
-            log.error("[Diagnose] Timeout al crear sesion. Samsung/Android 15 puede necesitar mas tiempo.");
-            log.error("  Considera aumentar uia2LaunchTimeout y uia2InstallTimeout en appium.properties.");
-        } else if (msg.contains("package") && msg.contains("not found")) {
-            log.error("[Diagnose] La app {} no esta instalada.", prop("appPackage", "?"));
-            log.error("  Instala con: adb install app.apk");
+        if (user.isBlank() || key.isBlank())
+            throw new IllegalStateException("[SauceLabs] Configura saucelabs.user y saucelabs.key en appium.properties");
+        if (appId.isBlank())
+            throw new IllegalStateException("[SauceLabs] Configura saucelabs.app.id con el ID del IPA subido");
+
+        o.setCapability("sauce:options", Map.of(
+            "username",        user,
+            "accessKey",       key,
+            "deviceName",      device,
+            "platformVersion", osVer,
+            "name",            "Cinepolis-iOS-" + LocalDate.now()
+        ));
+        o.setApp(appId);
+        if (!bundleId.isBlank()) o.setBundleId(bundleId);
+        o.setAutomationName("XCUITest");
+        o.setNoReset(true);
+        o.setCapability("autoAcceptAlerts", true);
+        o.setNewCommandTimeout(Duration.ofSeconds(Long.parseLong(prop("newCommandTimeout", "300"))));
+
+        log.info("[DriverFactory] SauceLabs iOS → device={} region={}", device, region);
+        return URI.create("https://ondemand." + region + ".saucelabs.com/wd/hub").toURL();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Diagnostics
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static void diagnose(Exception e, String platform) {
+        String msg  = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+        String root = rootCause(e).getMessage() != null ? rootCause(e).getMessage().toLowerCase() : "";
+
+        if ("iOS".equalsIgnoreCase(platform)) {
+            if (msg.contains("xcuitest") && (msg.contains("not found") || msg.contains("not installed"))) {
+                log.error("[Diagnose] XCUITest driver NOT installed in Appium.");
+                log.error("  Solucion: appium driver install xcuitest");
+            } else if (msg.contains("connection refused") || root.contains("connection refused")) {
+                log.error("[Diagnose] Appium server NO esta corriendo. Solucion: appium --port 4723");
+            } else if (msg.contains("xcode") || msg.contains("instruments")) {
+                log.error("[Diagnose] Error de Xcode/Instruments. Verifica que Xcode Command Line Tools esten instalados.");
+            }
+        } else {
+            if (msg.contains("uiautomator2") && (msg.contains("not found") || msg.contains("not installed"))) {
+                log.error("[Diagnose] UiAutomator2 driver NOT installed. Solucion: appium driver install uiautomator2");
+            } else if (msg.contains("could not start activity") || root.contains("could not start activity")) {
+                log.error("[Diagnose] Appium no pudo iniciar la actividad. Verifica appActivity en appium.properties.");
+            } else if (msg.contains("connection refused") || root.contains("connection refused")) {
+                log.error("[Diagnose] Appium server NO esta corriendo. Solucion: appium --port 4723");
+            } else if (msg.contains("device") && msg.contains("not found")) {
+                log.error("[Diagnose] Dispositivo no encontrado. udid={}", prop("udid", "?"));
+            } else if (msg.contains("timeout") || root.contains("timeout")) {
+                log.error("[Diagnose] Timeout. Considera aumentar uia2LaunchTimeout en appium.properties.");
+            }
         }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Auto-detect launcher activity
+    // Auto-detect launcher activity (Android only)
     // ──────────────────────────────────────────────────────────────────────────
 
     private static String resolveAppActivity(String udid, String pkg) {
@@ -525,7 +640,7 @@ public class DriverFactory {
     // Utilities
     // ──────────────────────────────────────────────────────────────────────────
 
-    private static boolean isSessionAlive(AndroidDriver d) {
+    private static boolean isSessionAlive(AppiumDriver d) {
         try {
             if (d == null || d.getSessionId() == null) return false;
             d.manage().window().getSize();
@@ -546,7 +661,7 @@ public class DriverFactory {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Properties loading (thread-safe, lazy)
+    // Properties loading
     // ──────────────────────────────────────────────────────────────────────────
 
     private static void initProps() {
@@ -567,7 +682,6 @@ public class DriverFactory {
     private static Properties loadProps() throws IOException {
         Properties p = new Properties();
 
-        // 1. Alongside the JAR (deployment scenario)
         File local = new File("appium.properties");
         if (local.exists()) {
             try (FileInputStream fis = new FileInputStream(local)) {
@@ -577,7 +691,6 @@ public class DriverFactory {
             }
         }
 
-        // 2. Project resources (IDE / Gradle test run)
         File project = new File("src/test/resources/appium.properties");
         if (project.exists()) {
             try (FileInputStream fis = new FileInputStream(project)) {
@@ -587,7 +700,6 @@ public class DriverFactory {
             }
         }
 
-        // 3. Classpath (embedded in JAR)
         try (InputStream is = DriverFactory.class.getClassLoader()
                 .getResourceAsStream("appium.properties")) {
             if (is != null) {
@@ -599,8 +711,8 @@ public class DriverFactory {
 
         throw new IOException(
             "appium.properties no encontrado en ninguna ubicacion:\n" +
-            "  1. Junto al JAR:       " + local.getAbsolutePath()   + "\n" +
-            "  2. Recursos del proyecto: " + project.getAbsolutePath() + "\n" +
+            "  1. Junto al JAR:             " + local.getAbsolutePath()   + "\n" +
+            "  2. Recursos del proyecto:    " + project.getAbsolutePath() + "\n" +
             "  3. Classpath (JAR embebido)"
         );
     }

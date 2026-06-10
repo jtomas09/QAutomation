@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.openqa.selenium.By;
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import pages.carritoCompras.SelectorsCarrito;
 import pages.common.BasePage;
@@ -28,7 +28,7 @@ public class SelectorsCheckOut extends BasePage {
     private static final String TARJETA_FECHA_VENCIMIENTO = "12/26";
     private static final String TARJETA_CVV               = "123";
 
-    public SelectorsCheckOut(AndroidDriver driver) {
+    public SelectorsCheckOut(AppiumDriver driver) {
         super(driver);
     }
 
@@ -56,10 +56,10 @@ public class SelectorsCheckOut extends BasePage {
         driver.executeScript("mobile: type", Map.of("text", "Pruebas"));
         this.click(INPUT_APELLIDO_CHECKOUT);
         driver.executeScript("mobile: type", Map.of("text", "IA Interactive"));
-        driver.hideKeyboard();
+        hideKeyboard();
         this.click(INPUT_CORREO_CHECKOUT);
         driver.executeScript("mobile: type", Map.of("text", "cinepolispayments@ia.com.mx"));
-        driver.hideKeyboard();
+        hideKeyboard();
     }
 
     public void llenarDatosPersonalesEspana() {
@@ -69,14 +69,14 @@ public class SelectorsCheckOut extends BasePage {
         driver.executeScript("mobile: type", Map.of("text", "Pruebas"));
         this.click(INPUT_APELLIDO_CHECKOUT);
         driver.executeScript("mobile: type", Map.of("text", "IA Interactive"));
-        driver.hideKeyboard();
+        hideKeyboard();
         this.click(INPUT_CORREO_CHECKOUT);
         driver.executeScript("mobile: type", Map.of("text", "cinepolispayments@ia.com.mx"));
-        driver.hideKeyboard();
+        hideKeyboard();
         if (isVisibleQuick(INPUT_TELEFONO_CHECKOUT)) {
             this.click(INPUT_TELEFONO_CHECKOUT);
             driver.executeScript("mobile: type", Map.of("text", "600000000"));
-            driver.hideKeyboard();
+            hideKeyboard();
         }
     }
 
@@ -168,7 +168,7 @@ public class SelectorsCheckOut extends BasePage {
     }
 
     public void pagarConTarjetaBancaria() {
-        driver.hideKeyboard();
+        hideKeyboard();
         ensureVisibleNoClick(TARJETA_BANCARIA_CHECKOUT, FAST_VISIBLE_SECONDS);
         this.click(TARJETA_BANCARIA_CHECKOUT);
         sleep(3000);
@@ -179,25 +179,25 @@ public class SelectorsCheckOut extends BasePage {
 
         tapW3C(x, (int)(h * Y_CAMPO_NOMBRE_TITULAR));
         driver.executeScript("mobile: type", Map.of("text", TARJETA_NOMBRE_TITULAR));
-        driver.hideKeyboard();
+        hideKeyboard();
 
         tapW3C(x, (int)(h * Y_CAMPO_NUMERO_TARJETA));
         typeCaracterPorCaracter(TARJETA_NUMERO);
-        driver.hideKeyboard();
+        hideKeyboard();
 
         tapW3C(x, (int)(h * Y_CAMPO_FECHA_VENCIMIENTO));
         typeCaracterPorCaracter(TARJETA_FECHA_VENCIMIENTO);
-        driver.hideKeyboard();
+        hideKeyboard();
 
         tapW3C(x, (int)(h * Y_CAMPO_CVV));
         typeCaracterPorCaracter(TARJETA_CVV);
-        driver.hideKeyboard();
+        hideKeyboard();
 
         tapW3C(x, (int)(h * Y_BOTON_PAGAR));
     }
 
     public void pagarConC2P() {
-        driver.hideKeyboard();
+        hideKeyboard();
         ensureVisibleNoClick(C2P_CHECKOUT, FAST_VISIBLE_SECONDS);
         this.click(C2P_CHECKOUT);
         sleep(3000);
@@ -205,7 +205,7 @@ public class SelectorsCheckOut extends BasePage {
     }
 
     public void pagarConAplazo() {
-        driver.hideKeyboard();
+        hideKeyboard();
         ensureVisibleNoClick(APLAZO_CHECKOUT, FAST_VISIBLE_SECONDS);
         this.click(APLAZO_CHECKOUT);
         sleep(3000);
@@ -213,7 +213,7 @@ public class SelectorsCheckOut extends BasePage {
     }
 
     public void pagarConPaypal() {
-        driver.hideKeyboard();
+        hideKeyboard();
         ensureVisibleNoClick(PAYPAL_CHECKOUT, FAST_VISIBLE_SECONDS);
         this.click(PAYPAL_CHECKOUT);
         sleep(3000);

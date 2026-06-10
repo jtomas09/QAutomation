@@ -1,7 +1,7 @@
 package pages.seleccionCines;
 import java.util.Map;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import pages.common.BasePage;
 import static pages.seleccionCines.LocatorsSelectorCines.*;
@@ -9,7 +9,7 @@ import static pages.seleccionCines.LocatorsSelectorCines.*;
 public class SelectorsCines extends BasePage {
     public static final int FAST_VISIBLE_SECONDS = 2;
 
-    public SelectorsCines(AndroidDriver driver) {
+    public SelectorsCines(AppiumDriver driver) {
         super(driver);
     }
 

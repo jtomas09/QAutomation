@@ -1,6 +1,6 @@
 package pages.common;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.appium.java_client.AppiumBy;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
@@ -251,7 +251,7 @@ public class CinemasHelper extends BasePage {
     private static final By BTN_MODAL_ANY_BUTTON =
             By.xpath("(//android.widget.Button)[last()]");
 
-    public CinemasHelper(AndroidDriver driver) {
+    public CinemasHelper(AppiumDriver driver) {
         super(driver);
     }
 
@@ -270,13 +270,15 @@ public class CinemasHelper extends BasePage {
             log.info("[CinemasHelper] Aplicar selección → clickable ancestor OK");
             return true;
         }
-        // 3. UiAutomator: clickable + texto "Aplicar"
-        try {
-            WebElement btn = driver.findElement(AppiumBy.androidUIAutomator(UA_APLICAR_SELECCION));
-            tapCenter(btn);
-            log.info("[CinemasHelper] Aplicar selección → UiAutomator OK");
-            return true;
-        } catch (Exception ignored) {}
+        // 3. UiAutomator: clickable + texto "Aplicar" (Android only)
+        if (!isIOS()) {
+            try {
+                WebElement btn = driver.findElement(AppiumBy.androidUIAutomator(UA_APLICAR_SELECCION));
+                tapCenter(btn);
+                log.info("[CinemasHelper] Aplicar selección → UiAutomator OK");
+                return true;
+            } catch (Exception ignored) {}
+        }
         // 4. Tap por coordenadas del label (funciona aunque no sea clickable)
         try {
             WebElement label = firstOrNull(BTN_APLICAR_SELECCION_LABEL);
@@ -445,14 +447,16 @@ public class CinemasHelper extends BasePage {
                 sleep(500);
             }
 
-            // 🔒 Intento duro: buscar el item del bottom-nav por UiSelector y tap (por si el xpath no pegó)
-            try {
-                WebElement alimentos = driver.findElement(AppiumBy.androidUIAutomator(
-                        "new UiSelector().textContains(\"Alimentos\")"
-                ));
-                tapCenter(alimentos);
-                sleep(650);
-            } catch (Exception ignored) {}
+            // 🔒 Intento duro: buscar el item del bottom-nav por UiSelector/XPath y tap
+            if (!isIOS()) {
+                try {
+                    WebElement alimentos = driver.findElement(AppiumBy.androidUIAutomator(
+                            "new UiSelector().textContains(\"Alimentos\")"
+                    ));
+                    tapCenter(alimentos);
+                    sleep(650);
+                } catch (Exception ignored) {}
+            }
 
             // ✅ Si ya vemos el header/elementos de Alimentos, salimos
             if (isOnAlimentosHome()) return;
@@ -461,16 +465,18 @@ public class CinemasHelper extends BasePage {
             sleep(650);
         }
 
-        // 🚨 Si aún vemos Cartelera/Horarios, NO logramos cambiar a Alimentos. Reintentamos una vez más con un tap fuerte.
+        // 🚨 Si aún vemos Cartelera/Horarios, forzamos tap final.
         if (isVisibleNow(TAB_CARTELERA) || isVisibleNow(TAB_HORARIOS)) {
-            log.warn("[CinemasHelper] WARNING: No se logró cambiar a Alimentos; aún estamos en Películas. Forzando tap final...");
-            try {
-                WebElement alimentos = driver.findElement(AppiumBy.androidUIAutomator(
-                        "new UiSelector().textContains(\"Alimentos\")"
-                ));
-                tapCenter(alimentos);
-                sleep(900);
-            } catch (Exception ignored) {}
+            log.warn("[CinemasHelper] WARNING: No se logró cambiar a Alimentos. Forzando tap final...");
+            if (!isIOS()) {
+                try {
+                    WebElement alimentos = driver.findElement(AppiumBy.androidUIAutomator(
+                            "new UiSelector().textContains(\"Alimentos\")"
+                    ));
+                    tapCenter(alimentos);
+                    sleep(900);
+                } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -501,12 +507,14 @@ public class CinemasHelper extends BasePage {
             if (tapIfPresent(CINES_TEXT)) { sleep(450); }
             if (isAfterCinesTapScreenOpen()) return;
 
-            try {
-                WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
-                        "new UiSelector().text(\"Cines\")"
-                ));
-                tapCenter(el);
-            } catch (Exception ignored) {}
+            if (!isIOS()) {
+                try {
+                    WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
+                            "new UiSelector().text(\"Cines\")"
+                    ));
+                    tapCenter(el);
+                } catch (Exception ignored) {}
+            }
 
             sleep(550);
             if (isAfterCinesTapScreenOpen()) return;
@@ -652,6 +660,7 @@ public class CinemasHelper extends BasePage {
     }
 
     private void mobileShell(String command, String[] args) {
+        if (isIOS()) return; // mobile: shell is Android-only
         Map<String, Object> shellArgs = Map.of(
                 "command", command,
                 "args", args,
@@ -687,7 +696,7 @@ public class CinemasHelper extends BasePage {
 
     private boolean setClipboardTextSafe(String text) {
         try {
-            driver.setClipboardText(text);
+            setClipboardText(text);
             return true;
         } catch (Exception e) {
             log.warn("[CinemasHelper] setClipboardText falló: {}", e.getMessage());
@@ -827,12 +836,14 @@ public class CinemasHelper extends BasePage {
                 if (tapIfPresent(BTN_SI_CAMBIAR_CINE_BUTTON_ABS)) { sleep(650); return; }
                 if (tapIfPresent(BTN_MODAL_ANY_BUTTON)) { sleep(650); return; }
 
-                try {
-                    WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
-                            "new UiSelector().text(\"Sí, cambiar de cine\")"
-                    ));
-                    tapCenter(el);
-                } catch (Exception ignored) {}
+                if (!isIOS()) {
+                    try {
+                        WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
+                                "new UiSelector().text(\"Sí, cambiar de cine\")"
+                        ));
+                        tapCenter(el);
+                    } catch (Exception ignored) {}
+                }
 
                 sleep(700);
                 if (isSelectorOpen()) return;
@@ -863,21 +874,29 @@ public class CinemasHelper extends BasePage {
                 return true;
             } catch (Exception ignored) {}
 
-            try {
-                String id = ((RemoteWebElement) el).getId();
-                Map<String, Object> args = Map.of("elementId", id);
-                driver.executeScript("mobile: clickGesture", args);
-                return true;
-            } catch (Exception ignored) {}
+            if (!isIOS()) {
+                try {
+                    String id = ((RemoteWebElement) el).getId();
+                    Map<String, Object> args = Map.of("elementId", id);
+                    driver.executeScript("mobile: clickGesture", args);
+                    return true;
+                } catch (Exception ignored) {}
 
-            try {
-                int cx = el.getLocation().getX() + (el.getSize().getWidth() / 2);
-                int cy = el.getLocation().getY() + (el.getSize().getHeight() / 2);
-
-                Map<String, Object> args = Map.of("x", cx, "y", cy);
-                driver.executeScript("mobile: clickGesture", args);
-                return true;
-            } catch (Exception ignored) {}
+                try {
+                    int cx = el.getLocation().getX() + (el.getSize().getWidth() / 2);
+                    int cy = el.getLocation().getY() + (el.getSize().getHeight() / 2);
+                    Map<String, Object> args = Map.of("x", cx, "y", cy);
+                    driver.executeScript("mobile: clickGesture", args);
+                    return true;
+                } catch (Exception ignored) {}
+            } else {
+                try {
+                    int cx = el.getLocation().getX() + (el.getSize().getWidth() / 2);
+                    int cy = el.getLocation().getY() + (el.getSize().getHeight() / 2);
+                    tapW3C(cx, cy);
+                    return true;
+                } catch (Exception ignored) {}
+            }
 
             return false;
         } catch (Exception e) {
@@ -1310,17 +1329,19 @@ public class CinemasHelper extends BasePage {
                 }
             }
 
-            // Intento 2: UiAutomator (más robusto con Compose)
-            try {
-                WebElement btn = driver.findElement(
-                        AppiumBy.androidUIAutomator("new UiSelector().text(\"No cambiar\")"));
-                tapCenter(btn);
-                safeSleep(600);
-                if (!isLocationChangePopupVisible()) {
-                    log.info("[CinemasHelper][ZonaGuard] Popup cerrado OK (UiAutomator) intento={}", i);
-                    return;
-                }
-            } catch (Exception ignored) {}
+            // Intento 2: UiAutomator (Android) / XPath (iOS)
+            if (!isIOS()) {
+                try {
+                    WebElement btn = driver.findElement(
+                            AppiumBy.androidUIAutomator("new UiSelector().text(\"No cambiar\")"));
+                    tapCenter(btn);
+                    safeSleep(600);
+                    if (!isLocationChangePopupVisible()) {
+                        log.info("[CinemasHelper][ZonaGuard] Popup cerrado OK (UiAutomator) intento={}", i);
+                        return;
+                    }
+                } catch (Exception ignored) {}
+            }
 
             safeSleep(300);
         }
@@ -1335,7 +1356,9 @@ public class CinemasHelper extends BasePage {
      */
     private boolean tapBackFromClubUI() {
         try {
-            List<WebElement> candidates = driver.findElements(CLUB_BACK_BUTTON_UIAUTO);
+            List<WebElement> candidates = isIOS()
+                ? driver.findElements(CLUB_BACK_BUTTON_XPATH)
+                : driver.findElements(CLUB_BACK_BUTTON_UIAUTO);
             if (candidates == null || candidates.isEmpty()) {
                 candidates = driver.findElements(CLUB_BACK_BUTTON_XPATH);
             }
@@ -1460,13 +1483,15 @@ public class CinemasHelper extends BasePage {
             if (tapIfPresent(CINES_SIN_SELECCION)) { sleep(700); }
             if (isSelectorOpen()) return;
 
-            // 3) UiAutomator fallback (ignora acentos para compatibilidad)
-            try {
-                WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
-                        "new UiSelector().textContains(\"Selecciona uno o\")"));
-                tapCenter(el);
-                sleep(700);
-            } catch (Exception ignored) {}
+            // 3) UiAutomator fallback (Android) / XPath (iOS)
+            if (!isIOS()) {
+                try {
+                    WebElement el = driver.findElement(AppiumBy.androidUIAutomator(
+                            "new UiSelector().textContains(\"Selecciona uno o\")"));
+                    tapCenter(el);
+                    sleep(700);
+                } catch (Exception ignored) {}
+            }
             if (isSelectorOpen()) return;
 
             sleep(400);

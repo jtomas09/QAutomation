@@ -48,12 +48,12 @@ public class MenuAtmosfera extends BaseTest {
             log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
             try {
-                driver.terminateApp(APP_PACKAGE);
+                config.DriverFactory.terminateApp(driver, APP_PACKAGE);
                 log.info("App terminada correctamente");
 
                 Thread.sleep(2000);
 
-                driver.activateApp(APP_PACKAGE);
+                config.DriverFactory.activateApp(driver, APP_PACKAGE);
                 log.info("App activada nuevamente");
 
                 waitForHomeReady();

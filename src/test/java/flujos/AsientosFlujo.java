@@ -1,6 +1,6 @@
 package flujos;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import pages.asientos.SelectorPage;
 import utils.Reintento;
 import utils.TestSteps;
@@ -20,10 +20,10 @@ import utils.TestSteps;
  */
 public class AsientosFlujo {
 
-    private final AndroidDriver driver;
+    private final AppiumDriver driver;
     private final SelectorPage pagina;
 
-    public AsientosFlujo(AndroidDriver driver) {
+    public AsientosFlujo(AppiumDriver driver) {
         this.driver = driver;
         this.pagina = new SelectorPage(driver);
     }
@@ -43,7 +43,7 @@ public class AsientosFlujo {
     // ─── Flujos de selección de asientos ─────────────────────────────────────
 
     /** Selecciona 1 asiento disponible al azar y continúa. */
-    public void seleccionar1Asiento(AndroidDriver driver) {
+    public void seleccionar1Asiento(AppiumDriver driver) {
         TestSteps.run("Selección de asiento disponible",
             () -> pagina.seleccionarAsientoRandomDisponible(), driver);
         TestSteps.run("Continuar con asiento seleccionado",
@@ -51,7 +51,7 @@ public class AsientosFlujo {
     }
 
     /** Selecciona 3 asientos aleatorios y continúa. */
-    public void seleccionar3AsientosAleatorios(AndroidDriver driver) {
+    public void seleccionar3AsientosAleatorios(AppiumDriver driver) {
         TestSteps.run("Selección de 3 asientos disponibles",
             () -> pagina.seleccionar3AsientosRandomDisponibles(), driver);
         TestSteps.run("Continuar con asientos seleccionados",
@@ -59,7 +59,7 @@ public class AsientosFlujo {
     }
 
     /** Selecciona 3 asientos consecutivos y continúa. */
-    public void seleccionar3AsientosConsecutivos(AndroidDriver driver) {
+    public void seleccionar3AsientosConsecutivos(AppiumDriver driver) {
         TestSteps.run("Selección de 3 asientos consecutivos",
             () -> pagina.seleccionar3AsientosConsecutivosDisponibles(), driver);
         TestSteps.run("Continuar con asientos seleccionados",
@@ -67,13 +67,13 @@ public class AsientosFlujo {
     }
 
     /** Selecciona y deselecciona 3 asientos consecutivos (validación de UI). */
-    public void seleccionarYDeseleccionar3AsientosConsecutivos(AndroidDriver driver) {
+    public void seleccionarYDeseleccionar3AsientosConsecutivos(AppiumDriver driver) {
         TestSteps.run("Pantalla de asientos",
             () -> pagina.seleccionarYDeseleccionar3AsientosConsecutivosDisponibles(), driver);
     }
 
     /** Intenta seleccionar más de 10 asientos y valida que aparezca la alerta de límite. */
-    public void validarLimite10Asientos(AndroidDriver driver) {
+    public void validarLimite10Asientos(AppiumDriver driver) {
         TestSteps.run("Pantalla de asientos",
             () -> pagina.seleccionarMasDe10AsientosYValidarAlerta(), driver);
     }
@@ -81,7 +81,7 @@ public class AsientosFlujo {
     // ─── Flujos de funciones especiales ──────────────────────────────────────
 
     /** Cambia el horario desde la pantalla de mapa de asientos. */
-    public void cambiarHorario(AndroidDriver driver) {
+    public void cambiarHorario(AppiumDriver driver) {
         TestSteps.run("Pantalla de asientos",
             () -> pagina.cambiarHorarioEnPantallaAsientos(), driver);
     }
@@ -90,7 +90,7 @@ public class AsientosFlujo {
      * Activa el filtro 3D; si no existe ninguna función 3D disponible, aborta el test (SKIP).
      * El panel de filtros se cierra automáticamente antes de propagar el SKIP.
      */
-    public void seleccionarFiltro3D(AndroidDriver driver) {
+    public void seleccionarFiltro3D(AppiumDriver driver) {
         try {
             TestSteps.run("Seleccionar filtro 3D",
                 () -> pagina.seleccionarFiltro3D(), driver);
@@ -106,7 +106,7 @@ public class AsientosFlujo {
      * Activa el filtro Sala Junior y selecciona función.
      * Si no hay funciones disponibles, aborta el test (SKIP).
      */
-    public void seleccionarSalaJunior(AndroidDriver driver) {
+    public void seleccionarSalaJunior(AppiumDriver driver) {
         try {
             TestSteps.run("Seleccionar filtro Sala Junior",
                 () -> pagina.seleccionarFiltroSalaJunior(), driver);
@@ -122,7 +122,7 @@ public class AsientosFlujo {
      * Selecciona un asiento especial (discapacidad) y valida la alerta.
      * Si no existen asientos especiales disponibles, aborta (SKIP).
      */
-    public void seleccionarAsientoEspecialYValidarAlerta(AndroidDriver driver) {
+    public void seleccionarAsientoEspecialYValidarAlerta(AppiumDriver driver) {
         try {
             TestSteps.run("Seleccionar asiento especial",
                 () -> pagina.seleccionarAsientoEspecial(), driver);

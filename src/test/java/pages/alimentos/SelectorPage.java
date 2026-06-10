@@ -1,7 +1,7 @@
 package pages.alimentos;
 
 import io.appium.java_client.AppiumBy;
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
@@ -28,19 +28,21 @@ public class SelectorPage extends BasePage {
     private static final String HEADER_SEGUNDO_SABOR = "Selecciona el segundo sabor";
     private static final String HEADER_EXTRA = "Selecciona tu extra";
 
-    public SelectorPage(AndroidDriver driver) {
+    public SelectorPage(AppiumDriver driver) {
         super(driver);
     }
 
     public void abrirMenu() {
-        // UiSelector works from any screen (home or already on alimentos tab)
-        try {
-            driver.findElement(AppiumBy.androidUIAutomator(
-                "new UiSelector().text(\"Alimentos\")"
-            )).click();
-            sleep(800);
-            return;
-        } catch (Exception ignored) {}
+        // UiSelector works from any screen (Android); use XPath on iOS
+        if (!isIOS()) {
+            try {
+                driver.findElement(AppiumBy.androidUIAutomator(
+                    "new UiSelector().text(\"Alimentos\")"
+                )).click();
+                sleep(800);
+                return;
+            } catch (Exception ignored) {}
+        }
         // Fallback: Compose xpath for bottom-nav Alimentos tab from home/cartelera screen
         try {
             this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]/android.view.View/android.view.View[2]/android.view.View[3]"));
@@ -1083,14 +1085,17 @@ public class SelectorPage extends BasePage {
                 return;
             }
 
-            // 1) Intento rápido con UiScrollable por texto (si aplica)
-            try {
-                String uiScroll = "new UiScrollable(new UiSelector().scrollable(true))"
-                        + ".scrollIntoView(new UiSelector().text(\"" + nombreProducto + "\"))";
-                driver.findElement(AppiumBy.androidUIAutomator(uiScroll));
-            } catch (Exception ignore) {
-                rethrowIfAborted(ignore);
-                // fallback manual
+            // 1) Intento rápido con UiScrollable por texto (Android) / W3C swipe (iOS)
+            if (!isIOS()) {
+                try {
+                    String uiScroll = "new UiScrollable(new UiSelector().scrollable(true))"
+                            + ".scrollIntoView(new UiSelector().text(\"" + nombreProducto + "\"))";
+                    driver.findElement(AppiumBy.androidUIAutomator(uiScroll));
+                } catch (Exception ignore) {
+                    rethrowIfAborted(ignore);
+                }
+            } else {
+                oneShotVerticalSearch(target, 8);
             }
 
             // Check post UiScrollable

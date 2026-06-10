@@ -1,7 +1,7 @@
 package pages.asientos;
 
 import io.appium.java_client.AppiumBy;
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.interactions.PointerInput;
@@ -28,7 +28,7 @@ public class SelectorPage extends BasePage {
 
     private static final int RANDOM_PICK_TIMEOUT_SECONDS = 10;
 
-    public SelectorPage(AndroidDriver driver) {
+    public SelectorPage(AppiumDriver driver) {
         super(driver);
     }
 
@@ -2164,27 +2164,28 @@ public class SelectorPage extends BasePage {
 
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
-            // UIAutomator2 on-device: evita getText() individual y el triple-XPath fallback
+            String seatXpath = isIOS()
+                ? "//XCUIElementTypeStaticText[@value and string-length(normalize-space(@value)) <= 2]"
+                : "//android.widget.TextView[@text and string-length(normalize-space(@text)) <= 2]";
+            // UIAutomator2 on-device (Android) or XPath (iOS)
             try {
-                List<WebElement> elementos = driver.findElements(
-                    AppiumBy.androidUIAutomator(
-                        "new UiSelector().textMatches(\"^\\\\d{1,2}$\")"
-                    )
-                );
+                List<WebElement> elementos = isIOS()
+                    ? driver.findElements(By.xpath(seatXpath))
+                    : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
                 for (WebElement el : elementos) {
                     try {
                         org.openqa.selenium.Rectangle r = el.getRect();
                         int cy = r.getY() + r.getHeight() / 2;
                         int cx = r.getX() + r.getWidth() / 2;
                         if (cy < mapTop || cy > mapBottom || cx < 10) continue;
-                        unicos.putIfAbsent(r.getX() + "|" + r.getY(), el);
+                        String key = isIOS() ? (obtenerTextoSeguro(el) + "|" + r.getX() + "|" + r.getY()) : (r.getX() + "|" + r.getY());
+                        if (isIOS() && !obtenerTextoSeguro(el).matches("^\\d{1,2}$")) continue;
+                        unicos.putIfAbsent(key, el);
                     } catch (Exception ignored) {}
                 }
             } catch (Exception e) {
-                // Fallback XPath si UIAutomator2 falla
-                List<WebElement> elementos = driver.findElements(
-                    By.xpath("//android.widget.TextView[@text and string-length(normalize-space(@text)) <= 2]")
-                );
+                // Fallback XPath
+                List<WebElement> elementos = driver.findElements(By.xpath(seatXpath));
                 for (WebElement el : elementos) {
                     try {
                         String txt = obtenerTextoSeguro(el);
@@ -2218,12 +2219,10 @@ public class SelectorPage extends BasePage {
 
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
-            // UIAutomator2: filtra en dispositivo, sin isDisplayed() ni getText() por elemento
-            List<WebElement> candidatos = driver.findElements(
-                AppiumBy.androidUIAutomator(
-                    "new UiSelector().textMatches(\"^\\\\d{1,2}$\")"
-                )
-            );
+            // UIAutomator2 (Android) / XPath (iOS): filtra asientos numéricos en el mapa
+            List<WebElement> candidatos = isIOS()
+                ? driver.findElements(By.xpath("//XCUIElementTypeStaticText[@value and string-length(normalize-space(@value)) <= 2]"))
+                : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
             for (WebElement el : candidatos) {
                 try {
                     org.openqa.selenium.Rectangle r = el.getRect();
@@ -2379,16 +2378,12 @@ public class SelectorPage extends BasePage {
         return new SeatMap(raw);
     }
 
-    // UIAutomator2 filtra por texto numérico EN EL DISPOSITIVO → solo devuelve asientos reales.
-    // Cada elemento solo necesita 1 call (getRect) en vez de 2 (getText + getRect).
+    // UIAutomator2 (Android) / XPath (iOS) — filtra por texto numérico en el mapa de asientos.
     private List<WebElement> escanearMapaConUIAutomator(int mapTop, int mapBottom) {
         try {
-            // Sin className: compatible con TextView Y elementos de Jetpack Compose (View)
-            List<WebElement> candidatos = driver.findElements(
-                AppiumBy.androidUIAutomator(
-                    "new UiSelector().textMatches(\"^\\\\d{1,2}$\")"
-                )
-            );
+            List<WebElement> candidatos = isIOS()
+                ? driver.findElements(By.xpath("//XCUIElementTypeStaticText[@value and string-length(normalize-space(@value)) <= 2]"))
+                : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
             if (candidatos.isEmpty()) return escanearMapaConXPath(mapTop, mapBottom);
 
             Map<String, WebElement> unicos = new LinkedHashMap<>();

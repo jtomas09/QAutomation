@@ -2,7 +2,7 @@ package pages.mapaAsientos;
 import static pages.mapaAsientos.LocatorsMapaAsientos.*;
 
 import org.openqa.selenium.By;
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import pages.common.BasePage;
 
@@ -12,7 +12,7 @@ public class SelectorsMapaAsientos extends BasePage {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SelectorsMapaAsientos.class);
     private static final int PANTALLA_TIMEOUT_MS = 25_000;
 
-    public SelectorsMapaAsientos(AndroidDriver driver) {
+    public SelectorsMapaAsientos(AppiumDriver driver) {
         super(driver);
     }
 
@@ -84,10 +84,14 @@ public class SelectorsMapaAsientos extends BasePage {
             try { texto = tv.getText(); } catch (Exception ignored) {}
             System.out.println("[DEBUG-MAPA] Tapping asiento: texto='" + texto + "' coords=(" + cx + "," + cy + ")");
             try {
-                java.util.Map<String, Object> args = new java.util.HashMap<>();
-                args.put("x", cx);
-                args.put("y", cy);
-                driver.executeScript("mobile: clickGesture", args);
+                if (isIOS()) {
+                    tapW3C(cx, cy);
+                } else {
+                    java.util.Map<String, Object> args = new java.util.HashMap<>();
+                    args.put("x", cx);
+                    args.put("y", cy);
+                    driver.executeScript("mobile: clickGesture", args);
+                }
             } catch (Exception ignored) {
                 tapW3C(cx, cy);
             }
@@ -109,10 +113,14 @@ public class SelectorsMapaAsientos extends BasePage {
         int cy = asiento.getLocation().getY() + asiento.getSize().getHeight() / 2;
 
         try {
-            java.util.Map<String, Object> args = new java.util.HashMap<>();
-            args.put("x", cx);
-            args.put("y", cy);
-            driver.executeScript("mobile: clickGesture", args);
+            if (isIOS()) {
+                tapW3C(cx, cy);
+            } else {
+                java.util.Map<String, Object> args = new java.util.HashMap<>();
+                args.put("x", cx);
+                args.put("y", cy);
+                driver.executeScript("mobile: clickGesture", args);
+            }
             takeScreenshot();
             return;
         } catch (Exception ignored) {}

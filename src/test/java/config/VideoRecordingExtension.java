@@ -1,7 +1,10 @@
 package config;
 
+import io.appium.java_client.AppiumDriver;
 import io.appium.java_client.android.AndroidDriver;
 import io.appium.java_client.android.AndroidStartScreenRecordingOptions;
+import io.appium.java_client.ios.IOSDriver;
+import io.appium.java_client.ios.IOSStartScreenRecordingOptions;
 import io.qameta.allure.Allure;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
@@ -17,7 +20,7 @@ import java.time.Duration;
 import java.util.Base64;
 
 /**
- * JUnit 5 extension that records the Android screen for every test method.
+ * JUnit 5 extension that records the device screen for every test method (Android + iOS).
  *
  * Enable by setting  video.enabled=true  in appium.properties (or -Dvideo.enabled=true).
  * Videos are saved to  build/videos/{ClassName}/{TestDisplayName}.mp4
@@ -34,12 +37,20 @@ public class VideoRecordingExtension implements BeforeEachCallback, AfterEachCal
     public void beforeEach(ExtensionContext context) {
         if (!isEnabled()) return;
         try {
-            AndroidDriver driver = DriverFactory.getDriver();
-            driver.startRecordingScreen(
-                new AndroidStartScreenRecordingOptions()
-                    .withBitRate(2_000_000)           // 2 Mbps — calidad razonable sin archivos enormes
-                    .withTimeLimit(Duration.ofMinutes(15))
-            );
+            AppiumDriver driver = DriverFactory.getDriver();
+            if (DriverFactory.isIOS()) {
+                ((IOSDriver) driver).startRecordingScreen(
+                    new IOSStartScreenRecordingOptions()
+                        .withVideoQuality(IOSStartScreenRecordingOptions.VideoQuality.MEDIUM)
+                        .withTimeLimit(Duration.ofMinutes(15))
+                );
+            } else {
+                ((AndroidDriver) driver).startRecordingScreen(
+                    new AndroidStartScreenRecordingOptions()
+                        .withBitRate(2_000_000)
+                        .withTimeLimit(Duration.ofMinutes(15))
+                );
+            }
             log.info("[Video] Grabacion iniciada: {}", context.getDisplayName());
         } catch (Exception e) {
             log.warn("[Video] No se pudo iniciar grabacion: {}", e.getMessage());
@@ -50,8 +61,13 @@ public class VideoRecordingExtension implements BeforeEachCallback, AfterEachCal
     public void afterEach(ExtensionContext context) {
         if (!isEnabled()) return;
         try {
-            AndroidDriver driver = DriverFactory.getDriver();
-            String base64 = driver.stopRecordingScreen();
+            AppiumDriver driver = DriverFactory.getDriver();
+            String base64;
+            if (DriverFactory.isIOS()) {
+                base64 = ((IOSDriver) driver).stopRecordingScreen();
+            } else {
+                base64 = ((AndroidDriver) driver).stopRecordingScreen();
+            }
             if (base64 == null || base64.isBlank()) return;
 
             byte[] videoBytes = Base64.getDecoder().decode(base64);
@@ -62,14 +78,12 @@ public class VideoRecordingExtension implements BeforeEachCallback, AfterEachCal
             String testName = context.getDisplayName()
                 .replaceAll("[^a-zA-Z0-9_\\-]", "_");
 
-            // ── Guardar en disco ──────────────────────────────────────────────
             Path dir  = Paths.get("build", "videos", className);
             Files.createDirectories(dir);
             Path file = dir.resolve(testName + ".mp4");
             Files.write(file, videoBytes);
             log.info("[Video] Guardado ({} KB): {}", videoBytes.length / 1024, file.toAbsolutePath());
 
-            // ── Adjuntar al reporte Allure ────────────────────────────────────
             Allure.addAttachment(
                 "Video — " + context.getDisplayName(),
                 "video/mp4",

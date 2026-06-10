@@ -7,7 +7,7 @@ import java.util.Random;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import pages.common.BasePage;
 
@@ -18,7 +18,7 @@ public class SelectorsAlimentos extends BasePage {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SelectorsAlimentos.class);
 
-    public SelectorsAlimentos(AndroidDriver driver) {
+    public SelectorsAlimentos(AppiumDriver driver) {
         super(driver);
     }
 

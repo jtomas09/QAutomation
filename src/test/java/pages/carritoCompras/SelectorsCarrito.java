@@ -7,7 +7,7 @@ import java.util.Map;
 
 import org.openqa.selenium.By;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import pages.common.BasePage;
 
@@ -23,7 +23,7 @@ public class SelectorsCarrito extends BasePage {
         return java.util.Collections.unmodifiableMap(TOTALES_CAPTURADOS.get());
     }
 
-    public SelectorsCarrito(AndroidDriver driver) {
+    public SelectorsCarrito(AppiumDriver driver) {
         super(driver);
     }
 

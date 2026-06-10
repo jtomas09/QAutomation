@@ -7,8 +7,11 @@
 # Modo de ejecución: local | browserstack | saucelabs
 appium.mode=local
 
-# ── LOCAL ─────────────────────────────────────────────────────
+# Plataforma: Android | iOS
 platformName=Android
+
+# ── LOCAL ANDROID ──────────────────────────────────────────────
+# (activo cuando platformName=Android)
 deviceName=
 platformVersion=
 udid=
@@ -24,7 +27,26 @@ autoGrantPermissions=true
 
 appium.hub=http://127.0.0.1:4723/wd/hub
 
-# ── BROWSERSTACK ──────────────────────────────────────────────
+# ── LOCAL iOS ─────────────────────────────────────────────────
+# (activo cuando platformName=iOS — requiere macOS + Xcode)
+# deviceName=iPhone 15
+# platformVersion=17.0
+# udid=<UDID del dispositivo o simulador: xcrun simctl list>
+# bundleId=com.cinepolis.ios
+# ipaPath=          # ruta al .ipa (opcional si la app ya está instalada)
+# automationName=XCUITest
+# noReset=true
+# newCommandTimeout=180
+# appium.hub=http://127.0.0.1:4723/wd/hub
+#
+# Instalar driver XCUITest en Appium (solo 1 vez):
+#   appium driver install xcuitest
+#
+# Verificar dispositivos conectados:
+#   iOS real:      idevice_id -l   (requiere libimobiledevice)
+#   Simuladores:   xcrun simctl list devices
+
+# ── BROWSERSTACK — Android ────────────────────────────────────
 # Variable de entorno equivalente: BS_USER, BS_KEY, BS_APP_ID
 browserstack.user=
 browserstack.key=
@@ -32,7 +54,12 @@ browserstack.device=Samsung Galaxy A55
 browserstack.os.version=14.0
 browserstack.app.id=
 
-# ── SAUCE LABS ────────────────────────────────────────────────
+# ── BROWSERSTACK — iOS ────────────────────────────────────────
+# browserstack.ios.device=iPhone 15
+# browserstack.ios.version=17
+# browserstack.app.id=     # ID del IPA subido a BrowserStack App Automate
+
+# ── SAUCE LABS — Android ──────────────────────────────────────
 # Variable de entorno equivalente: SL_USER, SL_KEY, SL_APP_ID
 saucelabs.user=
 saucelabs.key=
@@ -41,8 +68,12 @@ saucelabs.device=Samsung Galaxy A54 5G
 saucelabs.os.version=13
 saucelabs.app.id=
 
+# ── SAUCE LABS — iOS ──────────────────────────────────────────
+# saucelabs.ios.device=iPhone 15 Simulator
+# saucelabs.ios.version=17.0
+# saucelabs.app.id=   # ID del IPA subido a Sauce Labs
+
 # ── OTROS ─────────────────────────────────────────────────────
-# Variable de entorno equivalente: MAIL_ENABLED, NETLIFY_PUBLISH, MAIL_TO, CLAUDE_API_KEY
 mail.enabled=NO
 
 # ── VIDEO ──────────────────────────────────────────────────────

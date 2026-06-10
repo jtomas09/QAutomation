@@ -1,6 +1,6 @@
 package pages.alimentos;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 
 /**
  * Página de interacción con la sección de Alimentos.
@@ -16,7 +16,7 @@ import io.appium.java_client.android.AndroidDriver;
  */
 public class AlimentosPagina extends SelectorPage {
 
-    public AlimentosPagina(AndroidDriver driver) {
+    public AlimentosPagina(AppiumDriver driver) {
         super(driver);
     }
 }

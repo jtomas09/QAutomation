@@ -1,6 +1,6 @@
 package utils;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Allure;
 import org.junit.jupiter.api.Assertions;
 import org.openqa.selenium.OutputType;
@@ -57,7 +57,7 @@ public class TestSteps {
         return copy;
     }
 
-    public static void run(String name, Runnable action, AndroidDriver driver) {
+    public static void run(String name, Runnable action, AppiumDriver driver) {
         final String[] ref = {null};
         try {
             Allure.step(name, () -> {
@@ -102,7 +102,7 @@ public class TestSteps {
         }
     }
 
-    public static String captureEvidence(AndroidDriver driver, String stepName, String allureName) {
+    public static String captureEvidence(AppiumDriver driver, String stepName, String allureName) {
         try {
             if (driver == null) return null;
 
@@ -126,7 +126,7 @@ public class TestSteps {
         return steps.get();
     }
 
-    private static String takeScreenshot(AndroidDriver driver, String stepName) throws IOException {
+    private static String takeScreenshot(AppiumDriver driver, String stepName) throws IOException {
         byte[] bytes = ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
 
         Files.createDirectories(EVIDENCE_DIR);

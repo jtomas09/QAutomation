@@ -1,6 +1,6 @@
 package utils;
 
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
@@ -16,7 +16,7 @@ import java.time.Duration;
  */
 public class Waits {
 
-    private final AndroidDriver driver;
+    private final AppiumDriver driver;
 
     // ✅ Antes: 8s (muy alto para default en suites grandes)
     // 4s suele ser buen balance. Ajustable.
@@ -25,7 +25,7 @@ public class Waits {
     // ✅ Fast path para acciones comunes (cuando la UI suele responder rápido)
     private final Duration fastTimeout = Duration.ofSeconds(6);
 
-    public Waits(AndroidDriver driver) {
+    public Waits(AppiumDriver driver) {
         this.driver = driver;
     }
 

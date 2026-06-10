@@ -2,8 +2,8 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, Settings, Wifi, WifiOff, Activity, Zap,
-  X, Save, Trash2, CheckCircle2, RefreshCw, ChevronRight,
-  Smartphone, Monitor, Cloud,
+  X, Save, Trash2, CheckCircle2, RefreshCw,
+  Smartphone, Monitor, Cloud, Apple, Info,
 } from 'lucide-react'
 import type { DeviceConfig } from '../types'
 import { useDeviceStore } from '../hooks/useDeviceStore'
@@ -323,8 +323,21 @@ function DeviceModal({
   onClose: () => void
   onDelete: () => void
 }) {
+  const isIOS = device.platform === 'ios'
+
   const set = (key: keyof DeviceConfig, val: string) =>
     onChange({ ...device, [key]: val })
+
+  function handlePlatformChange(platform: string) {
+    onChange({
+      ...device,
+      platform: platform as DeviceConfig['platform'],
+      automationName: platform === 'ios' ? 'XCUITest' : 'UiAutomator2',
+    })
+  }
+
+  const iosBorderColor = isIOS ? 'rgba(229,229,234,0.2)' : 'rgba(255,255,255,0.1)'
+  const iosGlow        = isIOS ? '0 0 40px rgba(200,200,220,0.06)' : 'none'
 
   return (
     <motion.div
@@ -342,19 +355,40 @@ function DeviceModal({
         transition={{ duration: 0.25, ease: 'easeOut' }}
         className="w-full max-w-2xl rounded-2xl overflow-hidden"
         style={{
-          background: 'linear-gradient(135deg, #0d1226, #080e1c)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.7)',
+          background: isIOS
+            ? 'linear-gradient(135deg, #0e1220, #0a0f1b)'
+            : 'linear-gradient(135deg, #0d1226, #080e1c)',
+          border: `1px solid ${iosBorderColor}`,
+          boxShadow: `0 24px 80px rgba(0,0,0,0.7), ${iosGlow}`,
         }}
       >
         {/* Modal header */}
         <div
           className="flex items-center justify-between px-6 py-4"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ borderBottom: `1px solid ${iosBorderColor}` }}
         >
-          <div>
-            <div className="text-sm font-bold text-slate-100">Configurar Dispositivo</div>
-            <div className="text-xs text-slate-500 mt-0.5">Capabilities de Appium</div>
+          <div className="flex items-center gap-3">
+            {isIOS ? (
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center"
+                style={{ background: 'rgba(229,229,234,0.1)', border: '1px solid rgba(229,229,234,0.15)' }}
+              >
+                <Apple size={16} style={{ color: '#e5e5ea' }} />
+              </div>
+            ) : (
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center"
+                style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)' }}
+              >
+                <Smartphone size={16} className="text-indigo-400" />
+              </div>
+            )}
+            <div>
+              <div className="text-sm font-bold text-slate-100">Configurar Dispositivo</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {isIOS ? 'Capabilities XCUITest · iOS' : 'Capabilities de Appium · Android'}
+              </div>
+            </div>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-300 transition-colors"
             style={{ background: 'rgba(255,255,255,0.05)' }}>
@@ -367,39 +401,45 @@ function DeviceModal({
 
           {/* Nombre */}
           <Field label="Nombre del Dispositivo" span>
-            <Input value={device.name} onChange={v => set('name', v)} placeholder="Galaxy A56 5G" />
+            <Input value={device.name} onChange={v => set('name', v)}
+              placeholder={isIOS ? 'iPhone 15 Pro' : 'Galaxy A56 5G'} />
           </Field>
 
           {/* Platform */}
           <Field label="Plataforma">
-            <Select value={device.platform} onChange={v => set('platform', v as DeviceConfig['platform'])}
+            <Select value={device.platform} onChange={handlePlatformChange}
               options={[{ value: 'android', label: 'Android' }, { value: 'ios', label: 'iOS' }]} />
           </Field>
 
           {/* Platform Version */}
           <Field label="Versión de Plataforma">
-            <Input value={device.platformVersion} onChange={v => set('platformVersion', v)} placeholder="14" />
+            <Input value={device.platformVersion} onChange={v => set('platformVersion', v)}
+              placeholder={isIOS ? '17.4' : '14'} />
           </Field>
 
           {/* Device Name (Appium cap) */}
           <Field label="deviceName (Appium)">
-            <Input value={device.deviceName} onChange={v => set('deviceName', v)} placeholder="Galaxy A56 5G" />
+            <Input value={device.deviceName} onChange={v => set('deviceName', v)}
+              placeholder={isIOS ? 'iPhone 15' : 'Galaxy A56 5G'} />
           </Field>
 
           {/* UDID */}
-          <Field label="UDID / Serial" span>
-            <Input value={device.udid} onChange={v => set('udid', v)} placeholder="emulator-5554 ó R3CT203YHVA" mono />
+          <Field label={isIOS ? 'UDID del dispositivo' : 'UDID / Serial'} span>
+            <Input value={device.udid} onChange={v => set('udid', v)}
+              placeholder={isIOS ? '00008110-001A34C13E02401E' : 'emulator-5554 ó R3CT203YHVA'} mono />
           </Field>
 
           {/* Automation Name */}
           <Field label="automationName">
             <Select value={device.automationName}
               onChange={v => set('automationName', v as DeviceConfig['automationName'])}
-              options={[
-                { value: 'UiAutomator2', label: 'UiAutomator2' },
-                { value: 'XCUITest',     label: 'XCUITest'     },
-                { value: 'Espresso',     label: 'Espresso'     },
-              ]} />
+              options={isIOS
+                ? [{ value: 'XCUITest', label: 'XCUITest (iOS)' }]
+                : [
+                    { value: 'UiAutomator2', label: 'UiAutomator2' },
+                    { value: 'Espresso',     label: 'Espresso'     },
+                  ]
+              } />
           </Field>
 
           {/* Hub */}
@@ -425,42 +465,99 @@ function DeviceModal({
               ]} />
           </Field>
 
-          {/* App Package */}
-          <Field label="appPackage (Android)" span={device.platform === 'android'}>
-            {device.platform === 'android' ? (
-              <Input value={device.appPackage} onChange={v => set('appPackage', v)}
-                placeholder="com.cinepolis.movil" mono />
-            ) : (
-              <Input value={device.appPackage} onChange={v => set('appPackage', v)}
-                placeholder="com.cinepolis.ios (Bundle ID)" mono />
-            )}
-          </Field>
-
-          {/* App Activity (Android only) */}
-          {device.platform === 'android' && (
-            <Field label="appActivity" span>
-              <Input value={device.appActivity} onChange={v => set('appActivity', v)}
-                placeholder="com.cinepolis.movil.MainActivity" mono />
-            </Field>
+          {/* ── Android fields ── */}
+          {!isIOS && (
+            <>
+              <Field label="appPackage" span>
+                <Input value={device.appPackage} onChange={v => set('appPackage', v)}
+                  placeholder="com.cinepolis.movil" mono />
+              </Field>
+              <Field label="appActivity" span>
+                <Input value={device.appActivity} onChange={v => set('appActivity', v)}
+                  placeholder="com.cinepolis.movil.MainActivity" mono />
+              </Field>
+            </>
           )}
 
-          {/* Capabilities preview */}
+          {/* ── iOS fields ── */}
+          {isIOS && (
+            <>
+              {/* Separator */}
+              <div className="col-span-2 flex items-center gap-3 mt-1">
+                <Apple size={11} style={{ color: '#e5e5ea', flexShrink: 0 }} />
+                <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#e5e5ea99' }}>
+                  Configuración iOS
+                </div>
+                <div className="flex-1" style={{ height: 1, background: 'rgba(229,229,234,0.1)' }} />
+              </div>
+
+              {/* Bundle ID */}
+              <Field label="bundleId *" span>
+                <Input value={device.appPackage} onChange={v => set('appPackage', v)}
+                  placeholder="com.cinepolis.ios" mono />
+              </Field>
+
+              {/* Xcode Org ID */}
+              <Field label="xcodeOrgId (dispositivo real)">
+                <Input value={device.xcodeOrgId ?? ''} onChange={v => set('xcodeOrgId', v)}
+                  placeholder="A1B2C3D4E5" mono />
+              </Field>
+
+              {/* Signing Identity */}
+              <Field label="xcodeSigningId (dispositivo real)">
+                <Input value={device.xcodeSigningId ?? ''} onChange={v => set('xcodeSigningId', v)}
+                  placeholder="iPhone Developer" />
+              </Field>
+
+              {/* WDA Port */}
+              <Field label="wdaLocalPort (opcional)">
+                <Input value={device.wdaLocalPort ?? ''} onChange={v => set('wdaLocalPort', v)}
+                  placeholder="8100" mono />
+              </Field>
+
+              {/* IPA path */}
+              <Field label="Ruta IPA · app (opcional)" span>
+                <Input value={device.ipaPath ?? ''} onChange={v => set('ipaPath', v)}
+                  placeholder="/builds/CinePolis.ipa" mono />
+              </Field>
+
+              {/* Info banner */}
+              <div
+                className="col-span-2 flex items-start gap-2 px-3 py-2.5 rounded-xl"
+                style={{ background: 'rgba(229,229,234,0.05)', border: '1px solid rgba(229,229,234,0.1)' }}
+              >
+                <Info size={12} style={{ color: '#e5e5ea88', marginTop: 1, flexShrink: 0 }} />
+                <p className="text-[10px] leading-relaxed" style={{ color: '#e5e5ea77' }}>
+                  Para <strong style={{ color: '#e5e5eaaa' }}>dispositivos físicos</strong>, completa
+                  {' '}xcodeOrgId y xcodeSigningId (Ajustes › Apple Developer).
+                  Para el <strong style={{ color: '#e5e5eaaa' }}>simulador</strong>, solo se necesita udid y bundleId.
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* Capabilities JSON preview */}
           <Field label="Preview JSON capabilities" span>
             <div
               className="p-3 rounded-xl text-[10px] font-mono text-slate-400 leading-relaxed overflow-auto"
-              style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.06)', maxHeight: 130 }}
+              style={{ background: 'rgba(0,0,0,0.3)', border: `1px solid ${iosBorderColor}`, maxHeight: 150 }}
             >
               <pre>{JSON.stringify({
-                platformName:   device.platform === 'ios' ? 'iOS' : 'Android',
+                platformName:    isIOS ? 'iOS' : 'Android',
                 platformVersion: device.platformVersion,
-                deviceName:     device.deviceName,
-                udid:           device.udid || undefined,
-                automationName: device.automationName,
-                ...(device.platform === 'android' && {
+                deviceName:      device.deviceName,
+                udid:            device.udid || undefined,
+                automationName:  device.automationName,
+                ...(isIOS ? {
+                  bundleId: device.appPackage,
+                  ...(device.xcodeOrgId     && { xcodeOrgId:     device.xcodeOrgId     }),
+                  ...(device.xcodeSigningId && { xcodeSigningId: device.xcodeSigningId }),
+                  ...(device.wdaLocalPort   && { wdaLocalPort:   Number(device.wdaLocalPort) }),
+                  ...(device.ipaPath        && { app:            device.ipaPath }),
+                } : {
                   appPackage:  device.appPackage,
                   appActivity: device.appActivity,
                 }),
-                ...(device.platform === 'ios' && { bundleId: device.appPackage }),
               }, null, 2)}</pre>
             </div>
           </Field>
@@ -469,7 +566,7 @@ function DeviceModal({
         {/* Modal footer */}
         <div
           className="flex items-center justify-between px-6 py-4 gap-3"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ borderTop: `1px solid ${iosBorderColor}` }}
         >
           <button
             onClick={onDelete}
@@ -492,10 +589,10 @@ function DeviceModal({
               whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
               onClick={onSave}
               className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white"
-              style={{
-                background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
-                boxShadow: '0 4px 14px rgba(99,102,241,0.35)',
-              }}
+              style={isIOS
+                ? { background: 'linear-gradient(135deg, #3a3a4a, #4a4a5a)', boxShadow: '0 4px 14px rgba(200,200,220,0.15)' }
+                : { background: 'linear-gradient(135deg, #4f46e5, #6366f1)', boxShadow: '0 4px 14px rgba(99,102,241,0.35)' }
+              }
             >
               <Save size={13} />
               Guardar

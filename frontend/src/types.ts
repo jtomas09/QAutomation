@@ -58,10 +58,16 @@ export interface DeviceConfig {
   udid:            string
   automationName:  'UiAutomator2' | 'XCUITest' | 'Espresso'
   hub:             'local' | 'browserstack' | 'aws-device-farm' | 'genymotion'
+  // Android: appPackage / iOS: bundleId (reutilizado para evitar migración)
   appPackage:      string
-  appActivity:     string
+  appActivity:     string  // Android only
   status:          'available' | 'inuse' | 'offline'
   isActive:        boolean
+  // iOS-specific (optional)
+  xcodeOrgId?:     string
+  xcodeSigningId?: string
+  wdaLocalPort?:   string
+  ipaPath?:        string
 };
 
 export interface TestCaseResult {

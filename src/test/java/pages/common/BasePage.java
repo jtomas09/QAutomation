@@ -2,7 +2,7 @@ package pages.common;
 import org.openqa.selenium.interactions.Pause;
 import org.opentest4j.TestAbortedException;
 import io.appium.java_client.AppiumBy;
-import io.appium.java_client.android.AndroidDriver;
+import io.appium.java_client.AppiumDriver;
 import io.qameta.allure.Attachment;
 import org.junit.jupiter.api.Assertions;
 import org.openqa.selenium.*;
@@ -43,11 +43,11 @@ public class BasePage {
     protected static final AtomicInteger AGOTADOS_SKIPPED_COUNT =
             new AtomicInteger(0);
     // ====== ESTRUCTURA "BasePage" (driver final + waits centralizados) ======
-    protected final AndroidDriver driver;
+    protected final AppiumDriver driver;
     protected final WebDriverWait wait;
-    protected final FluentWait<AndroidDriver> fluentWait;
+    protected final FluentWait<AppiumDriver> fluentWait;
 
-    // Mantengo tu Waits custom porque tu lógica lo usa (waitClickableFast/waitClickable)
+    // Waits custom
     protected final Waits waits;
 
     // ====== TIMEOUTS BASE (estilo BasePage.txt) ======
@@ -75,18 +75,24 @@ public class BasePage {
     private static final int TOTAL_VERTICAL_SWIPE_BUDGET   = Constantes.SWIPES_VERTICAL_MAX;
     private static final int TOTAL_HORIZONTAL_SWIPE_BUDGET = Constantes.SWIPES_HORIZONTAL_MAX;
 
-    public BasePage(AndroidDriver driver) {
+    public BasePage(AppiumDriver driver) {
         this.driver = driver;
-
-        // Esperas como BasePage.txt
         this.wait = new WebDriverWait(driver, DEFAULT_WAIT_TIMEOUT);
         this.fluentWait = new FluentWait<>(driver)
                 .withTimeout(SCROLL_WAIT_TIMEOUT)
                 .pollingEvery(POLLING_INTERVAL)
                 .ignoring(NoSuchElementException.class);
-
-        // Waits custom como BasePage2
         this.waits = new Waits(driver);
+    }
+
+    /** Returns true when the current session is running on an iOS device. */
+    protected boolean isIOS() {
+        try {
+            Object cap = driver.getCapabilities().getCapability("platformName");
+            return cap != null && "ios".equalsIgnoreCase(String.valueOf(cap));
+        } catch (Exception e) {
+            return config.DriverFactory.isIOS();
+        }
     }
 
     // =========================================================
@@ -136,8 +142,13 @@ public class BasePage {
         try {
             driver.getSessionId();
 
+            // iOS does not have getCurrentPackage(); skip the foreground guard there.
+            if (isIOS()) return;
+
             String currentPackage = null;
-            try { currentPackage = driver.getCurrentPackage(); } catch (Exception ignore) {}
+            try {
+                currentPackage = ((io.appium.java_client.android.AndroidDriver) driver).getCurrentPackage();
+            } catch (Exception ignore) {}
 
             if (!APP_PACKAGE.equals(currentPackage)) {
                 long now = System.currentTimeMillis();
@@ -149,19 +160,21 @@ public class BasePage {
 
                 LAST_APP_RECOVER_MS = now;
 
-                try { driver.activateApp(APP_PACKAGE); } catch (Exception ignore) {}
+                config.DriverFactory.activateApp(driver, APP_PACKAGE);
 
                 long end = System.currentTimeMillis() + (APP_GUARD_TIMEOUT_SEC * 1000L);
 
-                // En BasePage2 venía como "if", aquí lo dejo como loop (misma intención: esperar a que vuelva)
+                io.appium.java_client.android.AndroidDriver androidDriver =
+                    (io.appium.java_client.android.AndroidDriver) driver;
+
                 while (System.currentTimeMillis() < end) {
                     try {
-                        String p = driver.getCurrentPackage();
+                        String p = androidDriver.getCurrentPackage();
                         if (APP_PACKAGE.equals(p)) return;
                     } catch (Exception ignore) {}
 
-                    try { driver.terminateApp(APP_PACKAGE); } catch (Exception ignore) {}
-                    try { driver.activateApp(APP_PACKAGE); } catch (Exception ignore) {}
+                    config.DriverFactory.terminateApp(driver, APP_PACKAGE);
+                    config.DriverFactory.activateApp(driver, APP_PACKAGE);
 
                     sleep(400L);
                 }
@@ -171,6 +184,13 @@ public class BasePage {
             throw new AssertionError("App no estable / posible crash.", e);
         }
     }
+
+    // ─── Platform-aware app control wrappers ───────────────────
+
+    protected void terminateApp(String appId) { config.DriverFactory.terminateApp(driver, appId); }
+    protected void activateApp(String appId)  { config.DriverFactory.activateApp(driver, appId); }
+    protected void hideKeyboard()             { config.DriverFactory.hideKeyboard(driver); }
+    protected void setClipboardText(String t) { config.DriverFactory.setClipboardText(driver, t); }
 
     // =========================================================
     // ================== SCREENSHOTS (Allure) =================
@@ -353,12 +373,22 @@ public class BasePage {
     protected void scrollToDescriptionAndClick(String partialDesc) {
         ensureAppIsInForegroundOrRecover();
 
-        String uiScrollable =
-                "new UiScrollable(new UiSelector().scrollable(true))" +
-                        ".scrollIntoView(new UiSelector().descriptionContains(\"" +
-                        Quotes.escape(partialDesc) + "\"))";
+        WebElement el;
+        if (isIOS()) {
+            // iOS: swipe until the element with matching label/value is visible
+            By locator = By.xpath(
+                "//*[contains(@label,'" + partialDesc + "') or contains(@value,'" + partialDesc + "')]"
+            );
+            oneShotVerticalSearch(locator, 10);
+            el = driver.findElement(locator);
+        } else {
+            String uiScrollable =
+                    "new UiScrollable(new UiSelector().scrollable(true))" +
+                            ".scrollIntoView(new UiSelector().descriptionContains(\"" +
+                            Quotes.escape(partialDesc) + "\"))";
+            el = driver.findElement(AppiumBy.androidUIAutomator(uiScrollable));
+        }
 
-        WebElement el = driver.findElement(AppiumBy.androidUIAutomator(uiScrollable));
         new WebDriverWait(driver, DEFAULT_WAIT_TIMEOUT)
                 .until(ExpectedConditions.elementToBeClickable(el))
                 .click();
@@ -573,10 +603,15 @@ protected List<WebElement> safeFindElements(By locator) {
         try {
             int cx = el.getLocation().getX() + el.getSize().getWidth() / 2;
             int cy = el.getLocation().getY() + el.getSize().getHeight() / 2;
-            Map<String, Object> args = new HashMap<>();
-            args.put("x", cx);
-            args.put("y", cy);
-            driver.executeScript("mobile: clickGesture", args);
+            if (isIOS()) {
+                // iOS: use W3C tap (mobile: clickGesture is Android-specific)
+                tapW3C(cx, cy);
+            } else {
+                Map<String, Object> args = new HashMap<>();
+                args.put("x", cx);
+                args.put("y", cy);
+                driver.executeScript("mobile: clickGesture", args);
+            }
             takeScreenshot();
             return true;
         } catch (Exception ignore) {
@@ -829,9 +864,10 @@ protected List<WebElement> safeFindElements(By locator) {
 
     private String viewportFingerPrint() {
         try {
-            List<WebElement> texts = driver.findElements(
-                    By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]")
-            );
+            String xpath = isIOS()
+                ? "(//XCUIElementTypeStaticText[@value and string-length(@value)>0])[position() <= 6]"
+                : "(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]";
+            List<WebElement> texts = driver.findElements(By.xpath(xpath));
             if (texts == null || texts.isEmpty()) return "EMPTY";
 
             StringBuilder sb = new StringBuilder();
@@ -846,9 +882,10 @@ protected List<WebElement> safeFindElements(By locator) {
 
     public String viewportFingerPrintPublic() {
         try {
-            List<WebElement> texts = driver.findElements(
-                    By.xpath("(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]")
-            );
+            String xpath = isIOS()
+                ? "(//XCUIElementTypeStaticText[@value and string-length(@value)>0])[position() <= 6]"
+                : "(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]";
+            List<WebElement> texts = driver.findElements(By.xpath(xpath));
             StringBuilder sb = new StringBuilder();
             for (WebElement el : texts) {
                 try { sb.append(el.getText().trim()).append("|"); } catch (Exception ignore) {}
@@ -866,17 +903,23 @@ protected List<WebElement> safeFindElements(By locator) {
      */
     private String richFingerPrint() {
         try {
-            List<WebElement> els = driver.findElements(By.xpath(
-                "(//*[string-length(@text)>0 or string-length(@content-desc)>0])[position()<=10]"
-            ));
+            String xpath = isIOS()
+                ? "(//*[string-length(@value)>0 or string-length(@label)>0])[position()<=10]"
+                : "(//*[string-length(@text)>0 or string-length(@content-desc)>0])[position()<=10]";
+            List<WebElement> els = driver.findElements(By.xpath(xpath));
             if (els == null || els.isEmpty()) return "EMPTY";
             StringBuilder sb = new StringBuilder();
             for (WebElement el : els) {
                 try {
-                    String txt  = el.getAttribute("text");
-                    String desc = el.getAttribute("content-desc");
-                    if (txt  != null && !txt.isBlank())  { sb.append(txt.trim()).append("|"); }
-                    else if (desc != null && !desc.isBlank()) { sb.append(desc.trim()).append("|"); }
+                    String txt;
+                    if (isIOS()) {
+                        txt = el.getAttribute("value");
+                        if (txt == null || txt.isBlank()) txt = el.getAttribute("label");
+                    } else {
+                        txt = el.getAttribute("text");
+                        if (txt == null || txt.isBlank()) txt = el.getAttribute("content-desc");
+                    }
+                    if (txt != null && !txt.isBlank()) sb.append(txt.trim()).append("|");
                 } catch (Exception ignore) {}
             }
             return sb.length() > 0 ? sb.toString() : "EMPTY";
@@ -900,7 +943,7 @@ protected List<WebElement> safeFindElements(By locator) {
     // Con 2 se tolera 1 swipe "sin cambio aparente" antes de rendirse.
     private static final int SCROLL_STALL_THRESHOLD = 2;
 
-    private boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
+    protected boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
         if (isVisible(locator)) return true;
 
         int allowed = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
@@ -1059,7 +1102,9 @@ protected List<WebElement> safeFindElements(By locator) {
     public void seleccionarSaborPorContentDesc2(String contentDesc) {
         ensureAppIsInForegroundOrRecover();
 
-        String xpath = "//android.view.View[@content-desc=\"" + contentDesc + "\"]";
+        String xpath = isIOS()
+            ? "//*[@label=\"" + contentDesc + "\" or @value=\"" + contentDesc + "\" or @name=\"" + contentDesc + "\"]"
+            : "//android.view.View[@content-desc=\"" + contentDesc + "\"]";
         By locator = By.xpath(xpath);
 
         // Conserva la intención de BasePage2 (búsqueda controlada y luego clickSmart)
@@ -1203,9 +1248,10 @@ protected List<WebElement> safeFindElements(By locator) {
 
     protected void verificarSinErrorApp() {
         ensureAppIsInForegroundOrRecover();
+        String textAttr = isIOS() ? "@value" : "@text";
         By[] errorLocators = {
-            By.xpath("//*[contains(@text,'Algo salió mal') or contains(@text,'Ocurrió un error') or contains(@text,'Error inesperado') or contains(@text,'Sin conexión')]"),
-            By.xpath("//*[contains(@text,'something went wrong') or contains(@text,'error')][@clickable='false']")
+            By.xpath("//*[contains(" + textAttr + ",'Algo salió mal') or contains(" + textAttr + ",'Ocurrió un error') or contains(" + textAttr + ",'Error inesperado') or contains(" + textAttr + ",'Sin conexión')]"),
+            By.xpath("//*[contains(" + textAttr + ",'something went wrong') or contains(" + textAttr + ",'error')]")
         };
         for (By loc : errorLocators) {
             try {
@@ -1233,11 +1279,12 @@ protected List<WebElement> safeFindElements(By locator) {
         try {
             return base.findElement(By.xpath("./ancestor::*[@clickable='true'][1]"));
         } catch (Exception ignore) {
+            String view = isIOS() ? "XCUIElementTypeOther" : "android.view.View";
             try {
-                return base.findElement(By.xpath("./ancestor::android.view.View[2]"));
+                return base.findElement(By.xpath("./ancestor::" + view + "[2]"));
             } catch (Exception ignore2) {
                 try {
-                    return base.findElement(By.xpath("./ancestor::android.view.View[3]"));
+                    return base.findElement(By.xpath("./ancestor::" + view + "[3]"));
                 } catch (Exception ignore3) {
                     return base;
                 }
@@ -1275,14 +1322,16 @@ protected List<WebElement> safeFindElements(By locator) {
 
             String n = nombreProducto.trim().replace("®", "").replace("™", "");
 
-            String xpName = "//android.widget.TextView[" +
-                    "normalize-space(@text)=\"" + n + "\" or contains(@text,\"" + n + "\")" +
-                    "]";
+            String xpName = isIOS()
+                ? "//XCUIElementTypeStaticText[normalize-space(@value)=\"" + n + "\" or contains(@value,\"" + n + "\")]"
+                : "//android.widget.TextView[normalize-space(@text)=\"" + n + "\" or contains(@text,\"" + n + "\")]";
 
             List<WebElement> names = driver.findElements(By.xpath(xpName));
             if (names == null || names.isEmpty()) return false;
 
-            By byAgotado = By.xpath(".//android.widget.TextView[contains(@text,'Agotado') or normalize-space(@text)='Agotado']");
+            By byAgotado = isIOS()
+                ? By.xpath(".//XCUIElementTypeStaticText[contains(@value,'Agotado') or normalize-space(@value)='Agotado']")
+                : By.xpath(".//android.widget.TextView[contains(@text,'Agotado') or normalize-space(@text)='Agotado']");
 
             for (WebElement nameEl : names) {
                 WebElement node = nameEl;
