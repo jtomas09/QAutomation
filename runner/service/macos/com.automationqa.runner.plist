@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Automation QA — Universal Runner LaunchAgent (Template)
+  Este archivo es GENERADO por install-service.sh con las rutas reales.
+  Para instalar manualmente, edita los valores marcados con EDIT_ME
+  y ejecuta: launchctl load -w ~/Library/LaunchAgents/com.automationqa.runner.plist
+
+  Para ver estado:  launchctl list | grep automationqa
+  Para ver logs:    tail -f ~/Library/Logs/AutomationQA/runner.log
+  Para detener:     launchctl unload ~/Library/LaunchAgents/com.automationqa.runner.plist
+  Para reiniciar:   launchctl kickstart gui/$(id -u)/com.automationqa.runner
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.automationqa.runner</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- EDIT_ME: ruta a java, obtener con: which java -->
+        <string>/usr/bin/java</string>
+
+        <string>-Dfile.encoding=UTF-8</string>
+        <!-- EDIT_ME: URL de tu backend Railway -->
+        <string>-DBACKEND_URL=https://qautomation-production.up.railway.app</string>
+        <string>-DRUNNER_TOKEN=runner-local-token</string>
+        <!-- EDIT_ME: ID unico para este runner -->
+        <string>-DRUNNER_ID=mac-runner-01</string>
+        <string>-DPOLL_INTERVAL_MS=30000</string>
+        <!-- EDIT_ME: directorio raiz del proyecto -->
+        <string>-DWORK_DIR=/Users/EDIT_ME/Documents/QAutomation</string>
+        <string>-DAPPIUM_HUB=http://127.0.0.1:4723</string>
+        <string>-jar</string>
+        <!-- EDIT_ME: ruta al JAR instalado -->
+        <string>/Users/EDIT_ME/Library/Application Support/AutomationQA/runner/cinepolis-runner.jar</string>
+    </array>
+
+    <!-- Arrancar automaticamente al iniciar sesion -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Reiniciar automaticamente si el proceso muere -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Intervalo minimo entre reinicios: 15 segundos -->
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <!-- Variables de entorno: PATH con ADB y xcrun -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <!-- EDIT_ME: agrega rutas de ADB y Homebrew segun tu sistema -->
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/EDIT_ME/Library/Android/sdk/platform-tools</string>
+        <key>HOME</key>
+        <!-- EDIT_ME: tu directorio home -->
+        <string>/Users/EDIT_ME</string>
+    </dict>
+
+    <!-- Directorio de trabajo -->
+    <key>WorkingDirectory</key>
+    <!-- EDIT_ME: directorio de instalacion del JAR -->
+    <string>/Users/EDIT_ME/Library/Application Support/AutomationQA/runner</string>
+
+    <!-- Logs de stdout y stderr -->
+    <key>StandardOutPath</key>
+    <string>/Users/EDIT_ME/Library/Logs/AutomationQA/runner.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/EDIT_ME/Library/Logs/AutomationQA/runner-error.log</string>
+</dict>
+</plist>

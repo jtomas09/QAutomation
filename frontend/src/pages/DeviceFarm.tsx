@@ -9,7 +9,8 @@ import {
   AlertCircle, Monitor, Apple, Clock, CheckCircle2,
   Wrench, Server, ChevronLeft, ChevronRight, ChevronDown,
   MoreHorizontal, Zap, HardDrive, Battery, BatteryMedium,
-  BatteryLow, BatteryFull, ExternalLink,
+  BatteryLow, BatteryFull, ExternalLink, ShieldAlert,
+  ScanLine, Loader2, Stethoscope,
 } from 'lucide-react'
 import { getDevices, getRunners, updateDeviceStatus, removeDevice } from '../api'
 import type { PhysicalDevice, DeviceStatus, Runner } from '../types'
@@ -301,6 +302,89 @@ function DeviceTableRow({
         </div>
       </td>
     </tr>
+  )
+}
+
+// ─── Enterprise Empty States ─────────────────────────────────────────────────
+
+function RunnerOfflineState({ onDiag }: { onDiag: () => void }) {
+  return (
+    <div className="flex flex-col items-center py-10 gap-4">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+        <ShieldAlert size={28} className="text-red-400" />
+      </div>
+      <div className="text-center">
+        <div className="text-[13px] font-black text-red-400">Infraestructura no disponible</div>
+        <div className="text-[12px] font-semibold mt-1" style={{ color: 'var(--text-sec)' }}>
+          Runner Offline
+        </div>
+        <div className="text-[11px] text-slate-500 mt-1 max-w-xs">
+          El servicio Runner no está corriendo en ningún equipo de la red.
+          Instálalo una vez para que arranque automáticamente.
+        </div>
+      </div>
+      <button onClick={onDiag}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-semibold transition-all hover:opacity-80"
+        style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
+        <Stethoscope size={13} />
+        Diagnosticar e Instalar Servicio
+      </button>
+    </div>
+  )
+}
+
+function DeviceOfflineState({ onDiag }: { onDiag: () => void }) {
+  return (
+    <div className="flex flex-col items-center py-12 gap-4">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.18)' }}>
+        <ShieldAlert size={28} className="text-red-400" />
+      </div>
+      <div className="text-center">
+        <div className="text-[13px] font-black text-red-400">Runner Offline</div>
+        <div className="text-[11px] text-slate-500 mt-1.5 max-w-sm leading-relaxed">
+          La infraestructura no está disponible. Instala el servicio automático
+          en tu equipo Windows o macOS para comenzar.
+        </div>
+      </div>
+      <button onClick={onDiag}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-semibold"
+        style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
+        <Stethoscope size={13} />
+        Ver instrucciones de instalación
+      </button>
+    </div>
+  )
+}
+
+function DeviceScanningState() {
+  return (
+    <div className="flex flex-col items-center py-12 gap-4">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
+        <ScanLine size={28} className="text-emerald-400 animate-pulse" />
+      </div>
+      <div className="text-center">
+        <div className="flex items-center gap-2 justify-center">
+          <Loader2 size={13} className="text-emerald-400 animate-spin" />
+          <span className="text-[13px] font-bold text-emerald-400">Runner conectado</span>
+        </div>
+        <div className="text-[12px] font-semibold mt-1" style={{ color: 'var(--text-sec)' }}>
+          Escaneando dispositivos...
+        </div>
+        <div className="text-[11px] text-slate-500 mt-1.5 max-w-xs leading-relaxed">
+          Conecta un <span className="text-slate-300 font-semibold">Android</span> o{' '}
+          <span className="text-slate-300 font-semibold">iPhone</span> por USB para comenzar.
+          El dispositivo aparecerá automáticamente.
+        </div>
+        <div className="flex items-center justify-center gap-4 mt-3 text-[10px] text-slate-600">
+          <span>Android: habilita Depuración USB</span>
+          <span className="text-slate-700">·</span>
+          <span>iOS: confía en este equipo</span>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -810,12 +894,8 @@ export default function DeviceFarm() {
             </div>
 
             <div className="p-4">
-              {runners.length === 0 && (
-                <div className="text-center py-8">
-                  <Server size={28} className="text-slate-600 mx-auto mb-2" />
-                  <div className="text-[12px] text-slate-500">Sin runners activos</div>
-                  <div className="text-[10px] text-slate-600 mt-1">Inicia el Universal Runner Agent para comenzar</div>
-                </div>
+              {runners.length === 0 && !loading && (
+                <RunnerOfflineState onDiag={() => setShowAddModal(true)} />
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {runners.map(r => <RunnerCardMain key={r.runnerId} runner={r} />)}
@@ -853,18 +933,12 @@ export default function DeviceFarm() {
               <FilterDropdown label="Todos los Estados"     options={stateOptions} value={stateFilter} onChange={v => { setStateFilter(v); setPage(1) }} />
             </div>
 
-            {/* Empty */}
-            {!loading && devices.length === 0 && (
-              <div className="flex flex-col items-center py-14 gap-3">
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                  <HardDrive size={24} className="text-indigo-400" />
-                </div>
-                <div className="text-center">
-                  <div className="text-sm font-semibold" style={{ color: 'var(--text-sec)' }}>Sin dispositivos registrados</div>
-                  <div className="text-[11px] text-slate-500 mt-1">Inicia un Runner Agent para detectar dispositivos automáticamente</div>
-                </div>
-              </div>
+            {/* Empty states */}
+            {!loading && devices.length === 0 && runners.length === 0 && (
+              <DeviceOfflineState onDiag={() => setShowAddModal(true)} />
+            )}
+            {!loading && devices.length === 0 && runners.length > 0 && (
+              <DeviceScanningState />
             )}
 
             {/* Table */}
@@ -1014,44 +1088,115 @@ export default function DeviceFarm() {
         </div>
       </div>
 
-      {/* ── Modal Agregar Runner ────────────────────────────────────────── */}
+      {/* ── Modal Diagnóstico / Instalación de Servicio ─────────────────── */}
       <AnimatePresence>
         {showAddModal && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
             onClick={() => setShowAddModal(false)}>
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="rounded-2xl p-6 max-w-md w-full"
-              style={{ background: '#1a1d2e', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+              className="rounded-2xl p-6 max-w-lg w-full"
+              style={{ background: '#151827', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 24px 64px rgba(0,0,0,0.7)' }}
               onClick={e => e.stopPropagation()}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
                   style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
-                  <Server size={18} className="text-indigo-400" />
+                  <Stethoscope size={20} className="text-indigo-400" />
                 </div>
                 <div>
-                  <div className="text-sm font-bold" style={{ color: 'var(--text-pri)' }}>Universal Runner Agent</div>
-                  <div className="text-[11px] text-slate-500">Auto-detecta OS, Android e iOS al arrancar</div>
+                  <div className="text-[14px] font-black" style={{ color: 'var(--text-pri)' }}>Diagnóstico de Infraestructura</div>
+                  <div className="text-[11px] text-slate-500">
+                    {runners.length === 0 ? 'Runner Offline — Instala el servicio para comenzar' : `${runners.length} runner(s) conectado(s) · Sin dispositivos detectados`}
+                  </div>
                 </div>
               </div>
-              <div className="space-y-3 text-[11px] text-slate-400">
-                <div className="p-3 rounded-xl font-mono text-xs overflow-x-auto"
-                  style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div className="text-slate-500 mb-1"># Windows (solo Android)</div>
-                  <div>runner\start-runner.bat</div>
+
+              {/* Estado actual */}
+              <div className="rounded-xl p-3 mb-4 flex items-start gap-3"
+                style={{ background: runners.length === 0 ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)', border: `1px solid ${runners.length === 0 ? 'rgba(239,68,68,0.2)' : 'rgba(245,158,11,0.2)'}` }}>
+                <ShieldAlert size={16} style={{ color: runners.length === 0 ? '#ef4444' : '#f59e0b', flexShrink: 0, marginTop: 1 }} />
+                <div className="text-[11px] leading-relaxed" style={{ color: runners.length === 0 ? '#fca5a5' : '#fcd34d' }}>
+                  {runners.length === 0
+                    ? 'El servicio Runner no está corriendo en ningún equipo. Instálalo como servicio automático para que arranque sin intervención manual.'
+                    : 'El Runner está online pero no detecta dispositivos. Verifica que el dispositivo esté conectado por USB y que la depuración USB esté habilitada.'}
                 </div>
-                <div className="p-3 rounded-xl font-mono text-xs overflow-x-auto"
-                  style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  <div className="text-slate-500 mb-1"># macOS (Android + iOS si tienes Xcode)</div>
-                  <div>bash runner/start-runner.sh</div>
-                </div>
-                <p className="text-slate-500">El runner detecta automáticamente los dispositivos conectados y se registra en el Device Farm sin configuración manual.</p>
               </div>
+
+              {/* Instrucciones de instalación como servicio */}
+              {runners.length === 0 && (
+                <div className="space-y-3 mb-4">
+                  <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase">
+                    Instalación como Servicio Automático (una sola vez)
+                  </div>
+
+                  {/* Windows */}
+                  <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div className="flex items-center gap-2 px-3 py-2"
+                      style={{ background: 'rgba(96,165,250,0.08)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                      <Monitor size={12} className="text-blue-400" />
+                      <span className="text-[10px] font-bold text-blue-400">Windows</span>
+                      <span className="text-[9px] text-slate-600 ml-auto">Arranca automáticamente al iniciar sesión</span>
+                    </div>
+                    <div className="p-3 font-mono text-[11px] space-y-1"
+                      style={{ background: 'rgba(0,0,0,0.4)', color: '#94a3b8' }}>
+                      <div className="text-slate-600 text-[10px]"># Doble-click en (sin CMD, sin admin requerido):</div>
+                      <div className="text-emerald-400 font-semibold">runner\service\windows\install-service.bat</div>
+                    </div>
+                  </div>
+
+                  {/* macOS */}
+                  <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div className="flex items-center gap-2 px-3 py-2"
+                      style={{ background: 'rgba(129,140,248,0.08)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                      <Apple size={12} className="text-indigo-400" />
+                      <span className="text-[10px] font-bold text-indigo-400">macOS</span>
+                      <span className="text-[9px] text-slate-600 ml-auto">LaunchAgent — Android + iOS</span>
+                    </div>
+                    <div className="p-3 font-mono text-[11px] space-y-1"
+                      style={{ background: 'rgba(0,0,0,0.4)', color: '#94a3b8' }}>
+                      <div className="text-slate-600 text-[10px]"># En Terminal (una sola vez):</div>
+                      <div className="text-emerald-400 font-semibold">bash runner/install.sh</div>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-600 leading-relaxed">
+                    Después de instalar, el Runner arrancará automáticamente al iniciar Windows o macOS.
+                    El Dashboard mostrará los dispositivos sin ninguna acción adicional.
+                  </p>
+                </div>
+              )}
+
+              {/* Dispositivos: checklist de diagnóstico */}
+              {runners.length > 0 && devices.length === 0 && (
+                <div className="space-y-2 mb-4">
+                  <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">
+                    Checklist de diagnóstico
+                  </div>
+                  {[
+                    'Cable USB conectado correctamente',
+                    'Depuración USB habilitada en el dispositivo',
+                    'Pantalla desbloqueada — acepta "Confiar en esta computadora"',
+                    'En iOS: dispositivo trust aprobado en Ajustes → General → VPN y administración',
+                    'ADB instalado y en PATH (Android Studio o platform-tools)',
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[11px] text-slate-400">
+                      <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 mt-0.5 text-[10px]"
+                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                        {i + 1}
+                      </span>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <button onClick={() => setShowAddModal(false)}
-                className="w-full mt-4 py-2 rounded-xl text-[12px] font-semibold"
+                className="w-full py-2.5 rounded-xl text-[12px] font-semibold"
                 style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
                 Cerrar
               </button>

@@ -1,0 +1,81 @@
+<!--
+  WinSW (Windows Service Wrapper) configuration
+  Uso alternativo al instalador de Tarea Programada.
+  Requiere permisos de Administrador.
+
+  Pasos:
+    1. Descarga WinSW desde https://github.com/winsw/winsw/releases
+    2. Renombralo a AutomationQARunner.exe y coloca en esta carpeta
+    3. Copia cinepolis-runner.jar a esta carpeta
+    4. Como Admin: AutomationQARunner.exe install
+    5. Como Admin: AutomationQARunner.exe start
+
+  Comandos:
+    AutomationQARunner.exe install    - Registra el servicio
+    AutomationQARunner.exe start      - Inicia el servicio
+    AutomationQARunner.exe stop       - Detiene el servicio
+    AutomationQARunner.exe restart    - Reinicia el servicio
+    AutomationQARunner.exe uninstall  - Elimina el servicio
+    AutomationQARunner.exe status     - Muestra estado
+-->
+
+<service>
+  <id>AutomationQARunner</id>
+  <name>Automation QA Runner</name>
+  <description>Universal Runner para la plataforma Automation QA. Descubre y gestiona dispositivos Android e iOS automaticamente. Auto-detecta OS y capacidades al arrancar.</description>
+
+  <!-- Java executable. WinSW lo busca en PATH. -->
+  <executable>java</executable>
+
+  <arguments>
+    -Dfile.encoding=UTF-8
+    -Dstdout.encoding=UTF-8
+    -DBACKEND_URL=https://qautomation-production.up.railway.app
+    -DRUNNER_TOKEN=runner-local-token
+    -DPOLL_INTERVAL_MS=30000
+    -DWORK_DIR="%BASE%\..\.."
+    -DAPPIUM_HUB=http://127.0.0.1:4723
+    -jar "%BASE%\cinepolis-runner.jar"
+  </arguments>
+
+  <!-- Ajustar RUNNER_ID por maquina: edita este valor -->
+  <env name="RUNNER_ID" value="win-runner-01"/>
+
+  <!-- Agregar ADB al PATH para deteccion de Android -->
+  <env name="PATH" value="%PATH%;%LOCALAPPDATA%\Android\Sdk\platform-tools;%PROGRAMFILES%\Android\android-sdk\platform-tools"/>
+
+  <!-- Modo de inicio: Automatic = arranca con Windows -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- Reintentos en caso de fallo -->
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- Logging -->
+  <logpath>%BASE%\logs</logpath>
+  <log mode="rotate">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+
+  <!-- Tiempo maximo para detenerse correctamente (ms) -->
+  <stopTimeout>30000</stopTimeout>
+
+  <!--
+  NOTA: Para que ADB detecte dispositivos USB, el servicio debe correr
+  bajo la cuenta del usuario (no SYSTEM). Si los dispositivos no aparecen,
+  configura la cuenta del servicio:
+
+  <serviceaccount>
+    <username>DOMINIO\usuario</username>
+    <password>contraseña</password>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+
+  Alternativa recomendada: usar install-service.bat (Tarea Programada)
+  que corre bajo la sesion del usuario sin necesitar contraseña.
+  -->
+</service>
