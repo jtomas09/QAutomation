@@ -1,9 +1,11 @@
 package qa.cinepolis.backend.controller;
 
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.store.DeviceStore;
 import qa.cinepolis.backend.store.RunnerStore;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -101,6 +103,31 @@ public class SystemInfoController {
                         ? "Mejoras de rendimiento, soporte Universal Runner, auto-detección de OS."
                         : "Ya tienes la versión más reciente."
         );
+    }
+
+    /**
+     * Redirects to the appropriate installer download for the given platform.
+     * GET /api/download/runner?platform=windows|macos|linux
+     *
+     * Points to GitHub Releases. Replace RELEASE_URL with the actual release URL
+     * once installers are built and published.
+     */
+    @GetMapping("/download/runner")
+    public void downloadRunner(
+            @RequestParam(defaultValue = "windows") String platform,
+            HttpServletResponse response) throws IOException {
+
+        // Replace these with actual GitHub Release asset URLs when available.
+        // The download is transparent to the user — they just click and receive the file.
+        String baseUrl = "https://github.com/jtomas09/QAutomation/releases/latest/download/";
+
+        String filename = switch (platform.toLowerCase()) {
+            case "macos"  -> "AutomationQA-Runner.pkg";
+            case "linux"  -> "AutomationQA-Runner-linux.tar.gz";
+            default       -> "AutomationQA-Runner-Setup.exe";
+        };
+
+        response.sendRedirect(baseUrl + filename);
     }
 
     private int compareVersions(String v1, String v2) {

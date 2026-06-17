@@ -10,8 +10,8 @@ import {
   Server, ChevronLeft, ChevronRight, ChevronDown,
   MoreHorizontal, Zap, HardDrive, BatteryMedium,
   BatteryLow, BatteryFull, Download, ShieldAlert,
-  ScanLine, Loader2, Stethoscope, Package, ArrowRight,
-  Terminal, Copy, Check, CheckCircle, XCircle, Wifi,
+  ScanLine, Loader2, Stethoscope, Package,
+  CheckCircle, XCircle, Wifi, RotateCcw,
 } from 'lucide-react'
 import { getDevices, getRunners, updateDeviceStatus, removeDevice } from '../api'
 import type { PhysicalDevice, DeviceStatus, Runner } from '../types'
@@ -136,201 +136,231 @@ function generateRunnerStats(runnerId: string) {
   })
 }
 
-// ─── CopyButton ───────────────────────────────────────────────────────────────
+// ─── Download helper ─────────────────────────────────────────────────────────
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+const DOWNLOAD_INFO: Record<string, { label: string; filename: string; platform: string }> = {
+  windows: { label: 'Windows',       filename: 'AutomationQA-Runner-Setup.exe', platform: 'windows' },
+  macos:   { label: 'macOS',         filename: 'AutomationQA-Runner.pkg',       platform: 'macos'   },
+  linux:   { label: 'Linux',         filename: 'AutomationQA-Runner-linux.tar.gz', platform: 'linux' },
+  unknown: { label: 'Windows',       filename: 'AutomationQA-Runner-Setup.exe', platform: 'windows' },
+}
+
+function triggerDownload(os: OsType) {
+  const info        = DOWNLOAD_INFO[os] ?? DOWNLOAD_INFO.windows
+  const backendBase = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'https://qautomation-production.up.railway.app'
+  const url         = `${backendBase}/api/system/download/runner?platform=${info.platform}`
+  const a           = document.createElement('a')
+  a.href            = url
+  a.download        = info.filename
+  a.target          = '_blank'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+// ─── Download Modal — estado not_installed ────────────────────────────────────
+
+interface DownloadModalProps {
+  infraState: InfraState
+  runners:    Runner[]
+  onClose:    () => void
+}
+
+function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
+  const os                  = detectOs()
+  const defaultTab: OsType  = os === 'macos' ? 'macos' : 'windows'
+  const [tab, setTab]       = useState<OsType>(defaultTab)
+  const [downloaded, setDownloaded] = useState(false)
+
+  const offlineLastSeen = runners.reduce((latest, r) => {
+    if (!r.lastSeen) return latest
+    if (!latest || new Date(r.lastSeen) > new Date(latest)) return r.lastSeen
+    return latest
+  }, null as string | null)
+
+  function handleDownload() {
+    triggerDownload(tab)
+    setDownloaded(true)
   }
-  return (
-    <button onClick={copy} title="Copiar"
-      className="p-1 rounded transition-colors flex-shrink-0"
-      style={{ color: copied ? '#10b981' : '#6b7280' }}>
-      {copied ? <Check size={11} /> : <Copy size={11} />}
-    </button>
-  )
-}
 
-// ─── OS Step row (in modal) ───────────────────────────────────────────────────
-
-function StepRow({ n, text, code }: { n: number; text: string; code?: string }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
-        <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0"
-          style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
-          {n}
-        </span>
-        <span className="text-[12px]" style={{ color: 'var(--text-sec)' }}>{text}</span>
-      </div>
-      {code && (
-        <div className="ml-7 flex items-center gap-2 px-3 py-1.5 rounded-lg"
-          style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <span className="flex-1 text-[11px] font-mono text-emerald-300">{code}</span>
-          <CopyButton text={code} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Download / Install Modal ─────────────────────────────────────────────────
-
-interface InstallModalProps {
-  infraState:   InfraState
-  runners:      Runner[]
-  onClose:      () => void
-}
-
-function InstallModal({ infraState, runners, onClose }: InstallModalProps) {
-  const os          = detectOs()
-  const [tab, setTab] = useState<OsType>(os === 'unknown' ? 'windows' : os)
-  const offlineRunner = runners.find(r => r.status === 'OFFLINE')
-
-  const tabs: { id: OsType; label: string; icon: React.ReactNode }[] = [
+  const osTabs: { id: OsType; label: string; icon: React.ReactNode }[] = [
     { id: 'windows', label: 'Windows', icon: <Monitor size={13} /> },
-    { id: 'macos',   label: 'macOS',   icon: <Apple size={13} />   },
+    { id: 'macos',   label: 'macOS',   icon: <Apple   size={13} /> },
+  ]
+
+  const afterInstall = [
+    { icon: <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />, text: 'Se inicia automáticamente con tu equipo' },
+    { icon: <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />, text: 'Detecta dispositivos Android conectados por USB' },
+    { icon: <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />, text: tab === 'macos' ? 'Detecta iPhone y iPad en macOS' : 'Detecta iPhone y iPad (requiere macOS)' },
+    { icon: <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />, text: 'Se conecta al Dashboard automáticamente' },
+    { icon: <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />, text: 'No requiere CMD, Terminal ni intervención manual' },
+  ]
+
+  const usbSteps = [
+    { icon: '①', text: 'Conecta el dispositivo por cable USB al equipo donde instalaste el Runner.' },
+    { icon: '②', text: 'En el teléfono o tablet, acepta el mensaje "Confiar en este equipo".' },
+    { icon: '③', text: 'El dispositivo aparecerá automáticamente en el Dashboard en segundos.' },
   ]
 
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)' }}
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)' }}
       onClick={onClose}>
       <motion.div
-        initial={{ scale: 0.95, opacity: 0, y: 12 }}
+        initial={{ scale: 0.95, opacity: 0, y: 16 }}
         animate={{ scale: 1,    opacity: 1, y: 0  }}
         exit={{   scale: 0.95, opacity: 0, y: 8  }}
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-        className="rounded-3xl overflow-hidden max-w-xl w-full"
-        style={{ background: '#10131f', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 32px 80px rgba(0,0,0,0.8)' }}
+        className="rounded-3xl overflow-hidden w-full max-w-lg"
+        style={{ background: '#0e1120', border: '1px solid rgba(255,255,255,0.09)', boxShadow: '0 40px 100px rgba(0,0,0,0.9)' }}
         onClick={e => e.stopPropagation()}>
 
-        {/* ── Modal header ── */}
-        <div className="px-6 pt-6 pb-4"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          <div className="flex items-start gap-3">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-              style={{ background: infraState === 'not_installed' ? 'rgba(99,102,241,0.15)' : 'rgba(239,68,68,0.12)', border: `1px solid ${infraState === 'not_installed' ? 'rgba(99,102,241,0.3)' : 'rgba(239,68,68,0.25)'}` }}>
-              {infraState === 'not_installed'
-                ? <Package size={22} className="text-indigo-400" />
-                : infraState === 'offline'
-                  ? <ShieldAlert size={22} className="text-red-400" />
-                  : <Stethoscope size={22} className="text-amber-400" />}
+        {/* ── Header ── */}
+        <div className="px-7 pt-7 pb-5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: infraState === 'not_installed' ? 'rgba(99,102,241,0.15)' : infraState === 'offline' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
+                  border:     infraState === 'not_installed' ? '1px solid rgba(99,102,241,0.3)' : infraState === 'offline' ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(245,158,11,0.25)',
+                }}>
+                {infraState === 'not_installed' && <Package     size={22} className="text-indigo-400" />}
+                {infraState === 'offline'        && <ShieldAlert size={22} className="text-red-400"    />}
+                {infraState === 'scanning'       && <ScanLine    size={22} className="text-amber-400"  />}
+              </div>
+              <div>
+                <h2 className="text-[16px] font-black leading-tight" style={{ color: 'var(--text-pri)' }}>
+                  {infraState === 'not_installed' && 'Descargar Automation QA Runner'}
+                  {infraState === 'offline'        && 'Runner sin conexión'}
+                  {infraState === 'scanning'       && 'Conectar un dispositivo'}
+                </h2>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-dim)' }}>
+                  {infraState === 'not_installed' && 'Instalación única · Auto-inicio · Sin intervención manual'}
+                  {infraState === 'offline'        && (offlineLastSeen ? `Último contacto: ${timeAgo(offlineLastSeen)}` : 'El servicio se detuvo temporalmente')}
+                  {infraState === 'scanning'       && 'El Runner está activo y esperando dispositivos USB'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-[15px] font-black" style={{ color: 'var(--text-pri)' }}>
-                {infraState === 'not_installed' ? 'Instalación del Runner Service'
-                  : infraState === 'offline'    ? 'Runner Offline — Diagnóstico'
-                  : 'Diagnóstico de Dispositivos'}
-              </h2>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {infraState === 'not_installed'
-                  ? 'Instalación única — el Runner arrancará automáticamente desde ahora'
-                  : infraState === 'offline' && offlineRunner
-                  ? `Último heartbeat de ${offlineRunner.runnerId}: ${timeAgo(offlineRunner.lastSeen)}`
-                  : 'El Runner está online pero no detecta dispositivos'}
-              </p>
-            </div>
-            <button onClick={onClose} className="ml-auto p-2 rounded-xl hover:bg-white/5 flex-shrink-0"
+            <button onClick={onClose} className="p-2 rounded-xl hover:bg-white/5 flex-shrink-0"
               style={{ color: 'var(--text-dim)' }}>
               <XCircle size={16} />
             </button>
           </div>
         </div>
 
-        <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+        {/* ── Body ── */}
+        <div className="px-7 py-6 space-y-5 max-h-[72vh] overflow-y-auto">
 
-          {/* ── NOT INSTALLED: Installation guide ── */}
+          {/* ═══ NOT INSTALLED ═══ */}
           {infraState === 'not_installed' && (
             <>
-              {/* Alert */}
-              <div className="flex items-start gap-3 rounded-2xl p-4"
-                style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)' }}>
-                <Package size={16} className="text-indigo-400 flex-shrink-0 mt-0.5" />
-                <div className="text-[11px] text-slate-400 leading-relaxed">
-                  <span className="font-semibold text-slate-300">Automation QA Runner</span> no está instalado en este equipo.
-                  La instalación tarda menos de 2 minutos y es permanente — no tendrás que hacer nada más.
-                </div>
+              {/* OS selector */}
+              <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                {osTabs.map(t => (
+                  <button key={t.id} onClick={() => { setTab(t.id); setDownloaded(false) }}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-semibold transition-all"
+                    style={{
+                      background: tab === t.id ? 'rgba(99,102,241,0.25)' : 'transparent',
+                      color:      tab === t.id ? '#818cf8' : 'var(--text-dim)',
+                      border:     tab === t.id ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
+                    }}>
+                    {t.icon}
+                    {t.label}
+                    {os === t.id && (
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
+                        style={{ background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>
+                        TU OS
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
 
-              {/* OS tabs */}
-              <div>
-                <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit"
-                  style={{ background: 'rgba(255,255,255,0.05)' }}>
-                  {tabs.map(t => (
-                    <button key={t.id} onClick={() => setTab(t.id)}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-semibold transition-all"
-                      style={{
-                        background: tab === t.id ? 'rgba(99,102,241,0.25)' : 'transparent',
-                        color:      tab === t.id ? '#818cf8' : 'var(--text-dim)',
-                        border:     tab === t.id ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
-                      }}>
-                      {t.icon}{t.label}
-                      {os === t.id && (
-                        <span className="text-[8px] font-black px-1 rounded"
-                          style={{ background: 'rgba(16,185,129,0.2)', color: '#10b981' }}>
-                          TU OS
-                        </span>
-                      )}
-                    </button>
-                  ))}
+              {/* Download card */}
+              {!downloaded ? (
+                <div className="rounded-2xl p-5 flex items-center gap-4"
+                  style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                    {tab === 'macos' ? <Apple size={28} className="text-indigo-300" /> : <Monitor size={28} className="text-indigo-300" />}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[13px] font-black" style={{ color: 'var(--text-pri)' }}>
+                      Automation QA Runner para {DOWNLOAD_INFO[tab].label}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      {DOWNLOAD_INFO[tab].filename}
+                    </div>
+                  </div>
+                  <button onClick={handleDownload}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12px] font-black transition-all hover:opacity-90 flex-shrink-0"
+                    style={{ background: 'linear-gradient(135deg, #6366f1, #7c3aed)', color: '#fff', boxShadow: '0 6px 18px rgba(99,102,241,0.4)' }}>
+                    <Download size={13} />
+                    Descargar
+                  </button>
                 </div>
-
-                {/* Windows steps */}
-                {tab === 'windows' && (
-                  <div className="space-y-3">
-                    <StepRow n={1} text="Clona o descarga el repositorio del proyecto (si aún no lo tienes)" />
-                    <StepRow n={2} text="Asegúrate de tener Java 17+ instalado"
-                      code="java -version" />
-                    <StepRow n={3} text="Ejecuta el instalador (doble clic o desde CMD):"
-                      code="runner\service\windows\install-service.bat" />
-                    <StepRow n={4} text="Cuando pregunte '¿Iniciar ahora?', responde S" />
-                    <div className="flex items-start gap-2 px-3 py-2 rounded-xl text-[10px] text-slate-500"
-                      style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.12)' }}>
-                      <CheckCircle size={12} className="text-emerald-500 flex-shrink-0 mt-0.5" />
-                      El servicio se registra como Tarea Programada. Al reiniciar Windows, arrancará automáticamente — sin CMD, sin scripts manuales.
+              ) : (
+                /* Post-download state */
+                <div className="rounded-2xl p-5" style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                      style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      <CheckCircle size={20} className="text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="text-[13px] font-black text-emerald-400">¡Descarga iniciada!</div>
+                      <div className="text-[11px] text-slate-500">Abre el archivo descargado para instalar</div>
                     </div>
                   </div>
-                )}
-
-                {/* macOS steps */}
-                {tab === 'macos' && (
-                  <div className="space-y-3">
-                    <StepRow n={1} text="Clona o descarga el repositorio (si aún no lo tienes)" />
-                    <StepRow n={2} text="Asegúrate de tener Java 17+ instalado"
-                      code="java -version" />
-                    <StepRow n={3} text="Ejecuta el instalador (una sola vez):"
-                      code="bash runner/install.sh" />
-                    <div className="flex items-start gap-2 px-3 py-2 rounded-xl text-[10px] text-slate-500"
-                      style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.12)' }}>
-                      <CheckCircle size={12} className="text-emerald-500 flex-shrink-0 mt-0.5" />
-                      Se instala como LaunchAgent. Arranca automáticamente al iniciar sesión.
-                      En Mac con Xcode detecta Android + iOS. Sin configuración adicional.
-                    </div>
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">Qué hacer ahora</div>
+                    {tab === 'windows' ? (
+                      <>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold">①</span>
+                          Abre <strong className="text-slate-300">AutomationQA-Runner-Setup.exe</strong> desde tu carpeta de Descargas
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold">②</span>
+                          Si Windows muestra "Protegió tu PC", haz clic en "Más información" → "Ejecutar de todas formas"
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold">③</span>
+                          Sigue los pasos del instalador y haz clic en Finalizar
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold">①</span>
+                          Abre <strong className="text-slate-300">AutomationQA-Runner.pkg</strong> desde tu carpeta de Descargas
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold">②</span>
+                          Si macOS pide tu contraseña, ingrésala para autorizar la instalación
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold">③</span>
+                          Haz clic en Instalar y espera que termine
+                        </div>
+                      </>
+                    )}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              {/* What happens next */}
-              <div className="rounded-2xl p-4"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-3">Después de instalar</div>
-                <div className="space-y-2">
-                  {[
-                    'El servicio inicia automáticamente',
-                    'Detecta dispositivos Android/iOS conectados por USB',
-                    'Se registra en el Dashboard en ~15 segundos',
-                    'Arranca solo en cada inicio de Windows o macOS',
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-center gap-2 text-[11px] text-slate-400">
-                      <ArrowRight size={11} className="text-indigo-400 flex-shrink-0" />
-                      {item}
+              {/* After install checklist */}
+              <div className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-3">
+                  Después de instalar, el Runner:
+                </div>
+                <div className="space-y-2.5">
+                  {afterInstall.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2.5">
+                      {item.icon}
+                      <span className="text-[12px] text-slate-300">{item.text}</span>
                     </div>
                   ))}
                 </div>
@@ -338,66 +368,78 @@ function InstallModal({ infraState, runners, onClose }: InstallModalProps) {
             </>
           )}
 
-          {/* ── OFFLINE: Recovery guide ── */}
+          {/* ═══ OFFLINE ═══ */}
           {infraState === 'offline' && (
             <>
-              <div className="flex items-start gap-3 rounded-2xl p-4"
-                style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.15)' }}>
-                <ShieldAlert size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
-                <div className="text-[11px] text-red-300 leading-relaxed">
-                  El Runner Service estaba funcionando pero ha perdido la conexión. Puede que el equipo se haya apagado o el servicio se haya detenido por un error.
+              <div className="rounded-2xl p-5" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                <div className="text-[13px] font-bold text-red-300 mb-1">El servicio se detuvo temporalmente</div>
+                <div className="text-[12px] text-slate-500 leading-relaxed">
+                  El Runner se instaló correctamente, pero perdió la conexión.
+                  Esto ocurre cuando el equipo fue apagado o reiniciado de forma inesperada.
                 </div>
               </div>
 
-              <div>
-                <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-3">Cómo recuperar</div>
-                <div className="space-y-3">
-                  <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-                    <div className="flex items-center gap-2 px-4 py-2"
-                      style={{ background: 'rgba(96,165,250,0.07)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                      <Monitor size={12} className="text-blue-400" />
-                      <span className="text-[10px] font-bold text-blue-400">Windows — reiniciar servicio</span>
-                    </div>
-                    <div className="p-3 space-y-2" style={{ background: 'rgba(0,0,0,0.3)' }}>
-                      <div className="text-[10px] text-slate-600">Opción 1: reinicia el equipo (el servicio arranca automáticamente)</div>
-                      <div className="text-[10px] text-slate-600">Opción 2: abre el Programador de Tareas → "Automation QA Runner" → Ejecutar</div>
+              <div className="space-y-3">
+                <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase">Cómo recuperar la conexión</div>
+
+                <div className="rounded-2xl p-4 flex items-start gap-3"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)' }}>
+                    <RotateCcw size={16} className="text-blue-400" />
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-bold text-blue-300 mb-0.5">Reinicia tu equipo</div>
+                    <div className="text-[11px] text-slate-500">
+                      El Runner arrancará automáticamente al volver a iniciar sesión.
+                      No necesitas hacer nada más.
                     </div>
                   </div>
-                  <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-                    <div className="flex items-center gap-2 px-4 py-2"
-                      style={{ background: 'rgba(129,140,248,0.07)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                      <Apple size={12} className="text-indigo-400" />
-                      <span className="text-[10px] font-bold text-indigo-400">macOS — reiniciar LaunchAgent</span>
+                </div>
+
+                <div className="text-center text-[10px] text-slate-700 font-semibold py-1">— o —</div>
+
+                <div className="rounded-2xl p-4 flex items-start gap-3"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                    style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                    <Download size={16} className="text-emerald-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[12px] font-bold text-emerald-300 mb-0.5">Reinstalar el Runner</div>
+                    <div className="text-[11px] text-slate-500 mb-3">
+                      Si el problema persiste después de reiniciar, descarga e instala de nuevo.
                     </div>
-                    <div className="p-3" style={{ background: 'rgba(0,0,0,0.3)' }}>
-                      <div className="flex items-center gap-2 py-0.5">
-                        <span className="text-[11px] font-mono text-emerald-300 flex-1">
-                          launchctl kickstart -k gui/$(id -u)/com.automationqa.runner
-                        </span>
-                        <CopyButton text="launchctl kickstart -k gui/$(id -u)/com.automationqa.runner" />
-                      </div>
-                    </div>
+                    <button onClick={() => { triggerDownload(os); onClose() }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all hover:opacity-90"
+                      style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
+                      <Download size={12} />
+                      Descargar Runner para {DOWNLOAD_INFO[os === 'unknown' ? 'windows' : os].label}
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Runner status list */}
+              {/* Machines list */}
               {runners.length > 0 && (
                 <div>
-                  <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">Estado de Runners</div>
+                  <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">Equipos registrados</div>
                   <div className="space-y-2">
                     {runners.map(r => (
-                      <div key={r.runnerId} className="flex items-center gap-3 px-3 py-2 rounded-xl"
+                      <div key={r.runnerId} className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
                         style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                         <span className="w-2 h-2 rounded-full flex-shrink-0"
                           style={{ background: r.status === 'OFFLINE' ? '#6b7280' : '#10b981' }} />
-                        <span className="text-[11px] font-semibold flex-1" style={{ color: 'var(--text-sec)' }}>
-                          {r.runnerId}
-                        </span>
-                        <span className="text-[10px] text-slate-600">{timeAgo(r.lastSeen)}</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={{ background: r.status === 'OFFLINE' ? 'rgba(107,114,128,0.2)' : 'rgba(16,185,129,0.2)', color: r.status === 'OFFLINE' ? '#9ca3af' : '#10b981' }}>
-                          {r.status}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--text-sec)' }}>
+                            {r.hostname ?? r.runnerId}
+                          </div>
+                          <div className="text-[10px] text-slate-600">{osDisplayLabel(resolveOs(r))}</div>
+                        </div>
+                        <span className="text-[10px] text-slate-600 flex-shrink-0">{timeAgo(r.lastSeen)}</span>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                          style={{ background: r.status === 'OFFLINE' ? 'rgba(107,114,128,0.18)' : 'rgba(16,185,129,0.18)', color: r.status === 'OFFLINE' ? '#9ca3af' : '#10b981' }}>
+                          {r.status === 'OFFLINE' ? 'Offline' : 'Online'}
                         </span>
                       </div>
                     ))}
@@ -407,45 +449,49 @@ function InstallModal({ infraState, runners, onClose }: InstallModalProps) {
             </>
           )}
 
-          {/* ── SCANNING: USB checklist ── */}
+          {/* ═══ SCANNING ═══ */}
           {infraState === 'scanning' && (
             <>
-              <div className="flex items-start gap-3 rounded-2xl p-4"
-                style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.15)' }}>
-                <ScanLine size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
-                <div className="text-[11px] text-amber-300 leading-relaxed">
-                  El Runner está online pero no detecta ningún dispositivo. Verifica la conexión USB.
+              <div className="rounded-2xl p-5" style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Loader2 size={13} className="text-amber-400 animate-spin" />
+                  <div className="text-[13px] font-bold text-amber-300">Runner activo — Esperando dispositivos</div>
+                </div>
+                <div className="text-[12px] text-slate-500 leading-relaxed">
+                  El Runner está funcionando correctamente.
+                  Conecta un teléfono o tablet por USB para que aparezca aquí.
                 </div>
               </div>
-              <div>
-                <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-3">Checklist de diagnóstico</div>
-                <div className="space-y-2">
-                  {[
-                    { check: 'Cable USB conectado físicamente al equipo del Runner' },
-                    { check: 'Depuración USB habilitada (Configuración → Opciones de Desarrollador)' },
-                    { check: 'Pantalla desbloqueada — acepta "Confiar en esta computadora"' },
-                    { check: 'Android: ejecuta "adb devices" para verificar que el dispositivo aparece', note: 'android' },
-                    { check: 'iOS: dispositivo trust aprobado en Ajustes → General → VPN y Administración', note: 'ios' },
-                    { check: 'Driver USB instalado en Windows (Android: Universal ADB, iOS: Apple Mobile Device Support)', note: 'windows' },
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-start gap-2.5 text-[11px] text-slate-400">
-                      <span className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
-                        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', fontSize: 9 }}>
-                        {i + 1}
-                      </span>
-                      <span>{item.check}</span>
-                    </div>
-                  ))}
+
+              <div className="space-y-3">
+                <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase">Cómo conectar un dispositivo</div>
+                {usbSteps.map((s, i) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                    style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span className="text-[18px] leading-none flex-shrink-0 text-slate-600">{s.icon}</span>
+                    <span className="text-[12px] text-slate-300 leading-relaxed">{s.text}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-2xl p-4 flex items-start gap-3"
+                style={{ background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.12)' }}>
+                <CheckCircle size={14} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  Compatible con <strong className="text-slate-300">Android</strong> e{' '}
+                  <strong className="text-slate-300">iPhone / iPad</strong>.
+                  Un mismo equipo puede tener múltiples dispositivos conectados simultáneamente.
                 </div>
               </div>
             </>
           )}
         </div>
 
-        <div className="px-6 pb-6">
+        {/* ── Footer ── */}
+        <div className="px-7 pb-7 pt-2">
           <button onClick={onClose}
-            className="w-full py-2.5 rounded-xl text-[12px] font-semibold"
-            style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
+            className="w-full py-2.5 rounded-xl text-[12px] font-semibold transition-all hover:bg-white/5"
+            style={{ color: 'var(--text-dim)', border: '1px solid rgba(255,255,255,0.07)' }}>
             Cerrar
           </button>
         </div>
@@ -456,62 +502,67 @@ function InstallModal({ infraState, runners, onClose }: InstallModalProps) {
 
 // ─── Enterprise empty states ───────────────────────────────────────────────────
 
-function InfrastructureSetupRequired({ onInstall }: { onInstall: () => void }) {
-  const os = detectOs()
+function InfrastructureSetupRequired({ onDownload }: { onDownload: () => void }) {
+  const os    = detectOs()
+  const osLbl = os === 'macos' ? 'macOS' : 'Windows'
+
+  const features = [
+    { icon: <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />, text: 'Se iniciará automáticamente con tu equipo' },
+    { icon: <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />, text: 'Detectará dispositivos Android' },
+    { icon: <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />, text: 'Detectará dispositivos iPhone y iPad' },
+    { icon: <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />, text: 'Se conectará al Dashboard automáticamente' },
+    { icon: <CheckCircle size={15} className="text-emerald-400 flex-shrink-0" />, text: 'No requerirá CMD ni Terminal' },
+  ]
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col items-center py-12 gap-5">
+      className="flex flex-col items-center py-14 gap-6 max-w-sm mx-auto">
 
-      {/* Icon */}
+      {/* App icon */}
       <div className="relative">
-        <div className="w-20 h-20 rounded-3xl flex items-center justify-center"
-          style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
-          <Package size={36} className="text-indigo-400" />
+        <div className="w-24 h-24 rounded-[28px] flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(124,58,237,0.15))', border: '1px solid rgba(99,102,241,0.25)' }}>
+          <Package size={44} className="text-indigo-400" />
         </div>
-        <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center"
-          style={{ background: '#10131f', border: '2px solid rgba(239,68,68,0.5)' }}>
-          <XCircle size={16} className="text-red-400" />
+        <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ background: '#0e1120', border: '2px solid rgba(239,68,68,0.4)' }}>
+          <XCircle size={18} className="text-red-400" />
         </div>
       </div>
 
-      {/* Text */}
-      <div className="text-center max-w-sm">
-        <div className="text-[16px] font-black mb-1" style={{ color: 'var(--text-pri)' }}>
+      {/* Headline */}
+      <div className="text-center">
+        <div className="text-[18px] font-black mb-2" style={{ color: 'var(--text-pri)' }}>
           Automation QA Runner no está instalado
         </div>
-        <div className="text-[12px] text-slate-500 leading-relaxed">
-          La infraestructura local aún no ha sido configurada.
-          Instala el Runner una sola vez para habilitar la detección
-          automática de dispositivos Android e iOS.
+        <div className="text-[12px] leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+          La instalación toma menos de 2 minutos.
         </div>
       </div>
 
-      {/* Features preview */}
-      <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
-        {[
-          { icon: <Monitor size={16} />, label: 'Android', sub: 'Detección automática', color: '#10b981' },
-          { icon: <Apple size={16} />,   label: 'iOS',     sub: os === 'macos' ? 'Auto en macOS' : 'Solo en macOS', color: '#818cf8' },
-          { icon: <Wifi size={16} />,    label: 'Online',  sub: 'Sin intervención', color: '#6366f1' },
-        ].map(f => (
-          <div key={f.label} className="rounded-xl p-3 text-center"
-            style={{ background: `${f.color}08`, border: `1px solid ${f.color}18` }}>
-            <span style={{ color: f.color }} className="flex justify-center mb-1">{f.icon}</span>
-            <div className="text-[11px] font-bold" style={{ color: 'var(--text-sec)' }}>{f.label}</div>
-            <div className="text-[9px] text-slate-600">{f.sub}</div>
+      {/* Feature list */}
+      <div className="w-full rounded-2xl p-5 space-y-3"
+        style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-1">Una vez instalado:</div>
+        {features.map((f, i) => (
+          <div key={i} className="flex items-center gap-3">
+            {f.icon}
+            <span className="text-[12px] text-slate-300">{f.text}</span>
           </div>
         ))}
       </div>
 
-      {/* CTA */}
-      <button onClick={onInstall}
-        className="flex items-center gap-2 px-6 py-3 rounded-2xl text-[13px] font-black transition-all hover:opacity-90"
-        style={{ background: 'linear-gradient(135deg, #6366f1, #7c3aed)', color: '#fff', boxShadow: '0 8px 24px rgba(99,102,241,0.35)' }}>
-        <Download size={15} />
-        Descargar e Instalar Runner
+      {/* Primary CTA */}
+      <button onClick={onDownload}
+        className="flex items-center gap-2.5 px-8 py-3.5 rounded-2xl text-[14px] font-black transition-all hover:opacity-90 active:scale-95 w-full justify-center"
+        style={{ background: 'linear-gradient(135deg, #6366f1, #7c3aed)', color: '#fff', boxShadow: '0 10px 28px rgba(99,102,241,0.4)' }}>
+        <Download size={16} />
+        Descargar Runner para {osLbl}
       </button>
-      <div className="text-[10px] text-slate-600">
-        Instalación única · Auto-arranca con {os === 'macos' ? 'macOS' : 'Windows'} · Sin mantenimiento manual
+
+      <div className="text-[10px] text-slate-600 text-center">
+        Instalación única · Auto-arranca con {osLbl} · Sin mantenimiento manual
       </div>
     </motion.div>
   )
@@ -525,57 +576,58 @@ function RunnerOfflineCard({ runners, onDiag }: { runners: Runner[]; onDiag: () 
   }, null as string | null)
 
   return (
-    <div className="flex flex-col items-center py-10 gap-4">
-      <div className="relative">
-        <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-          <ShieldAlert size={28} className="text-red-400" />
-        </div>
+    <div className="flex flex-col items-center py-10 gap-5">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+        <ShieldAlert size={28} className="text-red-400" />
       </div>
       <div className="text-center">
-        <div className="text-[14px] font-black text-red-400">Runner Offline</div>
+        <div className="text-[15px] font-black text-red-400">Runner Offline</div>
         {lastSeen && (
-          <div className="text-[11px] text-slate-500 mt-1">
-            Último heartbeat: <span className="text-slate-400">{timeAgo(lastSeen)}</span>
+          <div className="text-[12px] mt-1" style={{ color: 'var(--text-dim)' }}>
+            Último contacto: <span className="text-slate-300 font-semibold">{timeAgo(lastSeen)}</span>
           </div>
         )}
-        <div className="text-[11px] text-slate-600 mt-1 max-w-xs">
-          El servicio se instaló previamente pero está detenido. Reinicia el equipo o el servicio.
+        <div className="text-[12px] text-slate-600 mt-1.5 max-w-xs leading-relaxed">
+          El servicio se detuvo temporalmente. Reinicia tu equipo para recuperar la conexión.
         </div>
       </div>
-      <div className="flex gap-2">
-        <button onClick={onDiag}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-semibold"
-          style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)' }}>
-          <Stethoscope size={12} />
-          Diagnosticar
-        </button>
-      </div>
+      <button onClick={onDiag}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12px] font-semibold"
+        style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)' }}>
+        <Stethoscope size={13} />
+        Ver opciones de recuperación
+      </button>
     </div>
   )
 }
 
 function DeviceScanningCard() {
   return (
-    <div className="flex flex-col items-center py-10 gap-3">
+    <div className="flex flex-col items-center py-10 gap-5">
       <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
         style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
         <ScanLine size={28} className="text-emerald-400 animate-pulse" />
       </div>
       <div className="text-center">
-        <div className="flex items-center gap-2 justify-center mb-0.5">
+        <div className="flex items-center gap-2 justify-center mb-1.5">
           <Loader2 size={12} className="text-emerald-400 animate-spin" />
-          <span className="text-[13px] font-bold text-emerald-400">Runner conectado · Escaneando</span>
+          <span className="text-[14px] font-bold text-emerald-400">Runner activo — Esperando dispositivos</span>
         </div>
-        <div className="text-[11px] text-slate-500 max-w-xs leading-relaxed">
-          Conecta un <span className="text-slate-300 font-semibold">Android</span> o{' '}
-          <span className="text-slate-300 font-semibold">iPhone</span> por USB.
-          El dispositivo aparecerá automáticamente en el Dashboard.
+        <div className="text-[12px] text-slate-500 max-w-xs leading-relaxed">
+          Conecta un <span className="text-slate-200 font-semibold">Android</span> o un{' '}
+          <span className="text-slate-200 font-semibold">iPhone</span> por USB.{' '}
+          Aparecerá automáticamente en el Dashboard.
         </div>
-        <div className="flex items-center justify-center gap-3 mt-2.5 text-[10px] text-slate-600">
-          <span>Android: Depuración USB</span>
-          <span className="text-slate-700">·</span>
-          <span>iOS: Confiar en equipo</span>
+      </div>
+      <div className="flex gap-6 text-[11px] text-slate-600">
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          Android: acepta "Confiar en equipo"
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+          iPhone: acepta "Confiar en esta computadora"
         </div>
       </div>
     </div>
@@ -1208,7 +1260,7 @@ export default function DeviceFarm() {
 
             <div className="p-4">
               {infraState === 'not_installed' && !loading && (
-                <InfrastructureSetupRequired onInstall={() => setShowModal(true)} />
+                <InfrastructureSetupRequired onDownload={() => setShowModal(true)} />
               )}
               {infraState === 'offline' && (
                 <RunnerOfflineCard runners={runners} onDiag={() => setShowModal(true)} />
@@ -1414,7 +1466,7 @@ export default function DeviceFarm() {
       {/* ── Modal ── */}
       <AnimatePresence>
         {showModal && (
-          <InstallModal
+          <DownloadModal
             infraState={infraState}
             runners={runners}
             onClose={() => setShowModal(false)}
