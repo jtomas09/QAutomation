@@ -1153,91 +1153,102 @@ public class SelectorPage extends BasePage {
      *
      * OPTIMIZACIONES v2:
      *  1. implicitlyWait=0 en el bucle  → elimina ~10 s de espera por swipe infructuoso
-     *     (el comportamiento anterior: 20 swipes × 10 s = hasta 200 s solo en waits)
      *  2. swipeRightInAnchorY reducido   → 350 ms + 80 ms = 430 ms (era 1100 ms, −61 %)
      *  3. Reset carrusel opcional        → se omite si la sección ya es la misma
      *  4. Métricas completas en log      → swipe N/total + tiempo total + producto
      *
+     * ROBUSTEZ v3:
+     *  5. Fallback automático cuando el ancla no está visible →
+     *     intenta localizar el producto directamente con clickCardByTextWithFallback
+     *     antes de lanzar SKIP, eliminando la dependencia rígida de categorías ancla.
+     *
      * La lógica funcional (forzarClic, verificarYAbortarSiAgotado, SKIP) se mantiene intacta.
      */
     private void clickRightFromAnchorOneTry(String anchorXpath, String targetXpath) {
-        // 1. Extraer nombre del producto (sin cambios)
+        // 1. Extraer nombre del producto
         String extractedText = targetXpath.replaceAll(".*@text=['\"]", "").replaceAll("['\"].*", "");
 
-        final int ANCHOR_SCROLL_MAX  = 10;
-        final int RESET_SWIPES       = 3;
+        final int ANCHOR_SCROLL_MAX   = 10;
+        final int RESET_SWIPES        = 3;
         final int MAX_CAROUSEL_SWIPES = 20;
 
         long t0 = System.currentTimeMillis();
         log.info("[Búsqueda] Producto: \"{}\"", extractedText);
 
-        // 2. Asegurar sección visible (con métricas de scroll vertical)
-        if (!this.ensureVisibleByXpathNoClick(anchorXpath, ANCHOR_SCROLL_MAX)) {
-            throw new RuntimeException("Sección no encontrada: " + anchorXpath);
-        }
+        // ─── Intento 1: ancla visible → navegación por carrusel (camino original) ────
+        boolean anclaVisible = this.ensureVisibleByXpathNoClick(anchorXpath, ANCHOR_SCROLL_MAX);
 
-        WebElement anchorEl = this.driver.findElement(By.xpath(anchorXpath));
-        int anchorY = anchorEl.getLocation().getY() + (anchorEl.getSize().getHeight() / 2);
+        if (anclaVisible) {
+            WebElement anchorEl = this.driver.findElement(By.xpath(anchorXpath));
+            int anchorY = anchorEl.getLocation().getY() + (anchorEl.getSize().getHeight() / 2);
 
-        // 3. Reset del carrusel — se omite si estamos en la misma sección que la búsqueda anterior
-        //    Esto evita 3 swipes de retroceso (~900 ms) cuando los productos son consecutivos.
-        if (!anchorXpath.equals(lastAnchorXpath)) {
-            this.resetCarouselFromAnchorY(anchorY, RESET_SWIPES);
-            lastAnchorXpath = anchorXpath;
-        } else {
-            log.debug("[Búsqueda] Misma sección — reset de carrusel omitido");
-        }
-
-        // Ajuste de XPath para compatibilidad con Compose (texto o content-desc)
-        String targetComposeXpath = "//*[@text='" + extractedText
-                + "' or @content-desc='" + extractedText + "']";
-        By target = By.xpath(targetComposeXpath);
-
-        // 4. BUCLE DE BÚSQUEDA OPTIMIZADO
-        //    KEY FIX: implicitlyWait=0 → driver.findElements() retorna inmediatamente
-        //    si el elemento no está en pantalla, en lugar de esperar hasta 10 s.
-        //    El implicit wait se restaura antes de cualquier acción que lo requiera.
-        long tBucle = System.currentTimeMillis();
-        try {
-            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-
-            for (int i = 0; i < MAX_CAROUSEL_SWIPES; i++) {
-
-                // isVisibleInstantaneamente usa findElements con wait=0 ya activo
-                if (isVisibleInstantaneamente(target)) {
-                    log.info("[Búsqueda] \"{}\" encontrado en swipe {} | Tiempo búsqueda: {} ms",
-                            extractedText, i, (System.currentTimeMillis() - tBucle));
-
-                    // Restaurar timeout antes de acciones que dependen de él
-                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-
-                    // verificarYAbortarSiAgotado y forzarClic permanecen sin cambios
-                    this.verificarYAbortarSiAgotado(extractedText);
-                    try {
-                        this.forzarClic(target);
-                        log.info("[Búsqueda] Clic exitoso | Tiempo total: {} ms",
-                                (System.currentTimeMillis() - t0));
-                        return;
-                    } catch (Exception e) {
-                        this.verificarYAbortarSiAgotado(extractedText);
-                        throw e;
-                    }
-                }
-
-                log.debug("[Búsqueda] Swipe {}/{} → \"{}\"",
-                        (i + 1), MAX_CAROUSEL_SWIPES, extractedText);
-                this.swipeRightInAnchorY(anchorY);
+            // Reset del carrusel — omitido si estamos en la misma sección
+            if (!anchorXpath.equals(lastAnchorXpath)) {
+                this.resetCarouselFromAnchorY(anchorY, RESET_SWIPES);
+                lastAnchorXpath = anchorXpath;
+            } else {
+                log.debug("[Búsqueda] Misma sección — reset de carrusel omitido");
             }
 
-        } finally {
-            // Garantiza restauración del timeout aunque el bucle lance excepción
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            String targetComposeXpath = "//*[@text='" + extractedText
+                    + "' or @content-desc='" + extractedText + "']";
+            By target = By.xpath(targetComposeXpath);
+
+            long tBucle = System.currentTimeMillis();
+            try {
+                // implicitlyWait=0 → findElements() retorna inmediatamente
+                driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+
+                for (int i = 0; i < MAX_CAROUSEL_SWIPES; i++) {
+                    if (isVisibleInstantaneamente(target)) {
+                        log.info("[Búsqueda] \"{}\" encontrado en swipe {} | Tiempo búsqueda: {} ms",
+                                extractedText, i, (System.currentTimeMillis() - tBucle));
+
+                        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+                        this.verificarYAbortarSiAgotado(extractedText);
+                        try {
+                            this.forzarClic(target);
+                            log.info("[Búsqueda] Clic exitoso | Tiempo total: {} ms",
+                                    (System.currentTimeMillis() - t0));
+                            return;
+                        } catch (Exception e) {
+                            this.verificarYAbortarSiAgotado(extractedText);
+                            throw e;
+                        }
+                    }
+                    log.debug("[Búsqueda] Swipe {}/{} → \"{}\"",
+                            (i + 1), MAX_CAROUSEL_SWIPES, extractedText);
+                    this.swipeRightInAnchorY(anchorY);
+                }
+            } finally {
+                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            }
+
+            long elapsed = System.currentTimeMillis() - tBucle;
+            log.warn("[Búsqueda] \"{}\" NO en carrusel | Swipes: {} | Tiempo: {} ms | Activando fallback...",
+                    extractedText, MAX_CAROUSEL_SWIPES, elapsed);
+
+        } else {
+            log.warn("[Búsqueda] Ancla \"{}\" no visible tras {} scrolls | Activando fallback directo para \"{}\"",
+                    anchorXpath, ANCHOR_SCROLL_MAX, extractedText);
         }
 
-        // 5. No encontrado tras todos los swipes → SKIP (mantiene comportamiento original)
-        long elapsed = System.currentTimeMillis() - tBucle;
-        log.warn("[Búsqueda] \"{}\" NO localizado | Swipes: {} | Tiempo: {} ms",
-                extractedText, MAX_CAROUSEL_SWIPES, elapsed);
+        // ─── Intento 2: búsqueda directa del producto sin depender de ancla ──────────
+        log.info("[Búsqueda-Fallback] Buscando \"{}\" directamente (sin ancla)", extractedText);
+        try {
+            this.clickCardByTextWithFallback(extractedText, 15);
+            log.info("[Búsqueda-Fallback] \"{}\" encontrado | Tiempo total: {}ms",
+                    extractedText, System.currentTimeMillis() - t0);
+            return;
+        } catch (org.opentest4j.TestAbortedException aborted) {
+            throw aborted; // propagar SKIP (producto agotado detectado en fallback)
+        } catch (Exception fallbackEx) {
+            log.warn("[Búsqueda-Fallback] Búsqueda directa también falló: {}", fallbackEx.getMessage());
+        }
+
+        // ─── No localizado tras ancla + fallback → SKIP ───────────────────────────────
+        log.warn("[Búsqueda] \"{}\" NO localizado tras ancla + fallback | Tiempo total: {}ms",
+                extractedText, System.currentTimeMillis() - t0);
         throw new org.opentest4j.TestAbortedException(
                 "El alimento \"" + extractedText + "\" no fue localizado o está agotado.");
     }
@@ -1313,7 +1324,13 @@ public class SelectorPage extends BasePage {
             return true;
         }
         int screenH = driver.manage().window().getSize().getHeight();
-        int threshold = Math.max(30, screenH / 20); // 5% de pantalla
+        // Umbral de "sin movimiento": 2.5% de pantalla (era 5% → demasiado sensible en Compose/LazyColumn)
+        int threshold = Math.max(15, screenH / 40);
+        // Requiere 2 swipes consecutivos sin movimiento antes de declarar fin de catálogo,
+        // igual que BasePage.oneShotVerticalSearch (SCROLL_STALL_THRESHOLD = 2).
+        // Con 1 solo swipe se producían falsos positivos cuando Compose tiene inercia variable.
+        int stalledCount = 0;
+        final int STALL_REQUIRED = 2;
         int swipesDone = 0;
         for (int i = 0; i < maxVerticalSwipes; ++i) {
             if (this.isVisibleQuick(locator)) {
@@ -1350,13 +1367,22 @@ public class SelectorPage extends BasePage {
                 try {
                     int newY = refEl.getLocation().getY();
                     if (Math.abs(newY - refY) < threshold) {
-                        log.info("[Scroll] Fin de catálogo detectado");
-                        log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
-                                swipesDone, System.currentTimeMillis() - t0);
-                        break;
+                        stalledCount++;
+                        if (stalledCount >= STALL_REQUIRED) {
+                            log.info("[Scroll] Fin de catálogo detectado ({}/{} swipes sin movimiento)",
+                                    stalledCount, STALL_REQUIRED);
+                            log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
+                                    swipesDone, System.currentTimeMillis() - t0);
+                            break;
+                        }
+                        log.debug("[Scroll-V] Swipe sin movimiento ({}/{}), continuando...",
+                                stalledCount, STALL_REQUIRED);
+                    } else {
+                        stalledCount = 0; // movimiento real detectado → reiniciar contador
                     }
                 } catch (Exception ignored) {
                     // Elemento desapareció de pantalla → scroll funcionó → hay más contenido
+                    stalledCount = 0;
                 }
             }
             if (this.isVisibleQuick(locator)) {
