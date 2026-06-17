@@ -16,34 +16,44 @@ public class RunnerController {
 
     private final RunnerStore runnerStore;
 
-    /** Pending commands per runner: runnerId → "START" | "STOP" | "RESTART" */
+    /** Pending dashboard commands per runner: runnerId → "START" | "STOP" | "RESTART" */
     private final ConcurrentHashMap<String, String> pendingCommands = new ConcurrentHashMap<>();
 
     public RunnerController(RunnerStore runnerStore) {
         this.runnerStore = runnerStore;
     }
 
-    /** GET /api/runners — list all registered runners (marks stale ones OFFLINE first) */
+    /** GET /api/runners — all registered runners */
     @GetMapping
     public List<Runner> getAllRunners() {
         runnerStore.markOfflineIfStale();
         return runnerStore.findAll();
     }
 
-    /** GET /api/runners/status — summary counts + full runner list */
+    /** GET /api/runners/status — summary counts + list */
     @GetMapping("/status")
     public Map<String, Object> getStatus() {
         runnerStore.markOfflineIfStale();
         List<Runner> all = runnerStore.findAll();
         long online  = all.stream().filter(r -> r.getStatus() != RunnerStatus.OFFLINE).count();
         long busy    = all.stream().filter(r -> r.getStatus() == RunnerStatus.BUSY).count();
-        return Map.of("total", all.size(), "online", online, "busy", busy, "runners", all);
+        long android = all.stream().filter(r -> Boolean.TRUE.equals(r.getAndroidSupported())).count();
+        long ios     = all.stream().filter(r -> Boolean.TRUE.equals(r.getIosSupported())).count();
+        return Map.of(
+                "total",   all.size(),
+                "online",  online,
+                "busy",    busy,
+                "android", android,
+                "ios",     ios,
+                "runners", all);
     }
 
     /**
-     * POST /api/runners — runner registers itself or sends a heartbeat.
-     * Body: { runnerId, platform, version, status, devices[], timestamp }
-     * Response header X-Runner-Command carries any pending command (START/STOP/RESTART).
+     * POST /api/runners — Universal Runner heartbeat / registration.
+     * Payload: { runnerId, platform, version, status,
+     *            os, hostname, androidSupported, iosSupported,
+     *            devices[], timestamp }
+     * Response header X-Runner-Command carries a pending command if any.
      */
     @PostMapping
     public ResponseEntity<Runner> registerOrHeartbeat(@RequestBody Map<String, Object> payload) {
@@ -55,21 +65,33 @@ public class RunnerController {
         Runner update = new Runner();
         update.setRunnerId(runnerId);
         update.setPlatform((String) payload.get("platform"));
-        update.setVersion((String) payload.get("version"));
+        update.setVersion((String)  payload.get("version"));
 
+        // Status
         String statusStr = (String) payload.getOrDefault("status", "ONLINE");
         try { update.setStatus(RunnerStatus.valueOf(statusStr.toUpperCase())); }
         catch (Exception e) { update.setStatus(RunnerStatus.ONLINE); }
 
+        // Universal Runner capability fields
+        update.setOs((String) payload.get("os"));
+        update.setHostname((String) payload.get("hostname"));
+        if (payload.containsKey("androidSupported")) {
+            update.setAndroidSupported(Boolean.TRUE.equals(payload.get("androidSupported")));
+        }
+        if (payload.containsKey("iosSupported")) {
+            update.setIosSupported(Boolean.TRUE.equals(payload.get("iosSupported")));
+        }
+
+        // Device list (from heartbeat)
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> devRaw = (List<Map<String, Object>>) payload.get("devices");
         if (devRaw != null) {
             List<RunnerDevice> devices = devRaw.stream().map(d -> {
                 RunnerDevice rd = new RunnerDevice();
-                rd.setDeviceId((String) d.get("deviceId"));
-                rd.setDeviceName((String) d.get("deviceName"));
-                rd.setPlatform((String) d.get("platform"));
-                rd.setStatus((String) d.getOrDefault("status", "available"));
+                rd.setDeviceId((String)   d.getOrDefault("udid", d.getOrDefault("deviceId", "")));
+                rd.setDeviceName((String) d.getOrDefault("deviceName", ""));
+                rd.setPlatform((String)   d.getOrDefault("platform", ""));
+                rd.setStatus((String)     d.getOrDefault("status", "available"));
                 return rd;
             }).toList();
             update.setDevices(devices);
@@ -78,15 +100,21 @@ public class RunnerController {
         Runner saved = runnerStore.upsert(update);
 
         String cmd = pendingCommands.remove(runnerId);
-        if (cmd != null) {
-            return ResponseEntity.ok()
-                    .header("X-Runner-Command", cmd)
-                    .body(saved);
-        }
-        return ResponseEntity.ok(saved);
+        return cmd != null
+                ? ResponseEntity.ok().header("X-Runner-Command", cmd).body(saved)
+                : ResponseEntity.ok(saved);
     }
 
-    /** GET /api/runners/{id}/command — runner polls for a pending command (204 if none) */
+    /**
+     * POST /api/runners/heartbeat — alias for POST /api/runners.
+     * Allows runners to use either endpoint.
+     */
+    @PostMapping("/heartbeat")
+    public ResponseEntity<Runner> heartbeat(@RequestBody Map<String, Object> payload) {
+        return registerOrHeartbeat(payload);
+    }
+
+    /** GET /api/runners/{id}/command — runner polls for pending command (204 if none) */
     @GetMapping("/{id}/command")
     public ResponseEntity<Map<String, String>> getCommand(@PathVariable String id) {
         String cmd = pendingCommands.remove(id);
@@ -94,21 +122,21 @@ public class RunnerController {
         return ResponseEntity.ok(Map.of("command", cmd));
     }
 
-    /** POST /api/runners/start — enqueue START command for one or all runners */
+    /** POST /api/runners/start */
     @PostMapping("/start")
     public Map<String, String> startRunner(@RequestBody(required = false) Map<String, Object> payload) {
         enqueueCommand(payload, "START");
         return Map.of("result", "ok", "command", "START");
     }
 
-    /** POST /api/runners/stop — enqueue STOP command for one or all runners */
+    /** POST /api/runners/stop */
     @PostMapping("/stop")
     public Map<String, String> stopRunner(@RequestBody(required = false) Map<String, Object> payload) {
         enqueueCommand(payload, "STOP");
         return Map.of("result", "ok", "command", "STOP");
     }
 
-    /** POST /api/runners/restart — enqueue RESTART command for one or all runners */
+    /** POST /api/runners/restart */
     @PostMapping("/restart")
     public Map<String, String> restartRunner(@RequestBody(required = false) Map<String, Object> payload) {
         enqueueCommand(payload, "RESTART");

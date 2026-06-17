@@ -2,33 +2,38 @@
 set -e
 
 echo "============================================================"
-echo "  Cinepolis QA - Runner Agent v2.2.0"
-echo "  Device Farm Enterprise - Auto Discovery"
+echo "  Cinepolis QA Universal Runner v2.2.0"
+echo "  Auto-detects: OS, ADB, Xcode, Android + iOS devices"
 echo "============================================================"
 echo ""
 
-# ── Configuracion ──────────────────────────────────────────────
+# ── Core config ────────────────────────────────────────────────
 export BACKEND_URL="${BACKEND_URL:-https://qautomation-production.up.railway.app}"
 export RUNNER_TOKEN="${RUNNER_TOKEN:-runner-local-token}"
-export RUNNER_PLATFORM="${RUNNER_PLATFORM:-android}"
-export POLL_INTERVAL_MS="${POLL_INTERVAL_MS:-5000}"
-export WORK_DIR="${WORK_DIR:-..}"
-export APPIUM_HUB="${APPIUM_HUB:-http://127.0.0.1:4723}"
 
-# Runner ID unico por maquina
+# Runner ID: auto-generated from OS prefix + hostname
 _OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 _HOST=$(hostname | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
 case "$_OS" in
-  darwin)  _PREFIX="mac" ;;
-  linux*)  _PREFIX="linux" ;;
-  *)       _PREFIX="runner" ;;
+  darwin) _PREFIX="mac" ;;
+  linux*) _PREFIX="linux" ;;
+  *)      _PREFIX="runner" ;;
 esac
 export RUNNER_ID="${RUNNER_ID:-${_PREFIX}-${_HOST}}"
 
+# Capacidades: el Runner detecta automaticamente Android/iOS segun el OS.
+# En Mac → intenta Android (ADB) + iOS (Xcode/xcrun)
+# En Linux → solo Android (ADB)
+#
+# Para sobreescribir: export RUNNER_PLATFORM=android
+#
+export WORK_DIR="${WORK_DIR:-..}"
+export POLL_INTERVAL_MS="${POLL_INTERVAL_MS:-5000}"
+export APPIUM_HUB="${APPIUM_HUB:-http://127.0.0.1:4723}"
+
 echo "  Runner ID:  $RUNNER_ID"
-echo "  Platform:   $RUNNER_PLATFORM"
+echo "  OS:         $(uname -s) (auto-detectado)"
 echo "  Backend:    $BACKEND_URL"
-echo "  WorkDir:    $WORK_DIR"
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -38,55 +43,54 @@ cd "$SCRIPT_DIR"
 echo "[Check] Buscando ADB..."
 
 find_adb() {
-  # 1. PATH del sistema
-  if command -v adb &>/dev/null; then echo "PATH"; return; fi
-
-  # 2. ANDROID_HOME
-  if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
-    echo "$ANDROID_HOME/platform-tools"
-    return
-  fi
-
-  # 3. Rutas comunes macOS / Linux
-  for candidate in \
+  command -v adb &>/dev/null && { echo "PATH"; return; }
+  [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/platform-tools/adb" ] && {
+    echo "$ANDROID_HOME/platform-tools"; return
+  }
+  for d in \
       "$HOME/Library/Android/sdk/platform-tools" \
       "$HOME/Android/Sdk/platform-tools" \
-      "/usr/local/android-sdk/platform-tools" \
-      "/opt/android-sdk/platform-tools"; do
-    if [ -x "$candidate/adb" ]; then echo "$candidate"; return; fi
+      "/usr/local/android-sdk/platform-tools"; do
+    [ -x "$d/adb" ] && { echo "$d"; return; }
   done
-
   echo ""
 }
 
 ADB_DIR=$(find_adb)
 if [ -n "$ADB_DIR" ]; then
-  if [ "$ADB_DIR" != "PATH" ]; then
-    export PATH="$ADB_DIR:$PATH"
-  fi
+  [ "$ADB_DIR" != "PATH" ] && export PATH="$ADB_DIR:$PATH"
   echo "[OK] ADB encontrado"
   echo ""
-  echo "[ADB] Dispositivos detectados:"
+  echo "[ADB] Dispositivos conectados ahora:"
   adb devices -l
   echo ""
 else
   echo "[WARN] ADB no encontrado. Dispositivos Android no seran descubiertos."
-  echo "       Instala Android SDK o agrega platform-tools al PATH."
+  echo "       brew install android-platform-tools  o instala Android Studio"
+  echo ""
+fi
+
+# ── Detectar Xcode/xcrun (macOS) ───────────────────────────────
+if [ "$_OS" = "darwin" ]; then
+  echo "[Check] Verificando Xcode (iOS support)..."
+  if command -v xcrun &>/dev/null; then
+    echo "[OK] Xcode/xcrun disponible → iOS sera descubierto automaticamente"
+  else
+    echo "[INFO] xcrun no disponible → solo Android"
+    echo "       Para iOS: instala Xcode desde App Store"
+  fi
   echo ""
 fi
 
 # ── Compilar si no existe el JAR ───────────────────────────────
 if [ -f "target/cinepolis-runner.jar" ]; then
   echo "[OK] Usando JAR existente: target/cinepolis-runner.jar"
-  echo "     Para recompilar: rm target/cinepolis-runner.jar"
 else
-  echo "[Build] JAR no encontrado. Compilando con Maven..."
+  echo "[Build] Compilando con Maven..."
   if ! command -v mvn &>/dev/null; then
-    echo "[ERROR] Maven no encontrado en PATH."
-    echo ""
-    echo "Opciones:"
-    echo "  1. Instala Apache Maven 3.8+: brew install maven"
-    echo "  2. Copia manualmente cinepolis-runner.jar a runner/target/"
+    echo "[ERROR] Maven no en PATH."
+    echo "  macOS: brew install maven"
+    echo "  O copia cinepolis-runner.jar a runner/target/"
     exit 1
   fi
   mvn package -DskipTests -q
@@ -95,8 +99,8 @@ fi
 
 echo ""
 echo "------------------------------------------------------------"
-echo " Runner iniciando. El dispositivo aparecera en el Dashboard"
-echo " tras el primer heartbeat (aprox. 5-10 segundos)."
+echo " Universal Runner iniciando..."
+echo " El dispositivo aparecera en Device Farm en ~5 segundos."
 echo " Ctrl+C para detener."
 echo "------------------------------------------------------------"
 echo ""
@@ -106,7 +110,6 @@ exec java \
   -DBACKEND_URL="$BACKEND_URL" \
   -DRUNNER_TOKEN="$RUNNER_TOKEN" \
   -DRUNNER_ID="$RUNNER_ID" \
-  -DRUNNER_PLATFORM="$RUNNER_PLATFORM" \
   -DPOLL_INTERVAL_MS="$POLL_INTERVAL_MS" \
   -DWORK_DIR="$WORK_DIR" \
   -DAPPIUM_HUB="$APPIUM_HUB" \

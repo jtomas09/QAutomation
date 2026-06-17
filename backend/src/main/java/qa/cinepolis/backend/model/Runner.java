@@ -6,12 +6,18 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 public class Runner {
     private String       runnerId;
-    private String       platform;       // android | ios
+    private String       platform;       // android | ios (legacy routing)
     private String       version;
     private RunnerStatus status;
     private Instant      lastSeen;
     private Instant      registeredAt;
     private List<RunnerDevice> devices = new CopyOnWriteArrayList<>();
+
+    // Universal Runner capability fields
+    private String  os;               // WINDOWS | MACOS | LINUX
+    private String  hostname;
+    private Boolean androidSupported;
+    private Boolean iosSupported;
 
     public String       getRunnerId()              { return runnerId; }
     public void         setRunnerId(String v)      { this.runnerId = v; }
@@ -25,6 +31,16 @@ public class Runner {
     public void         setLastSeen(Instant v)     { this.lastSeen = v; }
     public Instant      getRegisteredAt()          { return registeredAt; }
     public void         setRegisteredAt(Instant v) { this.registeredAt = v; }
-    public List<RunnerDevice> getDevices()                  { return devices; }
+    public List<RunnerDevice> getDevices()                     { return devices; }
     public void               setDevices(List<RunnerDevice> v) { this.devices = v; }
+
+    // Universal Runner
+    public String  getOs()                    { return os; }
+    public void    setOs(String v)            { this.os = v; }
+    public String  getHostname()              { return hostname; }
+    public void    setHostname(String v)      { this.hostname = v; }
+    public Boolean getAndroidSupported()      { return androidSupported; }
+    public void    setAndroidSupported(Boolean v) { this.androidSupported = v; }
+    public Boolean getIosSupported()          { return iosSupported; }
+    public void    setIosSupported(Boolean v) { this.iosSupported = v; }
 }

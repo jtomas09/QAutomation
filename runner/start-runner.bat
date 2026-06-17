@@ -4,58 +4,60 @@ setlocal EnableDelayedExpansion
 
 echo.
 echo  ============================================================
-echo   Cinepolis QA  -  Runner Agent v2.2.0
-echo   Device Farm Enterprise - Auto Discovery
+echo   Cinepolis QA Universal Runner v2.2.0
+echo   Auto-detects: OS, ADB, Android devices
 echo  ============================================================
 echo.
 
 REM ============================================================
-REM  CONFIGURACION — editar solo estas lineas si necesario
+REM  CONFIGURACION — solo editar si necesario
 REM ============================================================
 set BACKEND_URL=https://qautomation-production.up.railway.app
 set RUNNER_TOKEN=runner-local-token
-set RUNNER_PLATFORM=android
-set POLL_INTERVAL_MS=5000
-set WORK_DIR=%~dp0..
-set APPIUM_HUB=http://127.0.0.1:4723
 
 REM Runner ID unico por maquina (win-<hostname>)
 for /f "delims=" %%H in ('hostname') do set _HOST=%%H
 set RUNNER_ID=win-%_HOST%
 
-echo  Configuracion:
+REM Capacidades: el Runner detecta automaticamente Android/iOS segun el OS.
+REM En Windows → solo Android (ADB)
+REM En Mac     → Android + iOS (ADB + Xcode)
+REM
+REM Para sobreescribir la deteccion automatica, descomenta:
+REM set RUNNER_PLATFORM=android
+
+REM Directorio raiz del proyecto de pruebas (donde esta gradlew.bat o pom.xml)
+set WORK_DIR=%~dp0..
+
+set POLL_INTERVAL_MS=5000
+set APPIUM_HUB=http://127.0.0.1:4723
+
+echo  Config:
 echo    Runner ID:  %RUNNER_ID%
-echo    Platform:   %RUNNER_PLATFORM%
+echo    OS:         Windows (auto-detectado)
 echo    Backend:    %BACKEND_URL%
-echo    WorkDir:    %WORK_DIR%
-echo    Appium:     %APPIUM_HUB%
+echo    Capacidades: Android AUTO | iOS NO (solo Mac)
 echo.
 
 REM ============================================================
-REM  DETECTAR ADB  (Android Debug Bridge)
+REM  DETECTAR ADB
 REM ============================================================
 echo  [Check] Buscando ADB...
 
-set ADB_FOUND=0
-
 where adb >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    echo  [OK] ADB encontrado en PATH del sistema
-    set ADB_FOUND=1
-    goto :ADB_VERIFY
+    echo  [OK] ADB en PATH
+    goto :ADB_READY
 )
 
-REM Buscar en ANDROID_HOME
 if defined ANDROID_HOME (
     if exist "%ANDROID_HOME%\platform-tools\adb.exe" (
-        echo  [OK] ADB encontrado via ANDROID_HOME
         set "PATH=%ANDROID_HOME%\platform-tools;%PATH%"
-        set ADB_FOUND=1
-        goto :ADB_VERIFY
+        echo  [OK] ADB via ANDROID_HOME
+        goto :ADB_READY
     )
 )
 
-REM Buscar en rutas comunes del Android SDK en Windows
 for %%P in (
     "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
     "%USERPROFILE%\AppData\Local\Android\Sdk\platform-tools\adb.exe"
@@ -63,65 +65,56 @@ for %%P in (
     "C:\Program Files\Android\platform-tools\adb.exe"
 ) do (
     if exist %%P (
+        for %%D in (%%~dpP.) do set "PATH=%%~fD;%PATH%"
         echo  [OK] ADB encontrado en %%~dpP
-        set "PATH=%%~dpP;%PATH%"
-        set ADB_FOUND=1
-        goto :ADB_VERIFY
+        goto :ADB_READY
     )
 )
 
-echo  [WARN] ADB no encontrado. Dispositivos Android no seran descubiertos.
+echo  [WARN] ADB no encontrado. Android no sera descubierto.
 echo         Instala Android SDK y agrega platform-tools al PATH.
-goto :BUILD_RUNNER
+goto :BUILD_JAR
 
-:ADB_VERIFY
+:ADB_READY
 echo.
-echo  [ADB] Dispositivos detectados:
+echo  [ADB] Dispositivos conectados ahora:
 adb devices -l
 echo.
-REM Exportar ADB en PATH para que el runner lo use
-set ANDROID_ADB_PATH=%PATH%
 
-:BUILD_RUNNER
+:BUILD_JAR
 REM ============================================================
-REM  COMPILAR RUNNER si no existe el JAR
+REM  COMPILAR si no existe el JAR
 REM ============================================================
 cd /d "%~dp0"
 
 if exist "target\cinepolis-runner.jar" (
     echo  [OK] JAR existente: target\cinepolis-runner.jar
-    echo       Para recompilar borra target\cinepolis-runner.jar y reinicia.
-    goto :START_RUNNER
+    goto :RUN
 )
 
-echo  [Build] JAR no encontrado. Compilando con Maven...
-echo.
-
+echo  [Build] Compilando con Maven...
 where mvn >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo  [ERROR] Maven no encontrado en PATH.
+    echo  [ERROR] Maven no en PATH.
     echo.
-    echo  Opciones para obtener el JAR:
-    echo    1. Instala Apache Maven 3.8+ y ejecuta este script de nuevo.
-    echo    2. En otro equipo con Maven: cd runner ^&^& mvn package -DskipTests
-    echo       Luego copia runner\target\cinepolis-runner.jar a esta carpeta.
+    echo  Opciones:
+    echo    1. Instala Maven 3.8+ y re-ejecuta este script
+    echo    2. Compila en otro equipo: mvn package -DskipTests
+    echo       y copia target\cinepolis-runner.jar aqui
     pause & exit /b 1
 )
-
 call mvn package -DskipTests -q
 if !ERRORLEVEL! neq 0 (
-    echo.
-    echo  [ERROR] Fallo la compilacion. Revisa los errores de Maven.
+    echo  [ERROR] Fallo la compilacion Maven.
     pause & exit /b 1
 )
 echo  [OK] Compilacion exitosa.
 
-:START_RUNNER
+:RUN
 echo.
 echo  ------------------------------------------------------------
-echo   Runner iniciando. Se conectara a Railway en segundos...
-echo   El dispositivo aparecera en el Dashboard tras el primer
-echo   heartbeat (aprox. 5-10 segundos).
+echo   Universal Runner iniciando...
+echo   El dispositivo aparecera en Device Farm en ~5 segundos.
 echo   Ctrl+C para detener.
 echo  ------------------------------------------------------------
 echo.
@@ -132,7 +125,6 @@ java ^
   -DBACKEND_URL="%BACKEND_URL%" ^
   -DRUNNER_TOKEN="%RUNNER_TOKEN%" ^
   -DRUNNER_ID="%RUNNER_ID%" ^
-  -DRUNNER_PLATFORM="%RUNNER_PLATFORM%" ^
   -DPOLL_INTERVAL_MS="%POLL_INTERVAL_MS%" ^
   -DWORK_DIR="%WORK_DIR%" ^
   -DAPPIUM_HUB="%APPIUM_HUB%" ^

@@ -255,24 +255,42 @@ function DeviceTableRow({
 // ─── RunnerCard (sidebar) ────────────────────────────────────────────────────
 
 function RunnerCard({ runner }: { runner: Runner }) {
-  const isOnline = runner.status !== 'OFFLINE'
-  const isMac = runner.platform === 'ios' || runner.runnerId?.toLowerCase().includes('mac')
-  const health = isOnline ? 100 : 0
+  const isOnline    = runner.status !== 'OFFLINE'
+  const health      = isOnline ? 100 : 0
   const statusColor = isOnline ? '#10b981' : '#6b7280'
+
+  // Resolve OS: use reported field, fallback to heuristic
+  const os = (() => {
+    if (runner.os === 'MACOS' || runner.os === 'WINDOWS' || runner.os === 'LINUX') return runner.os
+    const id = runner.runnerId?.toLowerCase() ?? ''
+    if (id.includes('mac'))   return 'MACOS'
+    if (id.includes('linux')) return 'LINUX'
+    return 'WINDOWS'
+  })()
+  const isMac       = os === 'MACOS'
+  const iconColor   = isMac ? '#818cf8' : '#60a5fa'
+  const iconBg      = isMac ? 'rgba(99,102,241,0.12)' : 'rgba(59,130,246,0.12)'
+  const iconBorder  = isMac ? 'rgba(99,102,241,0.25)' : 'rgba(59,130,246,0.25)'
+  const osLabel     = isMac ? 'macOS' : os === 'LINUX' ? 'Linux' : 'Windows'
+
+  const androidOk   = runner.androidSupported ?? true
+  const iosOk       = runner.iosSupported ?? (runner.platform === 'ios')
 
   return (
     <div className="rounded-xl p-3.5 mb-3"
       style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
       <div className="flex items-start gap-3">
-        {/* Platform icon */}
+        {/* OS icon */}
         <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: isMac ? 'rgba(99,102,241,0.12)' : 'rgba(59,130,246,0.12)', border: isMac ? '1px solid rgba(99,102,241,0.25)' : '1px solid rgba(59,130,246,0.25)' }}>
-          {isMac ? <Apple size={17} className="text-indigo-400" /> : <Monitor size={17} className="text-blue-400" />}
+          style={{ background: iconBg, border: `1px solid ${iconBorder}` }}>
+          {isMac
+            ? <Apple size={17} style={{ color: iconColor }} />
+            : <Monitor size={17} style={{ color: iconColor }} />}
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <span className="text-[12px] font-bold" style={{ color: 'var(--text-pri)' }}>
               {runner.runnerId}
             </span>
@@ -281,8 +299,20 @@ function RunnerCard({ runner }: { runner: Runner }) {
               {runner.status}
             </span>
           </div>
-          <div className="text-[10px] text-slate-500 mb-2">
-            {isMac ? `macOS ${runner.version ?? ''}` : `Windows 11 Pro`}
+          {/* OS + hostname */}
+          <div className="text-[10px] text-slate-500 mb-1.5">
+            {runner.hostname ? `${osLabel} · ${runner.hostname}` : osLabel}
+          </div>
+          {/* Capability chips */}
+          <div className="flex items-center gap-1.5 mb-2">
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+              style={{ background: androidOk ? 'rgba(16,185,129,0.12)' : 'rgba(107,114,128,0.12)', color: androidOk ? '#10b981' : '#6b7280', border: `1px solid ${androidOk ? 'rgba(16,185,129,0.25)' : 'rgba(107,114,128,0.2)'}` }}>
+              {androidOk ? '✓' : '✗'} Android
+            </span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+              style={{ background: iosOk ? 'rgba(129,140,248,0.12)' : 'rgba(107,114,128,0.12)', color: iosOk ? '#818cf8' : '#6b7280', border: `1px solid ${iosOk ? 'rgba(129,140,248,0.25)' : 'rgba(107,114,128,0.2)'}` }}>
+              {iosOk ? '✓' : '✗'} iOS
+            </span>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
             <div className="text-[10px] text-slate-600">

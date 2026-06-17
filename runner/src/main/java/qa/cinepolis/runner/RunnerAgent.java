@@ -10,6 +10,14 @@ import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Universal Runner Agent — discovers Android and iOS devices automatically
+ * based on OS capabilities. No manual RUNNER_PLATFORM configuration needed.
+ *
+ * Windows → Android only (ADB)
+ * macOS   → Android + iOS (ADB + Xcode)
+ * Linux   → Android only (ADB)
+ */
 public class RunnerAgent {
 
     private static volatile boolean stopping = false;
@@ -19,21 +27,7 @@ public class RunnerAgent {
         BackendClient client   = new BackendClient(config.backendUrl, config.runnerToken, config.runnerId);
         JobExecutor   executor = new JobExecutor(config, client);
 
-        System.out.println("=================================================");
-        System.out.println("  Cinepolis QA Runner Agent  v" + config.version);
-        System.out.println("=================================================");
-        System.out.println("  Runner ID: " + config.runnerId);
-        System.out.println("  Platform:  " + config.platform);
-        System.out.println("  Backend:   " + config.backendUrl);
-        System.out.println("  WorkDir:   " + config.workDir);
-        System.out.println("  AppiumHub: " + config.appiumHub);
-        System.out.println("  Poll:      " + config.pollIntervalMs + " ms");
-        System.out.println();
-
-        // Print ADB path for diagnostics
-        String adbPath = BackendClient.findAdb();
-        System.out.println("  ADB:       " + adbPath);
-        System.out.println();
+        printBanner(config);
 
         // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -42,59 +36,66 @@ public class RunnerAgent {
             executor.killActiveProcess();
         }, "shutdown-hook"));
 
-        // ── Heartbeat inmediato al arrancar ──────────────────────────────
-        // Descubre dispositivos y registra ANTES de iniciar el scheduler
-        System.out.println("[Runner] Iniciando registro en Device Farm...");
+        // ── Heartbeat inmediato al arrancar ──────────────────────────────────
+        System.out.println("[Runner] Registrando en Backend...");
         try {
-            List<Map<String, String>> initDevices = new ArrayList<>(BackendClient.discoverAndroidDevices());
-            if ("ios".equalsIgnoreCase(config.platform)) {
-                initDevices.addAll(BackendClient.discoverIosDevices());
-            }
+            List<Map<String, String>> initDevices = discoverAllDevices(config);
             client.registerDevices(config.runnerId, initDevices);
-            client.sendHeartbeat(config.runnerId, config.platform, config.version, "ONLINE", initDevices);
-            System.out.printf("[Runner] Registro inicial completado: %d dispositivo(s)%n", initDevices.size());
+            client.sendHeartbeat(
+                    config.runnerId, config.platform, config.version,
+                    "ONLINE", config.os, config.hostname,
+                    config.androidSupported, config.iosSupported,
+                    initDevices);
+            System.out.printf("[Runner] Registro completado: %d dispositivo(s) [%s]%n",
+                    initDevices.size(), config.capabilitySummary());
+
             if (initDevices.isEmpty()) {
-                System.out.println("[Runner] ADVERTENCIA: No se detectaron dispositivos.");
-                System.out.println("         - Verifica que el dispositivo este conectado");
-                System.out.println("         - Verifica que ADB este en PATH: " + adbPath);
-                System.out.println("         - Ejecuta manualmente: adb devices -l");
-                System.out.println("         - Acepta el permiso de depuracion USB en el dispositivo");
+                System.out.println("[Runner]");
+                System.out.println("[Runner] ⚠ Sin dispositivos detectados.");
+                System.out.println("[Runner]   → Verifica que el dispositivo este conectado por USB");
+                System.out.println("[Runner]   → En Android: acepta 'Depuracion USB' en el dispositivo");
+                System.out.println("[Runner]   → Ejecuta manualmente: adb devices -l");
+                if (config.iosSupported) {
+                    System.out.println("[Runner]   → En iOS: desbloquea el dispositivo y acepta 'Confiar en esta PC'");
+                }
             }
         } catch (Exception e) {
             System.err.println("[Runner] Error en registro inicial: " + e.getMessage());
         }
 
+        // ── Scheduler: heartbeat cada 30s + job ping cada 10s ───────────────
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "runner-scheduler");
             t.setDaemon(true);
             return t;
         });
 
-        // Legacy job ping every 10s
         scheduler.scheduleAtFixedRate(client::ping, 0, 10, TimeUnit.SECONDS);
 
-        // Enterprise heartbeat every 30s: discover devices → register → runner heartbeat
         AtomicReference<String> pendingCommand = new AtomicReference<>(null);
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                List<Map<String, String>> devices = new ArrayList<>(BackendClient.discoverAndroidDevices());
-                if ("ios".equalsIgnoreCase(config.platform)) {
-                    devices.addAll(BackendClient.discoverIosDevices());
-                }
-
+                List<Map<String, String>> devices = discoverAllDevices(config);
                 client.registerDevices(config.runnerId, devices);
 
-                String runnerStatus = stopping ? "STOPPING"
-                        : executor.hasActiveProcess() ? "BUSY" : "ONLINE";
+                String runnerStatus = stopping              ? "STOPPING"
+                        : executor.hasActiveProcess()       ? "BUSY"
+                        : "ONLINE";
+
                 String cmd = client.sendHeartbeat(
-                        config.runnerId, config.platform, config.version, runnerStatus, devices);
+                        config.runnerId, config.platform, config.version,
+                        runnerStatus, config.os, config.hostname,
+                        config.androidSupported, config.iosSupported,
+                        devices);
+
                 if (cmd != null) {
                     pendingCommand.set(cmd);
                     System.out.println("[Runner] Comando recibido: " + cmd);
                 }
 
-                System.out.printf("[Runner] Heartbeat: %d dispositivo(s) | estado: %s%n",
-                        devices.size(), runnerStatus);
+                System.out.printf("[Runner] Heartbeat: %d dispositivo(s) | %s | %s%n",
+                        devices.size(), runnerStatus, config.capabilitySummary());
+
             } catch (Exception e) {
                 System.err.println("[Runner] Error en heartbeat: " + e.getMessage());
             }
@@ -123,6 +124,38 @@ public class RunnerAgent {
             }
             Thread.sleep(config.pollIntervalMs);
         }
+    }
+
+    /**
+     * Discovers all physical devices based on platform capabilities.
+     * Android discovery is always attempted.
+     * iOS discovery runs automatically when iosSupported=true (macOS + Xcode).
+     */
+    private static List<Map<String, String>> discoverAllDevices(RunnerConfig config) {
+        List<Map<String, String>> devices = new ArrayList<>(BackendClient.discoverAndroidDevices());
+        if (config.iosSupported) {
+            devices.addAll(BackendClient.discoverIosDevices());
+        }
+        return devices;
+    }
+
+    private static void printBanner(RunnerConfig config) {
+        System.out.println("=================================================");
+        System.out.println("  Cinepolis QA Universal Runner  v" + config.version);
+        System.out.println("=================================================");
+        System.out.println("  Runner ID:  " + config.runnerId);
+        System.out.println("  Hostname:   " + config.hostname);
+        System.out.println("  OS:         " + config.os);
+        System.out.println("  Backend:    " + config.backendUrl);
+        System.out.println("  WorkDir:    " + config.workDir);
+        System.out.println("  AppiumHub:  " + config.appiumHub);
+        System.out.println("  Poll:       " + config.pollIntervalMs + " ms");
+        System.out.println();
+        System.out.println("  Capacidades detectadas:");
+        System.out.println("  " + (config.androidSupported ? "✓" : "✗") + " Android  (ADB)");
+        System.out.println("  " + (config.iosSupported     ? "✓" : "✗") + " iOS      (Xcode/xcrun)");
+        System.out.println("  ADB:        " + BackendClient.findAdb());
+        System.out.println();
     }
 
     private static void handleCommand(String cmd, JobExecutor executor) {

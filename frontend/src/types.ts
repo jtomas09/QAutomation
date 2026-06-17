@@ -106,13 +106,18 @@ export interface RunnerDevice {
 }
 
 export interface Runner {
-  runnerId:     string
-  platform:     'android' | 'ios' | string
-  version:      string
-  status:       RunnerStatus
-  lastSeen:     string | null
-  registeredAt: string | null
-  devices:      RunnerDevice[]
+  runnerId:          string
+  platform:          'android' | 'ios' | string
+  version:           string
+  status:            RunnerStatus
+  lastSeen:          string | null
+  registeredAt:      string | null
+  devices:           RunnerDevice[]
+  // Universal Runner fields (auto-detected at startup)
+  os?:               'WINDOWS' | 'MACOS' | 'LINUX' | string
+  hostname?:         string
+  androidSupported?: boolean
+  iosSupported?:     boolean
 }
 
 export interface ExecutionSummary {

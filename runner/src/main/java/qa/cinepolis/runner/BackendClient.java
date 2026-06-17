@@ -23,7 +23,7 @@ public class BackendClient {
             .build();
     private final ObjectMapper json = new ObjectMapper();
 
-    // Cached ADB path — resolved once, reused every heartbeat
+    // Cached ADB path resolved once and reused on every heartbeat
     private static volatile String resolvedAdbPath = null;
 
     public BackendClient(String baseUrl, String token) {
@@ -36,7 +36,10 @@ public class BackendClient {
         this.runnerId = runnerId;
     }
 
-    /** Returns the next PENDING job, or empty if queue is empty (204). */
+    // ─────────────────────────────────────────────────────────────────────
+    //  Job API
+    // ─────────────────────────────────────────────────────────────────────
+
     public Optional<JobDto> getNextJob() throws Exception {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/jobs/next"))
@@ -50,12 +53,11 @@ public class BackendClient {
         String body = res.body();
         System.out.println("[BackendClient] /api/jobs/next raw JSON: " + body);
         JobDto dto = json.readValue(body, JobDto.class);
-        System.out.println("[BackendClient] Deserialized → videoEnabled=" + dto.videoEnabled
-                + " sendMail=" + dto.sendMail + " executionId=" + dto.executionId);
+        System.out.printf("[BackendClient] Deserialized → videoEnabled=%b sendMail=%b executionId=%s%n",
+                dto.videoEnabled, dto.sendMail, dto.executionId);
         return Optional.of(dto);
     }
 
-    /** Fire-and-forget log line (does not throw on failure). */
     public void sendLog(String executionId, String level, String message) {
         try {
             String body = json.writeValueAsString(
@@ -66,7 +68,6 @@ public class BackendClient {
         }
     }
 
-    /** Returns true if the execution was marked ABORTED or ABORTING. */
     public boolean isJobAborted(String executionId) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -76,46 +77,50 @@ public class BackendClient {
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (res.statusCode() != 200) return false;
-            String body = res.body();
-            return body.contains("\"ABORTED\"") || body.contains("\"ABORTING\"");
+            return res.body().contains("\"ABORTED\"") || res.body().contains("\"ABORTING\"");
         } catch (Exception e) {
             return false;
         }
     }
 
-    /** Confirms abort with backend. Does not throw. */
     public void confirmAbort(String executionId) {
-        try {
-            post("/api/executions/" + executionId + "/abort-confirm", "{}");
-        } catch (Exception e) {
-            System.err.println("[BackendClient] confirmAbort error: " + e.getMessage());
-        }
+        try { post("/api/executions/" + executionId + "/abort-confirm", "{}"); }
+        catch (Exception e) { System.err.println("[BackendClient] confirmAbort error: " + e.getMessage()); }
     }
 
-    /** Legacy job-alive ping. Does not throw. */
     public void ping() {
-        try {
-            post("/api/jobs/ping", "{}");
-        } catch (Exception e) {
-            System.err.println("[BackendClient] ping error: " + e.getMessage());
-        }
+        try { post("/api/jobs/ping", "{}"); }
+        catch (Exception e) { System.err.println("[BackendClient] ping error: " + e.getMessage()); }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Runner Heartbeat — Universal Runner
+    // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Enterprise heartbeat: POST /api/runners
-     * Payload: { runnerId, platform, version, status, devices[], timestamp }
-     * Returns pending command ("START"|"STOP"|"RESTART") from X-Runner-Command header, or null.
+     * Enterprise heartbeat with full Universal Runner capabilities.
+     * POST /api/runners
+     * Payload includes: runnerId, platform, version, status, os, hostname,
+     *                   androidSupported, iosSupported, devices[], timestamp
+     * Returns pending command from X-Runner-Command header, or null.
      */
     public String sendHeartbeat(String runnerId, String platform, String version,
-                                String status, List<Map<String, String>> devices) {
+                                String status, String os, String hostname,
+                                boolean androidSupported, boolean iosSupported,
+                                List<Map<String, String>> devices) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("runnerId",  runnerId);
-            payload.put("platform",  platform);
-            payload.put("version",   version);
-            payload.put("status",    status);
-            payload.put("devices",   devices);
-            payload.put("timestamp", java.time.Instant.now().toString());
+            payload.put("runnerId",         runnerId);
+            payload.put("platform",         platform);
+            payload.put("version",          version);
+            payload.put("status",           status);
+            payload.put("os",               os);
+            payload.put("hostname",         hostname);
+            payload.put("androidSupported", androidSupported);
+            payload.put("iosSupported",     iosSupported);
+            payload.put("devices",          devices);
+            payload.put("timestamp",        java.time.Instant.now().toString());
+
             String body = json.writeValueAsString(payload);
             HttpResponse<String> res = post("/api/runners", body);
             return res.headers().firstValue("X-Runner-Command").orElse(null);
@@ -125,10 +130,16 @@ public class BackendClient {
         }
     }
 
+    /** Backward-compat overload (no OS capabilities). */
+    public String sendHeartbeat(String runnerId, String platform, String version,
+                                String status, List<Map<String, String>> devices) {
+        return sendHeartbeat(runnerId, platform, version, status,
+                "UNKNOWN", runnerId, true, false, devices);
+    }
+
     /**
-     * Registers discovered devices with the backend Device Farm.
+     * Registers devices with the Device Farm.
      * POST /api/devices/register — body: { runnerId, devices: [...] }
-     * Does not throw.
      */
     public void registerDevices(String runnerId, List<Map<String, String>> devices) {
         if (devices.isEmpty()) return;
@@ -138,7 +149,7 @@ public class BackendClient {
             payload.put("devices",  devices);
             String body = json.writeValueAsString(payload);
             HttpResponse<String> res = post("/api/devices/register", body);
-            System.out.printf("[Runner] Dispositivos registrados en Device Farm: %d (HTTP %d)%n",
+            System.out.printf("[Runner] Device Farm: %d dispositivo(s) registrado(s) (HTTP %d)%n",
                     devices.size(), res.statusCode());
         } catch (Exception e) {
             System.err.println("[BackendClient] registerDevices error: " + e.getMessage());
@@ -146,82 +157,65 @@ public class BackendClient {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  ADB / Device Discovery
+    //  ADB auto-discovery
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Resolves the ADB executable path once and caches it.
-     * Search order:
-     *  1. Already cached from a previous call.
-     *  2. ANDROID_HOME env var.
-     *  3. Common Android SDK paths on Windows and macOS/Linux.
-     *  4. System PATH ("adb" directly).
+     * Resolves the ADB executable once and caches the result.
+     * Search order: ANDROID_HOME → common SDK paths → PATH fallback.
      */
     public static String findAdb() {
         if (resolvedAdbPath != null) return resolvedAdbPath;
 
-        // 1. ANDROID_HOME
         String androidHome = System.getenv("ANDROID_HOME");
-        if (androidHome == null || androidHome.isBlank()) {
-            androidHome = System.getProperty("ANDROID_HOME");
-        }
-        if (androidHome != null && !androidHome.isBlank()) {
-            String candidate = androidHome + File.separator + "platform-tools" + File.separator + "adb";
-            if (new File(candidate).exists() || new File(candidate + ".exe").exists()) {
-                resolvedAdbPath = candidate;
-                System.out.println("[ADB] Encontrado via ANDROID_HOME: " + resolvedAdbPath);
+        if (androidHome == null) androidHome = System.getProperty("ANDROID_HOME");
+        if (androidHome != null) {
+            String c = androidHome + File.separator + "platform-tools" + File.separator + "adb";
+            if (new File(c).exists() || new File(c + ".exe").exists()) {
+                resolvedAdbPath = c;
                 return resolvedAdbPath;
             }
         }
 
-        // 2. Common paths
         String home   = System.getProperty("user.home", "");
         String osName = System.getProperty("os.name", "").toLowerCase();
         boolean isWin = osName.contains("win");
+        String user   = System.getProperty("user.name", "");
 
-        List<String> candidates = new ArrayList<>();
-        if (isWin) {
-            String user = System.getProperty("user.name", "");
-            candidates.addAll(List.of(
-                home + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+        List<String> candidates = isWin
+            ? List.of(
+                home  + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
                 "C:\\Android\\platform-tools\\adb.exe",
                 "C:\\Program Files\\Android\\platform-tools\\adb.exe",
-                "C:\\Users\\" + user + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"
-            ));
-        } else {
-            candidates.addAll(List.of(
+                "C:\\Users\\" + user + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe")
+            : List.of(
                 home + "/Library/Android/sdk/platform-tools/adb",
                 home + "/Android/Sdk/platform-tools/adb",
                 "/usr/local/android-sdk/platform-tools/adb",
-                "/opt/android-sdk/platform-tools/adb"
-            ));
-        }
+                "/opt/android-sdk/platform-tools/adb");
 
         for (String c : candidates) {
             if (new File(c).exists()) {
                 resolvedAdbPath = c;
-                System.out.println("[ADB] Encontrado en: " + resolvedAdbPath);
+                System.out.println("[ADB] Encontrado en: " + c);
                 return resolvedAdbPath;
             }
         }
 
-        // 3. Trust PATH
-        resolvedAdbPath = "adb";
+        resolvedAdbPath = "adb";  // trust PATH
         return resolvedAdbPath;
     }
 
     /**
-     * Discovers connected Android devices via `adb devices -l`.
+     * Discovers all connected Android devices via `adb devices -l`.
      * Returns maps with: udid, deviceName, model, manufacturer, platform, platformVersion, status.
-     * Does not throw.
      */
     public static List<Map<String, String>> discoverAndroidDevices() {
         List<Map<String, String>> result = new ArrayList<>();
         String adb = findAdb();
         try {
             Process p = new ProcessBuilder(adb, "devices", "-l")
-                    .redirectErrorStream(true)
-                    .start();
+                    .redirectErrorStream(true).start();
             boolean done = p.waitFor(8, TimeUnit.SECONDS);
             if (!done) { p.destroyForcibly(); return result; }
 
@@ -233,46 +227,28 @@ public class BackendClient {
 
                 String[] parts = line.split("\\s+");
                 if (parts.length < 2) continue;
-                String udid   = parts[0];
-                String state  = parts[1];
+
+                String udid  = parts[0];
+                String state = parts[1];
 
                 if ("unauthorized".equals(state)) {
-                    System.out.println("[ADB] Dispositivo no autorizado: " + udid
-                            + " — acepta el permiso de depuracion USB en el dispositivo.");
+                    System.out.printf("[ADB] ⚠ No autorizado: %s — acepta el permiso de depuracion USB.%n", udid);
                     continue;
                 }
                 if ("offline".equals(state)) {
-                    System.out.println("[ADB] Dispositivo offline: " + udid
-                            + " — reconecta el cable USB.");
+                    System.out.printf("[ADB] ⚠ Offline: %s — reconecta el cable USB.%n", udid);
                     continue;
                 }
                 if (!"device".equals(state)) continue;
 
-                // Parse model token from adb -l output
+                // Parse model from adb -l output
                 String model = "";
-                String manufacturer = "";
                 for (String token : parts) {
-                    if (token.startsWith("model:")) {
-                        model = token.substring(6).replace("_", " ");
-                    }
+                    if (token.startsWith("model:")) model = token.substring(6).replace("_", " ");
                 }
                 if (model.isEmpty()) model = udid;
 
-                // Infer manufacturer from model name
-                String modelLower = model.toLowerCase();
-                if (modelLower.contains("galaxy") || modelLower.startsWith("sm-"))
-                    manufacturer = "Samsung";
-                else if (modelLower.startsWith("pixel"))
-                    manufacturer = "Google";
-                else if (modelLower.contains("oneplus"))
-                    manufacturer = "OnePlus";
-                else if (modelLower.contains("xiaomi") || modelLower.contains("redmi"))
-                    manufacturer = "Xiaomi";
-                else if (modelLower.contains("huawei"))
-                    manufacturer = "Huawei";
-                else if (modelLower.contains("motorola") || modelLower.startsWith("moto"))
-                    manufacturer = "Motorola";
-
+                String manufacturer = inferManufacturer(model);
                 String platformVersion = getAndroidVersion(adb, udid);
                 String friendlyName    = getFriendlyName(adb, udid, model);
 
@@ -286,54 +262,62 @@ public class BackendClient {
                 d.put("status",          "AVAILABLE");
                 result.add(d);
 
-                System.out.printf("[ADB] Dispositivo: %s | Android %s | UDID: %s%n",
-                        friendlyName, platformVersion, udid);
+                System.out.printf("[ADB] ✓ %s | Android %s | %s%n", friendlyName, platformVersion, udid);
             }
         } catch (Exception e) {
-            System.err.println("[ADB] Error al descubrir dispositivos Android: " + e.getMessage());
-            System.err.println("      Verifica que ADB este en PATH o ANDROID_HOME este configurado.");
+            System.err.println("[ADB] Error al descubrir dispositivos: " + e.getMessage());
+            System.err.println("      Verifica que ADB este en PATH o ANDROID_HOME configurado.");
         }
         return result;
+    }
+
+    private static String inferManufacturer(String model) {
+        String m = model.toLowerCase();
+        if (m.contains("galaxy") || m.startsWith("sm-")) return "Samsung";
+        if (m.startsWith("pixel"))                        return "Google";
+        if (m.contains("oneplus"))                        return "OnePlus";
+        if (m.contains("xiaomi") || m.contains("redmi")) return "Xiaomi";
+        if (m.contains("huawei"))                         return "Huawei";
+        if (m.contains("motorola") || m.startsWith("moto")) return "Motorola";
+        if (m.contains("oppo"))                           return "OPPO";
+        if (m.contains("vivo"))                           return "Vivo";
+        return "";
     }
 
     private static String getAndroidVersion(String adb, String udid) {
         try {
             Process p = new ProcessBuilder(adb, "-s", udid, "shell",
                     "getprop", "ro.build.version.release")
-                    .redirectErrorStream(true)
-                    .start();
+                    .redirectErrorStream(true).start();
             p.waitFor(4, TimeUnit.SECONDS);
             return new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-        } catch (Exception e) {
-            return "";
-        }
+        } catch (Exception e) { return ""; }
     }
 
-    /** Returns the marketing name (e.g. "Galaxy A56 5G") from ro.product.model, falls back to model. */
     private static String getFriendlyName(String adb, String udid, String fallback) {
         try {
             Process p = new ProcessBuilder(adb, "-s", udid, "shell",
                     "getprop", "ro.product.model")
-                    .redirectErrorStream(true)
-                    .start();
+                    .redirectErrorStream(true).start();
             p.waitFor(4, TimeUnit.SECONDS);
             String name = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             return (name != null && !name.isBlank()) ? name : fallback;
-        } catch (Exception e) {
-            return fallback;
-        }
+        } catch (Exception e) { return fallback; }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  iOS discovery (macOS only — requires Xcode command-line tools)
+    // ─────────────────────────────────────────────────────────────────────
 
     /**
      * Discovers connected iOS physical devices via `xcrun xctrace list devices`.
-     * Skips simulators. Only works on macOS. Does not throw.
+     * Skips simulators. Only works on macOS with Xcode installed.
      */
     public static List<Map<String, String>> discoverIosDevices() {
         List<Map<String, String>> result = new ArrayList<>();
         try {
             Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
-                    .redirectErrorStream(true)
-                    .start();
+                    .redirectErrorStream(true).start();
             p.waitFor(10, TimeUnit.SECONDS);
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
@@ -360,16 +344,18 @@ public class BackendClient {
                 d.put("status",          "AVAILABLE");
                 result.add(d);
 
-                System.out.printf("[iOS] Dispositivo: %s | iOS %s | UDID: %s%n",
-                        deviceName, platformVersion, udid);
+                System.out.printf("[iOS] ✓ %s | iOS %s | %s%n", deviceName, platformVersion, udid);
             }
         } catch (Exception e) {
-            System.err.println("[iOS] Error al descubrir dispositivos iOS: " + e.getMessage());
+            System.err.println("[iOS] Error al descubrir dispositivos: " + e.getMessage());
         }
         return result;
     }
 
-    /** Reports final execution results. Throws on HTTP error. */
+    // ─────────────────────────────────────────────────────────────────────
+    //  Results & Video
+    // ─────────────────────────────────────────────────────────────────────
+
     public void sendResult(String executionId, int passed, int failed, int skipped,
                            String allureUrl, List<TestCaseResult> testCases) throws Exception {
         Map<String, Object> payload = new HashMap<>();
@@ -377,15 +363,14 @@ public class BackendClient {
         payload.put("passed",      passed);
         payload.put("failed",      failed);
         payload.put("skipped",     skipped);
-        if (allureUrl  != null)                          payload.put("allureUrl",  allureUrl);
-        if (testCases  != null && !testCases.isEmpty())  payload.put("testCases",  testCases);
+        if (allureUrl  != null)                         payload.put("allureUrl",  allureUrl);
+        if (testCases  != null && !testCases.isEmpty()) payload.put("testCases",  testCases);
         String body = json.writeValueAsString(payload);
         HttpResponse<String> res = post("/api/results", body);
         if (res.statusCode() != 200)
             throw new RuntimeException("POST /api/results → " + res.statusCode() + " " + res.body());
     }
 
-    /** Uploads an MP4 video file as raw bytes. Does not throw. */
     public void uploadVideo(String executionId, String suiteName, String testName, Path videoFile) {
         try {
             byte[] bytes    = Files.readAllBytes(videoFile);
@@ -401,16 +386,16 @@ public class BackendClient {
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (res.statusCode() == 200) {
-                System.out.printf("[BackendClient] Video subido: %s (%d KB)%n",
-                        filename, bytes.length / 1024);
+                System.out.printf("[BackendClient] Video: %s (%dKB)%n", filename, bytes.length / 1024);
             } else {
-                System.err.printf("[BackendClient] uploadVideo error: %d %s%n",
-                        res.statusCode(), res.body());
+                System.err.printf("[BackendClient] uploadVideo error: %d %s%n", res.statusCode(), res.body());
             }
         } catch (Exception e) {
             System.err.println("[BackendClient] uploadVideo error: " + e.getMessage());
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────
 
     private HttpResponse<String> post(String path, String body) throws Exception {
         HttpRequest req = HttpRequest.newBuilder()
