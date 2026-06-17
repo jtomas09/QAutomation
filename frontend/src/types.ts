@@ -75,6 +75,46 @@ export interface TestCaseResult {
   status: 'PASS' | 'FAIL' | 'SKIP';
 }
 
+// ─── Device Farm ──────────────────────────────────────────────────────────────
+
+export type DeviceStatus = 'AVAILABLE' | 'BUSY' | 'OFFLINE' | 'MAINTENANCE'
+
+export interface PhysicalDevice {
+  udid:            string
+  deviceName:      string
+  model:           string | null
+  manufacturer:    string | null
+  platform:        'ANDROID' | 'IOS' | string
+  platformVersion: string | null
+  status:          DeviceStatus
+  runnerId:        string | null
+  activeExecutionId: string | null
+  lastSeen:        string | null
+  registeredAt:    string | null
+}
+
+// ─── Runner Manager ──────────────────────────────────────────────────────────
+
+export type RunnerStatus = 'ONLINE' | 'OFFLINE' | 'BUSY' | 'STARTING' | 'STOPPING'
+
+export interface RunnerDevice {
+  deviceId:   string
+  deviceName: string
+  platform:   string
+  status:     string
+  runnerId?:  string
+}
+
+export interface Runner {
+  runnerId:     string
+  platform:     'android' | 'ios' | string
+  version:      string
+  status:       RunnerStatus
+  lastSeen:     string | null
+  registeredAt: string | null
+  devices:      RunnerDevice[]
+}
+
 export interface ExecutionSummary {
   executionId: string;
   suite: string;

@@ -2,6 +2,7 @@ package qa.cinepolis.backend.service;
 
 import org.springframework.stereotype.Service;
 import qa.cinepolis.backend.model.*;
+import qa.cinepolis.backend.store.DeviceStore;
 import qa.cinepolis.backend.store.ExecutionStore;
 
 import java.time.Instant;
@@ -12,10 +13,12 @@ public class ExecutionService {
 
     private final ExecutionStore store;
     private final SseService     sse;
+    private final DeviceStore    deviceStore;
 
-    public ExecutionService(ExecutionStore store, SseService sse) {
-        this.store = store;
-        this.sse   = sse;
+    public ExecutionService(ExecutionStore store, SseService sse, DeviceStore deviceStore) {
+        this.store       = store;
+        this.sse         = sse;
+        this.deviceStore = deviceStore;
     }
 
     public Execution create(String suite, String env, String device, String country, boolean videoEnabled) {
@@ -71,6 +74,9 @@ public class ExecutionService {
             if (allureUrl  != null && !allureUrl.isBlank())  e.setAllureUrl(allureUrl);
             if (testCases  != null && !testCases.isEmpty())  e.setTestCases(testCases);
 
+            // Release the allocated device back to AVAILABLE
+            if (e.getDeviceUdid() != null) deviceStore.releaseDevice(e.getDeviceUdid());
+
             sse.broadcast(executionId, "done", Map.of(
                     "passed",  passed,
                     "failed",  failed,
@@ -108,6 +114,8 @@ public class ExecutionService {
         store.findById(executionId).ifPresent(e -> {
             e.setStatus(ExecutionStatus.ABORTED);
             e.setEndTime(Instant.now());
+            // Release device on abort too
+            if (e.getDeviceUdid() != null) deviceStore.releaseDevice(e.getDeviceUdid());
             sse.broadcast(executionId, "done",
                     Map.of("aborted", true, "passed", 0, "failed", 0, "skipped", 0, "total", 0));
             sse.complete(executionId);

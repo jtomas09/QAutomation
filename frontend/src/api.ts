@@ -18,7 +18,7 @@
  *   POST   /api/results           → finalize execution (runner)
  */
 
-import type { LogLevel, ExecutionSummary } from './types'
+import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice } from './types'
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 
@@ -185,4 +185,71 @@ export async function getExecutions(): Promise<ExecutionSummary[]> {
 
 export async function getExecution(id: string): Promise<ExecutionSummary> {
   return httpGet<ExecutionSummary>(`/api/executions/${id}`)
+}
+
+// ─── Runner Manager ───────────────────────────────────────────────────────────
+
+export interface RunnerStatusSummary {
+  total:   number
+  online:  number
+  busy:    number
+  runners: Runner[]
+}
+
+/** GET /api/runners — all registered runners */
+export async function getRunners(): Promise<Runner[]> {
+  return httpGet<Runner[]>('/api/runners')
+}
+
+/** GET /api/runners/status — runner summary + list */
+export async function getRunnersStatus(): Promise<RunnerStatusSummary> {
+  return httpGet<RunnerStatusSummary>('/api/runners/status')
+}
+
+/** GET /api/runners/devices — all devices across all runners */
+export async function getRunnerDevices(): Promise<RunnerDevice[]> {
+  return httpGet<RunnerDevice[]>('/api/runners/devices')
+}
+
+/** POST /api/runners/start — start specific runner (omit runnerId for all) */
+export async function startRunner(runnerId?: string): Promise<void> {
+  await httpPost('/api/runners/start', runnerId ? { runnerId } : {})
+}
+
+/** POST /api/runners/stop — stop specific runner (omit runnerId for all) */
+export async function stopRunner(runnerId?: string): Promise<void> {
+  await httpPost('/api/runners/stop', runnerId ? { runnerId } : {})
+}
+
+/** POST /api/runners/restart — restart specific runner (omit runnerId for all) */
+export async function restartRunner(runnerId?: string): Promise<void> {
+  await httpPost('/api/runners/restart', runnerId ? { runnerId } : {})
+}
+
+// ─── Device Farm ──────────────────────────────────────────────────────────────
+
+/** GET /api/devices — all registered physical devices */
+export async function getDevices(): Promise<PhysicalDevice[]> {
+  return httpGet<PhysicalDevice[]>('/api/devices')
+}
+
+/** GET /api/devices/available?platform=ANDROID — only AVAILABLE devices, optionally filtered */
+export async function getAvailableDevices(platform?: string): Promise<PhysicalDevice[]> {
+  const q = platform ? `?platform=${encodeURIComponent(platform)}` : ''
+  return httpGet<PhysicalDevice[]>(`/api/devices/available${q}`)
+}
+
+/** GET /api/devices/{udid} — single device by UDID */
+export async function getDevice(udid: string): Promise<PhysicalDevice> {
+  return httpGet<PhysicalDevice>(`/api/devices/${encodeURIComponent(udid)}`)
+}
+
+/** PUT /api/devices/status — update device status */
+export async function updateDeviceStatus(udid: string, status: string): Promise<void> {
+  await httpPost<void>('/api/devices/status', { udid, status })
+}
+
+/** DELETE /api/devices/{udid} — remove device from pool */
+export async function removeDevice(udid: string): Promise<void> {
+  await httpDelete(`/api/devices/${encodeURIComponent(udid)}`)
 }

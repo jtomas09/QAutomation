@@ -416,6 +416,12 @@ public class JobExecutor {
         return count != null ? count : -1;
     }
 
+    /** Returns true if a Gradle test process is currently active. */
+    public boolean hasActiveProcess() {
+        Process p = activeProcess;
+        return p != null && p.isAlive();
+    }
+
     /** Kills the currently running Gradle process tree. Called by the shutdown hook. */
     public void killActiveProcess() {
         Process p = activeProcess;
@@ -687,12 +693,24 @@ public class JobExecutor {
 
     /** Añade los -D flags comunes a cualquier comando Gradle de test. */
     private void addCommonDFlags(List<String> cmd, JobDto job) {
-        cmd.add("-DdeviceName="    + nvl(job.device,  "Galaxy A56 5G"));
+        // Prefer discovered deviceName, fall back to user selection
+        String deviceName = (job.deviceName != null && !job.deviceName.isBlank())
+                ? job.deviceName : nvl(job.device, "Galaxy A56 5G");
+        cmd.add("-DdeviceName="    + deviceName);
         cmd.add("-Denv="           + nvl(job.env,     "QA"));
         cmd.add("-Dcountry="       + nvl(job.country, "mexico"));
         cmd.add("-Dappium.hub="    + config.appiumHub + "/wd/hub");
         cmd.add("-DexecutionName=" + nvl(job.suite,   "Suite"));
         cmd.add("-DREUSE_DRIVER=true");
+
+        // Dynamic device capabilities from Device Farm discovery
+        if (job.udid != null && !job.udid.isBlank()) {
+            cmd.add("-Dudid=" + job.udid);
+        }
+        if (job.platformVersion != null && !job.platformVersion.isBlank()) {
+            cmd.add("-DplatformVersion=" + job.platformVersion);
+        }
+
         if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
         if (job.sendMail)     cmd.add("-DsendMail=true");
     }

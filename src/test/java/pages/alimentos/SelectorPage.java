@@ -20,6 +20,8 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.opentest4j.TestAbortedException;
 import pages.common.BasePage;
+import java.text.Normalizer;
+import java.util.Locale;
 
 public class SelectorPage extends BasePage {
 
@@ -419,7 +421,18 @@ public class SelectorPage extends BasePage {
         this.click(By.className("android.widget.EditText"));
         this.driver.executeScript("mobile: type", Map.of("text", "Moka Obscuro"));
         this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Moka Obscuro']"));
+        // Tolerante: acepta "Moka Obscuro" o variante del catálogo "Moka Oscuro"
+        By exact = By.xpath("//android.widget.TextView[@text='Moka Obscuro']");
+        By tolerant = By.xpath("//android.widget.TextView[contains(@text,'Moka') and (contains(@text,'scuro') or contains(@text,'Obsc'))]");
+        if (isVisibleQuick(exact)) {
+            this.click(exact);
+        } else if (isVisibleQuick(tolerant)) {
+            WebElement el = driver.findElement(tolerant);
+            log.info("[buscarMokaObscuro] Nombre en catálogo: '{}'", el.getAttribute("text"));
+            tapCenterW3C(el);
+        } else {
+            this.click(exact); // lanzará excepción clara si no está disponible
+        }
     }
 
        public void buscarCapuccino() {
@@ -451,7 +464,15 @@ public class SelectorPage extends BasePage {
         this.click(By.className("android.widget.EditText"));
         this.driver.executeScript("mobile: type", Map.of("text", "Pretzel"));
         this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Pretzel']"));
+        // Tolerante: acepta "Pretzel" o "Pretzel®"
+        By tolerant = By.xpath("//android.widget.TextView[contains(@text,'Pretzel')]");
+        if (isVisibleQuick(tolerant)) {
+            WebElement el = driver.findElement(tolerant);
+            log.info("[buscarPretzel] Nombre en catálogo: '{}'", el.getAttribute("text"));
+            tapCenterW3C(el);
+        } else {
+            this.click(By.xpath("//android.widget.TextView[@text='Pretzel']"));
+        }
     }
        public void buscarCheeseCake() {
         // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
@@ -461,7 +482,15 @@ public class SelectorPage extends BasePage {
         this.click(By.className("android.widget.EditText"));
         this.driver.executeScript("mobile: type", Map.of("text", "Cheesecake"));
         this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Cheesecake']"));
+        // Tolerante: acepta "Cheesecake", "Cheese Cake", "CheeseCake"
+        By tolerant = By.xpath("//android.widget.TextView[contains(translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'cheesecake') or contains(translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'cheese cake')]");
+        if (isVisibleQuick(tolerant)) {
+            WebElement el = driver.findElement(tolerant);
+            log.info("[buscarCheeseCake] Nombre en catálogo: '{}'", el.getAttribute("text"));
+            tapCenterW3C(el);
+        } else {
+            this.click(By.xpath("//android.widget.TextView[@text='Cheesecake']"));
+        }
     }
     public void TeMentaManzanilla() {
         this.clickCardByTextWithFallback("Té Menta Manzanilla", 10);
@@ -884,6 +913,148 @@ public class SelectorPage extends BasePage {
     }
 
 
+    // ── Búsqueda tolerante (fuzzy matching) ──────────────────────────────────
+
+    private static String normalizeForSearch(String text) {
+        if (text == null) return "";
+        String s = text.toLowerCase(Locale.ROOT);
+        s = Normalizer.normalize(s, Normalizer.Form.NFD);
+        s = s.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        s = s.replaceAll("[®™©°]", "");
+        s = s.replaceAll("\\s+", " ").trim();
+        return s;
+    }
+
+    private static String escapeXpathValue(String value) {
+        if (value == null) return "";
+        return value.replace("\"", "'").replace("\\", "");
+    }
+
+    private boolean tryClickByXpathContains(String xpath, String logLabel) {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            java.util.List<WebElement> candidates = driver.findElements(By.xpath(xpath));
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            for (WebElement candidate : candidates) {
+                try {
+                    if (!candidate.isDisplayed()) continue;
+                    String actual = candidate.getAttribute("text");
+                    if (actual == null || actual.isBlank()) actual = candidate.getAttribute("content-desc");
+                    if (actual == null || actual.isBlank()) continue;
+                    log.info("[Fuzzy] Match: '{}' → búsqueda '{}'", actual, logLabel);
+                    tapCenterW3C(candidate);
+                    return true;
+                } catch (Exception inner) {
+                    rethrowIfAborted(inner);
+                }
+            }
+        } catch (Exception e) {
+            rethrowIfAborted(e);
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+        return false;
+    }
+
+    /**
+     * Búsqueda tolerante a variaciones del catálogo:
+     * mayúsculas/minúsculas, acentos, caracteres especiales (®, ™)
+     * y diferencias ortográficas menores (ej: "Obscuro" / "Oscuro", "Sandía" / "Sandia").
+     *
+     * Telemetría: [BUSQUEDA] Producto=X | Estrategia=fuzzy | Resultado=ENCONTRADO/NO
+     */
+    private boolean tryFuzzyClick(String targetText) {
+        if (targetText == null || targetText.isBlank()) return false;
+        long t0 = System.currentTimeMillis();
+        String norm = normalizeForSearch(targetText);
+        String[] words = norm.split("\\s+");
+
+        java.util.List<String> searchTerms = new java.util.ArrayList<>();
+        // Sin caracteres especiales (® → vacío)
+        String withoutSpecial = targetText.replaceAll("[®™©°]", "").trim();
+        if (!withoutSpecial.equals(targetText)) searchTerms.add(withoutSpecial);
+        // Normalizado sin acentos
+        if (!norm.equals(targetText.toLowerCase(Locale.ROOT))) searchTerms.add(norm);
+        // Primera palabra + prefijo de la segunda (tolera "Obscuro"/"Oscuro", "Cocó"/"Coco")
+        if (words.length >= 2) {
+            int prefLen = Math.min(4, words[1].length());
+            searchTerms.add(words[0] + " " + words[1].substring(0, prefLen));
+        }
+        // Primera palabra sola (más permisivo, solo si tiene >4 letras)
+        if (words.length >= 1 && words[0].length() > 4) {
+            searchTerms.add(words[0]);
+        }
+
+        for (String term : searchTerms) {
+            String safeT = escapeXpathValue(term);
+            log.debug("[Fuzzy] Probando término: '{}'", term);
+            if (tryClickByXpathContains("//*[contains(@text, \"" + safeT + "\")]", targetText)) {
+                log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-text-contains | Tiempo={}ms | Resultado=ENCONTRADO",
+                    targetText, System.currentTimeMillis() - t0);
+                return true;
+            }
+            if (tryClickByXpathContains("//*[contains(@content-desc, \"" + safeT + "\")]", targetText)) {
+                log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-desc-contains | Tiempo={}ms | Resultado=ENCONTRADO",
+                    targetText, System.currentTimeMillis() - t0);
+                return true;
+            }
+            // UiAutomator2 textContains con scroll automático (Android only)
+            if (!isIOS()) {
+                try {
+                    String cleanTerm = term.replace("\"", "").replace("'", "");
+                    String uiSel = "new UiScrollable(new UiSelector().scrollable(true))" +
+                        ".scrollIntoView(new UiSelector().textContains(\"" + cleanTerm + "\"))";
+                    driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+                    java.util.List<WebElement> found = driver.findElements(AppiumBy.androidUIAutomator(uiSel));
+                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+                    if (!found.isEmpty()) {
+                        WebElement el = found.get(0);
+                        log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-uia2-textContains('{}') | Tiempo={}ms | Resultado=ENCONTRADO",
+                            targetText, cleanTerm, System.currentTimeMillis() - t0);
+                        tapCenterW3C(el);
+                        return true;
+                    }
+                } catch (Exception e) {
+                    rethrowIfAborted(e);
+                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+                }
+            }
+        }
+        log.warn("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy | Tiempo={}ms | Resultado=NO_ENCONTRADO",
+            targetText, System.currentTimeMillis() - t0);
+        return false;
+    }
+
+    /**
+     * Registra todos los textos visibles en pantalla para diagnóstico.
+     * Útil para identificar cambios de nombre en el catálogo según cine/ciudad.
+     * Adjunta la lista a Allure como evidencia.
+     */
+    private void logVisibleElements(String contexto) {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            java.util.List<WebElement> textos = driver.findElements(
+                By.xpath("//*[string-length(@text)>0 or string-length(@content-desc)>0]"));
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            StringBuilder sb = new StringBuilder("[TELEMETRIA] ").append(contexto).append("\n");
+            for (WebElement t : textos) {
+                try {
+                    String txt = t.getAttribute("text");
+                    if (txt == null || txt.isBlank()) txt = t.getAttribute("content-desc");
+                    if (txt != null && !txt.isBlank()) sb.append("  VISIBLE: '").append(txt.trim()).append("'\n");
+                } catch (Exception ignored) {}
+            }
+            log.info(sb.toString());
+            try {
+                io.qameta.allure.Allure.addAttachment("Visibles - " + contexto, "text/plain", sb.toString());
+            } catch (Exception ignored) {}
+        } catch (Exception e) {
+            rethrowIfAborted(e);
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     private void clickCardByTextWithFallback(String visibleText, int longTimeoutSeconds) {
 
         // ✅ 1) Construcción de XPaths Mejorada (Texto exacto o Descripción de accesibilidad)
@@ -990,7 +1161,28 @@ public class SelectorPage extends BasePage {
             }
         } catch (Throwable ignored) {}
 
-        throw new RuntimeException("No se encontró el elemento (Texto/Desc): '" + visibleText + "' tras búsqueda rápida.");
+        // ✅ 7) Búsqueda fuzzy: tolerante a variaciones de nombre en catálogo
+        log.info("[Fuzzy] Iniciando búsqueda tolerante para: '{}'", visibleText);
+        try {
+            if (tryFuzzyClick(visibleText)) {
+                log.info("[Fuzzy] '{}' encontrado con búsqueda tolerante", visibleText);
+                return;
+            }
+            // Scroll adicional + reintento fuzzy (el producto puede estar fuera de pantalla)
+            for (int i = 0; i < 5; i++) {
+                slowSwipeUp();
+                if (tryFuzzyClick(visibleText)) {
+                    log.info("[Fuzzy] '{}' encontrado tras scroll {} con búsqueda tolerante", visibleText, i + 1);
+                    return;
+                }
+            }
+        } catch (Throwable ignored2) {}
+
+        // ✅ 8) Fail definitivo con telemetría completa
+        logVisibleElements("FAIL definitivo para '" + visibleText + "'");
+        takeScreenshotOnFailure();
+        throw new RuntimeException("[TELEMETRIA] No se encontró el elemento: '" + visibleText
+            + "'. Ver log y evidencia Allure adjunta para diagnóstico de catálogo.");
     }
     public void forzarClic(By locator) {
         try {
@@ -1421,7 +1613,8 @@ public class SelectorPage extends BasePage {
 //    }
 
     private void clickRightFromAmericanoAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Americano\"]";
+        // Flexible: acepta "Americano" o variante del catálogo "Café Americano"
+        String anchorXpath = "//android.widget.TextView[@text=\"Americano\" or contains(@text,\"Americano\") or @content-desc=\"Americano\" or contains(@content-desc,\"Americano\")]";
         String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
         this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
     }
@@ -1466,19 +1659,22 @@ public class SelectorPage extends BasePage {
     }
 
     private void clickRightFromPretzelAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Pretzel\"]";
+        // Flexible: acepta "Pretzel" o variante "Pretzel®"
+        String anchorXpath = "//android.widget.TextView[@text=\"Pretzel\" or @text=\"Pretzel®\" or contains(@text,\"Pretzel\")]";
         String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
         this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
     }
 
     private void clickRightFromCrepasDulcesAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Crepas Dulces Premium\"]";
+        // Flexible: acepta "Crepas Dulces Premium" o cualquier variante que contenga "Crepas Dulces"
+        String anchorXpath = "//android.widget.TextView[@text=\"Crepas Dulces Premium\" or contains(@text,\"Crepas Dulces\")]";
         String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
         this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
     }
 
     private void clickRightFromSkwinklesAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Skwinkles® Chunks sandia\"]";
+        // Flexible: acepta "Skwinkles® Chunks sandia" o variante con acento "Sandía"
+        String anchorXpath = "//android.widget.TextView[@text=\"Skwinkles® Chunks sandia\" or (contains(@text,\"Skwinkles\") and contains(@text,\"andia\"))]";
         String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
         this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
     }

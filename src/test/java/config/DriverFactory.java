@@ -247,11 +247,7 @@ public class DriverFactory {
         if (!udid.isBlank()) {
             validateAdbDevice(udid);
             if (!pkg.isBlank()) validatePackageInstalled(udid, pkg);
-            try {
-                String[] killCmd = {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server"};
-                Process p = Runtime.getRuntime().exec(killCmd);
-                p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (Exception ignored) {}
+            cleanupUiAutomator2Session(udid, Integer.parseInt(prop("systemPort", "8200")));
         }
 
         o.setPlatformName("Android");
@@ -715,6 +711,37 @@ public class DriverFactory {
             "  2. Recursos del proyecto:    " + project.getAbsolutePath() + "\n" +
             "  3. Classpath (JAR embebido)"
         );
+    }
+
+    /**
+     * Elimina sesiones huérfanas de UiAutomator2 antes de crear una nueva.
+     * Resuelve el error "systemPort X busy" (ej: 8200) en ejecuciones con REUSE_DRIVER=false.
+     * Mata tanto el servidor como el proceso de test para liberar recursos y el puerto TCP.
+     */
+    private static void cleanupUiAutomator2Session(String udid, int systemPort) {
+        if (udid == null || udid.isBlank()) return;
+        log.info("[DriverFactory] Limpiando sesión UiAutomator2 (udid={}, port={})...", udid, systemPort);
+
+        String[][] killCmds = {
+            {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server"},
+            {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server.test"},
+        };
+        for (String[] cmd : killCmds) {
+            try {
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+                p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception ignored) {}
+        }
+
+        // Liberar el systemPort si está ocupado (fuser -k es silencioso si no está en uso)
+        try {
+            String[] fuserKill = {"adb", "-s", udid, "shell", "fuser", "-k", systemPort + "/tcp"};
+            Process p = new ProcessBuilder(fuserKill).redirectErrorStream(true).start();
+            p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) {}
+
+        log.info("[DriverFactory] Limpieza UiAutomator2 completada.");
+        sleep(500L);
     }
 
     /**

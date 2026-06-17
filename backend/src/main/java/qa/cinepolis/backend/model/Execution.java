@@ -23,6 +23,9 @@ public class Execution {
     private String               allureUrl;
     private boolean         videoEnabled;
     private String          testClass;
+    private String          deviceUdid;
+    private String          devicePlatformVersion;
+    private String          assignedRunnerId;
 
     public String          getExecutionId()              { return executionId; }
     public void            setExecutionId(String v)      { this.executionId = v; }
@@ -56,6 +59,12 @@ public class Execution {
     public void            setAllureUrl(String v)        { this.allureUrl = v; }
     public boolean         isVideoEnabled()              { return videoEnabled; }
     public void            setVideoEnabled(boolean v)   { this.videoEnabled = v; }
-    public String          getTestClass()                { return testClass; }
-    public void            setTestClass(String v)        { this.testClass = v; }
+    public String          getTestClass()                        { return testClass; }
+    public void            setTestClass(String v)               { this.testClass = v; }
+    public String          getDeviceUdid()                      { return deviceUdid; }
+    public void            setDeviceUdid(String v)              { this.deviceUdid = v; }
+    public String          getDevicePlatformVersion()           { return devicePlatformVersion; }
+    public void            setDevicePlatformVersion(String v)   { this.devicePlatformVersion = v; }
+    public String          getAssignedRunnerId()                { return assignedRunnerId; }
+    public void            setAssignedRunnerId(String v)        { this.assignedRunnerId = v; }
 }

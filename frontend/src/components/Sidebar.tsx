@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Play, ListOrdered, Layers3,
   Smartphone, Globe, Settings2, BarChart3,
   TrendingUp, Clock4, Activity, BookOpen, Video, Headphones,
-  Zap, ChevronDown, CalendarClock,
+  Zap, ChevronDown, CalendarClock, Server, HardDrive,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -12,8 +12,9 @@ export type Page =
   | 'dashboard' | 'execute' | 'executions' | 'suites' | 'devices' | 'environments' | 'settings'
   | 'reports' | 'metrics' | 'history' | 'trends'
   | 'docs' | 'videos' | 'support' | 'schedule'
+  | 'runner-manager' | 'device-farm'
 
-interface NavItem { id: Page; label: string; icon: React.ElementType; accent?: string }
+interface NavItem { id: Page; label: string; icon: React.ElementType; accent?: string; tag?: string }
 
 const MAIN_NAV: NavItem[] = [
   { id: 'dashboard',    label: 'Dashboard',        icon: LayoutDashboard, accent: '#6366f1' },
@@ -31,6 +32,11 @@ const ANALYTICS_NAV: NavItem[] = [
   { id: 'metrics', label: 'Métricas',   icon: TrendingUp,  accent: '#6366f1' },
   { id: 'history', label: 'Historial',  icon: Clock4,      accent: '#818cf8' },
   { id: 'trends',  label: 'Tendencias', icon: Activity,    accent: '#f43f5e' },
+]
+
+const INFRASTRUCTURE_NAV: NavItem[] = [
+  { id: 'device-farm',    label: 'Device Farm',    icon: HardDrive, accent: '#10b981', tag: 'NUEVO' },
+  { id: 'runner-manager', label: 'Runner Manager', icon: Server,    accent: '#06b6d4' },
 ]
 
 const RESOURCES_NAV: NavItem[] = [
@@ -75,9 +81,10 @@ export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props)
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6 relative">
-        <NavSection label="NAVEGACIÓN" items={MAIN_NAV} page={page} onSelect={onPageChange} runningCount={runningCount} />
-        <NavSection label="ANALYTICS"  items={ANALYTICS_NAV} page={page} onSelect={onPageChange} />
-        <NavSection label="RECURSOS"   items={RESOURCES_NAV} page={page} onSelect={onPageChange} />
+        <NavSection label="NAVEGACIÓN"     items={MAIN_NAV}           page={page} onSelect={onPageChange} runningCount={runningCount} />
+        <NavSection label="ANALYTICS"      items={ANALYTICS_NAV}      page={page} onSelect={onPageChange} />
+        <NavSection label="INFRAESTRUCTURA" items={INFRASTRUCTURE_NAV} page={page} onSelect={onPageChange} />
+        <NavSection label="RECURSOS"       items={RESOURCES_NAV}      page={page} onSelect={onPageChange} />
       </nav>
 
       {/* Enterprise card */}
@@ -164,6 +171,12 @@ function NavRow({ item, active, onSelect, badge }: {
         style={{ color: active ? accent : hovered ? 'var(--text-lbl)' : 'var(--text-dim)', flexShrink: 0 }}
       />
       <span className="text-sm font-medium flex-1">{item.label}</span>
+      {item.tag && (
+        <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
+          style={{ background: 'rgba(16,185,129,0.2)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
+          {item.tag}
+        </span>
+      )}
       {badge !== undefined && (
         <span className="text-[10px] font-bold bg-rose-500 text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
           {badge}

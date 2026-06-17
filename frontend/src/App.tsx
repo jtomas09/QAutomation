@@ -17,6 +17,8 @@ import SettingsPage           from './pages/SettingsPage'
 import SchedulePage           from './pages/SchedulePage'
 import ReportsPage            from './pages/ReportsPage'
 import MetricsPage            from './pages/MetricsPage'
+import RunnerManager          from './pages/RunnerManager'
+import DeviceFarm             from './pages/DeviceFarm'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
@@ -103,7 +105,11 @@ export default function App() {
 
           {page === 'reports'  && <ReportsPage />}
 
-          {page === 'metrics'  && <MetricsPage />}
+          {page === 'metrics'        && <MetricsPage />}
+
+          {page === 'runner-manager' && <RunnerManager />}
+
+          {page === 'device-farm'    && <DeviceFarm />}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
@@ -178,7 +184,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>
