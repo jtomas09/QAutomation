@@ -28,61 +28,82 @@ public class RunnerAgent {
         System.out.println("  WorkDir:   " + config.workDir);
         System.out.println("  AppiumHub: " + config.appiumHub);
         System.out.println("  Poll:      " + config.pollIntervalMs + " ms");
-        System.out.println("\n[Runner] Iniciando...\n");
+        System.out.println();
+
+        // Print ADB path for diagnostics
+        String adbPath = BackendClient.findAdb();
+        System.out.println("  ADB:       " + adbPath);
+        System.out.println();
 
         // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("\n[Runner] Cerrando runner — deteniendo ejecución activa...");
+            System.out.println("\n[Runner] Cerrando — deteniendo ejecucion activa...");
             stopping = true;
             executor.killActiveProcess();
         }, "shutdown-hook"));
 
-        // Scheduler for enterprise heartbeat (30s) and job ping (10s)
+        // ── Heartbeat inmediato al arrancar ──────────────────────────────
+        // Descubre dispositivos y registra ANTES de iniciar el scheduler
+        System.out.println("[Runner] Iniciando registro en Device Farm...");
+        try {
+            List<Map<String, String>> initDevices = new ArrayList<>(BackendClient.discoverAndroidDevices());
+            if ("ios".equalsIgnoreCase(config.platform)) {
+                initDevices.addAll(BackendClient.discoverIosDevices());
+            }
+            client.registerDevices(config.runnerId, initDevices);
+            client.sendHeartbeat(config.runnerId, config.platform, config.version, "ONLINE", initDevices);
+            System.out.printf("[Runner] Registro inicial completado: %d dispositivo(s)%n", initDevices.size());
+            if (initDevices.isEmpty()) {
+                System.out.println("[Runner] ADVERTENCIA: No se detectaron dispositivos.");
+                System.out.println("         - Verifica que el dispositivo este conectado");
+                System.out.println("         - Verifica que ADB este en PATH: " + adbPath);
+                System.out.println("         - Ejecuta manualmente: adb devices -l");
+                System.out.println("         - Acepta el permiso de depuracion USB en el dispositivo");
+            }
+        } catch (Exception e) {
+            System.err.println("[Runner] Error en registro inicial: " + e.getMessage());
+        }
+
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
-            Thread t = new Thread(r, "runner-heartbeat");
+            Thread t = new Thread(r, "runner-scheduler");
             t.setDaemon(true);
             return t;
         });
 
-        // Legacy job ping every 10s (keeps existing /api/jobs/next aliveness)
+        // Legacy job ping every 10s
         scheduler.scheduleAtFixedRate(client::ping, 0, 10, TimeUnit.SECONDS);
 
-        // Enterprise heartbeat every 30s: registers runner + devices on /api/runners AND /api/devices/register
+        // Enterprise heartbeat every 30s: discover devices → register → runner heartbeat
         AtomicReference<String> pendingCommand = new AtomicReference<>(null);
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                // Discover physical devices
                 List<Map<String, String>> devices = new ArrayList<>(BackendClient.discoverAndroidDevices());
                 if ("ios".equalsIgnoreCase(config.platform)) {
                     devices.addAll(BackendClient.discoverIosDevices());
                 }
 
-                // 1) Register devices in Device Farm (udid, deviceName, platformVersion, etc.)
                 client.registerDevices(config.runnerId, devices);
 
-                // 2) Runner heartbeat with summary (runner status + count)
                 String runnerStatus = stopping ? "STOPPING"
                         : executor.hasActiveProcess() ? "BUSY" : "ONLINE";
                 String cmd = client.sendHeartbeat(
-                        config.runnerId, config.platform, config.version,
-                        runnerStatus, devices);
+                        config.runnerId, config.platform, config.version, runnerStatus, devices);
                 if (cmd != null) {
                     pendingCommand.set(cmd);
-                    System.out.println("[Runner] Comando recibido del dashboard: " + cmd);
+                    System.out.println("[Runner] Comando recibido: " + cmd);
                 }
 
-                if (!devices.isEmpty()) {
-                    System.out.printf("[Runner] %d dispositivos registrados (%s)%n",
-                            devices.size(), runnerStatus);
-                }
+                System.out.printf("[Runner] Heartbeat: %d dispositivo(s) | estado: %s%n",
+                        devices.size(), runnerStatus);
             } catch (Exception e) {
-                System.err.println("[Runner] heartbeat error: " + e.getMessage());
+                System.err.println("[Runner] Error en heartbeat: " + e.getMessage());
             }
-        }, 2, 30, TimeUnit.SECONDS);
+        }, 30, 30, TimeUnit.SECONDS);
+
+        System.out.println("[Runner] Listo. Consultando trabajos cada " + config.pollIntervalMs + "ms...\n");
 
         int dots = 0;
         while (!stopping) {
-            // Process any pending dashboard command
             String cmd = pendingCommand.getAndSet(null);
             if (cmd != null) handleCommand(cmd, executor);
 
@@ -107,18 +128,17 @@ public class RunnerAgent {
     private static void handleCommand(String cmd, JobExecutor executor) {
         switch (cmd.toUpperCase()) {
             case "STOP" -> {
-                System.out.println("[Runner] Ejecutando comando STOP del dashboard...");
+                System.out.println("[Runner] Ejecutando STOP...");
                 stopping = true;
                 executor.killActiveProcess();
                 System.exit(0);
             }
             case "RESTART" -> {
-                System.out.println("[Runner] Ejecutando comando RESTART del dashboard...");
+                System.out.println("[Runner] Ejecutando RESTART...");
                 executor.killActiveProcess();
-                // The process manager (launchd/NSSM/systemd) will restart the JVM
                 System.exit(0);
             }
-            case "START" -> System.out.println("[Runner] Comando START recibido — ya en ejecución.");
+            case "START" -> System.out.println("[Runner] Comando START recibido — ya en ejecucion.");
             default      -> System.out.println("[Runner] Comando desconocido: " + cmd);
         }
     }

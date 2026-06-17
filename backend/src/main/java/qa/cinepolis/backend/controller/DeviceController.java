@@ -87,10 +87,10 @@ public class DeviceController {
     }
 
     /**
-     * PUT /api/devices/status — update a single device status.
+     * POST /api/devices/status — update a single device status.
      * Body: { udid, status: "AVAILABLE" | "BUSY" | "OFFLINE" | "MAINTENANCE" }
      */
-    @PutMapping("/status")
+    @PostMapping("/status")
     public ResponseEntity<Map<String, String>> updateStatus(@RequestBody Map<String, String> payload) {
         String udid      = payload.get("udid");
         String statusStr = payload.get("status");

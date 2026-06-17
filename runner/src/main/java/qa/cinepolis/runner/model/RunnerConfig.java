@@ -1,7 +1,5 @@
 package qa.cinepolis.runner.model;
 
-import java.util.UUID;
-
 public class RunnerConfig {
 
     public String backendUrl;
@@ -11,7 +9,7 @@ public class RunnerConfig {
     public String appiumHub;
     public String allureBaseUrl;
     public String runnerId;
-    public String platform;   // android | ios | auto (auto-detected)
+    public String platform;
     public String version;
 
     public static RunnerConfig fromEnv() {
@@ -37,13 +35,14 @@ public class RunnerConfig {
     }
 
     private static String detectPlatform() {
-        String os = System.getProperty("os.name", "").toLowerCase();
-        // iOS runners must be on macOS; Windows runners are Android-only
-        return os.contains("mac") ? "android" : "android";
+        // iOS runners must be set explicitly via RUNNER_PLATFORM=ios
+        return "android";
     }
 
+    /** Reads from JVM system property (-Dkey=val) first, then OS env var, then default. */
     private static String env(String key, String def) {
-        String v = System.getenv(key);
+        String v = System.getProperty(key);
+        if (v == null || v.isBlank()) v = System.getenv(key);
         return (v != null && !v.isBlank()) ? v : def;
     }
 }
