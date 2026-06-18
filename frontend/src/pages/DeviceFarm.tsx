@@ -29,6 +29,14 @@ interface ActivityEvent {
 
 type InfraState    = 'loading' | 'not_installed' | 'offline' | 'scanning' | 'ready'
 type DownloadPhase = 'idle' | 'preparing' | 'done' | 'error'
+type InstallerType = 'proper' | 'temp' | 'unavailable'
+
+interface PlatformPackage {
+  available: boolean
+  type:      InstallerType
+  filename:  string
+  label:     string
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -139,24 +147,27 @@ function generateRunnerStats(runnerId: string) {
 
 // ─── Download helper ─────────────────────────────────────────────────────────
 
-const DOWNLOAD_INFO: Record<string, { label: string; filename: string }> = {
-  windows: { label: 'Windows', filename: 'AutomationQA-Runner-Setup.exe'      },
-  macos:   { label: 'macOS',   filename: 'AutomationQA-Runner.pkg'            },
-  linux:   { label: 'Linux',   filename: 'AutomationQA-Runner-linux.tar.gz'   },
-  unknown: { label: 'Windows', filename: 'AutomationQA-Runner-Setup.exe'      },
-}
-
 const BACKEND_BASE: string =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
   'https://qautomation-production.up.railway.app'
 
+async function fetchAvailability(): Promise<Record<string, PlatformPackage>> {
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/runner/download/availability`)
+    if (!res.ok) return {}
+    return await res.json() as Record<string, PlatformPackage>
+  } catch {
+    return {}
+  }
+}
+
 async function downloadRunnerPackage(
-  os: OsType,
-  onPhase: (p: DownloadPhase, msg?: string) => void,
+  platform: string,
+  pkg:      PlatformPackage,
+  onPhase:  (p: DownloadPhase, msg?: string) => void,
 ) {
-  const info     = DOWNLOAD_INFO[os] ?? DOWNLOAD_INFO.windows
-  const platform = os === 'macos' ? 'macos' : os === 'linux' ? 'linux' : 'windows'
   const url      = `${BACKEND_BASE}/api/runner/download/${platform}`
+  const filename = pkg.filename || `AutomationQA-Runner-${platform}`
 
   onPhase('preparing')
 
@@ -164,16 +175,19 @@ async function downloadRunnerPackage(
     const res = await fetch(url, { method: 'GET' })
 
     if (!res.ok) {
-      const msg = res.status === 404
-        ? 'No hay una versión disponible del Runner para descargar.'
-        : 'Error al preparar la descarga. Intenta de nuevo en unos momentos.'
+      let msg = 'No hay una versión disponible del Runner para descargar.'
+      try {
+        const body = await res.json() as { message?: string }
+        if (body.message) msg = body.message
+      } catch { /* ignore */ }
       onPhase('error', msg)
       return
     }
 
     const contentType = res.headers.get('content-type') ?? ''
-    if (!contentType.includes('octet-stream') && !contentType.includes('application/')) {
-      onPhase('error', 'No hay una versión disponible del Runner para descargar.')
+    if (contentType.includes('application/json')) {
+      const body = await res.json() as { message?: string }
+      onPhase('error', body.message ?? 'No hay versión disponible.')
       return
     }
 
@@ -181,7 +195,7 @@ async function downloadRunnerPackage(
     const blobUrl = URL.createObjectURL(blob)
     const a       = document.createElement('a')
     a.href        = blobUrl
-    a.download    = info.filename
+    a.download    = filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -201,12 +215,25 @@ interface DownloadModalProps {
   onClose:    () => void
 }
 
+const UNAVAILABLE_PKG: PlatformPackage = { available: false, type: 'unavailable', filename: '', label: 'No disponible' }
+
 function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
   const os                 = detectOs()
   const defaultTab: OsType = os === 'macos' ? 'macos' : 'windows'
   const [tab, setTab]      = useState<OsType>(defaultTab)
   const [phase, setPhase]  = useState<DownloadPhase>('idle')
   const [errorMsg, setErr] = useState('')
+  const [avail, setAvail]  = useState<Record<string, PlatformPackage>>({})
+  const [loadingAvail, setLoadingAvail] = useState(true)
+
+  // Fetch availability once on mount
+  useEffect(() => {
+    setLoadingAvail(true)
+    fetchAvailability().then(data => {
+      setAvail(data)
+      setLoadingAvail(false)
+    })
+  }, [])
 
   const offlineLastSeen = runners.reduce((latest, r) => {
     if (!r.lastSeen) return latest
@@ -219,8 +246,12 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
     if (msg) setErr(msg)
   }
 
+  // platform string matching the backend: 'windows' | 'macos' | 'linux'
+  const platformKey = tab === 'macos' ? 'macos' : 'windows'
+  const currentPkg: PlatformPackage = avail[platformKey] ?? UNAVAILABLE_PKG
+
   function handleDownload() {
-    downloadRunnerPackage(tab, handlePhase)
+    downloadRunnerPackage(platformKey, currentPkg, handlePhase)
   }
 
   function handleRetry() {
@@ -327,33 +358,88 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
 
               {/* ── Download card — phases ── */}
 
-              {/* idle + preparing */}
-              {(phase === 'idle' || phase === 'preparing') && (
-                <div className="rounded-2xl p-5 flex items-center gap-4"
-                  style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
-                    style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
-                    {tab === 'macos' ? <Apple size={28} className="text-indigo-300" /> : <Monitor size={28} className="text-indigo-300" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-black" style={{ color: 'var(--text-pri)' }}>
-                      Automation QA Runner para {DOWNLOAD_INFO[tab].label}
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                      {phase === 'preparing' ? 'Preparando descarga...' : DOWNLOAD_INFO[tab].filename}
+              {/* Provisional notice — shown when type is 'temp' */}
+              {!loadingAvail && currentPkg.type === 'temp' && phase !== 'done' && (
+                <div className="flex items-start gap-3 rounded-2xl p-4"
+                  style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                  <ShieldAlert size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-[11px] font-black text-amber-400 mb-0.5">Instalador provisional</div>
+                    <div className="text-[11px] text-slate-400 leading-relaxed">
+                      El instalador definitivo estará disponible próximamente.
+                      Esta versión provisional configura el servicio de forma automática
+                      y requiere <strong className="text-slate-300">Java 17+</strong> instalado en el equipo.
                     </div>
                   </div>
-                  <button
-                    onClick={handleDownload}
-                    disabled={phase === 'preparing'}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12px] font-black transition-all flex-shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
-                    style={{ background: 'linear-gradient(135deg, #6366f1, #7c3aed)', color: '#fff', boxShadow: phase === 'preparing' ? 'none' : '0 6px 18px rgba(99,102,241,0.4)' }}>
-                    {phase === 'preparing'
-                      ? <Loader2 size={13} className="animate-spin" />
-                      : <Download size={13} />}
-                    {phase === 'preparing' ? 'Preparando...' : 'Descargar'}
-                  </button>
                 </div>
+              )}
+
+              {/* Loading availability */}
+              {loadingAvail && (
+                <div className="flex items-center gap-3 px-5 py-4 rounded-2xl"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <Loader2 size={16} className="text-slate-600 animate-spin flex-shrink-0" />
+                  <span className="text-[12px] text-slate-500">Verificando disponibilidad...</span>
+                </div>
+              )}
+
+              {/* idle + preparing */}
+              {!loadingAvail && (phase === 'idle' || phase === 'preparing') && (
+                <>
+                  {currentPkg.available ? (
+                    <div className="rounded-2xl p-5 flex items-center gap-4"
+                      style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                        {tab === 'macos' ? <Apple size={28} className="text-indigo-300" /> : <Monitor size={28} className="text-indigo-300" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-[13px] font-black" style={{ color: 'var(--text-pri)' }}>
+                            {currentPkg.label}
+                          </span>
+                          {currentPkg.type === 'temp' && (
+                            <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full flex-shrink-0"
+                              style={{ background: 'rgba(245,158,11,0.2)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>
+                              PROVISIONAL
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {phase === 'preparing' ? 'Preparando descarga...' : currentPkg.filename}
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleDownload}
+                        disabled={phase === 'preparing'}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[12px] font-black transition-all flex-shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
+                        style={{ background: 'linear-gradient(135deg, #6366f1, #7c3aed)', color: '#fff', boxShadow: phase === 'preparing' ? 'none' : '0 6px 18px rgba(99,102,241,0.4)' }}>
+                        {phase === 'preparing'
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : <Download size={13} />}
+                        {phase === 'preparing' ? 'Preparando...' : 'Descargar'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl p-5 flex items-center gap-4"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: 'rgba(107,114,128,0.12)', border: '1px solid rgba(107,114,128,0.2)' }}>
+                        {tab === 'macos' ? <Apple size={28} className="text-slate-600" /> : <Monitor size={28} className="text-slate-600" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-[13px] font-bold text-slate-500">Próximamente disponible</div>
+                        <div className="text-[11px] text-slate-600 mt-0.5">
+                          El instalador para {tab === 'macos' ? 'macOS' : 'Windows'} estará disponible pronto.
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black px-2 py-1 rounded-full flex-shrink-0"
+                        style={{ background: 'rgba(107,114,128,0.15)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.25)' }}>
+                        PRÓXIMAMENTE
+                      </span>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* done */}
@@ -366,41 +452,81 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                     </div>
                     <div>
                       <div className="text-[13px] font-black text-emerald-400">Descarga iniciada</div>
-                      <div className="text-[11px] text-slate-500">Abre el archivo para instalar</div>
+                      <div className="text-[11px] text-slate-500">
+                        {currentPkg.type === 'temp'
+                          ? 'Abre el script descargado para instalar'
+                          : 'Abre el archivo para instalar'}
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">Qué hacer ahora</div>
+                    <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">
+                      {currentPkg.type === 'temp' ? 'Cómo instalar (versión provisional)' : 'Qué hacer ahora'}
+                    </div>
                     {tab === 'windows' ? (
-                      <>
-                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
-                          Abre <strong className="text-slate-300 mx-1">AutomationQA-Runner-Setup.exe</strong> desde tu carpeta de Descargas
-                        </div>
-                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
-                          Si Windows muestra "Protegió tu PC" → haz clic en "Más información" → "Ejecutar de todas formas"
-                        </div>
-                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
-                          Sigue los pasos del instalador y haz clic en Finalizar
-                        </div>
-                      </>
+                      currentPkg.type === 'temp' ? (
+                        <>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
+                            Verifica que tienes <strong className="text-slate-300">Java 17+</strong> instalado en el equipo
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
+                            Coloca el archivo descargado junto a <strong className="text-slate-300">cinepolis-runner.jar</strong>
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
+                            Haz doble clic en <strong className="text-slate-300">{currentPkg.filename}</strong> para instalar el servicio
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
+                            Abre <strong className="text-slate-300 mx-1">AutomationQA-Runner-Setup.exe</strong> desde tu carpeta de Descargas
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
+                            Si Windows muestra "Protegió tu PC" → haz clic en "Más información" → "Ejecutar de todas formas"
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
+                            Sigue los pasos del instalador y haz clic en Finalizar
+                          </div>
+                        </>
+                      )
                     ) : (
-                      <>
-                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
-                          Abre <strong className="text-slate-300 mx-1">AutomationQA-Runner.pkg</strong> desde tu carpeta de Descargas
-                        </div>
-                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
-                          Si macOS pide tu contraseña, ingrésala para autorizar la instalación
-                        </div>
-                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
-                          Haz clic en Instalar y espera que finalice
-                        </div>
-                      </>
+                      currentPkg.type === 'temp' ? (
+                        <>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
+                            Verifica que tienes <strong className="text-slate-300">Java 17+</strong> instalado en el equipo
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
+                            Coloca el archivo descargado junto a <strong className="text-slate-300">cinepolis-runner.jar</strong>
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
+                            En Terminal: <strong className="text-slate-300">bash {currentPkg.filename}</strong>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
+                            Abre <strong className="text-slate-300 mx-1">AutomationQA-Runner.pkg</strong> desde tu carpeta de Descargas
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
+                            Si macOS pide tu contraseña, ingrésala para autorizar la instalación
+                          </div>
+                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
+                            Haz clic en Instalar y espera que finalice
+                          </div>
+                        </>
+                      )
                     )}
                   </div>
                 </div>
@@ -489,11 +615,12 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                     <div className="text-[11px] text-slate-500 mb-3">
                       Si el problema persiste después de reiniciar, descarga e instala de nuevo.
                     </div>
-                    <button onClick={() => { downloadRunnerPackage(os === 'unknown' ? 'windows' : os, handlePhase) }}
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all hover:opacity-90"
+                    <button onClick={() => { void downloadRunnerPackage(platformKey, currentPkg, handlePhase) }}
+                      disabled={!currentPkg.available || phase === 'preparing'}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-[11px] font-bold transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
                       <Download size={12} />
-                      Descargar Runner para {DOWNLOAD_INFO[os === 'unknown' ? 'windows' : os].label}
+                      Descargar Runner para {currentPkg.available ? currentPkg.label : (tab === 'macos' ? 'macOS' : 'Windows')}
                     </button>
                   </div>
                 </div>
