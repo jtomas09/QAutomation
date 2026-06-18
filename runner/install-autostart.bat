@@ -2,8 +2,8 @@
 chcp 65001 > nul
 setlocal EnableDelayedExpansion
 
-REM ══════════════════════════════════════════════════════════════════════════════
-REM  Automation QA Runner — Instalador Auto-Start v4.0 (Windows 10 / 11)
+REM ==============================================================================
+REM  Automation QA Runner - Instalador Auto-Start v4.1 (Windows 10 / 11)
 REM
 REM  Compatible con Windows 10 build 1703+ y Windows 11.
 REM  No requiere privilegios de Administrador.
@@ -11,10 +11,10 @@ REM  No asume rutas fijas ni que la tarea se crea correctamente.
 REM  No lee ni ejecuta contenido de runner.properties, .env ni config.json.
 REM
 REM  REQUISITO: Ejecutar desde la carpeta runner\ del proyecto.
-REM  Todas las rutas se construyen a partir de %~dp0 — sin rutas hardcodeadas.
-REM ══════════════════════════════════════════════════════════════════════════════
+REM  Todas las rutas se construyen a partir de %~dp0 - sin rutas hardcodeadas.
+REM ==============================================================================
 
-REM ── Rutas — todas relativas a la carpeta de este script (%~dp0) ───────────────
+REM -- Rutas - todas relativas a la carpeta de este script (%~dp0) ---------------
 set "SCRIPT_DIR=%~dp0"
 set "RUNNER_VBS=%SCRIPT_DIR%runner-launcher.vbs"
 set "START_BAT=%SCRIPT_DIR%start-runner-auto.bat"
@@ -26,22 +26,20 @@ REM Nombre de tarea sin espacios para evitar problemas de parseo en schtasks
 set "TASK_NAME=AutomationQARunner"
 set "TASK_DISPLAY=Automation QA Runner"
 
-REM ── Variables de estado — NO son lineas de configuracion, NO se ejecutan ──────
+REM -- Variables de estado -------------------------------------------------------
 set "INSTALADO="
 set "SCHED_OK=1"
 set "PREFLIGHT_OK=1"
 
-REM ── Crear directorio de logs antes de escribir ────────────────────────────────
+REM -- Crear directorio de logs antes de escribir --------------------------------
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 
-REM ── Cabecera del log ──────────────────────────────────────────────────────────
->> "%INSTALL_LOG%" (
-    echo.
-    echo ================================================================
-    echo  Automation QA Runner — Instalacion Auto-Start v4.0
-    echo  Fecha: %DATE%   Hora: %TIME%
-    echo ================================================================
-)
+REM -- Cabecera del log ----------------------------------------------------------
+>> "%INSTALL_LOG%" echo.
+>> "%INSTALL_LOG%" echo ================================================================
+>> "%INSTALL_LOG%" echo  Automation QA Runner - Instalacion Auto-Start v4.1
+>> "%INSTALL_LOG%" echo  Fecha: %DATE%   Hora: %TIME%
+>> "%INSTALL_LOG%" echo ================================================================
 >> "%INSTALL_LOG%" echo [%TIME%] --- Variables de entorno ---
 >> "%INSTALL_LOG%" echo [%TIME%] USERNAME=%USERNAME%
 >> "%INSTALL_LOG%" echo [%TIME%] COMPUTERNAME=%COMPUTERNAME%
@@ -57,25 +55,23 @@ REM ── Cabecera del log ─────────────────�
 >> "%INSTALL_LOG%" echo.
 
 echo.
-echo  ╔═══════════════════════════════════════════════════════════════════╗
-echo  ║   Automation QA Runner — Instalador Auto-Start v4.0            ║
-echo  ║   Windows 10 / 11  —  Sin privilegios de Administrador         ║
-echo  ╚═══════════════════════════════════════════════════════════════════╝
+echo  ================================================================
+echo   Automation QA Runner - Instalador Auto-Start v4.1
+echo   Windows 10 / 11 - Sin privilegios de Administrador
+echo  ================================================================
 echo.
-echo  ┌─ RUTAS ───────────────────────────────────────────────────────────┐
-echo  ^|  SCRIPT_DIR  = %SCRIPT_DIR%
-echo  ^|  RUNNER_VBS  = %RUNNER_VBS%
-echo  ^|  START_BAT   = %START_BAT%
-echo  ^|  LOG_DIR     = %LOG_DIR%
-echo  ^|  TASK_NAME   = %TASK_NAME%
-echo  └───────────────────────────────────────────────────────────────────┘
+echo    SCRIPT_DIR : %SCRIPT_DIR%
+echo    RUNNER_VBS : %RUNNER_VBS%
+echo    START_BAT  : %START_BAT%
+echo    LOG_DIR    : %LOG_DIR%
+echo    TASK_NAME  : %TASK_NAME%
 echo.
 
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 1: Validar archivos requeridos
 REM  IMPORTANTE: No se leen ni ejecutan runner.properties, .env ni config.json.
 REM  Las variables se definen directamente en start-runner-auto.bat.
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo  [1/4] Validando archivos del Runner...
 >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 1: Validacion de archivos ---
 
@@ -110,16 +106,16 @@ if exist "%JAR_FILE%" (
 ) else (
     where mvn >nul 2>&1
     if !ERRORLEVEL! equ 0 (
-        echo          cinepolis-runner.jar   [INFO] Maven disponible — se compilara al primer inicio
-        >> "%INSTALL_LOG%" echo [%TIME%] INFO: JAR no encontrado — Maven disponible
+        echo          cinepolis-runner.jar   [INFO] Maven disponible - compilara al primer inicio
+        >> "%INSTALL_LOG%" echo [%TIME%] INFO: JAR no encontrado - Maven disponible
     ) else (
         echo.
         echo  [AVISO] cinepolis-runner.jar no encontrado y Maven no esta en PATH.
         echo.
         echo          El Runner no podra iniciarse hasta tener el JAR disponible.
         echo          Opciones:
-        echo            A^) mvn package -DskipTests  (desde la carpeta runner\^)
-        echo            B^) Copia cinepolis-runner.jar a: %SCRIPT_DIR%target\
+        echo            A) mvn package -DskipTests  (desde la carpeta runner\)
+        echo            B) Copia cinepolis-runner.jar a: %SCRIPT_DIR%target\
         echo.
         >> "%INSTALL_LOG%" echo [%TIME%] AVISO: JAR no encontrado y Maven no disponible
         set /p "CONT=  Continuar la instalacion de todas formas? (S/n): "
@@ -131,9 +127,9 @@ if exist "%JAR_FILE%" (
     )
 )
 
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 2: Verificar Java
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo.
 echo  [2/4] Verificando Java...
 >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 2: Java ---
@@ -152,17 +148,16 @@ if !ERRORLEVEL! neq 0 (
 echo          Java disponible  [OK]
 >> "%INSTALL_LOG%" echo [%TIME%] OK: Java disponible
 
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 3: Registrar Tarea Programada
-REM  Se verificara con schtasks /query despues de cada intento de creacion.
+REM  Se verifica con schtasks /query despues de cada intento de creacion.
 REM  Si los 3 intentos fallan, se usa la carpeta Startup como alternativa.
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo.
 echo  [3/4] Registrando tarea programada (al iniciar sesion)...
 >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 3: Tarea Programada ---
 
-REM Obtener ruta 8.3 (sin espacios) del VBS — evita problemas de parseo en /tr
-REM %%~sF convierte rutas con espacios a nombre corto 8.3
+REM Obtener ruta 8.3 del VBS para evitar problemas con espacios en schtasks /tr
 for %%F in ("%RUNNER_VBS%") do set "VBS_SHORT=%%~sF"
 >> "%INSTALL_LOG%" echo [%TIME%] VBS_SHORT=%VBS_SHORT%
 
@@ -173,47 +168,47 @@ if !ERRORLEVEL! equ 0 (
     >> "%INSTALL_LOG%" echo [%TIME%] INFO: Tarea anterior eliminada
 )
 
-REM ── Intento 1: /rl LIMITED + /delay (Windows 10 build 1703+) ─────────────────
+REM -- Intento 1: /rl LIMITED + /delay (Windows 10 build 1703+) -----------------
 schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe %VBS_SHORT%" /sc ONLOGON /ru "%USERNAME%" /f /rl LIMITED /delay 0000:30 >nul 2>&1
 if !ERRORLEVEL! equ 0 (
     schtasks /query /tn "%TASK_NAME%" >nul 2>&1
     if !ERRORLEVEL! equ 0 (
         set "SCHED_OK=0"
-        >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 1 ^(/rl LIMITED /delay^) — tarea verificada
+        >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 1 (/rl LIMITED /delay) - tarea verificada
     ) else (
-        >> "%INSTALL_LOG%" echo [%TIME%] FALLO: schtasks intento 1 — /create exitoso pero /query fallo
+        >> "%INSTALL_LOG%" echo [%TIME%] FALLO: intento 1 - /create OK pero /query fallo
     )
 )
 
-REM ── Intento 2: sin /rl ───────────────────────────────────────────────────────
+REM -- Intento 2: sin /rl -------------------------------------------------------
 if "!SCHED_OK!"=="1" (
     schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe %VBS_SHORT%" /sc ONLOGON /ru "%USERNAME%" /f /delay 0000:30 >nul 2>&1
     if !ERRORLEVEL! equ 0 (
         schtasks /query /tn "%TASK_NAME%" >nul 2>&1
         if !ERRORLEVEL! equ 0 (
             set "SCHED_OK=0"
-            >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 2 ^(sin /rl^) — tarea verificada
+            >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 2 (sin /rl) - tarea verificada
         ) else (
-            >> "%INSTALL_LOG%" echo [%TIME%] FALLO: schtasks intento 2 — /create exitoso pero /query fallo
+            >> "%INSTALL_LOG%" echo [%TIME%] FALLO: intento 2 - /create OK pero /query fallo
         )
     )
 )
 
-REM ── Intento 3: parametros minimos (maxima compatibilidad) ────────────────────
+REM -- Intento 3: parametros minimos (maxima compatibilidad) --------------------
 if "!SCHED_OK!"=="1" (
     schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe %VBS_SHORT%" /sc ONLOGON /ru "%USERNAME%" /f >nul 2>&1
     if !ERRORLEVEL! equ 0 (
         schtasks /query /tn "%TASK_NAME%" >nul 2>&1
         if !ERRORLEVEL! equ 0 (
             set "SCHED_OK=0"
-            >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 3 ^(minimo^) — tarea verificada
+            >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 3 (minimo) - tarea verificada
         ) else (
-            >> "%INSTALL_LOG%" echo [%TIME%] FALLO: schtasks intento 3 — /create exitoso pero /query fallo
+            >> "%INSTALL_LOG%" echo [%TIME%] FALLO: intento 3 - /create OK pero /query fallo
         )
     )
 )
 
-REM ── Resultado de schtasks ────────────────────────────────────────────────────
+REM -- Resultado de schtasks ----------------------------------------------------
 if "!SCHED_OK!"=="0" (
     echo          Tarea "%TASK_DISPLAY%"  [OK]
     >> "%INSTALL_LOG%" echo [%TIME%] OK: Tarea programada registrada y verificada: %TASK_NAME%
@@ -221,19 +216,18 @@ if "!SCHED_OK!"=="0" (
     goto :PASO4
 )
 
-REM ── Fallback: carpeta Startup del usuario ────────────────────────────────────
+REM -- Fallback: carpeta Startup del usuario ------------------------------------
 echo  [AVISO] No se pudo registrar la tarea programada en schtasks.
-echo          Motivo probable: politica del equipo o Windows sin actualizaciones.
+echo          Motivo probable: politica del equipo o Windows sin actualizar.
 echo          Instalando en carpeta Startup del usuario como alternativa...
 echo.
->> "%INSTALL_LOG%" echo [%TIME%] AVISO: schtasks fallo en 3 intentos — usando Startup como alternativa
+>> "%INSTALL_LOG%" echo [%TIME%] AVISO: schtasks fallo en 3 intentos - usando Startup
 
 set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "STARTUP_VBS=!STARTUP_DIR!\AutomationQARunner.vbs"
 >> "%INSTALL_LOG%" echo [%TIME%] STARTUP_DIR=!STARTUP_DIR!
 >> "%INSTALL_LOG%" echo [%TIME%] STARTUP_VBS=!STARTUP_VBS!
 
-REM Verificar que la carpeta Startup existe
 if not exist "!STARTUP_DIR!" (
     echo  [ERROR] No se encontro la carpeta Startup del usuario.
     echo          Ruta esperada: !STARTUP_DIR!
@@ -244,9 +238,9 @@ if not exist "!STARTUP_DIR!" (
 
 REM Generar wrapper VBS en Startup que invoca al runner-launcher.vbs original.
 REM El VBS original usa WScript.ScriptFullName para localizar start-runner-auto.bat,
-REM por lo que no se debe copiar — se llama desde su ubicacion original.
+REM por lo que NO se debe copiar - debe llamarse desde su ubicacion original.
 (
-    echo ' AutomationQARunner.vbs — generado por install-autostart.bat
+    echo ' AutomationQARunner.vbs - generado por install-autostart.bat
     echo ' Invoca runner-launcher.vbs desde su ubicacion original en runner\
     echo Dim sh
     echo Set sh = CreateObject^("WScript.Shell"^)
@@ -254,7 +248,6 @@ REM por lo que no se debe copiar — se llama desde su ubicacion original.
     echo Set sh = Nothing
 ) > "!STARTUP_VBS!"
 
-REM Verificar que el archivo fue creado correctamente
 if exist "!STARTUP_VBS!" (
     echo          Instalado en carpeta Startup  [OK]
     >> "%INSTALL_LOG%" echo [%TIME%] OK: Wrapper VBS creado: !STARTUP_VBS!
@@ -268,14 +261,14 @@ if exist "!STARTUP_VBS!" (
     echo            - Ruta de Startup no accesible
     echo            - Permisos insuficientes sobre la carpeta
     echo.
-    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: No se pudo crear wrapper VBS en Startup: !STARTUP_VBS!
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: No se pudo crear wrapper en Startup: !STARTUP_VBS!
     pause & exit /b 1
 )
 
 :PASO4
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 4: Resumen de instalacion
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo.
 echo  [4/4] Instalacion completada.
 >> "%INSTALL_LOG%" echo [%TIME%] --- INSTALACION COMPLETADA ---
@@ -285,28 +278,27 @@ echo  [4/4] Instalacion completada.
 >> "%INSTALL_LOG%" echo [%TIME%] Log de runner: %LOG_DIR%\runner.log
 
 echo.
+echo  ================================================================
 if "!INSTALADO!"=="tarea" (
-    echo  ════════════════════════════════════════════════════════════════════
-    echo   Metodo:  Tarea Programada ^(schtasks^)
-    echo   Tarea:   %TASK_NAME%
+    echo   Metodo  : Tarea Programada ^(schtasks^)
+    echo   Tarea   : %TASK_NAME%
 ) else (
-    echo  ════════════════════════════════════════════════════════════════════
-    echo   Metodo:  Carpeta Startup del usuario
-    echo   Archivo: %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\AutomationQARunner.vbs
+    echo   Metodo  : Carpeta Startup del usuario
+    echo   Archivo : AutomationQARunner.vbs en Startup
 )
 echo.
 echo   El Runner arrancara automaticamente al iniciar sesion en Windows.
 echo   No necesitas ejecutar ningun script manualmente.
 echo.
-echo   Launcher:    %RUNNER_VBS%
-echo   Log runner:  %LOG_DIR%\runner.log
-echo   Instalacion: %INSTALL_LOG%
-echo  ════════════════════════════════════════════════════════════════════
+echo   Launcher    : %RUNNER_VBS%
+echo   Log runner  : %LOG_DIR%\runner.log
+echo   Instalacion : %INSTALL_LOG%
+echo  ================================================================
 echo.
 
-REM ═══════════════════════════════════════════════════════════════════════════════
-REM  ARRANQUE OPCIONAL — con pre-flight completo antes de iniciar
-REM ═══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
+REM  ARRANQUE OPCIONAL - con pre-flight completo antes de iniciar
+REM ==============================================================================
 set /p "RUN_NOW=  Iniciar el Runner ahora mismo? (S/n): "
 if "!RUN_NOW!"=="" set "RUN_NOW=S"
 if /i not "!RUN_NOW!"=="S" goto :FIN
@@ -317,7 +309,7 @@ echo  Ejecutando verificaciones previas al arranque...
 
 set "PREFLIGHT_OK=1"
 
-REM ── 1. Verificar launcher VBS ────────────────────────────────────────────────
+REM -- 1. Verificar launcher VBS ------------------------------------------------
 if not exist "%RUNNER_VBS%" (
     echo  [ERROR] Launcher no encontrado:
     echo          %RUNNER_VBS%
@@ -327,7 +319,7 @@ if not exist "%RUNNER_VBS%" (
     >> "%INSTALL_LOG%" echo [%TIME%] PRE-FLIGHT OK: launcher VBS existe
 )
 
-REM ── 2. Verificar start-runner-auto.bat ──────────────────────────────────────
+REM -- 2. Verificar start-runner-auto.bat ---------------------------------------
 if not exist "%START_BAT%" (
     echo  [ERROR] Archivo de inicio no encontrado:
     echo          %START_BAT%
@@ -337,16 +329,16 @@ if not exist "%START_BAT%" (
     >> "%INSTALL_LOG%" echo [%TIME%] PRE-FLIGHT OK: start-runner-auto.bat existe
 )
 
-REM ── 3. Verificar JAR (advertencia, no bloquea) ───────────────────────────────
+REM -- 3. Verificar JAR (advertencia, no bloquea) --------------------------------
 if not exist "%JAR_FILE%" (
     echo  [AVISO] JAR no encontrado: %JAR_FILE%
     echo          El Runner intentara compilar con Maven al iniciar.
-    >> "%INSTALL_LOG%" echo [%TIME%] PRE-FLIGHT AVISO: JAR no existe — Maven compilara al iniciar
+    >> "%INSTALL_LOG%" echo [%TIME%] PRE-FLIGHT AVISO: JAR no existe - Maven compilara al iniciar
 ) else (
     >> "%INSTALL_LOG%" echo [%TIME%] PRE-FLIGHT OK: JAR existe: %JAR_FILE%
 )
 
-REM ── 4. Verificar metodo de inicio segun lo instalado ────────────────────────
+REM -- 4. Verificar metodo de inicio segun lo instalado --------------------------
 if "!INSTALADO!"=="tarea" (
     schtasks /query /tn "%TASK_NAME%" >nul 2>&1
     if !ERRORLEVEL! neq 0 (
@@ -371,23 +363,23 @@ if "!INSTALADO!"=="startup" (
     )
 )
 
-REM ── Resultado del pre-flight ─────────────────────────────────────────────────
+REM -- Resultado del pre-flight -------------------------------------------------
 if "!PREFLIGHT_OK!"=="0" (
     echo.
     echo  [ERROR] Una o mas verificaciones fallaron.
     echo          El Runner NO sera iniciado para evitar errores.
     echo.
-    echo          Revisa el log de instalacion para mas detalles:
+    echo          Revisa el log de instalacion:
     echo          %INSTALL_LOG%
     echo.
-    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: Pre-flight fallido — Runner NO iniciado
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: Pre-flight fallido - Runner NO iniciado
     goto :FIN
 )
 
 echo          Todas las verificaciones pasaron  [OK]
 echo.
 echo  Iniciando Runner en segundo plano...
->> "%INSTALL_LOG%" echo [%TIME%] OK: Pre-flight completado — iniciando Runner
+>> "%INSTALL_LOG%" echo [%TIME%] OK: Pre-flight OK - iniciando Runner
 >> "%INSTALL_LOG%" echo [%TIME%] Comando: wscript.exe "%RUNNER_VBS%"
 
 wscript.exe "%RUNNER_VBS%"
