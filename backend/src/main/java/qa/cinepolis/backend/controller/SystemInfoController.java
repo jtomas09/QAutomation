@@ -1,22 +1,20 @@
 package qa.cinepolis.backend.controller;
 
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.store.DeviceStore;
 import qa.cinepolis.backend.store.RunnerStore;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Provides platform metadata used by the Dashboard for:
- * - Detecting whether any runner has ever been registered
- * - Showing version / update info
- * - Providing OS-specific installer guidance
+ * Platform metadata consumed by the Dashboard.
  *
- * GET /api/system/info
+ * GET /api/system/info         → infraState, versions
+ * GET /api/system/update-check → version comparison
+ *
+ * File downloads are handled by RunnerDownloadController (/api/runner/download).
  */
 @RestController
 @RequestMapping("/api/system")
@@ -34,63 +32,40 @@ public class SystemInfoController {
         this.deviceStore = deviceStore;
     }
 
-    /** Basic platform info + installation state. */
     @GetMapping("/info")
     public Map<String, Object> info() {
-        int runnerCount = runnerStore.findAll().size();
-        int deviceCount = deviceStore.findAll().size();
+        int  runnerCount   = runnerStore.findAll().size();
+        int  deviceCount   = deviceStore.findAll().size();
         long onlineRunners = runnerStore.findAll().stream()
                 .filter(r -> r.getStatus() != null && !"OFFLINE".equals(r.getStatus().name()))
                 .count();
 
-        Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("platform",        "Automation QA");
-        resp.put("runnerVersion",   RUNNER_VERSION);
-        resp.put("backendVersion",  BACKEND_VERSION);
-        resp.put("releaseDate",     RELEASE_DATE);
-        resp.put("timestamp",       Instant.now().toString());
-
-        // Infrastructure state (consumed by Dashboard)
         String infraState;
-        if (runnerCount == 0) {
-            infraState = "not_installed";
-        } else if (onlineRunners == 0) {
-            infraState = "offline";
-        } else if (deviceCount == 0) {
-            infraState = "scanning";
-        } else {
-            infraState = "ready";
-        }
-        resp.put("infraState",      infraState);
-        resp.put("totalRunners",    runnerCount);
-        resp.put("onlineRunners",   (int) onlineRunners);
-        resp.put("totalDevices",    deviceCount);
+        if (runnerCount == 0)      infraState = "not_installed";
+        else if (onlineRunners == 0) infraState = "offline";
+        else if (deviceCount == 0) infraState = "scanning";
+        else                       infraState = "ready";
 
-        // Installer guidance per OS
-        resp.put("installers", Map.of(
-                "windows", Map.of(
-                        "method",       "Task Scheduler (no admin required)",
-                        "installer",    "runner\\service\\windows\\install-service.bat",
-                        "winswAlt",     "runner\\service\\windows\\AutomationQARunner.xml",
-                        "description",  "Auto-starts at login. Restart-on-failure built-in."
-                ),
-                "macos", Map.of(
-                        "method",       "LaunchAgent",
-                        "installer",    "bash runner/install.sh",
-                        "label",        "com.automationqa.runner",
-                        "description",  "Auto-starts at login. KeepAlive=true."
-                ),
-                "linux", Map.of(
-                        "method",       "systemd user service",
-                        "installer",    "bash runner/install.sh",
-                        "description",  "systemd --user, fallback to cron."
-                )
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("platform",       "Automation QA");
+        resp.put("runnerVersion",  RUNNER_VERSION);
+        resp.put("backendVersion", BACKEND_VERSION);
+        resp.put("releaseDate",    RELEASE_DATE);
+        resp.put("timestamp",      Instant.now().toString());
+        resp.put("infraState",     infraState);
+        resp.put("totalRunners",   runnerCount);
+        resp.put("onlineRunners",  (int) onlineRunners);
+        resp.put("totalDevices",   deviceCount);
+
+        resp.put("download", Map.of(
+                "windows", "/api/runner/download/windows",
+                "macos",   "/api/runner/download/macos",
+                "linux",   "/api/runner/download/linux"
         ));
 
         return resp;
     }
 
-    /** Check if this platform is newer than the provided version. */
     @GetMapping("/update-check")
     public Map<String, Object> updateCheck(@RequestParam(defaultValue = "0.0.0") String currentVersion) {
         boolean hasUpdate = compareVersions(RUNNER_VERSION, currentVersion) > 0;
@@ -103,31 +78,6 @@ public class SystemInfoController {
                         ? "Mejoras de rendimiento, soporte Universal Runner, auto-detección de OS."
                         : "Ya tienes la versión más reciente."
         );
-    }
-
-    /**
-     * Redirects to the appropriate installer download for the given platform.
-     * GET /api/download/runner?platform=windows|macos|linux
-     *
-     * Points to GitHub Releases. Replace RELEASE_URL with the actual release URL
-     * once installers are built and published.
-     */
-    @GetMapping("/download/runner")
-    public void downloadRunner(
-            @RequestParam(defaultValue = "windows") String platform,
-            HttpServletResponse response) throws IOException {
-
-        // Replace these with actual GitHub Release asset URLs when available.
-        // The download is transparent to the user — they just click and receive the file.
-        String baseUrl = "https://github.com/jtomas09/QAutomation/releases/latest/download/";
-
-        String filename = switch (platform.toLowerCase()) {
-            case "macos"  -> "AutomationQA-Runner.pkg";
-            case "linux"  -> "AutomationQA-Runner-linux.tar.gz";
-            default       -> "AutomationQA-Runner-Setup.exe";
-        };
-
-        response.sendRedirect(baseUrl + filename);
     }
 
     private int compareVersions(String v1, String v2) {
