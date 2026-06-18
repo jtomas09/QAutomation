@@ -366,9 +366,8 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                   <div>
                     <div className="text-[11px] font-black text-amber-400 mb-0.5">Instalador provisional</div>
                     <div className="text-[11px] text-slate-400 leading-relaxed">
-                      El instalador definitivo estará disponible próximamente.
-                      Esta versión provisional configura el servicio de forma automática
-                      y requiere <strong className="text-slate-300">Java 17+</strong> instalado en el equipo.
+                      El instalador incluye todos los componentes necesarios.
+                      La versión definitiva con asistente gráfico estará disponible próximamente.
                     </div>
                   </div>
                 </div>
@@ -406,7 +405,7 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                           )}
                         </div>
                         <div className="text-[11px] text-slate-500 truncate">
-                          {phase === 'preparing' ? 'Preparando descarga...' : currentPkg.filename}
+                          {phase === 'preparing' ? 'Preparando descarga...' : 'Incluye todos los componentes necesarios'}
                         </div>
                       </div>
                       <button
@@ -451,82 +450,44 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                       <CheckCircle size={20} className="text-emerald-400" />
                     </div>
                     <div>
-                      <div className="text-[13px] font-black text-emerald-400">Descarga iniciada</div>
-                      <div className="text-[11px] text-slate-500">
-                        {currentPkg.type === 'temp'
-                          ? 'Abre el script descargado para instalar'
-                          : 'Abre el archivo para instalar'}
-                      </div>
+                      <div className="text-[13px] font-black text-emerald-400">Descarga completada</div>
+                      <div className="text-[11px] text-slate-500">Abre el instalador para continuar</div>
                     </div>
                   </div>
                   <div className="space-y-2">
                     <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase mb-2">
-                      {currentPkg.type === 'temp' ? 'Cómo instalar (versión provisional)' : 'Qué hacer ahora'}
+                      Cómo instalar
                     </div>
                     {tab === 'windows' ? (
-                      currentPkg.type === 'temp' ? (
-                        <>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
-                            Verifica que tienes <strong className="text-slate-300">Java 17+</strong> instalado en el equipo
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
-                            Coloca el archivo descargado junto a <strong className="text-slate-300">cinepolis-runner.jar</strong>
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
-                            Haz doble clic en <strong className="text-slate-300">{currentPkg.filename}</strong> para instalar el servicio
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
-                            Abre <strong className="text-slate-300 mx-1">AutomationQA-Runner-Setup.exe</strong> desde tu carpeta de Descargas
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
-                            Si Windows muestra "Protegió tu PC" → haz clic en "Más información" → "Ejecutar de todas formas"
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
-                            Sigue los pasos del instalador y haz clic en Finalizar
-                          </div>
-                        </>
-                      )
+                      <>
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
+                          Abre el archivo descargado desde tu carpeta de Descargas
+                        </div>
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
+                          Si Windows muestra un aviso de seguridad → haz clic en <strong className="text-slate-300">"Ejecutar de todas formas"</strong>
+                        </div>
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
+                          El Runner se conectará automáticamente — aparecerá en el Dashboard en ~15 segundos
+                        </div>
+                      </>
                     ) : (
-                      currentPkg.type === 'temp' ? (
-                        <>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
-                            Verifica que tienes <strong className="text-slate-300">Java 17+</strong> instalado en el equipo
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
-                            Coloca el archivo descargado junto a <strong className="text-slate-300">cinepolis-runner.jar</strong>
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
-                            En Terminal: <strong className="text-slate-300">bash {currentPkg.filename}</strong>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
-                            Abre <strong className="text-slate-300 mx-1">AutomationQA-Runner.pkg</strong> desde tu carpeta de Descargas
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
-                            Si macOS pide tu contraseña, ingrésala para autorizar la instalación
-                          </div>
-                          <div className="flex items-start gap-2 text-[11px] text-slate-400">
-                            <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
-                            Haz clic en Instalar y espera que finalice
-                          </div>
-                        </>
-                      )
+                      <>
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">①</span>
+                          Abre el archivo descargado desde tu carpeta de Descargas
+                        </div>
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">②</span>
+                          Si macOS solicita autorización, ingrésala para completar la instalación
+                        </div>
+                        <div className="flex items-start gap-2 text-[11px] text-slate-400">
+                          <span className="text-slate-600 flex-shrink-0 font-bold mt-px">③</span>
+                          El Runner se conectará automáticamente — aparecerá en el Dashboard en ~15 segundos
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>

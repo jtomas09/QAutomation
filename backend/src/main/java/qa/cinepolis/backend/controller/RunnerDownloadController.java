@@ -47,9 +47,9 @@ public class RunnerDownloadController {
 
     // Human-readable labels
     private static final Map<String, String> TEMP_LABELS = Map.of(
-            "windows", "Script de configuración Windows (provisional)",
-            "macos",   "Script de configuración macOS (provisional)",
-            "linux",   "Script de configuración Linux (provisional)"
+            "windows", "Automation QA Runner para Windows",
+            "macos",   "Automation QA Runner para macOS",
+            "linux",   "Automation QA Runner para Linux"
     );
 
     // ── Availability endpoint ────────────────────────────────────────────────
@@ -112,6 +112,25 @@ public class RunnerDownloadController {
                         "message",  "No hay una versión disponible del Runner para descargar.",
                         "platform", platform
                 ));
+    }
+
+    // ── JAR download endpoint ────────────────────────────────────────────────
+
+    /**
+     * Serves the runner JAR from classpath for self-contained install scripts.
+     * Place cinepolis-runner.jar in backend/src/main/resources/installers/ to enable.
+     */
+    @GetMapping("/jar")
+    public ResponseEntity<?> downloadJar() {
+        ClassPathResource res = new ClassPathResource("installers/cinepolis-runner.jar");
+        if (!res.exists()) {
+            return ResponseEntity
+                    .status(HttpStatus.NOT_FOUND)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("success", false, "message",
+                            "El componente del Runner no está disponible en este momento."));
+        }
+        return serveFile(res, "automationqa-runner.jar");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
