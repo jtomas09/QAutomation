@@ -2,23 +2,23 @@
 chcp 65001 > nul
 setlocal EnableDelayedExpansion
 
-REM ════════════════════════════════════════════════════════════════════════════
-REM  Automation QA Runner — Instalador Windows v2.3.0
+REM ============================================================================
+REM  Automation QA Runner - Instalador Windows v2.3.0
 REM  Instalacion automatica del servicio de automatizacion.
-REM  Todas las rutas son dinamicas — sin rutas hardcodeadas.
-REM ════════════════════════════════════════════════════════════════════════════
+REM  Todas las rutas son dinamicas - sin rutas hardcodeadas.
+REM ============================================================================
 
 set "BACKEND_URL=https://qautomation-production.up.railway.app"
 set "RUNNER_TOKEN=runner-local-token"
 
 echo.
-echo  ╔═══════════════════════════════════════════════════════════════╗
-echo  ║   Automation QA Runner — Instalacion v2.3.0                 ║
-echo  ║   Configurando el servicio automaticamente...               ║
-echo  ╚═══════════════════════════════════════════════════════════════╝
+echo  +===============================================================+
+echo  |   Automation QA Runner - Instalacion v2.3.0                 |
+echo  |   Configurando el servicio automaticamente...               |
+echo  +===============================================================+
 echo.
 
-REM ── Validar sesion de usuario (LOCALAPPDATA requerido) ───────────────────────
+REM -- Validar sesion de usuario (LOCALAPPDATA requerido) -----------------------
 if not defined LOCALAPPDATA (
     echo  [ERROR] La instalacion requiere una sesion de usuario normal de Windows.
     echo  Ejecuta este instalador iniciando sesion con tu cuenta de usuario.
@@ -37,14 +37,14 @@ set "JAR_DST=%INSTALL_DIR%\automationqa-runner.jar"
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
 if not exist "%LOG_DIR%"     mkdir "%LOG_DIR%"     >nul 2>&1
 
-REM ── Paso 1: Verificar entorno de ejecucion ────────────────────────────────────
+REM -- Paso 1: Verificar entorno de ejecucion ------------------------------------
 echo  [1/4] Verificando entorno de ejecucion...
 java -version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo  ╔═══════════════════════════════════════════════════════════════╗
-    echo  ║   Se requiere instalar un componente del sistema            ║
-    echo  ╚═══════════════════════════════════════════════════════════════╝
+    echo  +===============================================================+
+    echo  |   Se requiere instalar un componente del sistema            |
+    echo  +===============================================================+
     echo.
     echo  El Runner de Automation QA necesita el entorno de ejecucion
     echo  Java para funcionar. Este componente es gratuito y seguro.
@@ -59,14 +59,14 @@ if errorlevel 1 (
 )
 echo  [OK] Entorno de ejecucion verificado.
 
-REM ── Paso 2: Obtener componente principal del Runner ───────────────────────────
+REM -- Paso 2: Obtener componente principal del Runner ---------------------------
 echo  [2/4] Descargando componentes del Runner...
 set "RUNNER_JAR="
 
 REM Si ya esta instalada una version anterior, reutilizarla
 if exist "%JAR_DST%" (
     set "RUNNER_JAR=%JAR_DST%"
-    echo  [OK] Componentes ya presentes — actualizando configuracion.
+    echo  [OK] Componentes ya presentes - actualizando configuracion.
     goto :JAR_READY
 )
 
@@ -94,9 +94,9 @@ if !ERRORLEVEL! equ 0 if exist "%JAR_TMP%" (
 
 REM No se pudieron obtener los componentes
 echo.
-echo  ╔═══════════════════════════════════════════════════════════════╗
-echo  ║   El paquete de instalacion esta incompleto                 ║
-echo  ╚═══════════════════════════════════════════════════════════════╝
+echo  +===============================================================+
+echo  |   El paquete de instalacion esta incompleto                 |
+echo  +===============================================================+
 echo.
 echo  No se pudieron obtener los componentes necesarios.
 echo.
@@ -121,14 +121,14 @@ if errorlevel 1 (
 :JAR_READY
 echo  [OK] Componentes del Runner listos.
 
-REM ── Paso 3: Configurar servicio de inicio automatico ─────────────────────────
+REM -- Paso 3: Configurar servicio de inicio automatico -------------------------
 echo  [3/4] Configurando inicio automatico...
 
 REM Identificador unico del equipo
 for /f "usebackq tokens=*" %%h in (`hostname`) do set "HOST_NAME=%%h"
 set "RUNNER_ID=win-!HOST_NAME!"
 
-REM Generar script de arranque (java en una sola linea — sin continuaciones ^)
+REM Generar script de arranque (java en una sola linea - sin continuaciones ^)
 (
     echo @echo off
     echo chcp 65001 ^>nul
@@ -203,16 +203,16 @@ if !ERRORLEVEL! equ 0 (
     )
 )
 
-REM ── Paso 4: Finalizar ─────────────────────────────────────────────────────────
+REM -- Paso 4: Finalizar ---------------------------------------------------------
 echo.
 echo  [4/4] Instalacion completada.
 echo.
-echo  ╔═══════════════════════════════════════════════════════════════╗
-echo  ║   Automation QA Runner instalado correctamente              ║
-echo  ║                                                               ║
-echo  ║   El Runner se conectara automaticamente al iniciar sesion. ║
-echo  ║   Aparecera en el Dashboard en aproximadamente 15 segundos. ║
-echo  ╚═══════════════════════════════════════════════════════════════╝
+echo  +===============================================================+
+echo  |   Automation QA Runner instalado correctamente              |
+echo  |                                                               |
+echo  |   El Runner se conectara automaticamente al iniciar sesion. |
+echo  |   Aparecera en el Dashboard en aproximadamente 15 segundos. |
+echo  +===============================================================+
 echo.
 
 set /p START_NOW=  Iniciar el Runner ahora mismo? (S/n):

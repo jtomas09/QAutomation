@@ -16,7 +16,7 @@ Dim fso
 Set fso = CreateObject("Scripting.FileSystemObject")
 
 If Not fso.FileExists(targetBat) Then
-    WScript.Echo "Automation QA Runner — Error de inicio" & vbCrLf & vbCrLf & _
+    WScript.Echo "Automation QA Runner - Error de inicio" & vbCrLf & vbCrLf & _
         "No se encontro el archivo:" & vbCrLf & _
         targetBat & vbCrLf & vbCrLf & _
         "Asegurate de que runner-launcher.vbs este en la carpeta runner\ del proyecto."

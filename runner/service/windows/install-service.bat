@@ -2,23 +2,23 @@
 chcp 65001 > nul
 setlocal EnableDelayedExpansion
 
-REM ══════════════════════════════════════════════════════════════════════════════
-REM  Automation QA — Windows Service Installer v3.1
+REM ==============================================================================
+REM  Automation QA - Windows Service Installer v3.1
 REM  Copia el JAR a LOCALAPPDATA, genera wrapper de arranque y registra
 REM  Tarea Programada. Sin privilegios de Admin. Compatible con rutas con espacios.
 REM
 REM  Todas las rutas se construyen con %~dp0, %LOCALAPPDATA% o %APPDATA%.
 REM  Ningun path esta hardcodeado.
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 
-REM ── 1. Rutas de origen (relativas a este script) ──────────────────────────────
+REM -- 1. Rutas de origen (relativas a este script) ------------------------------
 set "SCRIPT_DIR=%~dp0"
 
 REM Normalizar RUNNER_DIR: resolver "..\..\" a ruta absoluta sin ".."
 REM %%~fD convierte "C:\runner\service\windows\..\.." -> "C:\runner" (path absoluto limpio)
 for %%D in ("%SCRIPT_DIR%..\..") do set "RUNNER_DIR=%%~fD\"
 
-REM ── 2. Validar LOCALAPPDATA antes de usarlo ───────────────────────────────────
+REM -- 2. Validar LOCALAPPDATA antes de usarlo -----------------------------------
 REM LOCALAPPDATA puede estar vacio o indefinido en entornos restringidos (RDP, GPO, etc.)
 if not defined LOCALAPPDATA (
     echo.
@@ -37,7 +37,7 @@ if "%LOCALAPPDATA%"=="\" (
     pause & exit /b 1
 )
 
-REM ── 3. Rutas de destino (construidas con LOCALAPPDATA dinamicamente) ──────────
+REM -- 3. Rutas de destino (construidas con LOCALAPPDATA dinamicamente) ----------
 set "SERVICE_NAME=AutomationQARunner"
 set "TASK_NAME=Automation QA Runner"
 set "INSTALL_DIR=%LOCALAPPDATA%\AutomationQA\runner"
@@ -50,7 +50,7 @@ set "WRAPPER_SCRIPT=%INSTALL_DIR%\run-runner.bat"
 set "VBS_PATH=%INSTALL_DIR%\launcher.vbs"
 set "INSTALL_LOG=%LOG_DIR%\install.log"
 
-REM ── 4. Crear directorio de logs ANTES de escribir en el log ──────────────────
+REM -- 4. Crear directorio de logs ANTES de escribir en el log ------------------
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
 if not exist "%LOG_DIR%"     mkdir "%LOG_DIR%"     >nul 2>&1
 
@@ -58,12 +58,12 @@ REM Si no se pudo crear el log dir, continuar sin log en archivo
 set "LOG_AVAILABLE=0"
 if exist "%LOG_DIR%" set "LOG_AVAILABLE=1"
 
-REM ── 5. Abrir install.log ──────────────────────────────────────────────────────
+REM -- 5. Abrir install.log ------------------------------------------------------
 if "!LOG_AVAILABLE!"=="1" (
     >> "%INSTALL_LOG%" (
         echo.
         echo ================================================================
-        echo  Automation QA Runner — Instalacion Servicio v3.1
+        echo  Automation QA Runner - Instalacion Servicio v3.1
         echo  Fecha: %DATE%   Hora: %TIME%
         echo ================================================================
     )
@@ -87,7 +87,7 @@ if "!LOG_AVAILABLE!"=="1" (
     >> "%INSTALL_LOG%" echo.
 )
 
-REM ── 6. Leer runner.properties si existe (con usebackq + comillas) ──────────────
+REM -- 6. Leer runner.properties si existe (con usebackq + comillas) --------------
 REM usebackq + "ruta entre comillas" permite rutas con espacios en for /f
 set "BACKEND_URL=https://qautomation-production.up.railway.app"
 set "RUNNER_TOKEN=runner-local-token"
@@ -103,26 +103,26 @@ if exist "%RUNNER_DIR%runner.properties" (
 )
 
 echo.
-echo  ╔══════════════════════════════════════════════════════════════╗
-echo  ║   Automation QA — Instalador de Servicio v3.1              ║
-echo  ║   Auto-Start Enterprise  —  Windows 10 / 11               ║
-echo  ╚══════════════════════════════════════════════════════════════╝
+echo  +==============================================================+
+echo  |   Automation QA - Instalador de Servicio v3.1              |
+echo  |   Auto-Start Enterprise  -  Windows 10 / 11               |
+echo  +==============================================================+
 echo.
 
-REM ── DIAGNOSTICO: Rutas calculadas ────────────────────────────────────────────
-echo  ┌─ DIAGNOSTICO ──────────────────────────────────────────────────────────┐
+REM -- DIAGNOSTICO: Rutas calculadas --------------------------------------------
+echo  +- DIAGNOSTICO ----------------------------------------------------------+
 echo  ^|  LOCALAPPDATA   = %LOCALAPPDATA%
 echo  ^|  RUNNER_DIR     = %RUNNER_DIR%
 echo  ^|  INSTALL_DIR    = %INSTALL_DIR%
 echo  ^|  WRAPPER_SCRIPT = %WRAPPER_SCRIPT%
 echo  ^|  VBS_PATH       = %VBS_PATH%
 echo  ^|  install.log    = %INSTALL_LOG%
-echo  └────────────────────────────────────────────────────────────────────────┘
+echo  +------------------------------------------------------------------------+
 echo.
 
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 1: Verificar Java
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo  [1/5] Verificando Java...
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 1: Java ---
 
@@ -140,9 +140,9 @@ echo  [OK]    Java disponible.
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: Java disponible
 echo.
 
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 2: Verificar o compilar JAR
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo  [2/5] Preparando cinepolis-runner.jar...
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 2: JAR ---
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] JAR_SRC=%JAR_SRC%
@@ -154,7 +154,7 @@ if exist "%JAR_SRC%" (
     if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: JAR encontrado en %JAR_SRC%
 ) else (
     echo  [Build] JAR no encontrado. Compilando con Maven...
-    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] INFO: JAR no encontrado — intentando compilar
+    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] INFO: JAR no encontrado - intentando compilar
 
     where mvn >nul 2>&1
     if %ERRORLEVEL% neq 0 (
@@ -179,9 +179,9 @@ if exist "%JAR_SRC%" (
 )
 echo.
 
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 3: Instalar JAR en directorio estable y generar scripts
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo  [3/5] Instalando en LOCALAPPDATA...
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 3: Instalacion en %INSTALL_DIR% ---
 
@@ -206,8 +206,8 @@ for /f "usebackq tokens=*" %%h in (`hostname`) do set "HOST_NAME=%%h"
 set "RUNNER_ID=win-!HOST_NAME!"
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] RUNNER_ID=!RUNNER_ID!
 
-REM ── Generar run-runner.bat ────────────────────────────────────────────────────
-REM REGLA: java en una SOLA linea — NO usar ^ de continuacion dentro del bloque echo.
+REM -- Generar run-runner.bat ----------------------------------------------------
+REM REGLA: java en una SOLA linea - NO usar ^ de continuacion dentro del bloque echo.
 REM        El ^ al final de echo java ^ une los echo siguientes en un solo comando,
 REM        corrompiendo el archivo generado y causando errores "okens", "[OK]", etc.
 REM
@@ -218,7 +218,7 @@ REM %VAR%   -> valor literal bakeado al generar (RUNNER_ID, BACKEND_URL, rutas, 
     echo chcp 65001 ^>nul
     echo setlocal EnableDelayedExpansion
     echo.
-    echo REM Generado por install-service.bat — NO editar manualmente
+    echo REM Generado por install-service.bat - NO editar manualmente
     echo.
     echo set "RUNNER_ID=%RUNNER_ID%"
     echo set "BACKEND_URL=%BACKEND_URL%"
@@ -237,7 +237,7 @@ REM %VAR%   -> valor literal bakeado al generar (RUNNER_ID, BACKEND_URL, rutas, 
     echo.
     echo :loop
     echo java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -DBACKEND_URL=%%BACKEND_URL%% -DRUNNER_TOKEN=%%RUNNER_TOKEN%% -DRUNNER_ID=%%RUNNER_ID%% -DPOLL_INTERVAL_MS=%%POLL_INTERVAL_MS%% "-DWORK_DIR=%RUNNER_DIR%" -DAPPIUM_HUB=http://127.0.0.1:4723 -jar "%JAR_DST%" ^>^>"%%LOG_FILE%%" 2^>^&1
-    echo echo [%%DATE%% %%TIME%%] Runner detenido ^(exit %%ERRORLEVEL%%^) — reiniciando en 10s ^>^>"%%LOG_FILE%%"
+    echo echo [%%DATE%% %%TIME%%] Runner detenido ^(exit %%ERRORLEVEL%%^) - reiniciando en 10s ^>^>"%%LOG_FILE%%"
     echo timeout /t 10 /nobreak ^>nul
     echo goto loop
 ) > "%WRAPPER_SCRIPT%"
@@ -253,14 +253,14 @@ echo  [OK]    Wrapper generado: %WRAPPER_SCRIPT%
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: WRAPPER_SCRIPT creado: %WRAPPER_SCRIPT%
 echo.
 
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 4: Generar VBS launcher y registrar Tarea Programada
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo  [4/5] Registrando Tarea Programada (inicio de sesion)...
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 4: VBS + schtasks ---
 
-REM Generar VBS launcher con Chr(34) para quotes — evita ambiguedad de escape de CMD.
-REM q = Chr(34) = " — la ruta del wrapper queda bien protegida con comillas en el Run.
+REM Generar VBS launcher con Chr(34) para quotes - evita ambiguedad de escape de CMD.
+REM q = Chr(34) = " - la ruta del wrapper queda bien protegida con comillas en el Run.
 (
     echo Dim sh, q
     echo Set sh = CreateObject("WScript.Shell"^)
@@ -327,7 +327,7 @@ if !ERRORLEVEL! equ 0 (
 ) else (
     REM Fallback: carpeta Startup
     echo  [AVISO] schtasks no disponible. Instalando en carpeta Startup...
-    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] AVISO: schtasks fallo en 3 intentos — fallback Startup
+    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] AVISO: schtasks fallo en 3 intentos - fallback Startup
 
     set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
     if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] STARTUP_DIR=!STARTUP_DIR!
@@ -349,9 +349,9 @@ if !ERRORLEVEL! equ 0 (
 )
 echo.
 
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 REM  PASO 5: Herramientas de control
-REM ══════════════════════════════════════════════════════════════════════════════
+REM ==============================================================================
 echo  [5/5] Creando herramientas de control...
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 5: Herramientas ---
 
@@ -365,7 +365,7 @@ if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 5: Herramien
 echo  [OK]    Logs: %INSTALL_DIR%\ver-logs.vbs
 echo.
 
-REM ── Validacion final: verificar que VBS_PATH existe antes de lanzar ──────────
+REM -- Validacion final: verificar que VBS_PATH existe antes de lanzar ----------
 if not exist "%VBS_PATH%" (
     echo.
     echo  [ERROR] El archivo VBS launcher no existe: %VBS_PATH%
@@ -378,7 +378,7 @@ if not exist "%VBS_PATH%" (
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- INSTALACION COMPLETADA ---
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] Metodo: !INSTALADO!
 
-echo  ════════════════════════════════════════════════════════════════
+echo  ================================================================
 echo   Instalacion completada correctamente.
 echo.
 echo   El Runner arrancara AUTOMATICAMENTE al iniciar sesion.
@@ -390,7 +390,7 @@ echo   Logs runtime:  %LOG_FILE%
 echo   Instalacion:   %INSTALL_LOG%
 echo.
 echo   Para desinstalar: service\windows\uninstall-service.bat
-echo  ════════════════════════════════════════════════════════════════
+echo  ================================================================
 echo.
 
 set /p LAUNCH_NOW=  Iniciar el Runner ahora mismo? (S/n):
