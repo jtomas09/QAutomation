@@ -127,7 +127,7 @@ echo  [1/5] Verificando Java...
 if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] --- PASO 1: Java ---
 
 where java >nul 2>&1
-if %ERRORLEVEL% neq 0 (
+if !ERRORLEVEL! neq 0 (
     echo.
     echo  [ERROR] Java no encontrado en PATH.
     echo          Instala JDK 17+ desde: https://adoptium.net
@@ -157,7 +157,7 @@ if exist "%JAR_SRC%" (
     if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] INFO: JAR no encontrado - intentando compilar
 
     where mvn >nul 2>&1
-    if %ERRORLEVEL% neq 0 (
+    if !ERRORLEVEL! neq 0 (
         echo.
         echo  [ERROR] Maven no encontrado en PATH.
         echo          Opciones:
@@ -189,7 +189,7 @@ if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
 if not exist "%LOG_DIR%"     mkdir "%LOG_DIR%"     >nul 2>&1
 
 copy /Y "%JAR_SRC%" "%JAR_DST%" >nul
-if %ERRORLEVEL% neq 0 (
+if !ERRORLEVEL! neq 0 (
     echo.
     echo  [ERROR] No se pudo copiar el JAR.
     echo          Origen:  %JAR_SRC%
@@ -294,27 +294,37 @@ if %ERRORLEVEL% equ 0 (
 set "SCHED_OK=1"
 
 REM Intento 1: /rl LIMITED + /delay (preferido en Windows 10 build 1703+)
-schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe %VBS_SHORT%" /sc ONLOGON /ru "%USERNAME%" /f /rl LIMITED /delay 0000:30 >nul 2>&1
+REM NOTA: \"...\" protege la ruta en /tr cuando VBS_SHORT tiene espacios (8.3 deshabilitado)
+if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] Intento 1: schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /rl LIMITED /delay
+schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /sc ONLOGON /ru "%USERNAME%" /f /rl LIMITED /delay 0000:30 >> "%INSTALL_LOG%" 2>&1
 if !ERRORLEVEL! equ 0 (
     set "SCHED_OK=0"
-    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 1 ^(/rl LIMITED /delay^)
+    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 1 exitoso
+) else (
+    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] FALLO intento 1 (exit !ERRORLEVEL!)
 )
 
 REM Intento 2: sin /rl
 if "!SCHED_OK!"=="1" (
-    schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe %VBS_SHORT%" /sc ONLOGON /ru "%USERNAME%" /f /delay 0000:30 >nul 2>&1
+    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] Intento 2: schtasks /create sin /rl con /delay
+    schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /sc ONLOGON /ru "%USERNAME%" /f /delay 0000:30 >> "%INSTALL_LOG%" 2>&1
     if !ERRORLEVEL! equ 0 (
         set "SCHED_OK=0"
-        if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 2 ^(sin /rl^)
+        if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 2 exitoso
+    ) else (
+        if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] FALLO intento 2 (exit !ERRORLEVEL!)
     )
 )
 
 REM Intento 3: parametros minimos
 if "!SCHED_OK!"=="1" (
-    schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe %VBS_SHORT%" /sc ONLOGON /ru "%USERNAME%" /f >nul 2>&1
+    if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] Intento 3: schtasks /create parametros minimos
+    schtasks /create /tn "%TASK_NAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /sc ONLOGON /ru "%USERNAME%" /f >> "%INSTALL_LOG%" 2>&1
     if !ERRORLEVEL! equ 0 (
         set "SCHED_OK=0"
-        if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 3 ^(parametros minimos^)
+        if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] OK: schtasks intento 3 exitoso
+    ) else (
+        if "!LOG_AVAILABLE!"=="1" >> "%INSTALL_LOG%" echo [%TIME%] FALLO intento 3 (exit !ERRORLEVEL!)
     )
 )
 

@@ -33,14 +33,23 @@ if "%LOCALAPPDATA%"=="\" (
 set "INSTALL_DIR=%LOCALAPPDATA%\AutomationQA\runner"
 set "LOG_DIR=%INSTALL_DIR%\logs"
 set "JAR_DST=%INSTALL_DIR%\automationqa-runner.jar"
+set "INSTALL_LOG=%LOG_DIR%\install.log"
 
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >nul 2>&1
 if not exist "%LOG_DIR%"     mkdir "%LOG_DIR%"     >nul 2>&1
 
+>> "%INSTALL_LOG%" echo.
+>> "%INSTALL_LOG%" echo [%DATE% %TIME%] === Automation QA Runner - Instalacion v2.3.0 ===
+>> "%INSTALL_LOG%" echo [%TIME%] USERNAME=%USERNAME%
+>> "%INSTALL_LOG%" echo [%TIME%] COMPUTERNAME=%COMPUTERNAME%
+>> "%INSTALL_LOG%" echo [%TIME%] LOCALAPPDATA=%LOCALAPPDATA%
+>> "%INSTALL_LOG%" echo [%TIME%] INSTALL_DIR=%INSTALL_DIR%
+>> "%INSTALL_LOG%" echo [%TIME%] JAR_DST=%JAR_DST%
+
 REM -- Paso 1: Verificar entorno de ejecucion ------------------------------------
 echo  [1/4] Verificando entorno de ejecucion...
 java -version >nul 2>&1
-if errorlevel 1 (
+if !ERRORLEVEL! neq 0 (
     echo.
     echo  +===============================================================+
     echo  |   Se requiere instalar un componente del sistema            |
@@ -110,7 +119,7 @@ pause & exit /b 1
 :JAR_FOUND
 echo  Instalando componentes en %INSTALL_DIR%...
 copy /Y "!RUNNER_JAR!" "%JAR_DST%" >nul 2>&1
-if errorlevel 1 (
+if !ERRORLEVEL! neq 0 (
     echo.
     echo  [ERROR] No se pudieron copiar los componentes.
     echo  Verifica que tienes permisos de escritura en: %INSTALL_DIR%
@@ -127,6 +136,7 @@ echo  [3/4] Configurando inicio automatico...
 REM Identificador unico del equipo
 for /f "usebackq tokens=*" %%h in (`hostname`) do set "HOST_NAME=%%h"
 set "RUNNER_ID=win-!HOST_NAME!"
+>> "%INSTALL_LOG%" echo [%TIME%] RUNNER_ID=!RUNNER_ID!
 
 REM Generar script de arranque (java en una sola linea - sin continuaciones ^)
 (
@@ -159,33 +169,48 @@ if not exist "%INSTALL_DIR%\launcher.vbs" (
     echo.
     echo  [ERROR] No se pudo crear el servicio de inicio.
     echo  Verifica permisos en: %INSTALL_DIR%
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: launcher.vbs no se creo en %INSTALL_DIR%
     echo.
     pause & exit /b 1
 )
+>> "%INSTALL_LOG%" echo [%TIME%] OK: launcher.vbs creado: %INSTALL_DIR%\launcher.vbs
 
 REM Obtener ruta 8.3 para schtasks (evita problemas con espacios en rutas)
 for %%F in ("%INSTALL_DIR%\launcher.vbs") do set "VBS_SHORT=%%~sF"
+>> "%INSTALL_LOG%" echo [%TIME%] VBS_SHORT=!VBS_SHORT!
 
-REM Registrar en Task Scheduler (3 intentos, de mas especifico a minimo)
+REM Registrar en Task Scheduler (3 intentos, con comillas en la ruta del VBS)
+REM NOTA: \"%%...\"\" protege la ruta en /tr si VBS_SHORT tiene espacios (8.3 deshabilitado)
 schtasks /delete /tn "AutomationQA Runner" /f >nul 2>&1
 
-schtasks /create /tn "AutomationQA Runner" /sc ONLOGON /ru "%USERNAME%" /tr "wscript.exe %VBS_SHORT%" /f /rl LIMITED /delay 0000:30 >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] --- schtasks /create ---
+>> "%INSTALL_LOG%" echo [%TIME%] Intento 1: /rl LIMITED /delay 0000:30 /tr "wscript.exe \"!VBS_SHORT!\""
+schtasks /create /tn "AutomationQA Runner" /sc ONLOGON /ru "%USERNAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /f /rl LIMITED /delay 0000:30 >> "%INSTALL_LOG%" 2>&1
 if !ERRORLEVEL! equ 0 goto :SCHED_OK
+>> "%INSTALL_LOG%" echo [%TIME%] Intento 1 fallo (exit !ERRORLEVEL!)
 
-schtasks /create /tn "AutomationQA Runner" /sc ONLOGON /ru "%USERNAME%" /tr "wscript.exe %VBS_SHORT%" /f /delay 0000:30 >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] Intento 2: sin /rl /delay 0000:30
+schtasks /create /tn "AutomationQA Runner" /sc ONLOGON /ru "%USERNAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /f /delay 0000:30 >> "%INSTALL_LOG%" 2>&1
 if !ERRORLEVEL! equ 0 goto :SCHED_OK
+>> "%INSTALL_LOG%" echo [%TIME%] Intento 2 fallo (exit !ERRORLEVEL!)
 
-schtasks /create /tn "AutomationQA Runner" /sc ONLOGON /ru "%USERNAME%" /tr "wscript.exe %VBS_SHORT%" /f >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] Intento 3: parametros minimos
+schtasks /create /tn "AutomationQA Runner" /sc ONLOGON /ru "%USERNAME%" /tr "wscript.exe \"!VBS_SHORT!\"" /f >> "%INSTALL_LOG%" 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] Intento 3 resultado (exit !ERRORLEVEL!)
 
 :SCHED_OK
 REM Verificar que la tarea quedo registrada
-schtasks /query /tn "AutomationQA Runner" >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] schtasks /query verificando tarea...
+schtasks /query /tn "AutomationQA Runner" >> "%INSTALL_LOG%" 2>&1
 if !ERRORLEVEL! equ 0 (
     echo  [OK] Servicio de inicio automatico configurado.
+    >> "%INSTALL_LOG%" echo [%TIME%] OK: tarea "AutomationQA Runner" verificada con schtasks /query
 ) else (
+    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: tarea no encontrada en schtasks - usando Startup como alternativa
     REM Fallback: carpeta Startup del usuario (genera wrapper que apunta al VBS original)
     echo  Configurando metodo alternativo de inicio...
     set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
+    >> "%INSTALL_LOG%" echo [%TIME%] STARTUP_DIR=!STARTUP_DIR!
     (
         echo Dim sh
         echo Set sh = CreateObject("WScript.Shell"^)
@@ -194,11 +219,13 @@ if !ERRORLEVEL! equ 0 (
     ) > "!STARTUP_DIR!\AutomationQARunner.vbs"
     if exist "!STARTUP_DIR!\AutomationQARunner.vbs" (
         echo  [OK] Inicio automatico configurado (metodo alternativo).
+        >> "%INSTALL_LOG%" echo [%TIME%] OK: wrapper Startup creado: !STARTUP_DIR!\AutomationQARunner.vbs
     ) else (
         echo.
         echo  [ERROR] No se pudo configurar el inicio automatico.
         echo  El Runner se instalo pero deberas iniciarlo manualmente.
         echo  Ruta: %INSTALL_DIR%\launcher.vbs
+        >> "%INSTALL_LOG%" echo [%TIME%] ERROR: no se pudo crear wrapper en Startup: !STARTUP_DIR!
         echo.
     )
 )
@@ -219,15 +246,23 @@ set /p START_NOW=  Iniciar el Runner ahora mismo? (S/n):
 if "!START_NOW!"=="" set START_NOW=S
 if /i "!START_NOW!"=="n" goto :DONE
 
+>> "%INSTALL_LOG%" echo [%TIME%] --- Pre-flight antes de iniciar ---
+>> "%INSTALL_LOG%" echo [%TIME%] launcher.vbs existe: 0=no
 if not exist "%INSTALL_DIR%\launcher.vbs" (
     echo  [ERROR] No se encontro el servicio de inicio.
+    echo  Ruta esperada: %INSTALL_DIR%\launcher.vbs
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: launcher.vbs no existe: %INSTALL_DIR%\launcher.vbs
 ) else (
+    >> "%INSTALL_LOG%" echo [%TIME%] OK: launcher.vbs existe - iniciando
     echo  Iniciando el Runner en segundo plano...
     wscript.exe "%INSTALL_DIR%\launcher.vbs"
     echo  [OK] Runner iniciado. Aparecera en el Dashboard en ~15 segundos.
+    >> "%INSTALL_LOG%" echo [%TIME%] OK: Runner iniciado via wscript.exe
 )
 
 :DONE
+echo.
+echo  Log de instalacion: %INSTALL_LOG%
 echo.
 pause
 endlocal
