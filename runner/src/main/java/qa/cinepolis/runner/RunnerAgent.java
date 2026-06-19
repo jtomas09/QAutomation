@@ -40,13 +40,22 @@ public class RunnerAgent {
         UpdateManager        updateMgr     = new UpdateManager(
                 config.backendUrl, config.runnerToken, config.version, agentDataDir);
 
-        // Resolve embedded ADB (download if needed) before first device discovery
-        String adbPath = platformTools.resolveAdb();
-        if (adbPath != null) {
-            System.setProperty("ADB_PATH",    adbPath);
-            System.setProperty("ADB_VERSION", platformTools.getAdbVersion());
-            config.androidSupported = true;
-        }
+        // Resolve embedded ADB — downloads platform-tools if absent (up to 3 attempts)
+        // Must complete before first heartbeat so host is not marked ONLINE until ADB is validated
+        String  adbPath       = platformTools.resolveAdb();
+        boolean adbFunctional = platformTools.isAdbFunctional();
+        String  adbVersion    = platformTools.getAdbVersion();
+
+        System.setProperty("ADB_PATH",    adbPath);
+        System.setProperty("ADB_VERSION", adbVersion);
+        System.setProperty("ADB_OK",      String.valueOf(adbFunctional));
+        config.androidSupported = adbFunctional;
+
+        System.out.println("[Runner] === Diagnostico ADB ===");
+        System.out.println("[Runner] ADB Path:    " + adbPath);
+        System.out.println("[Runner] ADB Exists:  " + java.nio.file.Files.exists(java.nio.file.Path.of(adbPath)));
+        System.out.println("[Runner] ADB Version: " + adbVersion);
+        System.out.println("[Runner] ADB OK:      " + adbFunctional);
 
         // Ensure Appium is running before accepting jobs
         try {
@@ -72,6 +81,7 @@ public class RunnerAgent {
         System.out.println("[Runner] Registrando en Backend...");
         try {
             List<Map<String, String>> initDevices = discoverAllDevices(config);
+            System.out.println("[Runner] Devices Found:  " + initDevices.size());
             client.registerDevices(config.runnerId, initDevices);
             client.sendHeartbeat(
                     config.runnerId, config.platform, config.version,

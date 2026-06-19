@@ -118,6 +118,12 @@ export interface Runner {
   hostname?:         string
   androidSupported?: boolean
   iosSupported?:     boolean
+  // Embedded ADB diagnostics (from PlatformToolsManager)
+  adbPath?:          string
+  adbVersion?:       string
+  adbExists?:        boolean
+  adbOk?:            boolean
+  devicesFound?:     number
 }
 
 export interface ExecutionSummary {

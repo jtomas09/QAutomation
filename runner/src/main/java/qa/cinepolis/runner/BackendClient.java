@@ -120,11 +120,15 @@ public class BackendClient {
             payload.put("devices",          devices);
             payload.put("timestamp",        java.time.Instant.now().toString());
 
-            // Embedded ADB diagnostics (populated once PlatformToolsManager has resolved)
+            // Embedded ADB diagnostics — always included once ADB_PATH is set
             String adbPath = System.getProperty("ADB_PATH");
             if (adbPath != null && !adbPath.isBlank()) {
-                payload.put("adbEmbedded",  true);
-                payload.put("adbVersion",   System.getProperty("ADB_VERSION", "unknown"));
+                boolean adbExists = new File(adbPath).exists();
+                boolean adbOk     = Boolean.parseBoolean(System.getProperty("ADB_OK", "false"));
+                payload.put("adbPath",     adbPath);
+                payload.put("adbVersion",  System.getProperty("ADB_VERSION", "unavailable"));
+                payload.put("adbExists",   adbExists);
+                payload.put("adbOk",       adbOk);
                 payload.put("devicesFound", devices.size());
             }
 
@@ -168,35 +172,29 @@ public class BackendClient {
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Returns the embedded ADB path set by PlatformToolsManager via
-     * System.setProperty("ADB_PATH", ...).
+     * Returns the embedded ADB path.  Never falls through to PATH "adb".
      *
-     * Falls back to the well-known embedded location in case this is called
-     * before PlatformToolsManager has fully initialized, then to "adb" (PATH).
-     * In production the ADB_PATH property is always present before any call here.
+     * Priority:
+     *  1. ADB_PATH JVM property (set by PlatformToolsManager after resolveAdb())
+     *  2. Well-known embedded location (for calls made before PlatformToolsManager runs)
+     *
+     * If the returned path does not exist on disk, ADB commands will fail with
+     * a clear IOException rather than silently running the wrong "adb" from PATH.
      */
     public static String findAdb() {
-        // Primary: embedded path set by PlatformToolsManager
+        // Primary: set by PlatformToolsManager.resolveAdb()
         String embedded = System.getProperty("ADB_PATH");
-        if (embedded != null && !embedded.isBlank() && new File(embedded).exists()) {
-            return embedded;
-        }
+        if (embedded != null && !embedded.isBlank()) return embedded;
 
-        // Fallback: well-known embedded location (called before PlatformToolsManager ran)
+        // Fallback: compute well-known embedded location directly
         boolean isWin = System.getProperty("os.name", "").toLowerCase().contains("win");
         if (isWin) {
             String localAppData = System.getenv("LOCALAPPDATA");
-            if (localAppData != null) {
-                String c = localAppData + "\\AutomationQA\\runner\\platform-tools\\adb.exe";
-                if (new File(c).exists()) return c;
-            }
-        } else {
-            String home = System.getProperty("user.home", "");
-            String c = home + "/.automationqa/platform-tools/adb";
-            if (new File(c).exists()) return c;
+            if (localAppData != null)
+                return localAppData + "\\AutomationQA\\runner\\platform-tools\\adb.exe";
         }
-
-        return "adb"; // last resort — should not be reached in production
+        String home = System.getProperty("user.home", "");
+        return home + "/.automationqa/platform-tools/adb";
     }
 
     /**

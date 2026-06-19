@@ -206,60 +206,93 @@ echo  [OK] automationqa-runner.jar verificado.
 
 REM ===========================================================================
 REM  [3/6] ANDROID PLATFORM TOOLS (ADB embebido)
+REM  Target: %INSTALL_DIR%\platform-tools\adb.exe
+REM  Fuente: https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 REM ===========================================================================
-echo  [3/6] Instalando Android Platform Tools...
+echo  [3/6] Instalando Android Platform Tools ^(ADB embebido^)...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 3: platform-tools...
 
 set "PT_DIR=%INSTALL_DIR%\platform-tools"
 set "ADB_EXE=!PT_DIR!\adb.exe"
-
-if exist "!ADB_EXE!" (
-    echo  [OK] Platform-tools ya instalados: !PT_DIR!
-    >> "%INSTALL_LOG%" echo [%TIME%] OK: adb.exe ya disponible en !ADB_EXE!
-    goto :PT_READY
-)
-
-echo  Descargando Android Platform Tools (Google CDN^)...
->> "%INSTALL_LOG%" echo [%TIME%] INFO: descargando platform-tools desde Google CDN...
-
-set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
 set "PT_URL=https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
 
+>> "%INSTALL_LOG%" echo [%TIME%] ADB Path esperado: !ADB_EXE!
+
+REM -- Ya instalado y funcional -----------------------------------------------
+if exist "!ADB_EXE!" (
+    echo  [OK] ADB embebido ya instalado: !PT_DIR!
+    >> "%INSTALL_LOG%" echo [%TIME%] OK: adb.exe ya disponible
+    goto :PT_VALIDATE
+)
+
+REM -- Descarga: intento 1/2 --------------------------------------------------
+echo  Descargando Android Platform Tools ^(intento 1/2^)...
+echo  Origen: %PT_URL%
+>> "%INSTALL_LOG%" echo [%TIME%] INFO: descargando platform-tools intento 1/2...
+
+set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
+set "PT_DOWNLOAD_OK=0"
+
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { Invoke-WebRequest -Uri '%PT_URL%' -OutFile '!PT_ZIP!' -UseBasicParsing -TimeoutSec 300; Write-Host 'Descarga OK' } catch { Write-Host ('ERROR: ' + $_.Exception.Message); exit 1 }" ^
+    "$url='%PT_URL%'; $out='!PT_ZIP!'; try { Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 300 } catch { try { (New-Object System.Net.WebClient).DownloadFile($url,$out) } catch { Write-Host('ERROR: '+$_.Exception.Message); exit 1 } }; $sz=(Get-Item $out -ErrorAction SilentlyContinue).Length; if(!$sz -or $sz -lt 5000000) { Write-Host('ERROR: archivo invalido '+$sz+' bytes'); exit 1 }; Write-Host('OK: '+[math]::Round($sz/1MB,1)+' MB')" ^
     >>"%INSTALL_LOG%" 2>&1
-if !ERRORLEVEL! neq 0 (
-    echo  [AVISO] No se pudo descargar platform-tools ahora.
+if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
+
+REM -- Descarga: intento 2/2 --------------------------------------------------
+if "!PT_DOWNLOAD_OK!"=="0" (
+    del "!PT_ZIP!" >nul 2>&1
+    set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
+    echo  Reintentando descarga ^(intento 2/2^)...
+    >> "%INSTALL_LOG%" echo [%TIME%] INFO: reintentando descarga platform-tools intento 2/2...
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$url='%PT_URL%'; $out='!PT_ZIP!'; try { (New-Object System.Net.WebClient).DownloadFile($url,$out) } catch { Write-Host('ERROR: '+$_.Exception.Message); exit 1 }; $sz=(Get-Item $out -ErrorAction SilentlyContinue).Length; if(!$sz -or $sz -lt 5000000) { Write-Host('ERROR: archivo invalido '+$sz+' bytes'); exit 1 }; Write-Host('OK: '+[math]::Round($sz/1MB,1)+' MB')" ^
+        >>"%INSTALL_LOG%" 2>&1
+    if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
+)
+
+if "!PT_DOWNLOAD_OK!"=="0" (
+    del "!PT_ZIP!" >nul 2>&1
+    echo  [AVISO] No se pudo descargar platform-tools.
     echo  El Agent los descargara automaticamente al primer inicio.
-    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: fallo descarga platform-tools (no critico - se descargaran al iniciar)
+    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: fallo descarga platform-tools (Agent los descargara al iniciar)
     goto :PT_READY
 )
 
-echo  Extrayendo Platform Tools...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Expand-Archive -Path '!PT_ZIP!' -DestinationPath '!INSTALL_DIR!' -Force" ^
-    >>"%INSTALL_LOG%" 2>&1
-del "!PT_ZIP!" >nul 2>&1
+REM -- Extraccion -------------------------------------------------------------
+echo  Extrayendo Platform Tools en: !INSTALL_DIR!
+>> "%INSTALL_LOG%" echo [%TIME%] INFO: extrayendo platform-tools...
 
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { Expand-Archive -Path '!PT_ZIP!' -DestinationPath '!INSTALL_DIR!' -Force; Write-Host 'Extraccion OK' } catch { Write-Host ('ERROR extraccion: '+$_.Exception.Message); exit 1 }" ^
+    >>"%INSTALL_LOG%" 2>&1
+set "PT_EXTRACT_ERR=!ERRORLEVEL!"
+del "!PT_ZIP!" >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] Extraccion exit code: !PT_EXTRACT_ERR!
+
+:PT_VALIDATE
 if exist "!ADB_EXE!" (
-    for /f "usebackq" %%v in (`"!ADB_EXE!" version 2^>nul ^| findstr /i "Android Debug"`) do (
-        echo  [OK] ADB embebido: %%v
-        >> "%INSTALL_LOG%" echo [%TIME%] OK: %%v
-    )
-    >> "%INSTALL_LOG%" echo [%TIME%] OK: adb.exe instalado en !ADB_EXE!
+    echo  [OK] ADB embebido instalado: !ADB_EXE!
+    >> "%INSTALL_LOG%" echo [%TIME%] ADB Exists: true
+    >> "%INSTALL_LOG%" echo [%TIME%] ADB Path: !ADB_EXE!
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$v=& '!ADB_EXE!' version 2^>^&1 ^| Select-Object -First 1; Write-Host $v" ^
+        >>"%INSTALL_LOG%" 2>&1
 ) else (
-    echo  [AVISO] Extraccion incompleta. El Agent descargara platform-tools al iniciar.
-    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: adb.exe no encontrado tras extraccion
+    echo  [AVISO] adb.exe NO encontrado en: !ADB_EXE!
+    echo  El Agent descargara platform-tools automaticamente al iniciar.
+    >> "%INSTALL_LOG%" echo [%TIME%] ADB Exists: false
+    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: adb.exe no disponible tras instalacion
 )
 
 :PT_READY
->> "%INSTALL_LOG%" echo [%TIME%] OK: paso platform-tools completado
+>> "%INSTALL_LOG%" echo [%TIME%] Paso 3 platform-tools completado.
 
 REM ===========================================================================
 REM  [4/6] SCRIPTS DE ARRANQUE
 REM ===========================================================================
 echo  [4/6] Creando scripts de arranque...
->> "%INSTALL_LOG%" echo [%TIME%] Paso 3: creando scripts...
+>> "%INSTALL_LOG%" echo [%TIME%] Paso 4: creando scripts...
 
 REM -- RUNNER_ID --------------------------------------------------------------
 for /f "tokens=* usebackq" %%h in (`hostname`) do set "HOST_NAME=%%h"

@@ -907,7 +907,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
               <table className="w-full">
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                    {['HOST', 'SISTEMA OPERATIVO', 'ESTADO', 'DISPOSITIVOS', 'CPU', 'MEMORIA', 'ULTIMO CONTACTO'].map(h => (
+                    {['HOST', 'SISTEMA OPERATIVO', 'ESTADO', 'ADB', 'DISPOSITIVOS', 'CPU', 'MEMORIA', 'ULTIMO CONTACTO'].map(h => (
                       <th key={h} className="px-4 py-2.5 text-left text-[9px] font-black tracking-widest whitespace-nowrap"
                         style={{ color: 'var(--text-dim)' }}>
                         {h}
@@ -918,7 +918,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                 <tbody>
                   {loading && runners.length === 0 && Array.from({ length: 3 }, (_, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                      {Array.from({ length: 7 }, (__, j) => (
+                      {Array.from({ length: 8 }, (__, j) => (
                         <td key={j} className="px-4 py-3">
                           <div className="h-4 rounded animate-pulse" style={{ background: 'rgba(255,255,255,0.06)', width: j === 0 ? 140 : 70 }} />
                         </td>
@@ -977,10 +977,32 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                           </span>
                         </td>
 
+                        {/* ADB */}
+                        <td className="px-4 py-3">
+                          {runner.adbOk === undefined ? (
+                            <span className="text-[10px] text-slate-600">—</span>
+                          ) : runner.adbOk ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black w-fit"
+                                style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }}>
+                                ✓ OK
+                              </span>
+                              {runner.adbVersion && runner.adbVersion !== 'unavailable' && (
+                                <span className="text-[9px] font-mono text-slate-600">v{runner.adbVersion}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black w-fit"
+                              style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+                              ✗ ERROR
+                            </span>
+                          )}
+                        </td>
+
                         {/* DISPOSITIVOS */}
                         <td className="px-4 py-3">
                           <span className="text-[12px] font-bold" style={{ color: 'var(--text-sec)' }}>
-                            {runner.devices?.length ?? 0}
+                            {runner.devicesFound ?? runner.devices?.length ?? 0}
                           </span>
                         </td>
 
@@ -1013,7 +1035,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                   })}
                   {!loading && runners.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-10 text-center">
+                      <td colSpan={8} className="px-4 py-10 text-center">
                         <div className="flex flex-col items-center gap-2">
                           <Server size={28} className="text-slate-700" />
                           <span className="text-[12px] text-slate-600">Sin hosts registrados</span>
