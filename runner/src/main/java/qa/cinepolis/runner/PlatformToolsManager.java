@@ -267,23 +267,48 @@ public class PlatformToolsManager {
      * Downloads using PowerShell, which natively handles Windows proxy authentication
      * (NTLM, Kerberos) and reads IE/WinHTTP proxy settings. Used as fallback when
      * Java HttpClient fails in corporate networks.
+     *
+     * Uses a temp .ps1 file instead of -Command to avoid TerminatorExpectedAtEndOfString
+     * when the zip path contains apostrophes (e.g. C:\Users\John's PC\...).
      */
     private void downloadViaPowerShell(String url, Path zipFile) throws Exception {
-        String dst = zipFile.toString(); // PS single-quoted strings treat \ as literal
-        String psCmd =
-                "try { Invoke-WebRequest -Uri '" + url + "' -OutFile '" + dst + "'" +
-                " -UseBasicParsing -TimeoutSec 300; Write-Host 'OK-IWR' } " +
-                "catch { try { (New-Object System.Net.WebClient).DownloadFile('" + url + "','" + dst + "');" +
-                " Write-Host 'OK-WC' } catch { Write-Host ('ERROR: '+$_.Exception.Message); exit 1 } }";
+        // Escape any double-quotes in paths for embedding in a PS double-quoted string
+        String psUrl = url.replace("\"", "`\"");
+        String psDst = zipFile.toString().replace("\"", "`\"");
 
-        Process p = new ProcessBuilder(
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd)
-                .redirectErrorStream(true).start();
-        boolean done = p.waitFor(350, TimeUnit.SECONDS);
-        String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!done) { p.destroyForcibly(); throw new IOException("PowerShell timeout (350s)"); }
-        System.out.println("[PlatformTools] PowerShell: " + output.trim());
-        if (p.exitValue() != 0) throw new IOException("PowerShell exit " + p.exitValue() + ": " + output.trim());
+        String script =
+                "$downloadUrl = \"" + psUrl + "\"\r\n" +
+                "$zipPath     = \"" + psDst + "\"\r\n" +
+                "Write-Host \"URL: $downloadUrl\"\r\n" +
+                "Write-Host \"Destino: $zipPath\"\r\n" +
+                "try {\r\n" +
+                "    Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 300\r\n" +
+                "    Write-Host 'OK-IWR'\r\n" +
+                "} catch {\r\n" +
+                "    try {\r\n" +
+                "        (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $zipPath)\r\n" +
+                "        Write-Host 'OK-WC'\r\n" +
+                "    } catch {\r\n" +
+                "        Write-Host \"ERROR: $($_.Exception.Message)\"\r\n" +
+                "        Write-Host \"ERROR DETALLE: $($Error[0])\"\r\n" +
+                "        exit 1\r\n" +
+                "    }\r\n" +
+                "}\r\n";
+
+        Path ps1 = Files.createTempFile("qa_dl_pt_", ".ps1");
+        try {
+            Files.writeString(ps1, script, StandardCharsets.UTF_8);
+            Process p = new ProcessBuilder(
+                    "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1.toString())
+                    .redirectErrorStream(true).start();
+            boolean done = p.waitFor(350, TimeUnit.SECONDS);
+            String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!done) { p.destroyForcibly(); throw new IOException("PowerShell timeout (350s)"); }
+            System.out.println("[PlatformTools] PowerShell: " + output.trim());
+            if (p.exitValue() != 0) throw new IOException("PowerShell exit " + p.exitValue() + ": " + output.trim());
+        } finally {
+            Files.deleteIfExists(ps1);
+        }
     }
 
     private static void unzip(Path zipFile, Path destDir) throws IOException {

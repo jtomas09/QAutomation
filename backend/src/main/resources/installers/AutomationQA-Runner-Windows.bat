@@ -225,82 +225,146 @@ if exist "!ADB_EXE!" (
     goto :PT_VALIDATE
 )
 
-REM -- Descarga: intento 1/2 --------------------------------------------------
-echo  Descargando Android Platform Tools ^(intento 1/2^)...
-echo  Origen: %PT_URL%
->> "%INSTALL_LOG%" echo [%TIME%] INFO: descargando platform-tools intento 1/2...
-
+REM ---------------------------------------------------------------------------
+REM  Descarga via script PS1 (evita TerminatorExpectedAtEndOfString cuando
+REM  rutas contienen apostrofes — ej. C:\Users\John's PC\...)
+REM ---------------------------------------------------------------------------
 set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
+set "PT_PS1=%TEMP%\qa_dl_pt_%RANDOM%.ps1"
 set "PT_DOWNLOAD_OK=0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$url='%PT_URL%'; $out='!PT_ZIP!'; try { Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 300 } catch { try { (New-Object System.Net.WebClient).DownloadFile($url,$out) } catch { Write-Host('ERROR: '+$_.Exception.Message); exit 1 } }; $sz=(Get-Item $out -ErrorAction SilentlyContinue).Length; if(!$sz -or $sz -lt 5000000) { Write-Host('ERROR: archivo invalido '+$sz+' bytes'); exit 1 }; Write-Host('OK: '+[math]::Round($sz/1MB,1)+' MB')" ^
-    >>"%INSTALL_LOG%" 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] PT_ZIP destino: !PT_ZIP!
+>> "%INSTALL_LOG%" echo [%TIME%] PT_PS1 script:  !PT_PS1!
+
+REM -- Escribir script PS1 de descarga (sin comillas simples en rutas) --------
+>  "!PT_PS1!" echo $downloadUrl = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+>> "!PT_PS1!" echo $backendUrl  = "%BACKEND_URL%/api/runner/download/platform-tools/windows"
+>> "!PT_PS1!" echo $zipPath     = "%PT_ZIP%"
+>> "!PT_PS1!" echo $minBytes    = 5000000
+>> "!PT_PS1!" echo $downloaded  = $false
+>> "!PT_PS1!" echo Write-Host "URL: $downloadUrl"
+>> "!PT_PS1!" echo Write-Host "Destino: $zipPath"
+>> "!PT_PS1!" echo.
+>> "!PT_PS1!" echo # Intento 1: Invoke-WebRequest directo
+>> "!PT_PS1!" echo try {
+>> "!PT_PS1!" echo     Write-Host "Intento 1/3: Invoke-WebRequest..."
+>> "!PT_PS1!" echo     Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 300
+>> "!PT_PS1!" echo     $downloaded = $true
+>> "!PT_PS1!" echo     Write-Host "OK intento 1"
+>> "!PT_PS1!" echo } catch { Write-Host "IWR fallo: $($_.Exception.Message)" }
+>> "!PT_PS1!" echo.
+>> "!PT_PS1!" echo # Intento 2: WebClient
+>> "!PT_PS1!" echo if (-not $downloaded) {
+>> "!PT_PS1!" echo     try {
+>> "!PT_PS1!" echo         Write-Host "Intento 2/3: WebClient..."
+>> "!PT_PS1!" echo         (New-Object System.Net.WebClient).DownloadFile($downloadUrl, $zipPath)
+>> "!PT_PS1!" echo         $downloaded = $true
+>> "!PT_PS1!" echo         Write-Host "OK intento 2"
+>> "!PT_PS1!" echo     } catch { Write-Host "WebClient fallo: $($_.Exception.Message)" }
+>> "!PT_PS1!" echo }
+>> "!PT_PS1!" echo.
+>> "!PT_PS1!" echo # Intento 3: Backend proxy
+>> "!PT_PS1!" echo if (-not $downloaded) {
+>> "!PT_PS1!" echo     try {
+>> "!PT_PS1!" echo         Write-Host "Intento 3/3: proxy $backendUrl..."
+>> "!PT_PS1!" echo         Invoke-WebRequest -Uri $backendUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 300
+>> "!PT_PS1!" echo         $downloaded = $true
+>> "!PT_PS1!" echo         Write-Host "OK proxy IWR"
+>> "!PT_PS1!" echo     } catch {
+>> "!PT_PS1!" echo         try {
+>> "!PT_PS1!" echo             (New-Object System.Net.WebClient).DownloadFile($backendUrl, $zipPath)
+>> "!PT_PS1!" echo             $downloaded = $true
+>> "!PT_PS1!" echo             Write-Host "OK proxy WebClient"
+>> "!PT_PS1!" echo         } catch { Write-Host "Proxy fallo: $($_.Exception.Message)" }
+>> "!PT_PS1!" echo     }
+>> "!PT_PS1!" echo }
+>> "!PT_PS1!" echo.
+>> "!PT_PS1!" echo if (-not $downloaded) {
+>> "!PT_PS1!" echo     Write-Host "ERROR FINAL: $($Error[0])"
+>> "!PT_PS1!" echo     exit 1
+>> "!PT_PS1!" echo }
+>> "!PT_PS1!" echo $sz = (Get-Item $zipPath -ErrorAction SilentlyContinue).Length
+>> "!PT_PS1!" echo Write-Host "Tamano ZIP: $sz bytes"
+>> "!PT_PS1!" echo if (-not $sz -or $sz -lt $minBytes) {
+>> "!PT_PS1!" echo     Write-Host "ERROR: ZIP invalido ($sz bytes, minimo $minBytes)"
+>> "!PT_PS1!" echo     exit 1
+>> "!PT_PS1!" echo }
+>> "!PT_PS1!" echo Write-Host "Descarga OK: $([math]::Round($sz/1MB,1)) MB"
+
+echo  Descargando Android Platform Tools...
+powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_PS1!" >>"%INSTALL_LOG%" 2>&1
 if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
-
-REM -- Descarga: intento 2/2 --------------------------------------------------
-if "!PT_DOWNLOAD_OK!"=="0" (
-    del "!PT_ZIP!" >nul 2>&1
-    set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
-    echo  Reintentando descarga ^(intento 2/2^)...
-    >> "%INSTALL_LOG%" echo [%TIME%] INFO: reintentando descarga platform-tools intento 2/2...
-
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$url='%PT_URL%'; $out='!PT_ZIP!'; try { (New-Object System.Net.WebClient).DownloadFile($url,$out) } catch { Write-Host('ERROR: '+$_.Exception.Message); exit 1 }; $sz=(Get-Item $out -ErrorAction SilentlyContinue).Length; if(!$sz -or $sz -lt 5000000) { Write-Host('ERROR: archivo invalido '+$sz+' bytes'); exit 1 }; Write-Host('OK: '+[math]::Round($sz/1MB,1)+' MB')" ^
-        >>"%INSTALL_LOG%" 2>&1
-    if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
-)
+del "!PT_PS1!" >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] Descarga platform-tools result: PT_DOWNLOAD_OK=!PT_DOWNLOAD_OK!
 
 if "!PT_DOWNLOAD_OK!"=="0" (
     del "!PT_ZIP!" >nul 2>&1
-    set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
-    echo  Reintentando via proxy del servidor ^(intento 3/3^)...
-    >> "%INSTALL_LOG%" echo [%TIME%] INFO: intento 3/3 via backend proxy...
-
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$url='%BACKEND_URL%/api/runner/download/platform-tools/windows'; $out='!PT_ZIP!'; try { Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 300; Write-Host 'OK-proxy' } catch { try { (New-Object System.Net.WebClient).DownloadFile($url,$out); Write-Host 'OK-proxy-WC' } catch { Write-Host('ERROR: '+$_.Exception.Message); exit 1 } }; $sz=(Get-Item $out -ErrorAction SilentlyContinue).Length; if(!$sz -or $sz -lt 5000000) { Write-Host('ERROR: invalido '+$sz+' bytes'); exit 1 }; Write-Host('OK: '+[math]::Round($sz/1MB,1)+' MB')" ^
-        >>"%INSTALL_LOG%" 2>&1
-    if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
-)
-
-if "!PT_DOWNLOAD_OK!"=="0" (
-    del "!PT_ZIP!" >nul 2>&1
-    echo  [AVISO] No se pudo descargar Android Platform Tools.
-    echo  Ultimas lineas del log de instalacion:
-    powershell -NoProfile -Command "Get-Content '!INSTALL_LOG!' | Select-Object -Last 8 | ForEach-Object { Write-Host ('    ' + $_) }"
-    echo  El Agent intentara descargarlos automaticamente al iniciar.
-    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: fallo descarga platform-tools en 3 intentos
-    goto :PT_READY
+    echo.
+    echo  [ERROR] No se pudo descargar Android Platform Tools.
+    echo  Sin ADB el Agent no puede detectar dispositivos Android.
+    echo.
+    echo  Ultimas lineas del log:
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: fallo descarga platform-tools en 3 intentos
+    >> "%INSTALL_LOG%" echo [%TIME%] INSTALACION INCOMPLETA: adb.exe no disponible
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content $env:INSTALL_LOG | Select-Object -Last 12 | ForEach-Object { Write-Host ('    ' + $_) }"
+    echo.
+    echo  Verifica la conexion a internet y vuelve a ejecutar el instalador.
+    pause & exit /b 1
 )
 
 REM -- Extraccion -------------------------------------------------------------
 echo  Extrayendo Platform Tools en: !INSTALL_DIR!
->> "%INSTALL_LOG%" echo [%TIME%] INFO: extrayendo platform-tools...
+>> "%INSTALL_LOG%" echo [%TIME%] INFO: extrayendo !PT_ZIP! en !INSTALL_DIR!...
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { Expand-Archive -Path '!PT_ZIP!' -DestinationPath '!INSTALL_DIR!' -Force; Write-Host 'Extraccion OK' } catch { Write-Host ('ERROR extraccion: '+$_.Exception.Message); exit 1 }" ^
-    >>"%INSTALL_LOG%" 2>&1
+set "PT_EX_PS1=%TEMP%\qa_ex_pt_%RANDOM%.ps1"
+>  "!PT_EX_PS1!" echo $zip = "%PT_ZIP%"
+>> "!PT_EX_PS1!" echo $dst = "%INSTALL_DIR%"
+>> "!PT_EX_PS1!" echo try {
+>> "!PT_EX_PS1!" echo     Expand-Archive -Path $zip -DestinationPath $dst -Force
+>> "!PT_EX_PS1!" echo     Write-Host "Extraccion OK"
+>> "!PT_EX_PS1!" echo } catch {
+>> "!PT_EX_PS1!" echo     Write-Host "ERROR extraccion: $($_.Exception.Message)"
+>> "!PT_EX_PS1!" echo     exit 1
+>> "!PT_EX_PS1!" echo }
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_EX_PS1!" >>"%INSTALL_LOG%" 2>&1
 set "PT_EXTRACT_ERR=!ERRORLEVEL!"
+del "!PT_EX_PS1!" >nul 2>&1
 del "!PT_ZIP!" >nul 2>&1
 >> "%INSTALL_LOG%" echo [%TIME%] Extraccion exit code: !PT_EXTRACT_ERR!
 
+if !PT_EXTRACT_ERR! neq 0 (
+    echo  [ERROR] Fallo la extraccion del ZIP de platform-tools.
+    echo  Revisa el log: %INSTALL_LOG%
+    >> "%INSTALL_LOG%" echo [%TIME%] INSTALACION INCOMPLETA: extraccion fallida
+    pause & exit /b 1
+)
+
 :PT_VALIDATE
+>> "%INSTALL_LOG%" echo [%TIME%] Validando: !ADB_EXE!
 if exist "!ADB_EXE!" (
     echo  [OK] ADB embebido instalado: !ADB_EXE!
     >> "%INSTALL_LOG%" echo [%TIME%] ADB Exists: true
     >> "%INSTALL_LOG%" echo [%TIME%] ADB Path: !ADB_EXE!
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$v=& '!ADB_EXE!' version 2^>^&1 ^| Select-Object -First 1; Write-Host $v" ^
-        >>"%INSTALL_LOG%" 2>&1
+    set "PT_VER_PS1=%TEMP%\qa_ver_adb_%RANDOM%.ps1"
+    >  "!PT_VER_PS1!" echo $adb = "%ADB_EXE%"
+    >> "!PT_VER_PS1!" echo $v = (^& $adb version 2^>^&1) ^| Select-Object -First 1
+    >> "!PT_VER_PS1!" echo Write-Host $v
+    powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_VER_PS1!" >>"%INSTALL_LOG%" 2>&1
+    del "!PT_VER_PS1!" >nul 2>&1
 ) else (
-    echo  [AVISO] adb.exe NO encontrado en: !ADB_EXE!
-    echo  El Agent descargara platform-tools automaticamente al iniciar.
+    echo.
+    echo  [ERROR] adb.exe NO encontrado en: !ADB_EXE!
+    echo  La instalacion esta INCOMPLETA. El Agent no podra detectar dispositivos.
+    echo  Revisa el log: %INSTALL_LOG%
+    echo.
     >> "%INSTALL_LOG%" echo [%TIME%] ADB Exists: false
-    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: adb.exe no disponible tras instalacion
+    >> "%INSTALL_LOG%" echo [%TIME%] INSTALACION INCOMPLETA: adb.exe ausente tras extraccion
+    pause & exit /b 1
 )
 
 :PT_READY
->> "%INSTALL_LOG%" echo [%TIME%] Paso 3 platform-tools completado.
+>> "%INSTALL_LOG%" echo [%TIME%] Paso 3 platform-tools completado OK.
 
 REM ===========================================================================
 REM  [4/6] SCRIPTS DE ARRANQUE
