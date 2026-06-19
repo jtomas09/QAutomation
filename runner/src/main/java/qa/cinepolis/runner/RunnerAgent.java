@@ -29,15 +29,22 @@ public class RunnerAgent {
 
         // ── Tool managers ────────────────────────────────────────────────────
         Path agentDataDir = Path.of(config.agentDataDir);
-        PlatformToolsManager platformTools = new PlatformToolsManager(agentDataDir, config.os);
+
+        // Embedded platform-tools live at:
+        //   Windows  → %LOCALAPPDATA%\AutomationQA\runner\platform-tools\
+        //   Mac/Linux → ~/.automationqa/platform-tools/
+        Path runnerDir = "WINDOWS".equals(config.os) ? agentDataDir.resolve("runner") : agentDataDir;
+
+        PlatformToolsManager platformTools = new PlatformToolsManager(runnerDir, config.os);
         AppiumManager        appiumMgr     = new AppiumManager(config.os);
         UpdateManager        updateMgr     = new UpdateManager(
                 config.backendUrl, config.runnerToken, config.version, agentDataDir);
 
-        // Resolve ADB (download if needed) before first device discovery
+        // Resolve embedded ADB (download if needed) before first device discovery
         String adbPath = platformTools.resolveAdb();
         if (adbPath != null) {
-            System.setProperty("ADB_PATH", adbPath);
+            System.setProperty("ADB_PATH",    adbPath);
+            System.setProperty("ADB_VERSION", platformTools.getAdbVersion());
             config.androidSupported = true;
         }
 
@@ -51,7 +58,7 @@ public class RunnerAgent {
 
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
 
-        printBanner(config);
+        printBanner(config, adbPath);
 
         // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -170,7 +177,7 @@ public class RunnerAgent {
         return devices;
     }
 
-    private static void printBanner(RunnerConfig config) {
+    private static void printBanner(RunnerConfig config, String adbPath) {
         System.out.println("=================================================");
         System.out.println("  Cinepolis QA Universal Runner  v" + config.version);
         System.out.println("=================================================");
@@ -183,9 +190,10 @@ public class RunnerAgent {
         System.out.println("  Poll:       " + config.pollIntervalMs + " ms");
         System.out.println();
         System.out.println("  Capacidades detectadas:");
-        System.out.println("  " + (config.androidSupported ? "✓" : "✗") + " Android  (ADB)");
+        System.out.println("  " + (config.androidSupported ? "✓" : "✗") + " Android  (ADB embebido)");
         System.out.println("  " + (config.iosSupported     ? "✓" : "✗") + " iOS      (Xcode/xcrun)");
-        System.out.println("  ADB:        " + BackendClient.findAdb());
+        System.out.println("  ADB:        " + (adbPath != null ? adbPath : "no disponible"));
+        System.out.println("  ADB ver:    " + System.getProperty("ADB_VERSION", "-"));
         System.out.println();
     }
 

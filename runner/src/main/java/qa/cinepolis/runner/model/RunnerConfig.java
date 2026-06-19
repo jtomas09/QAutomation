@@ -105,8 +105,10 @@ public class RunnerConfig {
     }
 
     /**
-     * Probes for a working ADB binary.
-     * Tries PATH first, then ANDROID_HOME, then common SDK install locations.
+     * Probes for the embedded ADB binary only.
+     * The Agent never depends on Android Studio, ANDROID_HOME, or PATH.
+     * If the embedded path doesn't exist yet, PlatformToolsManager will
+     * download platform-tools at startup and override androidSupported=true.
      */
     static boolean probeAndroid() {
         for (String candidate : buildAdbCandidates()) {
@@ -115,37 +117,28 @@ public class RunnerConfig {
                 Process p = new ProcessBuilder(candidate, "version")
                         .redirectErrorStream(true).start();
                 boolean done = p.waitFor(3, TimeUnit.SECONDS);
-                p.getInputStream().readAllBytes(); // drain to avoid buffer deadlock
+                p.getInputStream().readAllBytes();
                 if (done && p.exitValue() == 0) {
-                    System.out.println("[Runner] Android soportado (ADB: " + candidate + ")");
+                    System.out.println("[Runner] ADB embebido disponible: " + candidate);
                     return true;
                 }
                 p.destroyForcibly();
             } catch (Exception ignored) {}
         }
-        System.out.println("[Runner] Android no detectado (ADB no encontrado en PATH ni en SDK)");
+        System.out.println("[Runner] ADB embebido no encontrado — se descargara al iniciar.");
         return false;
     }
 
     private static List<String> buildAdbCandidates() {
+        // Only the embedded location — never PATH, ANDROID_HOME, or Android Studio
         List<String> list = new ArrayList<>();
-        list.add("adb");  // trust PATH first
-
-        String androidHome = env("ANDROID_HOME", null);
-        if (androidHome != null) {
-            list.add(androidHome + File.separator + "platform-tools" + File.separator
-                    + (isWindows() ? "adb.exe" : "adb"));
-        }
-
         String home = System.getProperty("user.home", "");
         if (isWindows()) {
-            list.add(home + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe");
-            list.add("C:\\Android\\platform-tools\\adb.exe");
-            list.add("C:\\Program Files\\Android\\platform-tools\\adb.exe");
+            String localAppData = System.getenv().getOrDefault("LOCALAPPDATA",
+                    home + "\\AppData\\Local");
+            list.add(localAppData + "\\AutomationQA\\runner\\platform-tools\\adb.exe");
         } else {
-            list.add(home + "/Library/Android/sdk/platform-tools/adb");
-            list.add(home + "/Android/Sdk/platform-tools/adb");
-            list.add("/usr/local/android-sdk/platform-tools/adb");
+            list.add(home + "/.automationqa/platform-tools/adb");
         }
         return list;
     }

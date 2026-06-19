@@ -3,16 +3,17 @@ chcp 65001 > nul
 setlocal EnableDelayedExpansion
 
 REM ============================================================================
-REM  Automation QA Runner - Instalador Windows v6.0
+REM  Automation QA Runner - Instalador Windows v7.0
+REM
+REM  CAMBIOS v7.0:
+REM  - ADB embebido: descarga Android Platform Tools en %INSTALL_DIR%\platform-tools\
+REM    durante la instalacion. El Agent NO depende de Android Studio, ANDROID_HOME ni PATH.
+REM  - Pasos renumerados a 6 (nuevo paso [3/6] para platform-tools).
 REM
 REM  CAMBIOS v6.0:
 REM  - Validacion de Java 17+: descarga JRE 17 portatil si la version es menor.
 REM  - run-runner.bat generado con $variable += (sin @() arrays — evita PS ParserError).
 REM  - Logs de exit code y stderr de cada invocacion PowerShell.
-REM  - Validacion de archivos generados despues de cada paso.
-REM  - launcher.vbs y run-runner.bat generados via PowerShell (sin ECHO blocks).
-REM  - VBS usa sh.Run Chr(34) & "<ruta>" & Chr(34) sin cmd /c.
-REM  - Tarea programada via Register-ScheduledTask (sin rutas 8.3 ni %%~sF).
 REM ============================================================================
 
 set "BACKEND_URL=https://qautomation-production.up.railway.app"
@@ -21,7 +22,7 @@ set "TASK_NAME=AutomationQA Runner"
 
 echo.
 echo  +===============================================================+
-echo  ^|   Automation QA Runner - Instalacion v6.0                   ^|
+echo  ^|   Automation QA Runner - Instalacion v7.0                   ^|
 echo  +===============================================================+
 echo.
 
@@ -51,7 +52,7 @@ if not exist "%INSTALL_DIR%" (
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 
 REM -- Log inicial (overwrite) ------------------------------------------------
-> "%INSTALL_LOG%" echo [%DATE% %TIME%] === AutomationQA Runner v6.0 - Inicio instalacion ===
+> "%INSTALL_LOG%" echo [%DATE% %TIME%] === AutomationQA Runner v7.0 - Inicio instalacion ===
 >> "%INSTALL_LOG%" echo [%TIME%] INSTALL_DIR=%INSTALL_DIR%
 >> "%INSTALL_LOG%" echo [%TIME%] USERNAME=%USERNAME%
 >> "%INSTALL_LOG%" echo [%TIME%] COMPUTERNAME=%COMPUTERNAME%
@@ -60,7 +61,7 @@ REM -- Log inicial (overwrite) ------------------------------------------------
 REM ===========================================================================
 REM  [1/5] JAVA (requiere 17+)
 REM ===========================================================================
-echo  [1/5] Verificando entorno Java...
+echo  [1/6] Verificando entorno Java...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 1: verificando Java...
 
 set "JAVA_BIN=java"
@@ -153,7 +154,7 @@ echo  [OK] Ejecutable: !JAVA_BIN!
 REM ===========================================================================
 REM  [2/5] JAR
 REM ===========================================================================
-echo  [2/5] Verificando componentes del Runner...
+echo  [2/6] Verificando componentes del Runner...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 2: verificando JAR...
 
 if exist "%JAR_DST%" (
@@ -204,9 +205,60 @@ echo  [OK] automationqa-runner.jar verificado.
 >> "%INSTALL_LOG%" echo [%TIME%] OK: JAR verificado en %JAR_DST%
 
 REM ===========================================================================
-REM  [3/5] SCRIPTS DE ARRANQUE
+REM  [3/6] ANDROID PLATFORM TOOLS (ADB embebido)
 REM ===========================================================================
-echo  [3/5] Creando scripts de arranque...
+echo  [3/6] Instalando Android Platform Tools...
+>> "%INSTALL_LOG%" echo [%TIME%] Paso 3: platform-tools...
+
+set "PT_DIR=%INSTALL_DIR%\platform-tools"
+set "ADB_EXE=!PT_DIR!\adb.exe"
+
+if exist "!ADB_EXE!" (
+    echo  [OK] Platform-tools ya instalados: !PT_DIR!
+    >> "%INSTALL_LOG%" echo [%TIME%] OK: adb.exe ya disponible en !ADB_EXE!
+    goto :PT_READY
+)
+
+echo  Descargando Android Platform Tools (Google CDN^)...
+>> "%INSTALL_LOG%" echo [%TIME%] INFO: descargando platform-tools desde Google CDN...
+
+set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
+set "PT_URL=https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { Invoke-WebRequest -Uri '%PT_URL%' -OutFile '!PT_ZIP!' -UseBasicParsing -TimeoutSec 300; Write-Host 'Descarga OK' } catch { Write-Host ('ERROR: ' + $_.Exception.Message); exit 1 }" ^
+    >>"%INSTALL_LOG%" 2>&1
+if !ERRORLEVEL! neq 0 (
+    echo  [AVISO] No se pudo descargar platform-tools ahora.
+    echo  El Agent los descargara automaticamente al primer inicio.
+    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: fallo descarga platform-tools (no critico - se descargaran al iniciar)
+    goto :PT_READY
+)
+
+echo  Extrayendo Platform Tools...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Expand-Archive -Path '!PT_ZIP!' -DestinationPath '!INSTALL_DIR!' -Force" ^
+    >>"%INSTALL_LOG%" 2>&1
+del "!PT_ZIP!" >nul 2>&1
+
+if exist "!ADB_EXE!" (
+    for /f "usebackq" %%v in (`"!ADB_EXE!" version 2^>nul ^| findstr /i "Android Debug"`) do (
+        echo  [OK] ADB embebido: %%v
+        >> "%INSTALL_LOG%" echo [%TIME%] OK: %%v
+    )
+    >> "%INSTALL_LOG%" echo [%TIME%] OK: adb.exe instalado en !ADB_EXE!
+) else (
+    echo  [AVISO] Extraccion incompleta. El Agent descargara platform-tools al iniciar.
+    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: adb.exe no encontrado tras extraccion
+)
+
+:PT_READY
+>> "%INSTALL_LOG%" echo [%TIME%] OK: paso platform-tools completado
+
+REM ===========================================================================
+REM  [4/6] SCRIPTS DE ARRANQUE
+REM ===========================================================================
+echo  [4/6] Creando scripts de arranque...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 3: creando scripts...
 
 REM -- RUNNER_ID --------------------------------------------------------------
@@ -279,9 +331,9 @@ echo  [OK] Scripts de arranque creados.
 >> "%INSTALL_LOG%" echo [%TIME%] OK: launcher.vbs creado en %LAUNCHER_VBS%
 
 REM ===========================================================================
-REM  [4/5] TAREA PROGRAMADA
+REM  [5/6] TAREA PROGRAMADA
 REM ===========================================================================
-echo  [4/5] Configurando inicio automatico...
+echo  [5/6] Configurando inicio automatico...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 4: configurando tarea programada...
 
 REM -- Eliminar tarea previa --------------------------------------------------
@@ -343,10 +395,10 @@ if !ERRORLEVEL! neq 0 (
 )
 
 REM ===========================================================================
-REM  [5/5] INICIO DEL RUNNER
+REM  [6/6] INICIO DEL RUNNER
 REM ===========================================================================
 echo.
-echo  [5/5] Configuracion completada.
+echo  [6/6] Configuracion completada.
 echo.
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 5: inicio del runner
 

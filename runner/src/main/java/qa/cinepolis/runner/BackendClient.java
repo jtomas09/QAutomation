@@ -23,8 +23,7 @@ public class BackendClient {
             .build();
     private final ObjectMapper json = new ObjectMapper();
 
-    // Cached ADB path resolved once and reused on every heartbeat
-    private static volatile String resolvedAdbPath = null;
+    // No local cache — ADB_PATH is managed as a JVM system property by PlatformToolsManager
 
     public BackendClient(String baseUrl, String token) {
         this(baseUrl, token, "runner-unknown");
@@ -121,6 +120,14 @@ public class BackendClient {
             payload.put("devices",          devices);
             payload.put("timestamp",        java.time.Instant.now().toString());
 
+            // Embedded ADB diagnostics (populated once PlatformToolsManager has resolved)
+            String adbPath = System.getProperty("ADB_PATH");
+            if (adbPath != null && !adbPath.isBlank()) {
+                payload.put("adbEmbedded",  true);
+                payload.put("adbVersion",   System.getProperty("ADB_VERSION", "unknown"));
+                payload.put("devicesFound", devices.size());
+            }
+
             String body = json.writeValueAsString(payload);
             HttpResponse<String> res = post("/api/runners", body);
             return res.headers().firstValue("X-Runner-Command").orElse(null);
@@ -161,49 +168,35 @@ public class BackendClient {
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * Resolves the ADB executable once and caches the result.
-     * Search order: ANDROID_HOME → common SDK paths → PATH fallback.
+     * Returns the embedded ADB path set by PlatformToolsManager via
+     * System.setProperty("ADB_PATH", ...).
+     *
+     * Falls back to the well-known embedded location in case this is called
+     * before PlatformToolsManager has fully initialized, then to "adb" (PATH).
+     * In production the ADB_PATH property is always present before any call here.
      */
     public static String findAdb() {
-        if (resolvedAdbPath != null) return resolvedAdbPath;
-
-        String androidHome = System.getenv("ANDROID_HOME");
-        if (androidHome == null) androidHome = System.getProperty("ANDROID_HOME");
-        if (androidHome != null) {
-            String c = androidHome + File.separator + "platform-tools" + File.separator + "adb";
-            if (new File(c).exists() || new File(c + ".exe").exists()) {
-                resolvedAdbPath = c;
-                return resolvedAdbPath;
-            }
+        // Primary: embedded path set by PlatformToolsManager
+        String embedded = System.getProperty("ADB_PATH");
+        if (embedded != null && !embedded.isBlank() && new File(embedded).exists()) {
+            return embedded;
         }
 
-        String home   = System.getProperty("user.home", "");
-        String osName = System.getProperty("os.name", "").toLowerCase();
-        boolean isWin = osName.contains("win");
-        String user   = System.getProperty("user.name", "");
-
-        List<String> candidates = isWin
-            ? List.of(
-                home  + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
-                "C:\\Android\\platform-tools\\adb.exe",
-                "C:\\Program Files\\Android\\platform-tools\\adb.exe",
-                "C:\\Users\\" + user + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe")
-            : List.of(
-                home + "/Library/Android/sdk/platform-tools/adb",
-                home + "/Android/Sdk/platform-tools/adb",
-                "/usr/local/android-sdk/platform-tools/adb",
-                "/opt/android-sdk/platform-tools/adb");
-
-        for (String c : candidates) {
-            if (new File(c).exists()) {
-                resolvedAdbPath = c;
-                System.out.println("[ADB] Encontrado en: " + c);
-                return resolvedAdbPath;
+        // Fallback: well-known embedded location (called before PlatformToolsManager ran)
+        boolean isWin = System.getProperty("os.name", "").toLowerCase().contains("win");
+        if (isWin) {
+            String localAppData = System.getenv("LOCALAPPDATA");
+            if (localAppData != null) {
+                String c = localAppData + "\\AutomationQA\\runner\\platform-tools\\adb.exe";
+                if (new File(c).exists()) return c;
             }
+        } else {
+            String home = System.getProperty("user.home", "");
+            String c = home + "/.automationqa/platform-tools/adb";
+            if (new File(c).exists()) return c;
         }
 
-        resolvedAdbPath = "adb";  // trust PATH
-        return resolvedAdbPath;
+        return "adb"; // last resort — should not be reached in production
     }
 
     /**

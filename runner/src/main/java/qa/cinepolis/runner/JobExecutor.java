@@ -743,9 +743,14 @@ public class JobExecutor {
 
     // ── Pre-flight: ADB ────────────────────────────────────────────────────────
 
+    private String embeddedAdbPath() {
+        String path = System.getProperty("ADB_PATH");
+        return (path != null && !path.isBlank()) ? path : "adb";
+    }
+
     private void checkAdbDevices(String executionId) {
         try {
-            Process p = new ProcessBuilder("adb", "devices")
+            Process p = new ProcessBuilder(embeddedAdbPath(), "devices")
                     .redirectErrorStream(true).start();
             String output = new String(p.getInputStream().readAllBytes());
             p.waitFor();

@@ -3,6 +3,7 @@ package qa.cinepolis.runner;
 import java.io.*;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
@@ -12,16 +13,18 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Manages ADB (Android Debug Bridge) installation.
+ * Manages the embedded ADB (Android Debug Bridge) binary.
  *
- * Resolution order:
- *   1. PATH (system-wide adb)
- *   2. ANDROID_HOME env variable
- *   3. Common SDK install locations (Android Studio, etc.)
- *   4. Agent data dir: ~/.automationqa/android/platform-tools/  (already downloaded)
- *   5. Auto-download platform-tools from Google CDN → agent data dir
+ * The Agent NEVER depends on Android Studio, Android SDK, ANDROID_HOME, or PATH.
+ * ADB is always resolved from the embedded location inside the runner install dir:
  *
- * Once resolved, the path is cached for the lifetime of the process.
+ *   Windows : {runnerDir}\platform-tools\adb.exe
+ *   macOS   : {runnerDir}/platform-tools/adb
+ *   Linux   : {runnerDir}/platform-tools/adb
+ *
+ * If platform-tools are absent, they are downloaded automatically from Google CDN
+ * to the same embedded location.  All callers must use the path returned by
+ * resolveAdb() — never a bare "adb" string.
  */
 public class PlatformToolsManager {
 
@@ -29,45 +32,60 @@ public class PlatformToolsManager {
     private static final String MAC_URL   = "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip";
     private static final String LINUX_URL = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip";
 
-    private final Path   dataDir;    // ~/.automationqa  or  %LOCALAPPDATA%\AutomationQA
-    private final String os;
-    private volatile String resolvedAdb = null;
+    // Minimum acceptable ZIP size — Google's zip is ~8 MB; reject obvious errors
+    private static final long MIN_ZIP_BYTES = 1_000_000L;
 
-    public PlatformToolsManager(Path dataDir, String os) {
-        this.dataDir = dataDir;
-        this.os      = os;
+    private final Path   runnerDir;  // directory where platform-tools/ lives
+    private final String os;
+
+    private volatile String resolvedAdb  = null;
+    private volatile String cachedVersion = null;
+
+    /**
+     * @param runnerDir  Directory that will contain the platform-tools/ subdirectory.
+     *                   On Windows: %LOCALAPPDATA%\AutomationQA\runner
+     *                   On Mac/Linux: ~/.automationqa
+     */
+    public PlatformToolsManager(Path runnerDir, String os) {
+        this.runnerDir = runnerDir;
+        this.os        = os;
     }
 
     // ── Public API ────────────────────────────────────────────────────────
 
     /**
-     * Returns the absolute path to the adb executable, downloading platform-tools
-     * if needed.  Returns null only when download also fails.
+     * Returns the absolute path to the embedded adb executable.
+     * Downloads platform-tools on first call if they are absent.
+     * Returns null only when download also fails.
      */
     public String resolveAdb() {
         if (resolvedAdb != null) return resolvedAdb;
 
-        // Fast path: search known locations without downloading
-        String found = searchExisting();
-        if (found != null) {
-            resolvedAdb = found;
-            return found;
+        Path embedded = embeddedAdbPath();
+
+        // Fast path: already installed
+        if (Files.exists(embedded) && probe(embedded.toString())) {
+            resolvedAdb = embedded.toString();
+            System.out.println("[PlatformTools] ADB embebido listo: " + resolvedAdb);
+            return resolvedAdb;
         }
 
-        // Slow path: download platform-tools
-        System.out.println("[PlatformTools] ADB no encontrado — descargando platform-tools...");
-        try {
-            download();
-            found = embeddedAdbPath().toString();
-            if (Files.exists(Path.of(found))) {
-                resolvedAdb = found;
-                System.out.println("[PlatformTools] ADB listo: " + found);
-                return found;
+        // Slow path: download
+        System.out.println("[PlatformTools] ADB no encontrado en ruta embebida — descargando platform-tools...");
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                download();
+                if (Files.exists(embedded) && probe(embedded.toString())) {
+                    resolvedAdb = embedded.toString();
+                    System.out.println("[PlatformTools] ADB listo tras descarga: " + resolvedAdb);
+                    return resolvedAdb;
+                }
+            } catch (Exception e) {
+                System.err.printf("[PlatformTools] Intento %d/%d fallido: %s%n", attempt, 2, e.getMessage());
             }
-        } catch (Exception e) {
-            System.err.println("[PlatformTools] Error descargando platform-tools: " + e.getMessage());
         }
-        System.err.println("[PlatformTools] ADB no disponible. Android no sera descubierto.");
+
+        System.err.println("[PlatformTools] ADB embebido no disponible. Los dispositivos Android no seran detectados.");
         return null;
     }
 
@@ -75,70 +93,60 @@ public class PlatformToolsManager {
         return resolveAdb() != null;
     }
 
+    /**
+     * Returns the ADB version string, e.g. "35.0.2".
+     * Resolves (and downloads) ADB first if needed.
+     */
+    public String getAdbVersion() {
+        if (cachedVersion != null) return cachedVersion;
+        String adb = resolveAdb();
+        if (adb == null) { cachedVersion = "unavailable"; return cachedVersion; }
+        try {
+            Process p = new ProcessBuilder(adb, "version")
+                    .redirectErrorStream(true).start();
+            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (!done) p.destroyForcibly();
+            for (String line : out.split("\n")) {
+                if (line.startsWith("Android Debug Bridge version")) {
+                    cachedVersion = line.substring("Android Debug Bridge version ".length()).trim();
+                    return cachedVersion;
+                }
+            }
+            cachedVersion = "unknown";
+        } catch (Exception e) {
+            cachedVersion = "error";
+        }
+        return cachedVersion;
+    }
+
+    /** Path to the platform-tools directory (may not exist yet). */
+    public Path getToolsDir() {
+        return runnerDir.resolve("platform-tools");
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────
 
-    private String searchExisting() {
-        for (String candidate : buildCandidates()) {
-            if (candidate == null || candidate.isBlank()) continue;
-            if (probe(candidate)) {
-                System.out.println("[PlatformTools] ADB encontrado: " + candidate);
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private List<String> buildCandidates() {
-        List<String> list = new ArrayList<>();
-        // System PATH
-        list.add(isWindows() ? "adb.exe" : "adb");
-
-        // ANDROID_HOME
-        String androidHome = System.getenv("ANDROID_HOME");
-        if (androidHome != null && !androidHome.isBlank()) {
-            list.add(androidHome + sep() + "platform-tools" + sep() + adbBin());
-        }
-
-        String home = System.getProperty("user.home", "");
-
-        if (isWindows()) {
-            list.add(home + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe");
-            list.add("C:\\Android\\platform-tools\\adb.exe");
-            list.add("C:\\Program Files\\Android\\platform-tools\\adb.exe");
-        } else {
-            list.add(home + "/Library/Android/sdk/platform-tools/adb");
-            list.add(home + "/Android/Sdk/platform-tools/adb");
-            list.add("/usr/local/android-sdk/platform-tools/adb");
-            list.add("/opt/android-sdk/platform-tools/adb");
-        }
-
-        // Agent embedded path (previously downloaded)
-        list.add(embeddedAdbPath().toString());
-
-        return list;
-    }
-
     private Path embeddedAdbPath() {
-        return dataDir.resolve("android").resolve("platform-tools").resolve(adbBin());
+        return runnerDir.resolve("platform-tools").resolve(isWindows() ? "adb.exe" : "adb");
     }
 
     private boolean probe(String adbPath) {
         try {
             Process p = new ProcessBuilder(adbPath, "version")
                     .redirectErrorStream(true).start();
-            boolean done = p.waitFor(3, TimeUnit.SECONDS);
-            p.getInputStream().readAllBytes();
-            if (done && p.exitValue() == 0) return true;
-            p.destroyForcibly();
-        } catch (Exception ignored) {}
-        return false;
+            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            p.getInputStream().readAllBytes(); // drain
+            if (!done) { p.destroyForcibly(); return false; }
+            return p.exitValue() == 0;
+        } catch (Exception ignored) { return false; }
     }
 
     private void download() throws Exception {
-        String url = isWindows() ? WIN_URL : ("MACOS".equals(os) ? MAC_URL : LINUX_URL);
-        Path targetDir = dataDir.resolve("android");
-        Files.createDirectories(targetDir);
-        Path zipFile = targetDir.resolve("platform-tools.zip");
+        String url       = isWindows() ? WIN_URL : ("MACOS".equals(os) ? MAC_URL : LINUX_URL);
+        Path   zipFile   = runnerDir.resolve("platform-tools.zip");
+
+        Files.createDirectories(runnerDir);
 
         System.out.println("[PlatformTools] Descargando: " + url);
         HttpClient client = HttpClient.newBuilder()
@@ -147,27 +155,43 @@ public class PlatformToolsManager {
                 .build();
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofMinutes(5))
+                .timeout(Duration.ofMinutes(10))
                 .GET().build();
+
         HttpResponse<Path> res = client.send(req, HttpResponse.BodyHandlers.ofFile(zipFile));
         if (res.statusCode() != 200) {
+            Files.deleteIfExists(zipFile);
             throw new IOException("HTTP " + res.statusCode() + " al descargar platform-tools");
         }
-        System.out.printf("[PlatformTools] Descarga completada: %.1f MB%n",
-                Files.size(zipFile) / 1_048_576.0);
+
+        long size = Files.size(zipFile);
+        System.out.printf("[PlatformTools] Descarga completada: %.1f MB%n", size / 1_048_576.0);
+
+        if (size < MIN_ZIP_BYTES) {
+            Files.deleteIfExists(zipFile);
+            throw new IOException("ZIP descargado demasiado pequeno (" + size + " bytes) — probable error de red");
+        }
 
         System.out.println("[PlatformTools] Extrayendo...");
-        unzip(zipFile, targetDir);
+        // The zip contains a top-level platform-tools/ directory;
+        // extracting to runnerDir produces runnerDir/platform-tools/adb[.exe]
+        unzip(zipFile, runnerDir);
         Files.deleteIfExists(zipFile);
 
-        // Make adb executable on Unix
+        // Make binaries executable on Unix
         if (!isWindows()) {
-            Path adb = embeddedAdbPath();
-            if (Files.exists(adb)) {
-                Set<PosixFilePermission> perms = new HashSet<>(Files.getPosixFilePermissions(adb));
-                perms.add(PosixFilePermission.OWNER_EXECUTE);
-                perms.add(PosixFilePermission.GROUP_EXECUTE);
-                Files.setPosixFilePermissions(adb, perms);
+            Path toolsDir = runnerDir.resolve("platform-tools");
+            if (Files.exists(toolsDir)) {
+                Files.walk(toolsDir)
+                        .filter(p -> !Files.isDirectory(p))
+                        .forEach(p -> {
+                            try {
+                                Set<PosixFilePermission> perms = new HashSet<>(Files.getPosixFilePermissions(p));
+                                perms.add(PosixFilePermission.OWNER_EXECUTE);
+                                perms.add(PosixFilePermission.GROUP_EXECUTE);
+                                Files.setPosixFilePermissions(p, perms);
+                            } catch (Exception ignored) {}
+                        });
             }
         }
         System.out.println("[PlatformTools] Extraccion completa.");
@@ -178,7 +202,10 @@ public class PlatformToolsManager {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 Path target = destDir.resolve(entry.getName()).normalize();
-                if (!target.startsWith(destDir)) continue; // zip slip protection
+                if (!target.startsWith(destDir)) {
+                    zis.closeEntry();
+                    continue; // zip slip protection
+                }
                 if (entry.isDirectory()) {
                     Files.createDirectories(target);
                 } else {
@@ -190,7 +217,5 @@ public class PlatformToolsManager {
         }
     }
 
-    private String adbBin()  { return isWindows() ? "adb.exe" : "adb"; }
     private boolean isWindows() { return "WINDOWS".equals(os); }
-    private String sep() { return File.separator; }
 }
