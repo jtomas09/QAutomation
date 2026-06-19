@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Play, ListOrdered, Layers3,
   Smartphone, Globe, Settings2, BarChart3,
   TrendingUp, Clock4, Activity, BookOpen, Video, Headphones,
-  Zap, ChevronDown, CalendarClock, Server, HardDrive,
+  Zap, ChevronDown, CalendarClock, Server, HardDrive, Download,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -12,7 +12,7 @@ export type Page =
   | 'dashboard' | 'execute' | 'executions' | 'suites' | 'devices' | 'environments' | 'settings'
   | 'reports' | 'metrics' | 'history' | 'trends'
   | 'docs' | 'videos' | 'support' | 'schedule'
-  | 'runner-manager' | 'device-farm'
+  | 'runner-manager' | 'device-farm' | 'download-agent'
 
 interface NavItem { id: Page; label: string; icon: React.ElementType; accent?: string; tag?: string }
 
@@ -35,8 +35,9 @@ const ANALYTICS_NAV: NavItem[] = [
 ]
 
 const INFRASTRUCTURE_NAV: NavItem[] = [
-  { id: 'device-farm',    label: 'Device Farm',    icon: HardDrive, accent: '#10b981', tag: 'NUEVO' },
-  { id: 'runner-manager', label: 'Runner Manager', icon: Server,    accent: '#06b6d4' },
+  { id: 'device-farm',    label: 'Device Farm',     icon: HardDrive, accent: '#10b981', tag: 'NUEVO' },
+  { id: 'runner-manager', label: 'Runner Manager',  icon: Server,    accent: '#06b6d4' },
+  { id: 'download-agent', label: 'Descargar Agent', icon: Download,  accent: '#6366f1' },
 ]
 
 const RESOURCES_NAV: NavItem[] = [
@@ -87,31 +88,34 @@ export default function Sidebar({ page, onPageChange, runningCount = 0 }: Props)
         <NavSection label="RECURSOS"       items={RESOURCES_NAV}      page={page} onSelect={onPageChange} />
       </nav>
 
-      {/* Enterprise card */}
+      {/* Agent download card */}
       <div className="flex-shrink-0 p-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
         <div className="rounded-xl p-4 relative overflow-hidden"
           style={{
-            background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(124,58,237,0.1) 100%)',
-            border: '1px solid rgba(99,102,241,0.25)',
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(124,58,237,0.08) 100%)',
+            border: '1px solid rgba(99,102,241,0.22)',
           }}>
-          {/* Glow */}
           <div className="absolute inset-0 pointer-events-none"
-            style={{ background: 'radial-gradient(ellipse at top right, rgba(99,102,241,0.2) 0%, transparent 60%)' }} />
+            style={{ background: 'radial-gradient(ellipse at top right, rgba(99,102,241,0.18) 0%, transparent 60%)' }} />
           <div className="relative">
             <div className="flex items-center gap-2 mb-2">
-              <Zap size={13} className="text-yellow-400" />
-              <span className="text-xs font-bold" style={{ color: 'var(--text-pri)' }}>Plan Enterprise</span>
-              <span className="ml-auto text-[10px] font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">ACTIVO</span>
+              <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                <Download size={12} className="text-indigo-400" />
+              </div>
+              <span className="text-xs font-bold" style={{ color: 'var(--text-pri)' }}>¿Aún no tienes Agent?</span>
             </div>
             <p className="text-[10px] text-slate-400 leading-relaxed mb-3">
-              Automatiza, valida y entrega experiencias con IA integrada.
+              Descarga Automation QA Agent e instálalo en tus máquinas para comenzar a ejecutar pruebas.
             </p>
-            <div className="text-[10px] text-slate-500 mb-2">Vence el 25/12/2026</div>
-            <button className="w-full py-1.5 rounded-lg text-[11px] font-semibold text-indigo-300 transition-all"
-              style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.35)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.2)' }}>
-              Gestionar Plan
+            <button
+              onClick={() => onPageChange('download-agent')}
+              className="w-full py-2 rounded-lg text-[11px] font-bold text-white flex items-center justify-center gap-1.5 transition-all"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #7c3aed)', boxShadow: '0 4px 12px rgba(99,102,241,0.35)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}>
+              <Download size={12} />
+              Descargar Agent
             </button>
           </div>
         </div>

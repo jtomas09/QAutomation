@@ -109,7 +109,12 @@ export default function App() {
 
           {page === 'runner-manager' && <RunnerManager />}
 
-          {page === 'device-farm'    && <DeviceFarm />}
+          {(page === 'device-farm' || page === 'download-agent') && (
+            <DeviceFarm
+              onNavigate={(p) => setPage(p as Page)}
+              initialOpenDownload={page === 'download-agent'}
+            />
+          )}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
@@ -184,7 +189,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>
