@@ -3,15 +3,16 @@ chcp 65001 > nul
 setlocal EnableDelayedExpansion
 
 REM ============================================================================
-REM  Automation QA Runner - Instalador Windows v5.0
+REM  Automation QA Runner - Instalador Windows v6.0
 REM
-REM  CAMBIOS v5.0:
-REM  - launcher.vbs y run-runner.bat generados via PowerShell (sin ECHO blocks)
-REM    para evitar corrupcion por codepage UTF-8.
+REM  CAMBIOS v6.0:
+REM  - Validacion de Java 17+: descarga JRE 17 portatil si la version es menor.
+REM  - run-runner.bat generado con $variable += (sin @() arrays — evita PS ParserError).
+REM  - Logs de exit code y stderr de cada invocacion PowerShell.
+REM  - Validacion de archivos generados despues de cada paso.
+REM  - launcher.vbs y run-runner.bat generados via PowerShell (sin ECHO blocks).
 REM  - VBS usa sh.Run Chr(34) & "<ruta>" & Chr(34) sin cmd /c.
 REM  - Tarea programada via Register-ScheduledTask (sin rutas 8.3 ni %%~sF).
-REM  - Validacion completa al final: no muestra exito si falla algo.
-REM  - Logs detallados en cada paso.
 REM ============================================================================
 
 set "BACKEND_URL=https://qautomation-production.up.railway.app"
@@ -20,7 +21,7 @@ set "TASK_NAME=AutomationQA Runner"
 
 echo.
 echo  +===============================================================+
-echo  ^|   Automation QA Runner - Instalacion v5.0                   ^|
+echo  ^|   Automation QA Runner - Instalacion v6.0                   ^|
 echo  +===============================================================+
 echo.
 
@@ -50,34 +51,35 @@ if not exist "%INSTALL_DIR%" (
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>&1
 
 REM -- Log inicial (overwrite) ------------------------------------------------
-> "%INSTALL_LOG%" echo [%DATE% %TIME%] === AutomationQA Runner v5.0 - Inicio instalacion ===
+> "%INSTALL_LOG%" echo [%DATE% %TIME%] === AutomationQA Runner v6.0 - Inicio instalacion ===
 >> "%INSTALL_LOG%" echo [%TIME%] INSTALL_DIR=%INSTALL_DIR%
 >> "%INSTALL_LOG%" echo [%TIME%] USERNAME=%USERNAME%
 >> "%INSTALL_LOG%" echo [%TIME%] COMPUTERNAME=%COMPUTERNAME%
 >> "%INSTALL_LOG%" echo [%TIME%] LOCALAPPDATA=%LOCALAPPDATA%
 
 REM ===========================================================================
-REM  [1/5] JAVA
+REM  [1/5] JAVA (requiere 17+)
 REM ===========================================================================
 echo  [1/5] Verificando entorno Java...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 1: verificando Java...
 
-REM -- Try Java from PATH or embedded JRE ------------------------------------
 set "JAVA_BIN=java"
 set "JRE_DIR=%INSTALL_DIR%\jre17"
 
+REM -- Try Java from PATH first ----------------------------------------------
 java -version >nul 2>&1
-if !ERRORLEVEL! equ 0 goto :java_found
+if !ERRORLEVEL! equ 0 goto :check_java_ver
 
-REM -- Check embedded JRE (already downloaded on a previous install) ---------
+REM -- Try embedded JRE from a previous install ------------------------------
 if exist "!JRE_DIR!\bin\java.exe" (
     set "JAVA_BIN=!JRE_DIR!\bin\java.exe"
-    goto :java_found
+    goto :java_ready
 )
 
-REM -- Auto-download portable JRE 17 (user-level, no admin needed) -----------
+REM -- Auto-download portable JRE 17 ----------------------------------------
+:DOWNLOAD_JRE_17
 echo.
-echo  [INFO] Java no encontrado. Descargando JRE 17 portatil...
+echo  [INFO] Java no encontrado o version insuficiente. Descargando JRE 17 portatil...
 echo  [INFO] Esto puede tardar unos minutos segun la velocidad de Internet.
 echo.
 >> "%INSTALL_LOG%" echo [%TIME%] INFO: descargando JRE 17 portatil...
@@ -95,7 +97,7 @@ if !ERRORLEVEL! neq 0 (
     echo.
     >> "%INSTALL_LOG%" echo [%TIME%] ERROR: fallo descarga JRE
     start "" https://adoptium.net
-    pause ^& exit /b 1
+    pause & exit /b 1
 )
 
 echo  [INFO] Extrayendo JRE...
@@ -112,10 +114,34 @@ if not exist "!JRE_DIR!\bin\java.exe" (
 )
 
 set "JAVA_BIN=!JRE_DIR!\bin\java.exe"
-echo  [OK] JRE 17 portatil instalado en: !JRE_DIR!
+echo  [OK] JRE 17 portatil instalado: !JRE_DIR!
 >> "%INSTALL_LOG%" echo [%TIME%] OK: JRE 17 portatil listo en !JRE_DIR!
+goto :java_ready
 
-:java_found
+REM -- Validate Java version from PATH is >= 17 ------------------------------
+:check_java_ver
+set "PS_VER=%TEMP%\qa_ver_%RANDOM%.ps1"
+>  "!PS_VER!" echo $v = (java -version 2^>^&1) ^| Select-Object -First 1
+>> "!PS_VER!" echo if     ($v -match '"1\.(\d+)') { [int]$Matches[1] }
+>> "!PS_VER!" echo elseif ($v -match '"(\d+)')     { [int]$Matches[1] }
+>> "!PS_VER!" echo else                             { 0 }
+set "JAVA_MAJOR=0"
+for /f "usebackq" %%n in (`powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_VER!" 2^>nul`) do set "JAVA_MAJOR=%%n"
+del "!PS_VER!" >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] Java version detectada: !JAVA_MAJOR!
+if !JAVA_MAJOR! lss 17 (
+    echo  [INFO] Java !JAVA_MAJOR! detectado ^(se requiere 17+^). Instalando JRE 17 portatil...
+    >> "%INSTALL_LOG%" echo [%TIME%] INFO: Java !JAVA_MAJOR! menor a 17, descargando JRE 17
+    if exist "!JRE_DIR!\bin\java.exe" (
+        set "JAVA_BIN=!JRE_DIR!\bin\java.exe"
+        echo  [OK] JRE 17 portatil ya disponible.
+        >> "%INSTALL_LOG%" echo [%TIME%] OK: reutilizando JRE 17 en !JRE_DIR!
+        goto :java_ready
+    )
+    goto :DOWNLOAD_JRE_17
+)
+
+:java_ready
 for /f "tokens=* usebackq" %%v in (`"!JAVA_BIN!" -version 2^>^&1`) do (
     set "JAVA_VER=%%v"
     goto :java_ver_done
@@ -194,24 +220,29 @@ REM ---------------------------------------------------------------------------
 >> "%INSTALL_LOG%" echo [%TIME%] Creando run-runner.bat via PowerShell...
 
 set "PS1=%TEMP%\qa_bat_%RANDOM%.ps1"
-> "%PS1%" echo $dst = '!RUNNER_BAT!'
->> "%PS1%" echo $jar = '!JAR_DST!'
->> "%PS1%" echo $log = '!LOG_DIR!\runner.log'
->> "%PS1%" echo $lines = @(
->> "%PS1%" echo     '@echo off',
->> "%PS1%" echo     'setlocal',
->> "%PS1%" echo     'if exist "%%LOCALAPPDATA%%\Android\Sdk\platform-tools\adb.exe" set "PATH=%%LOCALAPPDATA%%\Android\Sdk\platform-tools;%%PATH%%"',
->> "%PS1%" echo     'if exist "%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools\adb.exe" set "PATH=%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools;%%PATH%%"',
->> "%PS1%" echo     'if defined ANDROID_HOME set "PATH=%%ANDROID_HOME%%\platform-tools;%%PATH%%"',
->> "%PS1%" echo     ':loop',
->> "%PS1%" echo     (('!JAVA_BIN!' + ' -Dfile.encoding=UTF-8 -DBACKEND_URL=!BACKEND_URL! -DRUNNER_TOKEN=!RUNNER_TOKEN! -DRUNNER_ID=!RUNNER_ID! -DPOLL_INTERVAL_MS=30000 -jar "' + $jar + '" ^>^>"' + $log + '" 2^>^&1'),
->> "%PS1%" echo     'timeout /t 15 /nobreak ^>nul',
->> "%PS1%" echo     'goto loop'
->> "%PS1%" echo )
->> "%PS1%" echo [IO.File]::WriteAllLines($dst, $lines, [Text.Encoding]::ASCII)
+>  "%PS1%" echo $dst     = '!RUNNER_BAT!'
+>> "%PS1%" echo $jar     = '!JAR_DST!'
+>> "%PS1%" echo $logFile = '!LOG_DIR!\runner.log'
+>> "%PS1%" echo $javaBin = '!JAVA_BIN!'
+>> "%PS1%" echo $crlf    = [string][char]13 + [string][char]10
+>> "%PS1%" echo $bat     = '@echo off'  + $crlf
+>> "%PS1%" echo $bat    += 'setlocal'   + $crlf
+>> "%PS1%" echo $bat    += 'if exist "%%LOCALAPPDATA%%\Android\Sdk\platform-tools\adb.exe" set "PATH=%%LOCALAPPDATA%%\Android\Sdk\platform-tools;%%PATH%%"' + $crlf
+>> "%PS1%" echo $bat    += 'if exist "%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools\adb.exe" set "PATH=%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools;%%PATH%%"' + $crlf
+>> "%PS1%" echo $bat    += 'if defined ANDROID_HOME set "PATH=%%ANDROID_HOME%%\platform-tools;%%PATH%%"' + $crlf
+>> "%PS1%" echo $bat    += ':loop' + $crlf
+>> "%PS1%" echo $bat    += ('"' + $javaBin + '" -Dfile.encoding=UTF-8 -DBACKEND_URL=!BACKEND_URL! -DRUNNER_TOKEN=!RUNNER_TOKEN! -DRUNNER_ID=!RUNNER_ID! -DPOLL_INTERVAL_MS=30000 -jar "' + $jar + '" ^>^> "' + $logFile + '" 2^>^&1') + $crlf
+>> "%PS1%" echo $bat    += 'timeout /t 15 /nobreak ^>nul' + $crlf
+>> "%PS1%" echo $bat    += 'goto loop'  + $crlf
+>> "%PS1%" echo [IO.File]::WriteAllText($dst, $bat, [Text.Encoding]::ASCII)
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" >>"%INSTALL_LOG%" 2>&1
+set "PS_BAT_EXIT=!ERRORLEVEL!"
 del "%PS1%" >nul 2>&1
+>> "%INSTALL_LOG%" echo [%TIME%] PowerShell run-runner.bat exit code: !PS_BAT_EXIT!
+if !PS_BAT_EXIT! neq 0 (
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: PowerShell fallo al generar run-runner.bat
+)
 
 if not exist "%RUNNER_BAT%" (
     echo  [ERROR] No se pudo crear run-runner.bat
