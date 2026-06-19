@@ -3,6 +3,7 @@ package qa.cinepolis.runner;
 import qa.cinepolis.runner.model.JobDto;
 import qa.cinepolis.runner.model.RunnerConfig;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,30 @@ public class RunnerAgent {
     public static void main(String[] args) throws Exception {
         RunnerConfig  config   = RunnerConfig.fromEnv();
         BackendClient client   = new BackendClient(config.backendUrl, config.runnerToken, config.runnerId);
-        JobExecutor   executor = new JobExecutor(config, client);
+
+        // ── Tool managers ────────────────────────────────────────────────────
+        Path agentDataDir = Path.of(config.agentDataDir);
+        PlatformToolsManager platformTools = new PlatformToolsManager(agentDataDir, config.os);
+        AppiumManager        appiumMgr     = new AppiumManager(config.os);
+        UpdateManager        updateMgr     = new UpdateManager(
+                config.backendUrl, config.runnerToken, config.version, agentDataDir);
+
+        // Resolve ADB (download if needed) before first device discovery
+        String adbPath = platformTools.resolveAdb();
+        if (adbPath != null) {
+            System.setProperty("ADB_PATH", adbPath);
+            config.androidSupported = true;
+        }
+
+        // Ensure Appium is running before accepting jobs
+        try {
+            appiumMgr.ensureRunning();
+        } catch (Exception e) {
+            System.err.println("[Runner] Appium no pudo iniciarse: " + e.getMessage());
+            System.err.println("[Runner] Los tests continuaran pero fallaran si requieren Appium.");
+        }
+
+        JobExecutor executor = new JobExecutor(config, client, appiumMgr);
 
         printBanner(config);
 
@@ -34,6 +58,7 @@ public class RunnerAgent {
             System.out.println("\n[Runner] Cerrando — deteniendo ejecucion activa...");
             stopping = true;
             executor.killActiveProcess();
+            appiumMgr.stop();
         }, "shutdown-hook"));
 
         // ── Heartbeat inmediato al arrancar ──────────────────────────────────
@@ -71,6 +96,12 @@ public class RunnerAgent {
         });
 
         scheduler.scheduleAtFixedRate(client::ping, 0, 10, TimeUnit.SECONDS);
+
+        // Appium watchdog (restart if crashed)
+        appiumMgr.startWatchdog(scheduler);
+
+        // Auto-update check every 60 minutes
+        scheduler.scheduleAtFixedRate(updateMgr::checkAndApply, 60, 60, TimeUnit.MINUTES);
 
         AtomicReference<String> pendingCommand = new AtomicReference<>(null);
         scheduler.scheduleAtFixedRate(() -> {

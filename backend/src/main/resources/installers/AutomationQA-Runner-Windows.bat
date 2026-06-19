@@ -62,25 +62,68 @@ REM ===========================================================================
 echo  [1/5] Verificando entorno Java...
 >> "%INSTALL_LOG%" echo [%TIME%] Paso 1: verificando Java...
 
+REM -- Try Java from PATH or embedded JRE ------------------------------------
+set "JAVA_BIN=java"
+set "JRE_DIR=%INSTALL_DIR%\jre17"
+
 java -version >nul 2>&1
+if !ERRORLEVEL! equ 0 goto :java_found
+
+REM -- Check embedded JRE (already downloaded on a previous install) ---------
+if exist "!JRE_DIR!\bin\java.exe" (
+    set "JAVA_BIN=!JRE_DIR!\bin\java.exe"
+    goto :java_found
+)
+
+REM -- Auto-download portable JRE 17 (user-level, no admin needed) -----------
+echo.
+echo  [INFO] Java no encontrado. Descargando JRE 17 portatil...
+echo  [INFO] Esto puede tardar unos minutos segun la velocidad de Internet.
+echo.
+>> "%INSTALL_LOG%" echo [%TIME%] INFO: descargando JRE 17 portatil...
+
+set "JRE_ZIP=%TEMP%\qa_jre17_%RANDOM%.zip"
+set "JRE_URL=https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse?project=jdk"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "try { Invoke-WebRequest -Uri '%JRE_URL%' -OutFile '!JRE_ZIP!' -UseBasicParsing -TimeoutSec 300; Write-Host 'Descarga OK' } catch { Write-Host ('ERROR: ' + $_.Exception.Message); exit 1 }" ^
+    >>"%INSTALL_LOG%" 2>&1
 if !ERRORLEVEL! neq 0 (
     echo.
-    echo  [ERROR] Java no esta instalado.
-    echo  Descarga la version gratuita desde: https://adoptium.net
+    echo  [ERROR] No se pudo descargar el JRE 17.
+    echo  Instala Java manualmente desde: https://adoptium.net
     echo.
-    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: Java no encontrado
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: fallo descarga JRE
     start "" https://adoptium.net
+    pause ^& exit /b 1
+)
+
+echo  [INFO] Extrayendo JRE...
+if not exist "!JRE_DIR!" mkdir "!JRE_DIR!" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$zip='!JRE_ZIP!'; $dst='!JRE_DIR!'; Expand-Archive -Path $zip -DestinationPath $dst -Force; $inner=Get-ChildItem $dst -Directory | Select-Object -First 1; if ($inner -and $inner.FullName -ne $dst) { Get-ChildItem $inner.FullName | Move-Item -Destination $dst -Force; Remove-Item $inner.FullName -Recurse -Force -ErrorAction SilentlyContinue }" ^
+    >>"%INSTALL_LOG%" 2>&1
+del "!JRE_ZIP!" >nul 2>&1
+
+if not exist "!JRE_DIR!\bin\java.exe" (
+    echo  [ERROR] La extraccion del JRE fallo.
+    >> "%INSTALL_LOG%" echo [%TIME%] ERROR: JRE extraido pero java.exe no encontrado
     pause & exit /b 1
 )
 
-for /f "tokens=* usebackq" %%v in (`java -version 2^>^&1`) do (
+set "JAVA_BIN=!JRE_DIR!\bin\java.exe"
+echo  [OK] JRE 17 portatil instalado en: !JRE_DIR!
+>> "%INSTALL_LOG%" echo [%TIME%] OK: JRE 17 portatil listo en !JRE_DIR!
+
+:java_found
+for /f "tokens=* usebackq" %%v in (`"!JAVA_BIN!" -version 2^>^&1`) do (
     set "JAVA_VER=%%v"
     goto :java_ver_done
 )
 :java_ver_done
 echo  [OK] Java: !JAVA_VER!
+echo  [OK] Ejecutable: !JAVA_BIN!
 >> "%INSTALL_LOG%" echo [%TIME%] OK: Java - !JAVA_VER!
-
 REM ===========================================================================
 REM  [2/5] JAR
 REM ===========================================================================
@@ -161,7 +204,7 @@ set "PS1=%TEMP%\qa_bat_%RANDOM%.ps1"
 >> "%PS1%" echo     'if exist "%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools\adb.exe" set "PATH=%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools;%%PATH%%"',
 >> "%PS1%" echo     'if defined ANDROID_HOME set "PATH=%%ANDROID_HOME%%\platform-tools;%%PATH%%"',
 >> "%PS1%" echo     ':loop',
->> "%PS1%" echo     ('java -Dfile.encoding=UTF-8 -DBACKEND_URL=!BACKEND_URL! -DRUNNER_TOKEN=!RUNNER_TOKEN! -DRUNNER_ID=!RUNNER_ID! -DPOLL_INTERVAL_MS=30000 -jar "' + $jar + '" ^>^>"' + $log + '" 2^>^&1'),
+>> "%PS1%" echo     (('!JAVA_BIN!' + ' -Dfile.encoding=UTF-8 -DBACKEND_URL=!BACKEND_URL! -DRUNNER_TOKEN=!RUNNER_TOKEN! -DRUNNER_ID=!RUNNER_ID! -DPOLL_INTERVAL_MS=30000 -jar "' + $jar + '" ^>^>"' + $log + '" 2^>^&1'),
 >> "%PS1%" echo     'timeout /t 15 /nobreak ^>nul',
 >> "%PS1%" echo     'goto loop'
 >> "%PS1%" echo )

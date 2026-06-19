@@ -28,6 +28,10 @@ public class RunnerConfig {
     public boolean androidSupported;
     public boolean iosSupported;
 
+    // ── Agent data & Appium ────────────────────────────────────────────────
+    public String  agentDataDir;   // root dir for downloaded tools, logs, updates
+    public int     appiumPort;     // default 4723
+
     public static RunnerConfig fromEnv() {
         RunnerConfig c = new RunnerConfig();
 
@@ -38,7 +42,15 @@ public class RunnerConfig {
         c.workDir        = env("WORK_DIR",          ".");
         c.appiumHub      = env("APPIUM_HUB",        "http://127.0.0.1:4723");
         c.allureBaseUrl  = env("ALLURE_BASE_URL",   "");
-        c.version        = env("RUNNER_VERSION",    "2.2.0");
+        c.version        = env("RUNNER_VERSION",    "2.3.0");
+        c.appiumPort     = Integer.parseInt(env("APPIUM_PORT", "4723"));
+
+        // Agent data directory (user-level, no admin required)
+        String home = System.getProperty("user.home", ".");
+        String defaultDataDir = isWindows()
+                ? System.getenv().getOrDefault("LOCALAPPDATA", home + "\\AppData\\Local") + "\\AutomationQA"
+                : home + "/.automationqa";
+        c.agentDataDir = env("AGENT_DATA_DIR", defaultDataDir);
 
         // Auto-detect OS and hostname
         c.os       = detectOs();

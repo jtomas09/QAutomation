@@ -342,14 +342,20 @@ public class JobExecutor {
         // MenuVIP / MenuAtmosfera: 2 reales ≈ entradas en SUITE_MAP — ya correcto
     }
 
-    private final RunnerConfig  config;
-    private final BackendClient client;
+    private final RunnerConfig   config;
+    private final BackendClient  client;
+    private final AppiumManager  appiumMgr;
 
     private volatile Process activeProcess;
 
     public JobExecutor(RunnerConfig config, BackendClient client) {
-        this.config = config;
-        this.client = client;
+        this(config, client, null);
+    }
+
+    public JobExecutor(RunnerConfig config, BackendClient client, AppiumManager appiumMgr) {
+        this.config    = config;
+        this.client    = client;
+        this.appiumMgr = appiumMgr;
     }
 
     /**
@@ -761,31 +767,40 @@ public class JobExecutor {
     // ── Pre-flight: Appium ─────────────────────────────────────────────────────
 
     private void checkAppiumServer(String executionId) {
-        String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
-        HttpClient http = HttpClient.newHttpClient();
-
-        // Try /status (Appium 2.x default) and /wd/hub/status (Appium 1.x / base-path)
-        for (String path : new String[]{"/status", "/wd/hub/status"}) {
-            String statusUrl = hubBase + path;
-            try {
-                HttpRequest req = HttpRequest.newBuilder()
-                        .uri(URI.create(statusUrl))
-                        .timeout(Duration.ofSeconds(5))
-                        .GET().build();
-                int code = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
-                if (code == 200) {
-                    client.sendLog(executionId, "INFO",
-                            "✅ Appium server online: " + hubBase);
-                    return;
+        // If AppiumManager is wired, ask it to ensure Appium is running
+        if (appiumMgr != null) {
+            if (!appiumMgr.isAlive()) {
+                client.sendLog(executionId, "INFO", "Appium no responde — intentando iniciar...");
+                try {
+                    appiumMgr.ensureRunning();
+                    client.sendLog(executionId, "INFO", "Appium iniciado correctamente.");
+                } catch (Exception e) {
+                    client.sendLog(executionId, "WARN",
+                            "Appium no pudo iniciarse: " + e.getMessage());
                 }
-            } catch (Exception ignored) {
-                // try next path
+            } else {
+                client.sendLog(executionId, "INFO", "Appium server online.");
             }
+            return;
         }
 
+        // Fallback: passive check only (legacy path — no AppiumManager)
+        String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
+        HttpClient http = HttpClient.newHttpClient();
+        for (String path : new String[]{"/status", "/wd/hub/status"}) {
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(hubBase + path))
+                        .timeout(Duration.ofSeconds(5))
+                        .GET().build();
+                if (http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode() == 200) {
+                    client.sendLog(executionId, "INFO", "Appium server online: " + hubBase);
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
         client.sendLog(executionId, "WARN",
-                "⚠️  Appium no disponible en " + hubBase
-                + " — inícialo con: appium --port 4723");
+                "Appium no disponible en " + hubBase + " — inicialo con: appium --port 4723");
     }
 
     // ── Video upload ───────────────────────────────────────────────────────────
