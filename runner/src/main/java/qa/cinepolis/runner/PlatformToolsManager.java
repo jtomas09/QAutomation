@@ -287,6 +287,7 @@ public class PlatformToolsManager {
         String psDst = zipFile.toString().replace("\"", "`\"");
 
         String script =
+                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12\r\n" +
                 "$downloadUrl = \"" + psUrl + "\"\r\n" +
                 "$zipPath     = \"" + psDst + "\"\r\n" +
                 "Write-Host \"URL: $downloadUrl\"\r\n" +

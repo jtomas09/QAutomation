@@ -180,10 +180,26 @@ for %%P in (
 
 echo  Descargando runner desde servidor...
 >> "%INSTALL_LOG%" echo [%TIME%] Descargando JAR: %BACKEND_URL%/api/runner/download/jar
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { Invoke-WebRequest -Uri '%BACKEND_URL%/api/runner/download/jar' -OutFile '%JAR_DST%' -UseBasicParsing -TimeoutSec 120; Write-Host 'Descarga OK' } catch { Write-Host ('Error: ' + $_.Exception.Message); exit 1 }" >>%INSTALL_LOG% 2>&1
+set "JAR_PS1=%TEMP%\qa_dl_jar_%RANDOM%.ps1"
+set "JAR_OUT=%TEMP%\qa_jar_out_%RANDOM%.txt"
+>  "!JAR_PS1!" echo [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+>> "!JAR_PS1!" echo $jarUrl = "%BACKEND_URL%/api/runner/download/jar"
+>> "!JAR_PS1!" echo $jarDst = "%JAR_DST%"
+>> "!JAR_PS1!" echo try {
+>> "!JAR_PS1!" echo     Invoke-WebRequest -Uri $jarUrl -OutFile $jarDst -UseBasicParsing -TimeoutSec 120
+>> "!JAR_PS1!" echo     Write-Host "Descarga JAR OK"
+>> "!JAR_PS1!" echo } catch {
+>> "!JAR_PS1!" echo     Write-Host ("Error JAR: " + $_.Exception.Message)
+>> "!JAR_PS1!" echo     exit 1
+>> "!JAR_PS1!" echo }
+powershell -NoProfile -ExecutionPolicy Bypass -File "!JAR_PS1!" > "!JAR_OUT!" 2>&1
+set "JAR_DL_ERR=!ERRORLEVEL!"
+type "!JAR_OUT!"
+type "!JAR_OUT!" >> "%INSTALL_LOG%"
+del "!JAR_OUT!" >nul 2>&1
+del "!JAR_PS1!" >nul 2>&1
 
-if !ERRORLEVEL! neq 0 (
+if !JAR_DL_ERR! neq 0 (
     echo.
     echo  [ERROR] No se pudo descargar el runner.
     echo  Verifica la conexion a internet y vuelve a intentarlo.
@@ -242,6 +258,7 @@ REM -- Escribir script PS1 de descarga (sin comillas simples en rutas) --------
 >> "!PT_PS1!" echo $zipPath     = "%PT_ZIP%"
 >> "!PT_PS1!" echo $minBytes    = 5000000
 >> "!PT_PS1!" echo $downloaded  = $false
+>> "!PT_PS1!" echo [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 >> "!PT_PS1!" echo Write-Host "URL: $downloadUrl"
 >> "!PT_PS1!" echo Write-Host "Destino: $zipPath"
 >> "!PT_PS1!" echo.
@@ -291,10 +308,15 @@ REM -- Escribir script PS1 de descarga (sin comillas simples en rutas) --------
 >> "!PT_PS1!" echo }
 >> "!PT_PS1!" echo Write-Host "Descarga OK: $([math]::Round($sz/1MB,1)) MB"
 
-echo  Descargando Android Platform Tools...
-powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_PS1!" >>"%INSTALL_LOG%" 2>&1
-if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
+echo  Descargando Android Platform Tools (puede tardar 1-2 minutos)...
+set "PT_OUT=%TEMP%\qa_pt_out_%RANDOM%.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_PS1!" > "!PT_OUT!" 2>&1
+set "PT_DL_ERR=!ERRORLEVEL!"
+type "!PT_OUT!"
+type "!PT_OUT!" >> "%INSTALL_LOG%"
+del "!PT_OUT!" >nul 2>&1
 del "!PT_PS1!" >nul 2>&1
+if !PT_DL_ERR! equ 0 set "PT_DOWNLOAD_OK=1"
 >> "%INSTALL_LOG%" echo [%TIME%] Descarga platform-tools result: PT_DOWNLOAD_OK=!PT_DOWNLOAD_OK!
 
 if "!PT_DOWNLOAD_OK!"=="0" (
@@ -327,8 +349,12 @@ set "PT_EX_PS1=%TEMP%\qa_ex_pt_%RANDOM%.ps1"
 >> "!PT_EX_PS1!" echo     exit 1
 >> "!PT_EX_PS1!" echo }
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_EX_PS1!" >>"%INSTALL_LOG%" 2>&1
+set "PT_EX_OUT=%TEMP%\qa_pt_ex_out_%RANDOM%.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!PT_EX_PS1!" > "!PT_EX_OUT!" 2>&1
 set "PT_EXTRACT_ERR=!ERRORLEVEL!"
+type "!PT_EX_OUT!"
+type "!PT_EX_OUT!" >> "%INSTALL_LOG%"
+del "!PT_EX_OUT!" >nul 2>&1
 del "!PT_EX_PS1!" >nul 2>&1
 del "!PT_ZIP!" >nul 2>&1
 >> "%INSTALL_LOG%" echo [%TIME%] Extraccion exit code: !PT_EXTRACT_ERR!
