@@ -35,17 +35,19 @@ public class RunnerController {
     public Map<String, Object> getStatus() {
         runnerStore.markOfflineIfStale();
         List<Runner> all = runnerStore.findAll();
-        long online  = all.stream().filter(r -> r.getStatus() != RunnerStatus.OFFLINE).count();
-        long busy    = all.stream().filter(r -> r.getStatus() == RunnerStatus.BUSY).count();
-        long android = all.stream().filter(r -> Boolean.TRUE.equals(r.getAndroidSupported())).count();
-        long ios     = all.stream().filter(r -> Boolean.TRUE.equals(r.getIosSupported())).count();
+        long online   = all.stream().filter(r -> r.getStatus() == RunnerStatus.ONLINE || r.getStatus() == RunnerStatus.BUSY).count();
+        long degraded = all.stream().filter(r -> r.getStatus() == RunnerStatus.DEGRADED).count();
+        long busy     = all.stream().filter(r -> r.getStatus() == RunnerStatus.BUSY).count();
+        long android  = all.stream().filter(r -> Boolean.TRUE.equals(r.getAndroidSupported())).count();
+        long ios      = all.stream().filter(r -> Boolean.TRUE.equals(r.getIosSupported())).count();
         return Map.of(
-                "total",   all.size(),
-                "online",  online,
-                "busy",    busy,
-                "android", android,
-                "ios",     ios,
-                "runners", all);
+                "total",    all.size(),
+                "online",   online,
+                "degraded", degraded,
+                "busy",     busy,
+                "android",  android,
+                "ios",      ios,
+                "runners",  all);
     }
 
     /**
@@ -81,6 +83,19 @@ public class RunnerController {
         if (payload.containsKey("iosSupported")) {
             update.setIosSupported(Boolean.TRUE.equals(payload.get("iosSupported")));
         }
+
+        // ADB / platform-tools diagnostics
+        if (payload.containsKey("adbPath"))   update.setAdbPath((String) payload.get("adbPath"));
+        if (payload.containsKey("adbVersion")) update.setAdbVersion((String) payload.get("adbVersion"));
+        if (payload.containsKey("adbExists")) update.setAdbExists(Boolean.TRUE.equals(payload.get("adbExists")));
+        if (payload.containsKey("adbOk"))     update.setAdbOk(Boolean.TRUE.equals(payload.get("adbOk")));
+        if (payload.containsKey("devicesFound")) {
+            Object df = payload.get("devicesFound");
+            if (df instanceof Number n) update.setDevicesFound(n.intValue());
+        }
+        // platformToolsInstalled = adbExists AND adbOk
+        update.setPlatformToolsInstalled(
+                Boolean.TRUE.equals(update.getAdbExists()) && Boolean.TRUE.equals(update.getAdbOk()));
 
         // Device list (from heartbeat)
         @SuppressWarnings("unchecked")

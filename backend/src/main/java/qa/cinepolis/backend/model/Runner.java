@@ -19,6 +19,14 @@ public class Runner {
     private Boolean androidSupported;
     private Boolean iosSupported;
 
+    // Embedded ADB / platform-tools diagnostics (sent by PlatformToolsManager)
+    private String  adbPath;
+    private String  adbVersion;
+    private Boolean adbExists;
+    private Boolean adbOk;
+    private Integer devicesFound;
+    private Boolean platformToolsInstalled;
+
     public String       getRunnerId()              { return runnerId; }
     public void         setRunnerId(String v)      { this.runnerId = v; }
     public String       getPlatform()              { return platform; }
@@ -43,4 +51,18 @@ public class Runner {
     public void    setAndroidSupported(Boolean v) { this.androidSupported = v; }
     public Boolean getIosSupported()          { return iosSupported; }
     public void    setIosSupported(Boolean v) { this.iosSupported = v; }
+
+    // ADB diagnostics
+    public String  getAdbPath()                    { return adbPath; }
+    public void    setAdbPath(String v)            { this.adbPath = v; }
+    public String  getAdbVersion()                 { return adbVersion; }
+    public void    setAdbVersion(String v)         { this.adbVersion = v; }
+    public Boolean getAdbExists()                  { return adbExists; }
+    public void    setAdbExists(Boolean v)         { this.adbExists = v; }
+    public Boolean getAdbOk()                      { return adbOk; }
+    public void    setAdbOk(Boolean v)             { this.adbOk = v; }
+    public Integer getDevicesFound()               { return devicesFound; }
+    public void    setDevicesFound(Integer v)      { this.devicesFound = v; }
+    public Boolean getPlatformToolsInstalled()     { return platformToolsInstalled; }
+    public void    setPlatformToolsInstalled(Boolean v) { this.platformToolsInstalled = v; }
 }

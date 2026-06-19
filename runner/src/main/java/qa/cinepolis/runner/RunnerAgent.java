@@ -40,8 +40,9 @@ public class RunnerAgent {
         UpdateManager        updateMgr     = new UpdateManager(
                 config.backendUrl, config.runnerToken, config.version, agentDataDir);
 
-        // Resolve embedded ADB — downloads platform-tools if absent (up to 3 attempts)
-        // Must complete before first heartbeat so host is not marked ONLINE until ADB is validated
+        // Resolve embedded ADB — downloads platform-tools if absent (up to 3 attempts).
+        // If all attempts fail the runner starts in DEGRADED status and SelfHealingManager
+        // retries every 5 minutes until adb.exe is available — no manual action required.
         String  adbPath       = platformTools.resolveAdb();
         boolean adbFunctional = platformTools.isAdbFunctional();
         String  adbVersion    = platformTools.getAdbVersion();
@@ -50,6 +51,11 @@ public class RunnerAgent {
         System.setProperty("ADB_VERSION", adbVersion);
         System.setProperty("ADB_OK",      String.valueOf(adbFunctional));
         config.androidSupported = adbFunctional;
+
+        if (!adbFunctional) {
+            System.out.println("[Runner] ADB no disponible. El Agent iniciara en estado DEGRADED.");
+            System.out.println("[Runner] SelfHealingManager reintentara la descarga cada 5 minutos.");
+        }
 
         System.out.println("[Runner] === Diagnostico ADB ===");
         System.out.println("[Runner] ADB Path:    " + adbPath);
@@ -69,23 +75,30 @@ public class RunnerAgent {
 
         printBanner(config, adbPath);
 
+        // Declared before shutdown hook so the lambda can capture it
+        AtomicReference<SelfHealingManager> selfHealingRef = new AtomicReference<>();
+
         // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\n[Runner] Cerrando — deteniendo ejecucion activa...");
             stopping = true;
+            SelfHealingManager sh = selfHealingRef.get();
+            if (sh != null) sh.stop();
             executor.killActiveProcess();
             appiumMgr.stop();
         }, "shutdown-hook"));
 
         // ── Heartbeat inmediato al arrancar ──────────────────────────────────
         System.out.println("[Runner] Registrando en Backend...");
+        // DEGRADED when ADB is missing/broken; ONLINE when all components are ready.
+        String initialStatus = adbFunctional ? "ONLINE" : "DEGRADED";
         try {
             List<Map<String, String>> initDevices = discoverAllDevices(config);
             System.out.println("[Runner] Devices Found:  " + initDevices.size());
             client.registerDevices(config.runnerId, initDevices);
             client.sendHeartbeat(
                     config.runnerId, config.platform, config.version,
-                    "ONLINE", config.os, config.hostname,
+                    initialStatus, config.os, config.hostname,
                     config.androidSupported, config.iosSupported,
                     initDevices);
             System.out.printf("[Runner] Registro completado: %d dispositivo(s) [%s]%n",
@@ -104,6 +117,30 @@ public class RunnerAgent {
         } catch (Exception e) {
             System.err.println("[Runner] Error en registro inicial: " + e.getMessage());
         }
+
+        // ── SelfHealingManager — auto-descarga ADB si falta ─────────────────
+        // Heal callback: cuando ADB se repara, actualizar config y enviar heartbeat
+        // inmediato para que el Dashboard cambie de DEGRADED → ONLINE sin reiniciar.
+        SelfHealingManager selfHealing = new SelfHealingManager(
+                platformTools,
+                adbFunctional,
+                () -> {
+                    config.androidSupported = true;
+                    try {
+                        List<Map<String, String>> healed = discoverAllDevices(config);
+                        client.registerDevices(config.runnerId, healed);
+                        client.sendHeartbeat(
+                                config.runnerId, config.platform, config.version,
+                                "ONLINE", config.os, config.hostname,
+                                true, config.iosSupported, healed);
+                        System.out.printf("[Runner] Self-healing completado — %d dispositivo(s) re-registrado(s).%n",
+                                healed.size());
+                    } catch (Exception e) {
+                        System.err.println("[Runner] Error en heartbeat post-healing: " + e.getMessage());
+                    }
+                });
+        selfHealingRef.set(selfHealing);
+        selfHealing.start();
 
         // ── Scheduler: heartbeat cada 30s + job ping cada 10s ───────────────
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
@@ -126,8 +163,9 @@ public class RunnerAgent {
                 List<Map<String, String>> devices = discoverAllDevices(config);
                 client.registerDevices(config.runnerId, devices);
 
-                String runnerStatus = stopping              ? "STOPPING"
-                        : executor.hasActiveProcess()       ? "BUSY"
+                String runnerStatus = stopping                        ? "STOPPING"
+                        : executor.hasActiveProcess()                ? "BUSY"
+                        : !platformTools.isAdbFunctional()           ? "DEGRADED"
                         : "ONLINE";
 
                 String cmd = client.sendHeartbeat(

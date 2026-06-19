@@ -20,6 +20,7 @@ const STATUS_COLORS: Record<RunnerStatus, string> = {
   STARTING: '#6366f1',
   STOPPING: '#f97316',
   OFFLINE:  '#6b7280',
+  DEGRADED: '#f59e0b',
 }
 
 const STATUS_LABELS: Record<RunnerStatus, string> = {
@@ -28,6 +29,7 @@ const STATUS_LABELS: Record<RunnerStatus, string> = {
   STARTING: 'Iniciando',
   STOPPING: 'Deteniendo',
   OFFLINE:  'Sin conexión',
+  DEGRADED: 'Degraded',
 }
 
 function statusColor(s: RunnerStatus) { return STATUS_COLORS[s] ?? '#6b7280' }
@@ -67,7 +69,7 @@ function osLabel(os: string, hostname?: string) {
 
 function StatusDot({ status }: { status: RunnerStatus }) {
   const color = statusColor(status)
-  const pulse = status === 'ONLINE' || status === 'BUSY'
+  const pulse = status === 'ONLINE' || status === 'BUSY' || status === 'DEGRADED'
   return (
     <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
       {pulse && <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style={{ background: color }} />}

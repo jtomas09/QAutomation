@@ -140,6 +140,16 @@ public class PlatformToolsManager {
         return runnerDir.resolve("platform-tools");
     }
 
+    /**
+     * Clears cached resolution so the next resolveAdb() call re-attempts
+     * the download. Used by SelfHealingManager between retry cycles.
+     */
+    public void reset() {
+        this.resolvedAdb   = null;
+        this.cachedVersion = null;
+        this.adbFunctional = false;
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────
 
     private Path embeddedAdbPath() {

@@ -571,7 +571,7 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                   <div key={r.runnerId} className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
                     style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                     <span className="w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ background: r.status === 'OFFLINE' ? '#6b7280' : '#10b981' }} />
+                      style={{ background: r.status === 'OFFLINE' ? '#6b7280' : r.status === 'DEGRADED' ? '#f59e0b' : '#10b981' }} />
                     <div className="flex-1 min-w-0">
                       <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--text-sec)' }}>
                         {r.hostname ?? r.runnerId}
@@ -580,8 +580,11 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                     </div>
                     <span className="text-[10px] text-slate-600 flex-shrink-0">{timeAgo(r.lastSeen)}</span>
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                      style={{ background: r.status === 'OFFLINE' ? 'rgba(107,114,128,0.18)' : 'rgba(16,185,129,0.18)', color: r.status === 'OFFLINE' ? '#9ca3af' : '#10b981' }}>
-                      {r.status === 'OFFLINE' ? 'Offline' : 'Online'}
+                      style={{
+                        background: r.status === 'OFFLINE' ? 'rgba(107,114,128,0.18)' : r.status === 'DEGRADED' ? 'rgba(245,158,11,0.18)' : 'rgba(16,185,129,0.18)',
+                        color:      r.status === 'OFFLINE' ? '#9ca3af'               : r.status === 'DEGRADED' ? '#f59e0b'               : '#10b981',
+                      }}>
+                      {r.status === 'OFFLINE' ? 'Offline' : r.status === 'DEGRADED' ? 'Degraded' : 'Online'}
                     </span>
                   </div>
                 ))}
@@ -665,15 +668,18 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
   // ── Infrastructure state ─────────────────────────────────────────────────
 
   const infraState: InfraState = loading ? 'loading'
-    : runners.length === 0                       ? 'not_installed'
-    : runners.every(r => r.status === 'OFFLINE') ? 'offline'
-    : devices.length === 0                       ? 'scanning'
+    : runners.length === 0                                                       ? 'not_installed'
+    : runners.every(r => r.status === 'OFFLINE')                                 ? 'offline'
+    : runners.every(r => r.status === 'OFFLINE' || r.status === 'DEGRADED')
+      && devices.length === 0                                                     ? 'scanning'
+    : devices.length === 0                                                        ? 'scanning'
     : 'ready'
 
   // ── KPI metrics ──────────────────────────────────────────────────────────
 
-  const hostsOnline  = runners.filter(r => r.status !== 'OFFLINE').length
-  const hostsOffline = runners.filter(r => r.status === 'OFFLINE').length
+  const hostsOnline    = runners.filter(r => r.status === 'ONLINE' || r.status === 'BUSY').length
+  const hostsDegraded  = runners.filter(r => r.status === 'DEGRADED').length
+  const hostsOffline   = runners.filter(r => r.status === 'OFFLINE').length
   const totalRunners = runners.length
 
   const devAvailable   = devices.filter(d => d.status === 'AVAILABLE').length
@@ -794,8 +800,23 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
           </div>
         </motion.div>
 
-        {/* 2. Hosts Offline */}
+        {/* 2. Hosts Degraded */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}
+          className="rounded-2xl p-4 flex items-center gap-3"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}>
+            <Monitor size={18} style={{ color: '#f59e0b' }} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold text-slate-500 mb-0.5">Hosts Degraded</div>
+            <div className="text-xl font-black leading-none" style={{ color: 'var(--text-pri)' }}>{hostsDegraded}</div>
+            <div className="text-[10px] mt-0.5" style={{ color: '#f59e0b' }}>ADB / componentes faltantes</div>
+          </div>
+        </motion.div>
+
+        {/* 3. Hosts Offline */}
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }}
           className="rounded-2xl p-4 flex items-center gap-3"
           style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
           <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -926,8 +947,9 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                     </tr>
                   ))}
                   {paginatedHosts.map(runner => {
-                    const isOnline  = runner.status !== 'OFFLINE'
-                    const os        = resolveOs(runner)
+                    const isOnline   = runner.status !== 'OFFLINE' && runner.status !== 'DEGRADED'
+                    const isDegraded = runner.status === 'DEGRADED'
+                    const os         = resolveOs(runner)
                     const isMac     = os === 'MACOS'
                     const stats     = fakeRunnerStats(runner.runnerId)
                     const hostName  = runner.hostname ?? runner.runnerId
@@ -965,15 +987,16 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                         <td className="px-4 py-3">
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black"
                             style={{
-                              background: isOnline ? 'rgba(16,185,129,0.15)' : 'rgba(107,114,128,0.15)',
-                              color:      isOnline ? '#10b981' : '#6b7280',
-                              border:     `1px solid ${isOnline ? 'rgba(16,185,129,0.3)' : 'rgba(107,114,128,0.3)'}`,
+                              background: isDegraded ? 'rgba(245,158,11,0.15)' : isOnline ? 'rgba(16,185,129,0.15)' : 'rgba(107,114,128,0.15)',
+                              color:      isDegraded ? '#f59e0b'               : isOnline ? '#10b981'               : '#6b7280',
+                              border:     `1px solid ${isDegraded ? 'rgba(245,158,11,0.3)' : isOnline ? 'rgba(16,185,129,0.3)' : 'rgba(107,114,128,0.3)'}`,
                             }}>
                             <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
-                              {isOnline && <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-50 bg-emerald-400" />}
-                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: isOnline ? '#10b981' : '#6b7280' }} />
+                              {(isOnline || isDegraded) && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-50 ${isDegraded ? 'bg-amber-400' : 'bg-emerald-400'}`} />}
+                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full"
+                                style={{ background: isDegraded ? '#f59e0b' : isOnline ? '#10b981' : '#6b7280' }} />
                             </span>
-                            {isOnline ? 'Online' : 'Offline'}
+                            {isDegraded ? 'Degraded' : isOnline ? 'Online' : 'Offline'}
                           </span>
                         </td>
 

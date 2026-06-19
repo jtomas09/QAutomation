@@ -95,7 +95,7 @@ export interface PhysicalDevice {
 
 // ─── Runner Manager ──────────────────────────────────────────────────────────
 
-export type RunnerStatus = 'ONLINE' | 'OFFLINE' | 'BUSY' | 'STARTING' | 'STOPPING'
+export type RunnerStatus = 'ONLINE' | 'OFFLINE' | 'BUSY' | 'STARTING' | 'STOPPING' | 'DEGRADED'
 
 export interface RunnerDevice {
   deviceId:   string
@@ -119,11 +119,12 @@ export interface Runner {
   androidSupported?: boolean
   iosSupported?:     boolean
   // Embedded ADB diagnostics (from PlatformToolsManager)
-  adbPath?:          string
-  adbVersion?:       string
-  adbExists?:        boolean
-  adbOk?:            boolean
-  devicesFound?:     number
+  adbPath?:               string
+  adbVersion?:            string
+  adbExists?:             boolean
+  adbOk?:                 boolean
+  devicesFound?:          number
+  platformToolsInstalled?: boolean
 }
 
 export interface ExecutionSummary {
