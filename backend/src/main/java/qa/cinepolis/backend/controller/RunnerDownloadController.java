@@ -1,5 +1,7 @@
 package qa.cinepolis.backend.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -8,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -30,6 +33,8 @@ import java.util.Map;
 @RequestMapping("/api/runner/download")
 @CrossOrigin(origins = "*", exposedHeaders = { HttpHeaders.CONTENT_DISPOSITION })
 public class RunnerDownloadController {
+
+    private static final Logger log = LoggerFactory.getLogger(RunnerDownloadController.class);
 
     // ── Cascade entries: [0] proper installer, [1] temp fallback ────────────
 
@@ -118,19 +123,39 @@ public class RunnerDownloadController {
 
     /**
      * Serves the runner JAR from classpath for self-contained install scripts.
-     * Place cinepolis-runner.jar in backend/src/main/resources/installers/ to enable.
+     * The JAR is compiled from runner/ and embedded at Docker build time as
+     * backend/src/main/resources/installers/cinepolis-runner.jar.
+     * Served to clients as automationqa-runner.jar.
      */
     @GetMapping("/jar")
     public ResponseEntity<?> downloadJar() {
+        log.info("GET /api/runner/download/jar - solicitado");
+
         ClassPathResource res = new ClassPathResource("installers/cinepolis-runner.jar");
+
         if (!res.exists()) {
+            log.warn("GET /api/runner/download/jar - HTTP 404: cinepolis-runner.jar no encontrado en classpath. " +
+                     "Asegurate de que el Dockerfile compila el runner antes de empaquetar el backend.");
             return ResponseEntity
                     .status(HttpStatus.NOT_FOUND)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("success", false, "message",
                             "El componente del Runner no está disponible en este momento."));
         }
-        return serveFile(res, "automationqa-runner.jar");
+
+        try {
+            long size = res.contentLength();
+            log.info("GET /api/runner/download/jar - HTTP 200 | filename: automationqa-runner.jar | " +
+                     "Content-Type: application/octet-stream | Content-Length: {} bytes ({} KB)",
+                     size, size / 1024);
+            return serveFile(res, "automationqa-runner.jar", size);
+        } catch (IOException e) {
+            log.error("GET /api/runner/download/jar - error leyendo cinepolis-runner.jar: {}", e.getMessage(), e);
+            return ResponseEntity
+                    .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("success", false, "message", "Error al leer el componente del Runner."));
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -172,6 +197,14 @@ public class RunnerDownloadController {
     private ResponseEntity<Resource> serveFile(ClassPathResource resource, String filename) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(resource);
+    }
+
+    private ResponseEntity<Resource> serveFile(ClassPathResource resource, String filename, long contentLength) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(contentLength))
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(resource);
     }

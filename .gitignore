@@ -64,5 +64,8 @@ bin/
 runner/target/
 runner/dependency-reduced-pom.xml
 
+# Runner JAR copiado a recursos del backend (artefacto de build, no commitear)
+backend/src/main/resources/installers/cinepolis-runner.jar
+
 # Videos generados en backend (datos de ejecución local)
 videos/

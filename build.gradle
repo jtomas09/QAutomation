@@ -230,6 +230,29 @@ tasks.register('buildRunner', Exec) {
     }
 }
 
+// Copia runner/target/cinepolis-runner.jar al classpath del backend para
+// que /api/runner/download/jar pueda servirlo en desarrollo local.
+// Ejecutar: .\gradlew deployRunner
+tasks.register('deployRunner') {
+    group = 'build'
+    description = 'Compila el runner JAR y lo copia a backend/src/main/resources/installers/'
+    dependsOn 'buildRunner'
+    doLast {
+        def src = file("$projectDir/runner/target/cinepolis-runner.jar")
+        def dstDir = file("$projectDir/backend/src/main/resources/installers")
+        if (!src.exists()) {
+            throw new GradleException("runner/target/cinepolis-runner.jar no existe. Revisa runner/pom.xml")
+        }
+        copy {
+            from src
+            into dstDir
+        }
+        def dst = new File(dstDir, "cinepolis-runner.jar")
+        println "  OK deployRunner: ${dst.absolutePath} (${src.length() / 1024} KB)"
+        println "  Endpoint listo: GET /api/runner/download/jar"
+    }
+}
+
 // ---------- RUNNER PARA ENVIAR CORREO DESDE CI ----------
 tasks.register('runAllureMailRunner', JavaExec) {
     group = "reporting"
