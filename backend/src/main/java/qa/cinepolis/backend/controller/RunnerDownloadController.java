@@ -10,7 +10,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URL;
+import java.net.URLConnection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -117,6 +122,50 @@ public class RunnerDownloadController {
                         "message",  "No hay una versión disponible del Runner para descargar.",
                         "platform", platform
                 ));
+    }
+
+    // ── Platform-tools proxy endpoint ────────────────────────────────────────
+    // Proxies the Android Platform Tools ZIP from Google's CDN through the backend.
+    // This lets runners on corporate networks (where dl.google.com may be blocked)
+    // download platform-tools via the backend URL, which is always reachable.
+
+    private static final String PT_WIN   = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip";
+    private static final String PT_MAC   = "https://dl.google.com/android/repository/platform-tools-latest-darwin.zip";
+    private static final String PT_LINUX = "https://dl.google.com/android/repository/platform-tools-latest-linux.zip";
+
+    @GetMapping("/platform-tools/{platform}")
+    public void platformTools(@PathVariable String platform, HttpServletResponse response) throws IOException {
+        String url = switch (platform.toLowerCase()) {
+            case "windows" -> PT_WIN;
+            case "macos"   -> PT_MAC;
+            default        -> PT_LINUX;
+        };
+
+        log.info("GET /api/runner/download/platform-tools/{} → proxying {}", platform, url);
+
+        URLConnection conn = new URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(600_000);
+        conn.setRequestProperty("User-Agent", "AutomationQA-Backend/1.0");
+
+        long contentLength = conn.getContentLengthLong();
+        response.setContentType("application/zip");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"platform-tools-latest-" + platform.toLowerCase() + ".zip\"");
+        if (contentLength > 0) response.setContentLengthLong(contentLength);
+
+        try (InputStream in = conn.getInputStream();
+             OutputStream out = response.getOutputStream()) {
+            byte[] buf = new byte[65_536];
+            int n;
+            while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+        } catch (IOException e) {
+            log.error("Error proxying platform-tools for {}: {}", platform, e.getMessage());
+            if (!response.isCommitted()) {
+                response.sendError(HttpStatus.BAD_GATEWAY.value(),
+                        "No se pudo obtener platform-tools desde Google: " + e.getMessage());
+            }
+        }
     }
 
     // ── JAR download endpoint ────────────────────────────────────────────────

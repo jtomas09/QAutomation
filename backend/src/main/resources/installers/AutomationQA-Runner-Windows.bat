@@ -253,9 +253,23 @@ if "!PT_DOWNLOAD_OK!"=="0" (
 
 if "!PT_DOWNLOAD_OK!"=="0" (
     del "!PT_ZIP!" >nul 2>&1
-    echo  [AVISO] No se pudo descargar platform-tools.
-    echo  El Agent los descargara automaticamente al primer inicio.
-    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: fallo descarga platform-tools (Agent los descargara al iniciar)
+    set "PT_ZIP=%TEMP%\qa_pt_%RANDOM%.zip"
+    echo  Reintentando via proxy del servidor ^(intento 3/3^)...
+    >> "%INSTALL_LOG%" echo [%TIME%] INFO: intento 3/3 via backend proxy...
+
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$url='%BACKEND_URL%/api/runner/download/platform-tools/windows'; $out='!PT_ZIP!'; try { Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 300; Write-Host 'OK-proxy' } catch { try { (New-Object System.Net.WebClient).DownloadFile($url,$out); Write-Host 'OK-proxy-WC' } catch { Write-Host('ERROR: '+$_.Exception.Message); exit 1 } }; $sz=(Get-Item $out -ErrorAction SilentlyContinue).Length; if(!$sz -or $sz -lt 5000000) { Write-Host('ERROR: invalido '+$sz+' bytes'); exit 1 }; Write-Host('OK: '+[math]::Round($sz/1MB,1)+' MB')" ^
+        >>"%INSTALL_LOG%" 2>&1
+    if !ERRORLEVEL! equ 0 set "PT_DOWNLOAD_OK=1"
+)
+
+if "!PT_DOWNLOAD_OK!"=="0" (
+    del "!PT_ZIP!" >nul 2>&1
+    echo  [AVISO] No se pudo descargar Android Platform Tools.
+    echo  Ultimas lineas del log de instalacion:
+    powershell -NoProfile -Command "Get-Content '!INSTALL_LOG!' | Select-Object -Last 8 | ForEach-Object { Write-Host ('    ' + $_) }"
+    echo  El Agent intentara descargarlos automaticamente al iniciar.
+    >> "%INSTALL_LOG%" echo [%TIME%] AVISO: fallo descarga platform-tools en 3 intentos
     goto :PT_READY
 )
 
@@ -312,9 +326,6 @@ set "PS1=%TEMP%\qa_bat_%RANDOM%.ps1"
 >> "%PS1%" echo $crlf    = [string][char]13 + [string][char]10
 >> "%PS1%" echo $bat     = '@echo off'  + $crlf
 >> "%PS1%" echo $bat    += 'setlocal'   + $crlf
->> "%PS1%" echo $bat    += 'if exist "%%LOCALAPPDATA%%\Android\Sdk\platform-tools\adb.exe" set "PATH=%%LOCALAPPDATA%%\Android\Sdk\platform-tools;%%PATH%%"' + $crlf
->> "%PS1%" echo $bat    += 'if exist "%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools\adb.exe" set "PATH=%%USERPROFILE%%\AppData\Local\Android\Sdk\platform-tools;%%PATH%%"' + $crlf
->> "%PS1%" echo $bat    += 'if defined ANDROID_HOME set "PATH=%%ANDROID_HOME%%\platform-tools;%%PATH%%"' + $crlf
 >> "%PS1%" echo $bat    += ':loop' + $crlf
 >> "%PS1%" echo $bat    += ('"' + $javaBin + '" -Dfile.encoding=UTF-8 -DBACKEND_URL=!BACKEND_URL! -DRUNNER_TOKEN=!RUNNER_TOKEN! -DRUNNER_ID=!RUNNER_ID! -DPOLL_INTERVAL_MS=30000 -jar "' + $jar + '" ^>^> "' + $logFile + '" 2^>^&1') + $crlf
 >> "%PS1%" echo $bat    += 'timeout /t 15 /nobreak ^>nul' + $crlf

@@ -35,7 +35,7 @@ public class RunnerAgent {
         //   Mac/Linux → ~/.automationqa/platform-tools/
         Path runnerDir = "WINDOWS".equals(config.os) ? agentDataDir.resolve("runner") : agentDataDir;
 
-        PlatformToolsManager platformTools = new PlatformToolsManager(runnerDir, config.os);
+        PlatformToolsManager platformTools = new PlatformToolsManager(runnerDir, config.os, config.backendUrl);
         AppiumManager        appiumMgr     = new AppiumManager(config.os);
         UpdateManager        updateMgr     = new UpdateManager(
                 config.backendUrl, config.runnerToken, config.version, agentDataDir);

@@ -35,14 +35,21 @@ public class PlatformToolsManager {
 
     private final Path   runnerDir;
     private final String os;
+    private final String backendUrl; // used as proxy fallback if Google CDN is blocked
 
     private volatile String  resolvedAdb  = null;
     private volatile String  cachedVersion = null;
     private volatile boolean adbFunctional = false;
 
+    public PlatformToolsManager(Path runnerDir, String os, String backendUrl) {
+        this.runnerDir  = runnerDir;
+        this.os         = os;
+        this.backendUrl = backendUrl;
+    }
+
+    /** Convenience constructor for tests / callers without backend access. */
     public PlatformToolsManager(Path runnerDir, String os) {
-        this.runnerDir = runnerDir;
-        this.os        = os;
+        this(runnerDir, os, null);
     }
 
     // ── Public API ────────────────────────────────────────────────────────
@@ -155,32 +162,65 @@ public class PlatformToolsManager {
         Path   zipFile = runnerDir.resolve("platform-tools.zip");
 
         Files.createDirectories(runnerDir);
-
-        // Remove stale/partial zip
         Files.deleteIfExists(zipFile);
 
         System.out.println("[PlatformTools] Descargando: " + url);
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofMinutes(10))
-                .GET().build();
 
-        HttpResponse<Path> res = client.send(req, HttpResponse.BodyHandlers.ofFile(zipFile));
-        if (res.statusCode() != 200) {
+        // Attempt 1: Java HttpClient (cross-platform, follows all redirects)
+        boolean downloaded = false;
+        try {
+            downloadViaHttpClient(url, zipFile);
+            if (Files.exists(zipFile) && Files.size(zipFile) >= MIN_ZIP_BYTES) {
+                downloaded = true;
+                System.out.printf("[PlatformTools] Descarga OK via HttpClient: %.1f MB%n",
+                        Files.size(zipFile) / 1_048_576.0);
+            }
+        } catch (Exception e) {
+            System.err.println("[PlatformTools] HttpClient fallo: " + e.getMessage());
             Files.deleteIfExists(zipFile);
-            throw new IOException("HTTP " + res.statusCode() + " al descargar platform-tools");
         }
 
-        long size = Files.size(zipFile);
-        System.out.printf("[PlatformTools] Descarga: %.1f MB%n", size / 1_048_576.0);
+        // Attempt 2 (Windows only): PowerShell — handles NTLM proxy, Windows credentials
+        if (!downloaded && isWindows()) {
+            System.out.println("[PlatformTools] Intentando descarga via PowerShell (soporte proxy NTLM)...");
+            try {
+                downloadViaPowerShell(url, zipFile);
+                if (Files.exists(zipFile) && Files.size(zipFile) >= MIN_ZIP_BYTES) {
+                    downloaded = true;
+                    System.out.printf("[PlatformTools] Descarga OK via PowerShell: %.1f MB%n",
+                            Files.size(zipFile) / 1_048_576.0);
+                }
+            } catch (Exception e) {
+                System.err.println("[PlatformTools] PowerShell fallo: " + e.getMessage());
+                Files.deleteIfExists(zipFile);
+            }
+        }
 
-        if (size < MIN_ZIP_BYTES) {
+        // Attempt 3: Backend proxy — bypasses corporate firewall blocks on dl.google.com
+        // The backend (Railway) can always reach Google; the runner can always reach the backend.
+        if (!downloaded && backendUrl != null && !backendUrl.isBlank()) {
+            String platform   = isWindows() ? "windows" : ("MACOS".equals(os) ? "macos" : "linux");
+            String proxyUrl   = backendUrl.replaceAll("/+$", "") +
+                                "/api/runner/download/platform-tools/" + platform;
+            System.out.println("[PlatformTools] Intentando via proxy backend: " + proxyUrl);
+            try {
+                downloadViaHttpClient(proxyUrl, zipFile);
+                if (Files.exists(zipFile) && Files.size(zipFile) >= MIN_ZIP_BYTES) {
+                    downloaded = true;
+                    System.out.printf("[PlatformTools] Descarga OK via backend proxy: %.1f MB%n",
+                            Files.size(zipFile) / 1_048_576.0);
+                }
+            } catch (Exception e) {
+                System.err.println("[PlatformTools] Backend proxy fallo: " + e.getMessage());
+                Files.deleteIfExists(zipFile);
+            }
+        }
+
+        if (!downloaded) {
             Files.deleteIfExists(zipFile);
-            throw new IOException("ZIP invalido: " + size + " bytes (esperado >5MB)");
+            throw new IOException(
+                    "Fallo la descarga de platform-tools. Intentado: Google CDN, PowerShell, backend proxy. " +
+                    "Verifica acceso a internet desde este equipo.");
         }
 
         System.out.println("[PlatformTools] Extrayendo en: " + runnerDir);
@@ -204,6 +244,46 @@ public class PlatformToolsManager {
             }
         }
         System.out.println("[PlatformTools] Extraccion completa.");
+    }
+
+    private void downloadViaHttpClient(String url, Path zipFile) throws Exception {
+        HttpClient client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.ALWAYS)
+                .build();
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMinutes(10))
+                .GET().build();
+
+        HttpResponse<Path> res = client.send(req, HttpResponse.BodyHandlers.ofFile(zipFile));
+        if (res.statusCode() != 200) {
+            Files.deleteIfExists(zipFile);
+            throw new IOException("HTTP " + res.statusCode() + " descargando platform-tools");
+        }
+    }
+
+    /**
+     * Downloads using PowerShell, which natively handles Windows proxy authentication
+     * (NTLM, Kerberos) and reads IE/WinHTTP proxy settings. Used as fallback when
+     * Java HttpClient fails in corporate networks.
+     */
+    private void downloadViaPowerShell(String url, Path zipFile) throws Exception {
+        String dst = zipFile.toString(); // PS single-quoted strings treat \ as literal
+        String psCmd =
+                "try { Invoke-WebRequest -Uri '" + url + "' -OutFile '" + dst + "'" +
+                " -UseBasicParsing -TimeoutSec 300; Write-Host 'OK-IWR' } " +
+                "catch { try { (New-Object System.Net.WebClient).DownloadFile('" + url + "','" + dst + "');" +
+                " Write-Host 'OK-WC' } catch { Write-Host ('ERROR: '+$_.Exception.Message); exit 1 } }";
+
+        Process p = new ProcessBuilder(
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd)
+                .redirectErrorStream(true).start();
+        boolean done = p.waitFor(350, TimeUnit.SECONDS);
+        String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!done) { p.destroyForcibly(); throw new IOException("PowerShell timeout (350s)"); }
+        System.out.println("[PlatformTools] PowerShell: " + output.trim());
+        if (p.exitValue() != 0) throw new IOException("PowerShell exit " + p.exitValue() + ": " + output.trim());
     }
 
     private static void unzip(Path zipFile, Path destDir) throws IOException {
