@@ -226,6 +226,37 @@ export async function restartRunner(runnerId?: string): Promise<void> {
   await httpPost('/api/runners/restart', runnerId ? { runnerId } : {})
 }
 
+/**
+ * GET /api/runners/{id}/diagnostics
+ * Returns full component health for a specific runner (V4/V5 enterprise agent).
+ */
+export async function getRunnerDiagnostics(runnerId: string): Promise<RunnerDiagnostics> {
+  return httpGet<RunnerDiagnostics>(`/api/runners/${encodeURIComponent(runnerId)}/diagnostics`)
+}
+
+export interface RunnerDiagnostics {
+  runnerId:   string
+  status:     string
+  lastSeen:   string | null
+  hostname:   string | null
+  os:         string | null
+  version:    string | null
+  adb: {
+    ok:                  boolean
+    path:                string | null
+    version:             string | null
+    devicesFound:        number
+    platformToolsInstalled: boolean
+  }
+  components: {
+    jre:    { installed: boolean; version: string | null }
+    node:   { installed: boolean; version: string | null }
+    appium: { installed: boolean; version: string | null }
+    xcode:  { installed: boolean; version: string | null }
+  }
+  devices: Array<{ deviceId: string; deviceName: string; platform: string; status: string }>
+}
+
 // ─── Device Farm ──────────────────────────────────────────────────────────────
 
 /** GET /api/devices — all registered physical devices */

@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Universal Runner Agent v4.0
+ * Universal Runner Agent v5.0
  *
  * Discovers Android and iOS devices automatically based on OS capabilities.
  * No manual RUNNER_PLATFORM configuration needed.
@@ -22,11 +22,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * macOS   → Android (ADB) + iOS (Xcode)  — requires Xcode CLT
  * Linux   → Android (ADB)
  *
- * V4 additions:
- *  - XcodeValidator: validates Xcode on macOS at startup
- *  - DependencySelfHealingManager: monitors JRE/Node/Appium/ADB/Xcode every 5 min
- *  - Component telemetry: jreVersion, nodeVersion, appiumVersion, xcodeVersion in heartbeat
- *  - ONLINE requires all components operational (DEGRADED if any critical component missing)
+ * V5 additions over V4:
+ *  - DeviceSelfHealingManager: reactive device rescan after ADB/Appium recovery
+ *  - AppiumManager.startWatchdog now fires onAppiumRestarted callback
+ *  - DependencySelfHealingManager fires onAdbHealed via AtomicReference bridge
+ *  - Driver presence check folded into appiumOk (DependencySelfHealingManager)
  */
 public class RunnerAgent {
 
@@ -121,8 +121,9 @@ public class RunnerAgent {
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
         printBanner(config, adbPath);
 
-        // Declared before shutdown hook so lambdas can capture the reference
-        AtomicReference<DependencySelfHealingManager> selfHealingRef = new AtomicReference<>();
+        // Declared before shutdown hook so lambdas can capture the references
+        AtomicReference<DependencySelfHealingManager> selfHealingRef  = new AtomicReference<>();
+        AtomicReference<DeviceSelfHealingManager>     deviceHealerRef = new AtomicReference<>();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\n[Runner] Cerrando — deteniendo ejecucion activa...");
@@ -168,13 +169,24 @@ public class RunnerAgent {
                         adbFunctional,
                         xcodeOk);
 
+        // Track previous ADB state so the callback can detect a recovery transition
+        java.util.concurrent.atomic.AtomicBoolean prevAdbOk = new java.util.concurrent.atomic.AtomicBoolean(adbFunctional);
+
         DependencySelfHealingManager selfHealing = new DependencySelfHealingManager(
                 platformTools, appiumMgr, config.os, initialHealth,
                 report -> {
+                    boolean adbJustHealed = !prevAdbOk.getAndSet(report.adbOk) && report.adbOk;
                     config.androidSupported = report.adbOk;
                     if ("MACOS".equals(config.os)) config.iosSupported = report.xcodeOk;
                     System.setProperty("APPIUM_OK", String.valueOf(report.appiumOk));
                     System.setProperty("NODE_OK",   String.valueOf(report.nodeOk));
+
+                    // Immediate rescan when ADB recovers (don't wait for monitor poll)
+                    if (adbJustHealed) {
+                        DeviceSelfHealingManager dh = deviceHealerRef.get();
+                        if (dh != null) dh.onAdbHealed();
+                    }
+
                     String newStatus = report.isFullyOperational() ? "ONLINE" : "DEGRADED";
                     try {
                         List<Map<String, String>> healed = discoverAllDevices(config);
@@ -192,15 +204,26 @@ public class RunnerAgent {
         selfHealingRef.set(selfHealing);
         selfHealing.start();
 
+        // ── DeviceSelfHealingManager ────────────────────────────────────────────
+        List<Map<String, String>> initDevicesList = discoverAllDevices(config);
+        DeviceSelfHealingManager deviceHealer = new DeviceSelfHealingManager(
+                platformTools, appiumMgr, client, config);
+        deviceHealer.init(adbFunctional, appiumOk, initDevicesList.size());
+        deviceHealerRef.set(deviceHealer);
+
         // ── Scheduler ──────────────────────────────────────────────────────────
-        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3, r -> {
             Thread t = new Thread(r, "runner-scheduler");
             t.setDaemon(true);
             return t;
         });
 
         scheduler.scheduleAtFixedRate(client::ping, 0, 10, TimeUnit.SECONDS);
-        appiumMgr.startWatchdog(scheduler);
+        appiumMgr.startWatchdog(scheduler, () -> {
+            DeviceSelfHealingManager dh = deviceHealerRef.get();
+            if (dh != null) dh.onAppiumRestarted();
+        });
+        deviceHealer.startMonitor(scheduler);
         scheduler.scheduleAtFixedRate(updateMgr::checkAndApply, 60, 60, TimeUnit.MINUTES);
 
         AtomicReference<String> pendingCommand = new AtomicReference<>(null);

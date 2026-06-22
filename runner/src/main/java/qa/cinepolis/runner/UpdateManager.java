@@ -68,7 +68,26 @@ public class UpdateManager {
             System.out.println("[Update] Nueva version disponible: " + remote.version +
                     " (actual: " + currentVersion + ")");
             Path newJar = downloadJar(remote);
+
+            // SHA256 validation — reject tampered or corrupted JARs before rotation
+            if (remote.sha256 != null && !remote.sha256.isBlank()) {
+                System.out.println("[Update] Validando integridad SHA256...");
+                if (!ChecksumValidator.validate(newJar, remote.sha256)) {
+                    Files.deleteIfExists(newJar);
+                    throw new IOException("SHA256 mismatch — update abortado. JAR puede estar corrompido.");
+                }
+                System.out.println("[Update] SHA256 OK.");
+            }
+
             rotate(newJar);
+
+            // Record baseline so DependencySelfHealingManager can detect tampering later
+            try {
+                Path activeJar = agentDataDir.resolve("runner").resolve("automationqa-runner.jar");
+                ChecksumValidator.writeBaseline(activeJar);
+            } catch (Exception e) {
+                System.err.println("[Update] Warning: no se pudo guardar baseline SHA256: " + e.getMessage());
+            }
 
             System.out.println("[Update] Actualizacion aplicada. Reiniciando...");
             System.exit(0); // shell loop restarts JVM with updated JAR
@@ -100,11 +119,12 @@ public class UpdateManager {
 
     private VersionInfo parseVersionInfo(String json) {
         // Minimal JSON parse without Jackson dependency (runner has no jackson at compile time)
-        // Expected: {"version":"2.3.0","downloadUrl":"/api/runner/download/jar"}
+        // Expected: {"version":"2.3.0","downloadUrl":"/api/runner/download/jar","sha256":"abc..."}
         String version = jsonString(json, "version");
         if (version == null) return null;
-        String dlUrl = jsonString(json, "downloadUrl");
-        return new VersionInfo(version, dlUrl != null ? dlUrl : DOWNLOAD_PATH);
+        String dlUrl  = jsonString(json, "downloadUrl");
+        String sha256 = jsonString(json, "sha256");
+        return new VersionInfo(version, dlUrl != null ? dlUrl : DOWNLOAD_PATH, sha256);
     }
 
     /** Returns true when candidate is strictly newer than current using semver. */
@@ -206,9 +226,11 @@ public class UpdateManager {
     private static class VersionInfo {
         final String version;
         final String downloadUrl;
-        VersionInfo(String version, String downloadUrl) {
+        final String sha256; // optional — backend may omit for older deploys
+        VersionInfo(String version, String downloadUrl, String sha256) {
             this.version     = version;
             this.downloadUrl = downloadUrl;
+            this.sha256      = sha256;
         }
     }
 }

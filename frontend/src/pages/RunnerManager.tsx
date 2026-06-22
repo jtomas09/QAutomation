@@ -8,8 +8,10 @@ import {
 } from 'lucide-react'
 import {
   getRunners, getRunnerDevices,
-  startRunner, stopRunner, restartRunner
+  startRunner, stopRunner, restartRunner,
+  getRunnerDiagnostics,
 } from '../api'
+import type { RunnerDiagnostics } from '../api'
 import type { Runner, RunnerDevice, RunnerStatus } from '../types'
 
 // ─── Status helpers ─────────────────────────────────────────────────────────
@@ -109,6 +111,80 @@ function CompBadge({ ok, label, version }: { ok?: boolean; label: string; versio
   )
 }
 
+// ─── Host diagnostics panel ──────────────────────────────────────────────────
+
+function DiagRow({ label, ok, detail }: { label: string; ok: boolean; detail?: string | null }) {
+  const color = ok ? '#10b981' : '#ef4444'
+  const Icon  = ok ? CheckCircle2 : XCircle
+  return (
+    <div className="flex items-center gap-2 py-1.5 border-b border-white/5 last:border-0">
+      <Icon size={12} style={{ color, flexShrink: 0 }} />
+      <span className="text-[11px] font-semibold w-16 text-slate-400">{label}</span>
+      {detail && detail !== 'unavailable' && detail !== 'N/A' && (
+        <span className="text-[10px] font-mono text-slate-500 truncate">{detail}</span>
+      )}
+      {!ok && !detail && (
+        <span className="text-[10px] text-red-500/70 italic">no disponible</span>
+      )}
+    </div>
+  )
+}
+
+function HostDiagnosticsPanel({ diag, loading }: { diag: RunnerDiagnostics | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-3 text-[11px] text-slate-500">
+        <RefreshCw size={12} className="animate-spin" />
+        Cargando diagnósticos...
+      </div>
+    )
+  }
+  if (!diag) return null
+
+  const { components, adb } = diag
+
+  return (
+    <div className="pt-3 space-y-3">
+      <div className="text-[10px] font-black tracking-widest text-slate-600 uppercase">
+        Diagnósticos del host
+      </div>
+
+      {/* Components */}
+      <div className="rounded-xl overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="px-3 py-2 text-[9px] font-black tracking-widest uppercase text-slate-600 border-b border-white/5">
+          Runtimes
+        </div>
+        <div className="px-3 py-1">
+          <DiagRow label="JRE 17"  ok={components.jre.installed}    detail={components.jre.version} />
+          <DiagRow label="Node.js" ok={components.node.installed}   detail={components.node.version} />
+          <DiagRow label="Appium"  ok={components.appium.installed} detail={components.appium.version} />
+          {components.xcode.installed !== undefined && (
+            <DiagRow label="Xcode" ok={components.xcode.installed}  detail={components.xcode.version} />
+          )}
+        </div>
+      </div>
+
+      {/* ADB */}
+      <div className="rounded-xl overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="px-3 py-2 text-[9px] font-black tracking-widest uppercase text-slate-600 border-b border-white/5">
+          Android Debug Bridge
+        </div>
+        <div className="px-3 py-1">
+          <DiagRow label="ADB"    ok={adb.ok}      detail={adb.version} />
+          <DiagRow label="Tools"  ok={adb.platformToolsInstalled} detail={adb.path ?? undefined} />
+          <div className="flex items-center gap-2 py-1.5">
+            <Activity size={12} style={{ color: '#6366f1', flexShrink: 0 }} />
+            <span className="text-[11px] font-semibold w-16 text-slate-400">Disp.</span>
+            <span className="text-[10px] font-mono text-slate-500">{adb.devicesFound ?? 0} detectado(s)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Runner card ─────────────────────────────────────────────────────────────
 
 interface RunnerCardProps {
@@ -119,11 +195,22 @@ interface RunnerCardProps {
 }
 
 function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
-  const [expanded, setExpanded] = useState(false)
-  const [loading,  setLoading]  = useState<string | null>(null)
+  const [expanded,    setExpanded]    = useState(false)
+  const [loading,     setLoading]     = useState<string | null>(null)
+  const [diag,        setDiag]        = useState<RunnerDiagnostics | null>(null)
+  const [diagLoading, setDiagLoading] = useState(false)
 
   const color = statusColor(runner.status)
   const os    = resolveOs(runner)
+
+  useEffect(() => {
+    if (!expanded) return
+    setDiagLoading(true)
+    getRunnerDiagnostics(runner.runnerId)
+      .then(setDiag)
+      .catch(() => setDiag(null))
+      .finally(() => setDiagLoading(false))
+  }, [expanded, runner.runnerId])
 
   const androidOk = runner.androidSupported ?? true
   const iosOk     = runner.iosSupported ?? (runner.platform === 'ios')
@@ -262,6 +349,8 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
                 <div className="text-[11px] text-slate-600 italic">Sin dispositivos detectados</div>
               )}
               {runner.devices?.map(d => <DeviceRow key={d.deviceId} device={d} />)}
+
+              <HostDiagnosticsPanel diag={diag} loading={diagLoading} />
             </div>
           </motion.div>
         )}

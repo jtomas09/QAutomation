@@ -157,9 +157,33 @@ public class DependencySelfHealingManager {
     private boolean checkAppium() {
         boolean alive    = appiumMgr.isAlive();
         boolean canStart = appiumMgr.canStart();
-        boolean ok       = alive || canStart;
+        boolean drivers  = checkDriversInstalled();
+        boolean ok       = (alive || canStart) && drivers;
         System.setProperty("APPIUM_OK", String.valueOf(ok));
-        if (!ok) System.err.println("[DependencyHealer] Appium no disponible (proceso y binario).");
+        if (!alive && !canStart)
+            System.err.println("[DependencyHealer] Appium no disponible (proceso y binario).");
+        return ok;
+    }
+
+    private boolean checkDriversInstalled() {
+        // APPIUM_HOME is set by installer or defaults to ~/.appium
+        String appiumHome = System.getProperty("APPIUM_HOME",
+                System.getProperty("user.home") + "/.appium");
+        Path modules = Path.of(appiumHome, "node_modules");
+
+        // uiautomator2 required for Android
+        boolean ua2 = Files.isDirectory(modules.resolve("appium-uiautomator2-driver"))
+                   || Files.isDirectory(modules.resolve("@appium/uiautomator2-driver"));
+
+        // xcuitest required for iOS — only on macOS
+        boolean xcui = !"MACOS".equals(os)
+                    || Files.isDirectory(modules.resolve("appium-xcuitest-driver"))
+                    || Files.isDirectory(modules.resolve("@appium/xcuitest-driver"));
+
+        boolean ok = ua2 && xcui;
+        System.setProperty("DRIVERS_OK", String.valueOf(ok));
+        if (!ok) System.err.printf("[DependencyHealer] Drivers incompletos: ua2=%s xcui=%s (APPIUM_HOME=%s)%n",
+                ua2, xcui, appiumHome);
         return ok;
     }
 

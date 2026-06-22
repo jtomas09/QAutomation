@@ -99,6 +99,14 @@ public class AppiumManager {
      * Call once after ensureRunning() succeeds.
      */
     public void startWatchdog(ScheduledExecutorService scheduler) {
+        startWatchdog(scheduler, null);
+    }
+
+    /**
+     * Variant that fires {@code onRestart} (if non-null) after a successful restart.
+     * DeviceSelfHealingManager uses this to trigger an immediate device rescan.
+     */
+    public void startWatchdog(ScheduledExecutorService scheduler, Runnable onRestart) {
         scheduler.scheduleAtFixedRate(() -> {
             if (stopping.get() || !managedByUs) return;
             if (!isAlive()) {
@@ -106,6 +114,9 @@ public class AppiumManager {
                 try {
                     Thread.sleep(RESTART_DELAY * 1000L);
                     ensureRunning();
+                    if (isAlive() && onRestart != null) {
+                        onRestart.run();
+                    }
                 } catch (Exception e) {
                     System.err.println("[Appium] Error al reiniciar: " + e.getMessage());
                 }
@@ -322,10 +333,17 @@ public class AppiumManager {
                     "--log", logFile.toString(), "--log-timestamp"};
         }
 
-        appiumProcess = new ProcessBuilder(cmd)
+        ProcessBuilder pb = new ProcessBuilder(cmd)
                 .redirectErrorStream(true)
-                .redirectOutput(logFile.toFile())
-                .start();
+                .redirectOutput(logFile.toFile());
+
+        // Pass APPIUM_HOME to child process if set — lets Appium find pre-bundled drivers
+        String appiumHome = System.getProperty("APPIUM_HOME");
+        if (appiumHome != null && !appiumHome.isBlank()) {
+            pb.environment().put("APPIUM_HOME", appiumHome);
+        }
+
+        appiumProcess = pb.start();
 
         managedByUs = true;
         System.out.println("[Appium] Proceso iniciado (PID " + appiumProcess.pid() +

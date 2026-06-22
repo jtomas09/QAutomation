@@ -1,9 +1,14 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Automation QA Agent — Instalador macOS Enterprise v3.0.0
+#  Automation QA Agent — Instalador macOS Enterprise v5.0.0
 #
 #  Autosuficiente: Java 17, Node.js, Appium, ADB — todo embebido.
 #  El usuario NO necesita instalar Java, Node, Android Studio, ni Appium.
+#
+#  V5: Appium y drivers pre-empaquetados en el bundle (.app/Contents/Appium/).
+#      npm install NUNCA se ejecuta en produccion.
+#      Solo se usa el JRE embebido — JAVA_HOME y java del sistema ignorados.
+#      APPIUM_HOME exportado al LaunchAgent para drivers pre-instalados.
 #
 #  Dependencias externas PERMITIDAS (solo para iOS, impuesto por Apple):
 #    - Xcode + Command Line Tools  (obligatorio para xcrun / iOS)
@@ -33,6 +38,9 @@ PLIST_LABEL="com.automationqa.runner"
 
 NODE_VERSION="v20.19.2"
 
+# Directorio donde los drivers pre-instalados (APPIUM_HOME) se almacenan
+APPIUM_HOME_DIR="$RUNTIME_DIR/appium-home"
+
 # ── Deteccion de arquitectura ──────────────────────────────────────────────────
 ARCH=$(uname -m)
 if [ "$ARCH" = "arm64" ]; then
@@ -60,8 +68,9 @@ info() { echo "         $1"; }
 print_header() {
     echo ""
     echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   Automation QA Agent — Instalador Enterprise v3.0.0"
+    echo "   Automation QA Agent — Instalador Enterprise v5.0.0"
     echo "   Sin dependencias manuales. Runtimes embebidos."
+    echo "   Appium + drivers pre-empaquetados. Sin npm en produccion."
     echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "   Arquitectura:  $ARCH"
     echo "   Directorio:    $BASE_DIR"
@@ -155,30 +164,100 @@ install_node() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [3/6] Appium Server 2 + drivers — instalacion local via Node embebido
+# [3/6] Appium Server 2 + drivers — pre-empaquetado (V5: sin npm en produccion)
+#
+# Orden de busqueda:
+#   1. Bundle .app (Contents/Appium/) — PREFERIDO para distribuciones enterprise
+#   2. Descarga tarball pre-construido desde el backend
+#   3. npm install como FALLBACK de emergencia (solo si lo anterior falla)
 # ══════════════════════════════════════════════════════════════════════════════
 install_appium() {
     echo "  [3/6] Appium Server 2 + drivers..."
 
     local appium_bin="$APPIUM_DIR/node_modules/.bin/appium"
 
+    # ── Ya instalado ─────────────────────────────────────────────────────────
     if [ -f "$appium_bin" ]; then
         local ver
         ver=$("$NODE_DIR/bin/node" "$appium_bin" --version 2>/dev/null)
         ok "Appium ya instalado: $ver"
         APPIUM_OK=true
+        setup_appium_home
         return
     fi
 
+    # ── [V5] Opcion 1: Bundle pre-empaquetado en .app ────────────────────────
+    # Cuando se distribuye como AutomationQA-Agent.app, Appium viene pre-instalado
+    # en Contents/Appium/ con todos sus drivers listos.
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    local bundle_appium="$script_dir/../Appium/node_modules/.bin/appium"
+    local bundle_drivers="$script_dir/../Drivers"
+
+    if [ -f "$bundle_appium" ]; then
+        info "Appium pre-empaquetado encontrado — copiando bundle..."
+        mkdir -p "$APPIUM_DIR"
+        cp -r "$(dirname "$(dirname "$bundle_appium")")" "$RUNTIME_DIR/appium_tmp"
+        rsync -a --delete "$RUNTIME_DIR/appium_tmp/" "$APPIUM_DIR/" 2>/dev/null \
+            || cp -rf "$RUNTIME_DIR/appium_tmp/." "$APPIUM_DIR/"
+        rm -rf "$RUNTIME_DIR/appium_tmp"
+
+        # Copiar drivers pre-instalados si existen en el bundle
+        if [ -d "$bundle_drivers" ]; then
+            info "Copiando drivers pre-instalados..."
+            mkdir -p "$APPIUM_HOME_DIR"
+            rsync -a --delete "$bundle_drivers/" "$APPIUM_HOME_DIR/" 2>/dev/null \
+                || cp -rf "$bundle_drivers/." "$APPIUM_HOME_DIR/"
+            ok "Drivers copiados desde bundle."
+        fi
+
+        if [ -f "$appium_bin" ]; then
+            local ver
+            ver=$("$NODE_DIR/bin/node" "$appium_bin" --version 2>/dev/null)
+            ok "Appium instalado desde bundle: $ver"
+            APPIUM_OK=true
+            setup_appium_home
+            return
+        fi
+        warn "Bundle encontrado pero Appium bin no copiado correctamente."
+    fi
+
+    # ── [V5] Opcion 2: Descarga tarball pre-construido desde backend ──────────
+    local tarball_url="$BACKEND_URL/api/runner/download/appium-bundle/macos"
+    local tmp_tar
+    tmp_tar="$(mktemp /tmp/qa_appium_XXXXXX.tar.gz)"
+    info "Descargando bundle pre-construido de Appium..."
+    if curl -fL --max-time 300 --progress-bar "$tarball_url" -o "$tmp_tar" 2>/dev/null; then
+        local sz
+        sz=$(wc -c < "$tmp_tar" | tr -d ' ')
+        if [ "$sz" -gt 1000000 ]; then
+            mkdir -p "$APPIUM_DIR"
+            if tar -xzf "$tmp_tar" -C "$RUNTIME_DIR" 2>/dev/null; then
+                if [ -f "$appium_bin" ]; then
+                    local ver
+                    ver=$("$NODE_DIR/bin/node" "$appium_bin" --version 2>/dev/null)
+                    ok "Appium instalado desde tarball del servidor: $ver"
+                    APPIUM_OK=true
+                    rm -f "$tmp_tar"
+                    setup_appium_home
+                    return
+                fi
+            fi
+        fi
+    fi
+    rm -f "$tmp_tar"
+
+    # ── [V5] Opcion 3: npm install — fallback de emergencia ──────────────────
+    # Esto solo deberia ejecutarse en entornos de desarrollo o si el bundle
+    # no esta disponible. En produccion el bundle SIEMPRE debe estar presente.
     if [ ! -x "$NODE_DIR/bin/node" ]; then
         warn "Node.js no disponible — Appium omitido. El Agent iniciara en modo DEGRADED."
-        info "Reejecutar el instalador para instalar Appium."
         return
     fi
 
+    warn "Bundle no encontrado. Instalando Appium via npm (puede tardar 2-4 min)..."
+    warn "AVISO: npm install en produccion indica que el bundle no esta configurado."
     mkdir -p "$APPIUM_DIR"
-
-    info "Instalando Appium 2 (puede tardar 2-4 minutos)..."
     if "$NODE_DIR/bin/npm" install \
             --prefix "$APPIUM_DIR" \
             appium@2 \
@@ -188,26 +267,36 @@ install_appium() {
         if [ -f "$appium_bin" ]; then
             local ver
             ver=$("$NODE_DIR/bin/node" "$appium_bin" --version 2>/dev/null)
-            ok "Appium instalado: $ver"
+            ok "Appium instalado via npm (fallback): $ver"
             APPIUM_OK=true
-            install_drivers "$appium_bin"
+            install_drivers_fallback "$appium_bin"
+            setup_appium_home
         else
             warn "npm exit OK pero appium bin no encontrado."
         fi
     else
-        warn "Error al instalar Appium via npm."
+        warn "Error al instalar Appium via npm. El Agent iniciara en modo DEGRADED."
     fi
 }
 
-install_drivers() {
+# Establece APPIUM_HOME apuntando a los drivers pre-instalados.
+# Se llama despues de cualquier ruta de instalacion exitosa.
+setup_appium_home() {
+    mkdir -p "$APPIUM_HOME_DIR"
+    ok "APPIUM_HOME: $APPIUM_HOME_DIR"
+}
+
+# Instala drivers via 'appium driver install' — solo como fallback cuando npm
+# tuvo que instalar Appium. En produccion los drivers vienen en el bundle.
+install_drivers_fallback() {
     local appium_bin="$1"
     local node_bin="$NODE_DIR/bin/node"
 
     info "Instalando driver uiautomator2 (Android)..."
-    "$node_bin" "$appium_bin" driver install uiautomator2 2>&1 | tail -3 || true
+    APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver install uiautomator2 2>&1 | tail -3 || true
 
     info "Instalando driver xcuitest (iOS — requiere Xcode)..."
-    "$node_bin" "$appium_bin" driver install xcuitest 2>&1 | tail -3 || true
+    APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver install xcuitest 2>&1 | tail -3 || true
 
     ok "Drivers instalados."
 }
@@ -334,22 +423,18 @@ install_launch_agent() {
 
     mkdir -p "$LOGS_DIR"
 
-    # Seleccionar binario Java
-    local java_bin=""
-    if [ -x "$JRE_DIR/bin/java" ]; then
-        java_bin="$JRE_DIR/bin/java"
-    elif [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
-        java_bin="$JAVA_HOME/bin/java"
-        warn "Usando JAVA_HOME como fallback: $java_bin"
-    elif command -v java &>/dev/null; then
-        java_bin="$(command -v java)"
-        warn "Usando Java del sistema como fallback: $java_bin"
-    else
+    # [V5] Solo se acepta el JRE embebido — JAVA_HOME y java del sistema ignorados.
+    # Esto garantiza que el agent siempre corre con JRE 17 validado,
+    # independientemente del entorno del usuario.
+    local java_bin="$JRE_DIR/bin/java"
+    if [ ! -x "$java_bin" ]; then
         echo ""
         echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "   [ERROR] Java no disponible."
-        echo "   JRE 17 no pudo descargarse y no hay Java instalado en el sistema."
-        echo "   Instala desde: https://adoptium.net"
+        echo "   [ERROR] JRE 17 embebido requerido pero no disponible."
+        echo "   No se encontro: $java_bin"
+        echo ""
+        echo "   Solucion: ejecutar el instalador en un equipo con acceso a"
+        echo "   internet para que JRE 17 pueda descargarse de Adoptium."
         echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         exit 1
     fi
@@ -384,6 +469,7 @@ install_launch_agent() {
         <string>-DAGENT_DATA_DIR=${BASE_DIR}</string>
         <string>-DAPPIUM_BIN=${appium_bin}</string>
         <string>-DNODE_BIN=${node_bin}</string>
+        <string>-DAPPIUM_HOME=${APPIUM_HOME_DIR}</string>
         <string>-DPOLL_INTERVAL_MS=30000</string>
         <string>-jar</string>
         <string>${JAR_DST}</string>
@@ -414,23 +500,21 @@ PLIST_EOF
 
 # ══════════════════════════════════════════════════════════════════════════════
 print_summary() {
-    local java_status="embebido (JRE 17)"
-    $JRE_OK   || java_status="WARN — usando Java del sistema"
-
     echo ""
     echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "   Resumen de instalacion"
+    echo "   Resumen de instalacion v5.0.0"
     echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     if $JRE_OK;    then echo "   Java 17 embebido      [OK]"
-    else                echo "   Java 17 embebido      [WARN] usando Java del sistema"; fi
+    else                echo "   Java 17 embebido      [ERROR] requerido — reinstala con internet"; fi
     if $NODE_OK;   then echo "   Node.js embebido      [OK]"
     else                echo "   Node.js embebido      [WARN] Appium no disponible"; fi
-    if $APPIUM_OK; then echo "   Appium 2 + drivers    [OK]"
+    if $APPIUM_OK; then echo "   Appium 2 + drivers    [OK]  (pre-empaquetado)"
     else                echo "   Appium 2 + drivers    [WARN] Agent modo DEGRADED — reintentara"; fi
     if $ADB_OK;    then echo "   Android ADB           [OK]"
     else                echo "   Android ADB           [WARN] Agent modo DEGRADED — reintentara"; fi
     if $JAR_OK;    then echo "   Runner JAR            [OK]"; fi
     echo ""
+    echo "   APPIUM_HOME:  $APPIUM_HOME_DIR"
     echo "   El Agent se esta iniciando..."
     echo "   Aparecera en el Dashboard en aproximadamente 15 segundos."
     echo ""
