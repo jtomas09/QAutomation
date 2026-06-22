@@ -132,6 +132,24 @@ public class BackendClient {
                 payload.put("devicesFound", devices.size());
             }
 
+            // Component telemetry (v4.0)
+            payload.put("jreInstalled",    true);
+            payload.put("jreVersion",      System.getProperty("JRE_VERSION",
+                    System.getProperty("java.version", "unavailable")));
+
+            String nodeBin = System.getProperty("NODE_BIN", "");
+            boolean nodeOk = !nodeBin.isBlank()
+                    ? new File(nodeBin).canExecute()
+                    : Boolean.parseBoolean(System.getProperty("NODE_OK", "false"));
+            payload.put("nodeInstalled",   nodeOk);
+            payload.put("nodeVersion",     System.getProperty("NODE_VERSION", "unavailable"));
+
+            payload.put("appiumInstalled", Boolean.parseBoolean(System.getProperty("APPIUM_OK", "false")));
+            payload.put("appiumVersion",   System.getProperty("APPIUM_VERSION", "unavailable"));
+
+            payload.put("xcodeInstalled",  Boolean.parseBoolean(System.getProperty("XCODE_OK", "false")));
+            payload.put("xcodeVersion",    System.getProperty("XCODE_VERSION", "unavailable"));
+
             String body = json.writeValueAsString(payload);
             HttpResponse<String> res = post("/api/runners", body);
             return res.headers().firstValue("X-Runner-Command").orElse(null);

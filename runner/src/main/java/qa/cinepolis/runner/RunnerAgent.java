@@ -3,6 +3,7 @@ package qa.cinepolis.runner;
 import qa.cinepolis.runner.model.JobDto;
 import qa.cinepolis.runner.model.RunnerConfig;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,37 +13,39 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Universal Runner Agent — discovers Android and iOS devices automatically
- * based on OS capabilities. No manual RUNNER_PLATFORM configuration needed.
+ * Universal Runner Agent v4.0
  *
- * Windows → Android only (ADB)
- * macOS   → Android + iOS (ADB + Xcode)
- * Linux   → Android only (ADB)
+ * Discovers Android and iOS devices automatically based on OS capabilities.
+ * No manual RUNNER_PLATFORM configuration needed.
+ *
+ * Windows → Android (ADB)
+ * macOS   → Android (ADB) + iOS (Xcode)  — requires Xcode CLT
+ * Linux   → Android (ADB)
+ *
+ * V4 additions:
+ *  - XcodeValidator: validates Xcode on macOS at startup
+ *  - DependencySelfHealingManager: monitors JRE/Node/Appium/ADB/Xcode every 5 min
+ *  - Component telemetry: jreVersion, nodeVersion, appiumVersion, xcodeVersion in heartbeat
+ *  - ONLINE requires all components operational (DEGRADED if any critical component missing)
  */
 public class RunnerAgent {
 
     private static volatile boolean stopping = false;
 
     public static void main(String[] args) throws Exception {
-        RunnerConfig  config   = RunnerConfig.fromEnv();
-        BackendClient client   = new BackendClient(config.backendUrl, config.runnerToken, config.runnerId);
+        RunnerConfig  config = RunnerConfig.fromEnv();
+        BackendClient client = new BackendClient(config.backendUrl, config.runnerToken, config.runnerId);
 
-        // ── Tool managers ────────────────────────────────────────────────────
+        // ── Tool managers ──────────────────────────────────────────────────────
         Path agentDataDir = Path.of(config.agentDataDir);
-
-        // Embedded platform-tools live at:
-        //   Windows  → %LOCALAPPDATA%\AutomationQA\runner\platform-tools\
-        //   Mac/Linux → ~/.automationqa/platform-tools/
-        Path runnerDir = "WINDOWS".equals(config.os) ? agentDataDir.resolve("runner") : agentDataDir;
+        Path runnerDir    = "WINDOWS".equals(config.os) ? agentDataDir.resolve("runner") : agentDataDir;
 
         PlatformToolsManager platformTools = new PlatformToolsManager(runnerDir, config.os, config.backendUrl);
         AppiumManager        appiumMgr     = new AppiumManager(config.os);
         UpdateManager        updateMgr     = new UpdateManager(
                 config.backendUrl, config.runnerToken, config.version, agentDataDir);
 
-        // Resolve embedded ADB — downloads platform-tools if absent (up to 3 attempts).
-        // If all attempts fail the runner starts in DEGRADED status and SelfHealingManager
-        // retries every 5 minutes until adb.exe is available — no manual action required.
+        // ── ADB ────────────────────────────────────────────────────────────────
         String  adbPath       = platformTools.resolveAdb();
         boolean adbFunctional = platformTools.isAdbFunctional();
         String  adbVersion    = platformTools.getAdbVersion();
@@ -52,89 +55,136 @@ public class RunnerAgent {
         System.setProperty("ADB_OK",      String.valueOf(adbFunctional));
         config.androidSupported = adbFunctional;
 
-        if (!adbFunctional) {
-            System.out.println("[Runner] ADB no disponible. El Agent iniciara en estado DEGRADED.");
-            System.out.println("[Runner] SelfHealingManager reintentara la descarga cada 5 minutos.");
-        }
-
         System.out.println("[Runner] === Diagnostico ADB ===");
         System.out.println("[Runner] ADB Path:    " + adbPath);
-        System.out.println("[Runner] ADB Exists:  " + java.nio.file.Files.exists(java.nio.file.Path.of(adbPath)));
+        System.out.println("[Runner] ADB Exists:  " + Files.exists(Path.of(adbPath)));
         System.out.println("[Runner] ADB Version: " + adbVersion);
         System.out.println("[Runner] ADB OK:      " + adbFunctional);
+        if (!adbFunctional) System.out.println("[Runner] ADB no disponible. Iniciando en DEGRADED.");
 
-        // Ensure Appium is running before accepting jobs
+        // ── Appium ─────────────────────────────────────────────────────────────
         try {
             appiumMgr.ensureRunning();
         } catch (Exception e) {
             System.err.println("[Runner] Appium no pudo iniciarse: " + e.getMessage());
-            System.err.println("[Runner] Los tests continuaran pero fallaran si requieren Appium.");
+        }
+        boolean appiumOk = appiumMgr.isAlive();
+        System.setProperty("APPIUM_OK",      String.valueOf(appiumOk));
+        System.setProperty("APPIUM_VERSION",  appiumOk ? appiumMgr.getAppiumVersion() : "unavailable");
+
+        // ── JRE telemetry ──────────────────────────────────────────────────────
+        System.setProperty("JRE_VERSION", System.getProperty("java.version", "unavailable"));
+
+        // ── Node telemetry ─────────────────────────────────────────────────────
+        String  nodeBin = System.getProperty("NODE_BIN", "");
+        boolean nodeOk  = !nodeBin.isBlank() && Files.isExecutable(Path.of(nodeBin));
+        if (!nodeOk && nodeBin.isBlank()) {
+            // Check system Node as fallback
+            try {
+                Process pn = new ProcessBuilder("node", "--version")
+                        .redirectErrorStream(true).start();
+                nodeOk = pn.waitFor(3, TimeUnit.SECONDS) && pn.exitValue() == 0;
+                pn.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+            } catch (Exception ignored) {}
+        }
+        System.setProperty("NODE_OK", String.valueOf(nodeOk));
+        if (nodeOk) {
+            try {
+                String nbCmd = nodeBin.isBlank() ? "node" : nodeBin;
+                Process pn = new ProcessBuilder(nbCmd, "--version")
+                        .redirectErrorStream(true).start();
+                pn.waitFor(3, TimeUnit.SECONDS);
+                String v = new String(pn.getInputStream().readAllBytes()).trim();
+                System.setProperty("NODE_VERSION", v.isEmpty() ? "unavailable" : v);
+            } catch (Exception ignored) {
+                System.setProperty("NODE_VERSION", "unavailable");
+            }
+        }
+
+        // ── Xcode (macOS only) ─────────────────────────────────────────────────
+        boolean xcodeOk;
+        if ("MACOS".equals(config.os)) {
+            XcodeValidator.XcodeInfo xcodeInfo = XcodeValidator.validate();
+            xcodeOk             = xcodeInfo.installed;
+            config.iosSupported = xcodeInfo.installed;
+            System.setProperty("XCODE_OK",      String.valueOf(xcodeOk));
+            System.setProperty("XCODE_VERSION",
+                    xcodeInfo.xcodeVersion != null ? xcodeInfo.xcodeVersion : "unavailable");
+            System.out.printf("[Runner] Xcode: %s%n",
+                    xcodeOk ? "disponible (" + xcodeInfo.xcodeVersion + ")" : "no instalado");
+        } else {
+            xcodeOk = true; // non-macOS: not applicable
+            System.setProperty("XCODE_OK",      "false");
+            System.setProperty("XCODE_VERSION", "N/A");
         }
 
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
-
         printBanner(config, adbPath);
 
-        // Declared before shutdown hook so the lambda can capture it
-        AtomicReference<SelfHealingManager> selfHealingRef = new AtomicReference<>();
+        // Declared before shutdown hook so lambdas can capture the reference
+        AtomicReference<DependencySelfHealingManager> selfHealingRef = new AtomicReference<>();
 
-        // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\n[Runner] Cerrando — deteniendo ejecucion activa...");
             stopping = true;
-            SelfHealingManager sh = selfHealingRef.get();
+            DependencySelfHealingManager sh = selfHealingRef.get();
             if (sh != null) sh.stop();
             executor.killActiveProcess();
             appiumMgr.stop();
         }, "shutdown-hook"));
 
-        // ── Heartbeat inmediato al arrancar ──────────────────────────────────
+        // ── Initial heartbeat ──────────────────────────────────────────────────
         System.out.println("[Runner] Registrando en Backend...");
-        // DEGRADED when ADB is missing/broken; ONLINE when all components are ready.
-        String initialStatus = adbFunctional ? "ONLINE" : "DEGRADED";
+        boolean allOk        = adbFunctional && appiumOk && nodeOk && xcodeOk;
+        String  initialStatus = allOk ? "ONLINE" : "DEGRADED";
         try {
             List<Map<String, String>> initDevices = discoverAllDevices(config);
-            System.out.println("[Runner] Devices Found:  " + initDevices.size());
+            System.out.println("[Runner] Devices Found: " + initDevices.size());
             client.registerDevices(config.runnerId, initDevices);
             client.sendHeartbeat(
                     config.runnerId, config.platform, config.version,
                     initialStatus, config.os, config.hostname,
-                    config.androidSupported, config.iosSupported,
-                    initDevices);
+                    config.androidSupported, config.iosSupported, initDevices);
             System.out.printf("[Runner] Registro completado: %d dispositivo(s) [%s]%n",
                     initDevices.size(), config.capabilitySummary());
 
             if (initDevices.isEmpty()) {
-                System.out.println("[Runner]");
-                System.out.println("[Runner] ⚠ Sin dispositivos detectados.");
-                System.out.println("[Runner]   → Verifica que el dispositivo este conectado por USB");
-                System.out.println("[Runner]   → En Android: acepta 'Depuracion USB' en el dispositivo");
-                System.out.println("[Runner]   → Ejecuta manualmente: adb devices -l");
-                if (config.iosSupported) {
-                    System.out.println("[Runner]   → En iOS: desbloquea el dispositivo y acepta 'Confiar en esta PC'");
-                }
+                System.out.println("[Runner] Sin dispositivos detectados.");
+                System.out.println("[Runner]   -> Verifica que el dispositivo este conectado por USB");
+                System.out.println("[Runner]   -> En Android: acepta 'Depuracion USB' en el dispositivo");
+                if (config.iosSupported)
+                    System.out.println("[Runner]   -> En iOS: desbloquea el dispositivo y acepta confiar en este Mac");
             }
         } catch (Exception e) {
             System.err.println("[Runner] Error en registro inicial: " + e.getMessage());
         }
 
-        // ── SelfHealingManager — auto-descarga ADB si falta ─────────────────
-        // Heal callback: cuando ADB se repara, actualizar config y enviar heartbeat
-        // inmediato para que el Dashboard cambie de DEGRADED → ONLINE sin reiniciar.
-        SelfHealingManager selfHealing = new SelfHealingManager(
-                platformTools,
-                adbFunctional,
-                () -> {
-                    config.androidSupported = true;
+        // ── DependencySelfHealingManager ───────────────────────────────────────
+        DependencySelfHealingManager.HealthReport initialHealth =
+                new DependencySelfHealingManager.HealthReport(
+                        true,           // JRE: always present (we're running)
+                        nodeOk,
+                        appiumOk,
+                        adbFunctional,
+                        xcodeOk);
+
+        DependencySelfHealingManager selfHealing = new DependencySelfHealingManager(
+                platformTools, appiumMgr, config.os, initialHealth,
+                report -> {
+                    config.androidSupported = report.adbOk;
+                    if ("MACOS".equals(config.os)) config.iosSupported = report.xcodeOk;
+                    System.setProperty("APPIUM_OK", String.valueOf(report.appiumOk));
+                    System.setProperty("NODE_OK",   String.valueOf(report.nodeOk));
+                    String newStatus = report.isFullyOperational() ? "ONLINE" : "DEGRADED";
                     try {
                         List<Map<String, String>> healed = discoverAllDevices(config);
                         client.registerDevices(config.runnerId, healed);
                         client.sendHeartbeat(
                                 config.runnerId, config.platform, config.version,
-                                "ONLINE", config.os, config.hostname,
-                                true, config.iosSupported, healed);
-                        System.out.printf("[Runner] Self-healing completado — %d dispositivo(s) re-registrado(s).%n",
-                                healed.size());
+                                newStatus, config.os, config.hostname,
+                                config.androidSupported, config.iosSupported, healed);
+                        System.out.printf("[Runner] DependencyHealer: %s — %d dispositivo(s) re-registrado(s).%n",
+                                newStatus, healed.size());
                     } catch (Exception e) {
                         System.err.println("[Runner] Error en heartbeat post-healing: " + e.getMessage());
                     }
@@ -142,7 +192,7 @@ public class RunnerAgent {
         selfHealingRef.set(selfHealing);
         selfHealing.start();
 
-        // ── Scheduler: heartbeat cada 30s + job ping cada 10s ───────────────
+        // ── Scheduler ──────────────────────────────────────────────────────────
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "runner-scheduler");
             t.setDaemon(true);
@@ -150,11 +200,7 @@ public class RunnerAgent {
         });
 
         scheduler.scheduleAtFixedRate(client::ping, 0, 10, TimeUnit.SECONDS);
-
-        // Appium watchdog (restart if crashed)
         appiumMgr.startWatchdog(scheduler);
-
-        // Auto-update check every 60 minutes
         scheduler.scheduleAtFixedRate(updateMgr::checkAndApply, 60, 60, TimeUnit.MINUTES);
 
         AtomicReference<String> pendingCommand = new AtomicReference<>(null);
@@ -163,16 +209,19 @@ public class RunnerAgent {
                 List<Map<String, String>> devices = discoverAllDevices(config);
                 client.registerDevices(config.runnerId, devices);
 
-                String runnerStatus = stopping                        ? "STOPPING"
-                        : executor.hasActiveProcess()                ? "BUSY"
-                        : !platformTools.isAdbFunctional()           ? "DEGRADED"
+                DependencySelfHealingManager sh     = selfHealingRef.get();
+                DependencySelfHealingManager.HealthReport health =
+                        sh != null ? sh.getLastReport() : null;
+
+                String runnerStatus = stopping                                          ? "STOPPING"
+                        : executor.hasActiveProcess()                                   ? "BUSY"
+                        : (health != null && !health.isFullyOperational())              ? "DEGRADED"
                         : "ONLINE";
 
                 String cmd = client.sendHeartbeat(
                         config.runnerId, config.platform, config.version,
                         runnerStatus, config.os, config.hostname,
-                        config.androidSupported, config.iosSupported,
-                        devices);
+                        config.androidSupported, config.iosSupported, devices);
 
                 if (cmd != null) {
                     pendingCommand.set(cmd);
@@ -212,16 +261,9 @@ public class RunnerAgent {
         }
     }
 
-    /**
-     * Discovers all physical devices based on platform capabilities.
-     * Android discovery is always attempted.
-     * iOS discovery runs automatically when iosSupported=true (macOS + Xcode).
-     */
     private static List<Map<String, String>> discoverAllDevices(RunnerConfig config) {
         List<Map<String, String>> devices = new ArrayList<>(BackendClient.discoverAndroidDevices());
-        if (config.iosSupported) {
-            devices.addAll(BackendClient.discoverIosDevices());
-        }
+        if (config.iosSupported) devices.addAll(BackendClient.discoverIosDevices());
         return devices;
     }
 
@@ -237,11 +279,17 @@ public class RunnerAgent {
         System.out.println("  AppiumHub:  " + config.appiumHub);
         System.out.println("  Poll:       " + config.pollIntervalMs + " ms");
         System.out.println();
-        System.out.println("  Capacidades detectadas:");
-        System.out.println("  " + (config.androidSupported ? "✓" : "✗") + " Android  (ADB embebido)");
-        System.out.println("  " + (config.iosSupported     ? "✓" : "✗") + " iOS      (Xcode/xcrun)");
-        System.out.println("  ADB:        " + (adbPath != null ? adbPath : "no disponible"));
+        System.out.println("  Componentes:");
+        System.out.println("  + JRE:      " + System.getProperty("JRE_VERSION", "?"));
+        System.out.println("  " + (Boolean.parseBoolean(System.getProperty("NODE_OK", "false")) ? "+" : "-")
+                + " Node:     " + System.getProperty("NODE_VERSION", "no disponible"));
+        System.out.println("  " + (Boolean.parseBoolean(System.getProperty("APPIUM_OK", "false")) ? "+" : "-")
+                + " Appium:   " + System.getProperty("APPIUM_VERSION", "no disponible"));
+        System.out.println("  " + (config.androidSupported ? "+" : "-") + " Android  (ADB embebido)");
+        System.out.println("  " + (config.iosSupported     ? "+" : "-") + " iOS      (Xcode/xcrun)");
         System.out.println("  ADB ver:    " + System.getProperty("ADB_VERSION", "-"));
+        if ("MACOS".equals(config.os))
+            System.out.println("  Xcode:      " + System.getProperty("XCODE_VERSION", "-"));
         System.out.println();
     }
 
@@ -258,8 +306,8 @@ public class RunnerAgent {
                 executor.killActiveProcess();
                 System.exit(0);
             }
-            case "START" -> System.out.println("[Runner] Comando START recibido — ya en ejecucion.");
-            default      -> System.out.println("[Runner] Comando desconocido: " + cmd);
+            case "START"  -> System.out.println("[Runner] Comando START recibido — ya en ejecucion.");
+            default       -> System.out.println("[Runner] Comando desconocido: " + cmd);
         }
     }
 }

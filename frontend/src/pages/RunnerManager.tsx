@@ -48,7 +48,6 @@ function timeAgo(iso: string | null) {
 function resolveOs(runner: Runner): 'WINDOWS' | 'MACOS' | 'LINUX' {
   if (runner.os === 'MACOS' || runner.os === 'WINDOWS' || runner.os === 'LINUX')
     return runner.os
-  // Fallback: infer from runnerId or platform
   const id = runner.runnerId?.toLowerCase() ?? ''
   if (id.startsWith('mac')) return 'MACOS'
   if (id.startsWith('linux')) return 'LINUX'
@@ -57,7 +56,7 @@ function resolveOs(runner: Runner): 'WINDOWS' | 'MACOS' | 'LINUX' {
 
 function OsIcon({ os, size = 18 }: { os: string; size?: number }) {
   if (os === 'MACOS') return <Apple size={size} />
-  return <Monitor size={size} />  // Windows + Linux both get monitor icon
+  return <Monitor size={size} />
 }
 
 function osLabel(os: string, hostname?: string) {
@@ -92,6 +91,24 @@ function CapChip({ supported, label }: { supported: boolean; label: string }) {
   )
 }
 
+// ─── Component badge (v4 telemetry) ──────────────────────────────────────────
+
+function CompBadge({ ok, label, version }: { ok?: boolean; label: string; version?: string }) {
+  if (ok === undefined) return null
+  const color = ok ? '#10b981' : '#ef4444'
+  const Icon  = ok ? CheckCircle2 : XCircle
+  return (
+    <div className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold"
+      style={{ background: `${color}12`, color, border: `1px solid ${color}20` }}>
+      <Icon size={10} />
+      {label}
+      {version && ok && version !== 'unavailable' && version !== 'N/A' && (
+        <span className="text-[9px] opacity-60 ml-0.5">{version}</span>
+      )}
+    </div>
+  )
+}
+
 // ─── Runner card ─────────────────────────────────────────────────────────────
 
 interface RunnerCardProps {
@@ -108,9 +125,13 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
   const color = statusColor(runner.status)
   const os    = resolveOs(runner)
 
-  // Capability flags — backward-compat fallback
   const androidOk = runner.androidSupported ?? true
   const iosOk     = runner.iosSupported ?? (runner.platform === 'ios')
+
+  const hasComponentTelemetry = runner.jreInstalled !== undefined
+    || runner.nodeInstalled !== undefined
+    || runner.appiumInstalled !== undefined
+    || runner.xcodeInstalled !== undefined
 
   async function act(fn: () => Promise<void>, label: string) {
     setLoading(label)
@@ -193,6 +214,19 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
           <span className="text-[10px] text-slate-600 italic">Sin capacidades detectadas</span>
         )}
       </div>
+
+      {/* ── Component health (v4 telemetry) ──────────────── */}
+      {hasComponentTelemetry && (
+        <div className="flex items-center gap-2 px-5 pb-3 flex-wrap">
+          <span className="text-[10px] text-slate-600 font-semibold mr-1">Componentes:</span>
+          <CompBadge ok={runner.jreInstalled}    label="JRE"    version={runner.jreVersion} />
+          <CompBadge ok={runner.nodeInstalled}   label="Node"   version={runner.nodeVersion} />
+          <CompBadge ok={runner.appiumInstalled} label="Appium" version={runner.appiumVersion} />
+          {os === 'MACOS' && (
+            <CompBadge ok={runner.xcodeInstalled} label="Xcode" version={runner.xcodeVersion} />
+          )}
+        </div>
+      )}
 
       {/* ── Control buttons ────────────────────────────────── */}
       <div className="flex items-center gap-2 px-5 pb-4"
@@ -341,7 +375,6 @@ export default function RunnerManager() {
     finally { setAllLoading(null); setTimeout(refresh, 2000) }
   }
 
-  // Stats derived from runner data
   const online      = runners.filter(r => r.status !== 'OFFLINE').length
   const busy        = runners.filter(r => r.status === 'BUSY').length
   const withAndroid = runners.filter(r => r.androidSupported !== false).length

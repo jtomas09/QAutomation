@@ -125,6 +125,15 @@ export interface Runner {
   adbOk?:                 boolean
   devicesFound?:          number
   platformToolsInstalled?: boolean
+  // Component telemetry (v4.0 — enterprise agent)
+  jreInstalled?:          boolean
+  jreVersion?:            string
+  nodeInstalled?:         boolean
+  nodeVersion?:           string
+  appiumInstalled?:       boolean
+  appiumVersion?:         string
+  xcodeInstalled?:        boolean
+  xcodeVersion?:          string
 }
 
 export interface ExecutionSummary {

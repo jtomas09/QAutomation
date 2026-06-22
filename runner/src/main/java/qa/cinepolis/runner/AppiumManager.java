@@ -113,6 +113,36 @@ public class AppiumManager {
         }, 30, 30, TimeUnit.SECONDS);
     }
 
+    /**
+     * Returns true if an Appium binary can be located (process need not be running).
+     * Used by DependencySelfHealingManager to distinguish "not installed" from "crashed".
+     */
+    public boolean canStart() {
+        return findAppiumBin() != null;
+    }
+
+    /**
+     * Returns the Appium version string (e.g. "2.11.3").
+     * Returns "unavailable" if Appium cannot be found or version-queried.
+     */
+    public String getAppiumVersion() {
+        String bin = findAppiumBin();
+        if (bin == null) return "unavailable";
+        try {
+            String nodeBin = System.getProperty("NODE_BIN");
+            boolean useNode = nodeBin != null && !nodeBin.isBlank()
+                    && Files.exists(Path.of(nodeBin)) && !bin.contains(" ");
+            String[] cmd = useNode
+                    ? new String[]{nodeBin, bin, "--version"}
+                    : new String[]{bin, "--version"};
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); return "unavailable"; }
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            return (p.exitValue() == 0 && !out.isBlank()) ? out.split("\n")[0].trim() : "unavailable";
+        } catch (Exception e) { return "unavailable"; }
+    }
+
     public void stop() {
         stopping.set(true);
         Process p = appiumProcess;
@@ -126,7 +156,8 @@ public class AppiumManager {
 
     // ── Find ──────────────────────────────────────────────────────────────
 
-    private String findAppiumBin() {
+    // Package-visible so DependencySelfHealingManager can probe without duplicating logic
+    String findAppiumBin() {
         for (String candidate : buildCandidates()) {
             if (candidate == null || candidate.isBlank()) continue;
             if (probeAppiumBin(candidate)) {

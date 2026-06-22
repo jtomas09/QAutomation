@@ -20,10 +20,32 @@ public class RunnerStore {
             if (r.getRegisteredAt() == null) r.setRegisteredAt(Instant.now());
             r.setRunnerId(id);
             r.setLastSeen(Instant.now());
-            if (update.getPlatform() != null)                          r.setPlatform(update.getPlatform());
-            if (update.getVersion()  != null)                          r.setVersion(update.getVersion());
-            if (update.getStatus()   != null)                          r.setStatus(update.getStatus());
+            // Core
+            if (update.getPlatform() != null) r.setPlatform(update.getPlatform());
+            if (update.getVersion()  != null) r.setVersion(update.getVersion());
+            if (update.getStatus()   != null) r.setStatus(update.getStatus());
             if (update.getDevices()  != null && !update.getDevices().isEmpty()) r.setDevices(update.getDevices());
+            // Universal Runner
+            if (update.getOs()               != null) r.setOs(update.getOs());
+            if (update.getHostname()         != null) r.setHostname(update.getHostname());
+            if (update.getAndroidSupported() != null) r.setAndroidSupported(update.getAndroidSupported());
+            if (update.getIosSupported()     != null) r.setIosSupported(update.getIosSupported());
+            // ADB diagnostics
+            if (update.getAdbPath()    != null) r.setAdbPath(update.getAdbPath());
+            if (update.getAdbVersion() != null) r.setAdbVersion(update.getAdbVersion());
+            if (update.getAdbExists()  != null) r.setAdbExists(update.getAdbExists());
+            if (update.getAdbOk()      != null) r.setAdbOk(update.getAdbOk());
+            if (update.getDevicesFound()             != null) r.setDevicesFound(update.getDevicesFound());
+            if (update.getPlatformToolsInstalled()   != null) r.setPlatformToolsInstalled(update.getPlatformToolsInstalled());
+            // Component telemetry (v4.0)
+            if (update.getJreInstalled()    != null) r.setJreInstalled(update.getJreInstalled());
+            if (update.getJreVersion()      != null) r.setJreVersion(update.getJreVersion());
+            if (update.getNodeInstalled()   != null) r.setNodeInstalled(update.getNodeInstalled());
+            if (update.getNodeVersion()     != null) r.setNodeVersion(update.getNodeVersion());
+            if (update.getAppiumInstalled() != null) r.setAppiumInstalled(update.getAppiumInstalled());
+            if (update.getAppiumVersion()   != null) r.setAppiumVersion(update.getAppiumVersion());
+            if (update.getXcodeInstalled()  != null) r.setXcodeInstalled(update.getXcodeInstalled());
+            if (update.getXcodeVersion()    != null) r.setXcodeVersion(update.getXcodeVersion());
             return r;
         });
     }

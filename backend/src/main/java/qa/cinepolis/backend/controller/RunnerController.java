@@ -97,6 +97,16 @@ public class RunnerController {
         update.setPlatformToolsInstalled(
                 Boolean.TRUE.equals(update.getAdbExists()) && Boolean.TRUE.equals(update.getAdbOk()));
 
+        // Component telemetry (v4.0)
+        if (payload.containsKey("jreInstalled"))    update.setJreInstalled(Boolean.TRUE.equals(payload.get("jreInstalled")));
+        if (payload.containsKey("jreVersion"))      update.setJreVersion((String) payload.get("jreVersion"));
+        if (payload.containsKey("nodeInstalled"))   update.setNodeInstalled(Boolean.TRUE.equals(payload.get("nodeInstalled")));
+        if (payload.containsKey("nodeVersion"))     update.setNodeVersion((String) payload.get("nodeVersion"));
+        if (payload.containsKey("appiumInstalled")) update.setAppiumInstalled(Boolean.TRUE.equals(payload.get("appiumInstalled")));
+        if (payload.containsKey("appiumVersion"))   update.setAppiumVersion((String) payload.get("appiumVersion"));
+        if (payload.containsKey("xcodeInstalled"))  update.setXcodeInstalled(Boolean.TRUE.equals(payload.get("xcodeInstalled")));
+        if (payload.containsKey("xcodeVersion"))    update.setXcodeVersion((String) payload.get("xcodeVersion"));
+
         // Device list (from heartbeat)
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> devRaw = (List<Map<String, Object>>) payload.get("devices");
@@ -176,6 +186,49 @@ public class RunnerController {
         );
         return result;
     }
+
+    /** GET /api/runners/{id}/diagnostics — full component health for a specific runner */
+    @GetMapping("/{id}/diagnostics")
+    public ResponseEntity<Map<String, Object>> getDiagnostics(@PathVariable String id) {
+        return runnerStore.findById(id)
+                .map(runner -> {
+                    Map<String, Object> d = new LinkedHashMap<>();
+                    d.put("runnerId",  runner.getRunnerId());
+                    d.put("status",    runner.getStatus());
+                    d.put("lastSeen",  runner.getLastSeen());
+                    d.put("hostname",  runner.getHostname());
+                    d.put("os",        runner.getOs());
+                    d.put("version",   runner.getVersion());
+
+                    Map<String, Object> adb = new LinkedHashMap<>();
+                    adb.put("path",    runner.getAdbPath());
+                    adb.put("version", runner.getAdbVersion());
+                    adb.put("exists",  runner.getAdbExists());
+                    adb.put("ok",      runner.getAdbOk());
+                    adb.put("devicesFound", runner.getDevicesFound());
+                    d.put("adb", adb);
+
+                    Map<String, Object> components = new LinkedHashMap<>();
+                    components.put("jre",    Map.of(
+                            "installed", Boolean.TRUE.equals(runner.getJreInstalled()),
+                            "version",   safe(runner.getJreVersion())));
+                    components.put("node",   Map.of(
+                            "installed", Boolean.TRUE.equals(runner.getNodeInstalled()),
+                            "version",   safe(runner.getNodeVersion())));
+                    components.put("appium", Map.of(
+                            "installed", Boolean.TRUE.equals(runner.getAppiumInstalled()),
+                            "version",   safe(runner.getAppiumVersion())));
+                    components.put("xcode",  Map.of(
+                            "installed", Boolean.TRUE.equals(runner.getXcodeInstalled()),
+                            "version",   safe(runner.getXcodeVersion())));
+                    d.put("components", components);
+                    d.put("devices", runner.getDevices());
+                    return ResponseEntity.ok(d);
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    private static String safe(String v) { return v != null ? v : "unavailable"; }
 
     private void enqueueCommand(Map<String, Object> payload, String command) {
         String runnerId = payload != null ? (String) payload.get("runnerId") : null;

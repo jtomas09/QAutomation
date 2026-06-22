@@ -27,6 +27,16 @@ public class Runner {
     private Integer devicesFound;
     private Boolean platformToolsInstalled;
 
+    // Component telemetry (v4.0 — enterprise agent)
+    private Boolean jreInstalled;
+    private String  jreVersion;
+    private Boolean nodeInstalled;
+    private String  nodeVersion;
+    private Boolean appiumInstalled;
+    private String  appiumVersion;
+    private Boolean xcodeInstalled;
+    private String  xcodeVersion;
+
     public String       getRunnerId()              { return runnerId; }
     public void         setRunnerId(String v)      { this.runnerId = v; }
     public String       getPlatform()              { return platform; }
@@ -63,6 +73,24 @@ public class Runner {
     public void    setAdbOk(Boolean v)             { this.adbOk = v; }
     public Integer getDevicesFound()               { return devicesFound; }
     public void    setDevicesFound(Integer v)      { this.devicesFound = v; }
-    public Boolean getPlatformToolsInstalled()     { return platformToolsInstalled; }
+    public Boolean getPlatformToolsInstalled()          { return platformToolsInstalled; }
     public void    setPlatformToolsInstalled(Boolean v) { this.platformToolsInstalled = v; }
+
+    // Component telemetry
+    public Boolean getJreInstalled()             { return jreInstalled; }
+    public void    setJreInstalled(Boolean v)    { this.jreInstalled = v; }
+    public String  getJreVersion()               { return jreVersion; }
+    public void    setJreVersion(String v)       { this.jreVersion = v; }
+    public Boolean getNodeInstalled()            { return nodeInstalled; }
+    public void    setNodeInstalled(Boolean v)   { this.nodeInstalled = v; }
+    public String  getNodeVersion()              { return nodeVersion; }
+    public void    setNodeVersion(String v)      { this.nodeVersion = v; }
+    public Boolean getAppiumInstalled()          { return appiumInstalled; }
+    public void    setAppiumInstalled(Boolean v) { this.appiumInstalled = v; }
+    public String  getAppiumVersion()            { return appiumVersion; }
+    public void    setAppiumVersion(String v)    { this.appiumVersion = v; }
+    public Boolean getXcodeInstalled()           { return xcodeInstalled; }
+    public void    setXcodeInstalled(Boolean v)  { this.xcodeInstalled = v; }
+    public String  getXcodeVersion()             { return xcodeVersion; }
+    public void    setXcodeVersion(String v)     { this.xcodeVersion = v; }
 }
