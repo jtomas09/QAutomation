@@ -118,6 +118,11 @@ public class RunnerAgent {
             System.setProperty("XCODE_VERSION", "N/A");
         }
 
+        // ── HostStatusManager (v6) ────────────────────────────────────────────
+        HostStatusManager.HostReport hostReport = HostStatusManager.evaluate(
+                true, nodeOk, appiumOk, adbFunctional, xcodeOk, config.iosSupported);
+        HostStatusManager.apply(hostReport);
+
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
         printBanner(config, adbPath);
 
@@ -186,6 +191,11 @@ public class RunnerAgent {
                         DeviceSelfHealingManager dh = deviceHealerRef.get();
                         if (dh != null) dh.onAdbHealed();
                     }
+
+                    // Update HostStatusManager properties
+                    HostStatusManager.HostReport healedHost =
+                            HostStatusManager.fromHealthReport(report, config.iosSupported);
+                    HostStatusManager.apply(healedHost);
 
                     String newStatus = report.isFullyOperational() ? "ONLINE" : "DEGRADED";
                     try {

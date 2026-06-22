@@ -75,6 +75,9 @@ public class VersionController {
         return ResponseEntity.ok(info);
     }
 
+    /** Returns the pre-computed SHA256 of the runner JAR, or null if unavailable. */
+    public String getJarSha256() { return jarSha256; }
+
     private static String toHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
         for (byte b : bytes) sb.append(String.format("%02x", b));

@@ -257,6 +257,27 @@ export interface RunnerDiagnostics {
   devices: Array<{ deviceId: string; deviceName: string; platform: string; status: string }>
 }
 
+/**
+ * GET /api/hosts/{hostId}/diagnostics
+ * Returns a flat host status snapshot (CAMBIO 6 — Host Diagnostics).
+ */
+export interface HostDiagnostics {
+  hostId:          string
+  status:          string   // ONLINE | DEGRADED | OFFLINE | BUSY | UNKNOWN
+  jreInstalled:    boolean
+  nodeInstalled:   boolean
+  appiumInstalled: boolean
+  adbInstalled:    boolean
+  xcodeInstalled:  boolean
+  iosReady:        boolean
+  devicesDetected: number
+  lastHeartbeat:   string | null
+}
+
+export async function getHostDiagnostics(hostId: string): Promise<HostDiagnostics> {
+  return httpGet<HostDiagnostics>(`/api/hosts/${encodeURIComponent(hostId)}/diagnostics`)
+}
+
 // ─── Device Farm ──────────────────────────────────────────────────────────────
 
 /** GET /api/devices — all registered physical devices */

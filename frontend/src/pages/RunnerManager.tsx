@@ -9,9 +9,9 @@ import {
 import {
   getRunners, getRunnerDevices,
   startRunner, stopRunner, restartRunner,
-  getRunnerDiagnostics,
+  getRunnerDiagnostics, getHostDiagnostics,
 } from '../api'
-import type { RunnerDiagnostics } from '../api'
+import type { RunnerDiagnostics, HostDiagnostics } from '../api'
 import type { Runner, RunnerDevice, RunnerStatus } from '../types'
 
 // ─── Status helpers ─────────────────────────────────────────────────────────
@@ -111,6 +111,94 @@ function CompBadge({ ok, label, version }: { ok?: boolean; label: string; versio
   )
 }
 
+// ─── Host Status Section (CAMBIO 6 — flat format from /api/hosts/{id}/diagnostics) ──
+
+const HOST_STATUS_COLOR: Record<string, string> = {
+  ONLINE:   '#10b981',
+  BUSY:     '#f59e0b',
+  DEGRADED: '#f59e0b',
+  OFFLINE:  '#6b7280',
+}
+
+function ComponentRow({
+  label, ok, icon,
+}: { label: string; ok: boolean; icon: React.ReactNode }) {
+  const color = ok ? '#10b981' : '#ef4444'
+  const Icon  = ok ? CheckCircle2 : XCircle
+  return (
+    <div className="flex items-center gap-2 py-1.5 border-b border-white/5 last:border-0">
+      <Icon size={12} style={{ color, flexShrink: 0 }} />
+      <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>{icon}</span>
+      <span className="text-[11px] font-semibold text-slate-400 flex-1">{label}</span>
+      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+        style={{ background: `${color}14`, color }}>
+        {ok ? 'OK' : 'FAIL'}
+      </span>
+    </div>
+  )
+}
+
+function HostStatusSection({ diag, loading }: {
+  diag: HostDiagnostics | null
+  loading: boolean
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-3 text-[11px] text-slate-500">
+        <RefreshCw size={12} className="animate-spin" />
+        Cargando estado del host...
+      </div>
+    )
+  }
+  if (!diag) return null
+
+  const statusColor = HOST_STATUS_COLOR[diag.status] ?? '#6b7280'
+  const heartbeat   = diag.lastHeartbeat ? timeAgo(diag.lastHeartbeat) : '—'
+
+  return (
+    <div className="space-y-3 pt-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-black tracking-widest text-slate-600 uppercase">
+          Host Diagnostics
+        </span>
+        <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
+          style={{ background: `${statusColor}18`, color: statusColor, border: `1px solid ${statusColor}30` }}>
+          {diag.status}
+        </span>
+      </div>
+
+      {/* Component grid */}
+      <div className="rounded-xl overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="px-3 py-2 text-[9px] font-black tracking-widest uppercase text-slate-600 border-b border-white/5">
+          Componentes
+        </div>
+        <div className="px-3 py-1">
+          <ComponentRow label="Java (JRE)"  ok={diag.jreInstalled}    icon={<Cpu size={10} />} />
+          <ComponentRow label="Node.js"     ok={diag.nodeInstalled}   icon={<Activity size={10} />} />
+          <ComponentRow label="Appium"      ok={diag.appiumInstalled} icon={<Smartphone size={10} />} />
+          <ComponentRow label="ADB"         ok={diag.adbInstalled}    icon={<Monitor size={10} />} />
+          <ComponentRow label="Xcode"       ok={diag.xcodeInstalled}  icon={<Apple size={10} />} />
+          <ComponentRow label="iOS Ready"   ok={diag.iosReady}        icon={<Apple size={10} />} />
+        </div>
+      </div>
+
+      {/* Footer: devices + heartbeat */}
+      <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
+        <div className="flex items-center gap-1.5">
+          <Smartphone size={10} />
+          <span>{diag.devicesDetected} dispositivo(s) detectado(s)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Clock size={10} />
+          <span>Heartbeat: {heartbeat}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Host diagnostics panel ──────────────────────────────────────────────────
 
 function DiagRow({ label, ok, detail }: { label: string; ok: boolean; detail?: string | null }) {
@@ -195,10 +283,12 @@ interface RunnerCardProps {
 }
 
 function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
-  const [expanded,    setExpanded]    = useState(false)
-  const [loading,     setLoading]     = useState<string | null>(null)
-  const [diag,        setDiag]        = useState<RunnerDiagnostics | null>(null)
-  const [diagLoading, setDiagLoading] = useState(false)
+  const [expanded,        setExpanded]        = useState(false)
+  const [loading,         setLoading]         = useState<string | null>(null)
+  const [diag,            setDiag]            = useState<RunnerDiagnostics | null>(null)
+  const [diagLoading,     setDiagLoading]     = useState(false)
+  const [hostDiag,        setHostDiag]        = useState<HostDiagnostics | null>(null)
+  const [hostDiagLoading, setHostDiagLoading] = useState(false)
 
   const color = statusColor(runner.status)
   const os    = resolveOs(runner)
@@ -210,6 +300,12 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
       .then(setDiag)
       .catch(() => setDiag(null))
       .finally(() => setDiagLoading(false))
+
+    setHostDiagLoading(true)
+    getHostDiagnostics(runner.runnerId)
+      .then(setHostDiag)
+      .catch(() => setHostDiag(null))
+      .finally(() => setHostDiagLoading(false))
   }, [expanded, runner.runnerId])
 
   const androidOk = runner.androidSupported ?? true
@@ -350,6 +446,7 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
               )}
               {runner.devices?.map(d => <DeviceRow key={d.deviceId} device={d} />)}
 
+              <HostStatusSection diag={hostDiag} loading={hostDiagLoading} />
               <HostDiagnosticsPanel diag={diag} loading={diagLoading} />
             </div>
           </motion.div>

@@ -150,6 +150,10 @@ public class BackendClient {
             payload.put("xcodeInstalled",  Boolean.parseBoolean(System.getProperty("XCODE_OK", "false")));
             payload.put("xcodeVersion",    System.getProperty("XCODE_VERSION", "unavailable"));
 
+            // Host Status (v6 — HostStatusManager)
+            payload.put("hostStatus", System.getProperty("HOST_STATUS", status));
+            payload.put("iosReady",   Boolean.parseBoolean(System.getProperty("IOS_READY", "false")));
+
             String body = json.writeValueAsString(payload);
             HttpResponse<String> res = post("/api/runners", body);
             return res.headers().firstValue("X-Runner-Command").orElse(null);

@@ -67,16 +67,42 @@ public class UpdateManager {
 
             System.out.println("[Update] Nueva version disponible: " + remote.version +
                     " (actual: " + currentVersion + ")");
-            Path newJar = downloadJar(remote);
 
-            // SHA256 validation — reject tampered or corrupted JARs before rotation
-            if (remote.sha256 != null && !remote.sha256.isBlank()) {
-                System.out.println("[Update] Validando integridad SHA256...");
-                if (!ChecksumValidator.validate(newJar, remote.sha256)) {
-                    Files.deleteIfExists(newJar);
-                    throw new IOException("SHA256 mismatch — update abortado. JAR puede estar corrompido.");
+            // Download + SHA256 validation with up to 3 retry attempts
+            Path newJar = null;
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    Path downloaded = downloadJar(remote);
+
+                    // Fetch and compare SHA256 from dedicated endpoint, then fall back to version JSON
+                    String sha256 = fetchRemoteSha256(remote);
+                    if (sha256 != null && !sha256.isBlank()) {
+                        System.out.printf("[Update] Validando integridad SHA256 (intento %d/3)...%n", attempt);
+                        if (!ChecksumValidator.validate(downloaded, sha256)) {
+                            Files.deleteIfExists(downloaded);
+                            System.err.printf("[Update] SHA256 mismatch en intento %d — reintentando...%n", attempt);
+                            if (attempt < 3) Thread.sleep(3000L * attempt);
+                            continue;
+                        }
+                        System.out.println("[Update] SHA256 OK.");
+                    }
+
+                    newJar = downloaded;
+                    break; // success
+                } catch (IOException e) {
+                    System.err.printf("[Update] Intento %d/3 fallido: %s%n", attempt, e.getMessage());
+                    if (attempt < 3) {
+                        try { Thread.sleep(3000L * attempt); } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
                 }
-                System.out.println("[Update] SHA256 OK.");
+            }
+
+            if (newJar == null) {
+                System.setProperty("HOST_STATUS", "DEGRADED");
+                System.err.println("[Update] Fallo la descarga/validacion tras 3 intentos. Host marcado DEGRADED.");
+                return;
             }
 
             rotate(newJar);
@@ -147,6 +173,42 @@ public class UpdateManager {
             try { out[i] = Integer.parseInt(parts[i]); } catch (NumberFormatException ignored) {}
         }
         return out;
+    }
+
+    // ── Remote SHA256 ─────────────────────────────────────────────────────────
+
+    /**
+     * Fetches the official SHA256 for the runner JAR.
+     *
+     * Priority:
+     *   1. GET {backendUrl}/api/runner/download/jar.sha256  — dedicated endpoint (CAMBIO 5)
+     *   2. sha256 field from VersionInfo JSON               — fallback
+     *
+     * Returns null when neither source is available (SHA256 check is then skipped).
+     */
+    private String fetchRemoteSha256(VersionInfo info) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(backendUrl + "/api/runner/download/jar.sha256"))
+                    .header("Authorization", "Bearer " + runnerToken)
+                    .timeout(Duration.ofSeconds(10))
+                    .GET().build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 200) {
+                String body = res.body().trim();
+                if (!body.isEmpty()) {
+                    String hash = body.split("\\s+")[0].trim();
+                    if (hash.length() == 64) {
+                        System.out.println("[Update] SHA256 obtenido del endpoint dedicado.");
+                        return hash;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[Update] Endpoint jar.sha256 no accesible — usando SHA256 del JSON de version: "
+                    + e.getMessage());
+        }
+        return info.sha256; // fallback: sha256 from version JSON
     }
 
     // ── Download ──────────────────────────────────────────────────────────

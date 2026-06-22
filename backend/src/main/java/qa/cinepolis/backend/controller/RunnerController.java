@@ -107,6 +107,10 @@ public class RunnerController {
         if (payload.containsKey("xcodeInstalled"))  update.setXcodeInstalled(Boolean.TRUE.equals(payload.get("xcodeInstalled")));
         if (payload.containsKey("xcodeVersion"))    update.setXcodeVersion((String) payload.get("xcodeVersion"));
 
+        // Host Status (v6 — HostStatusManager)
+        if (payload.containsKey("hostStatus"))  update.setHostStatus((String) payload.get("hostStatus"));
+        if (payload.containsKey("iosReady"))    update.setIosReady(Boolean.TRUE.equals(payload.get("iosReady")));
+
         // Device list (from heartbeat)
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> devRaw = (List<Map<String, Object>>) payload.get("devices");

@@ -46,6 +46,9 @@ public class RunnerStore {
             if (update.getAppiumVersion()   != null) r.setAppiumVersion(update.getAppiumVersion());
             if (update.getXcodeInstalled()  != null) r.setXcodeInstalled(update.getXcodeInstalled());
             if (update.getXcodeVersion()    != null) r.setXcodeVersion(update.getXcodeVersion());
+            // Host Status (v6 — HostStatusManager)
+            if (update.getHostStatus() != null) r.setHostStatus(update.getHostStatus());
+            if (update.getIosReady()   != null) r.setIosReady(update.getIosReady());
             return r;
         });
     }

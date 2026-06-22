@@ -27,6 +27,10 @@ public class Runner {
     private Integer devicesFound;
     private Boolean platformToolsInstalled;
 
+    // Host status (v6 — HostStatusManager)
+    private String  hostStatus;    // "ONLINE" | "DEGRADED" | "OFFLINE"
+    private Boolean iosReady;
+
     // Component telemetry (v4.0 — enterprise agent)
     private Boolean jreInstalled;
     private String  jreVersion;
@@ -75,6 +79,12 @@ public class Runner {
     public void    setDevicesFound(Integer v)      { this.devicesFound = v; }
     public Boolean getPlatformToolsInstalled()          { return platformToolsInstalled; }
     public void    setPlatformToolsInstalled(Boolean v) { this.platformToolsInstalled = v; }
+
+    // Host status (v6)
+    public String  getHostStatus()               { return hostStatus; }
+    public void    setHostStatus(String v)       { this.hostStatus = v; }
+    public Boolean getIosReady()                 { return iosReady; }
+    public void    setIosReady(Boolean v)        { this.iosReady = v; }
 
     // Component telemetry
     public Boolean getJreInstalled()             { return jreInstalled; }

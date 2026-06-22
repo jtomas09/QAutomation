@@ -41,6 +41,12 @@ public class RunnerDownloadController {
 
     private static final Logger log = LoggerFactory.getLogger(RunnerDownloadController.class);
 
+    private final VersionController versionController;
+
+    public RunnerDownloadController(VersionController versionController) {
+        this.versionController = versionController;
+    }
+
     // ── Cascade entries: [0] proper installer, [1] temp fallback ────────────
 
     private static final Map<String, String[]> PROPER = Map.of(
@@ -205,6 +211,32 @@ public class RunnerDownloadController {
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("success", false, "message", "Error al leer el componente del Runner."));
         }
+    }
+
+    // ── JAR SHA256 endpoint ──────────────────────────────────────────────────
+
+    /**
+     * GET /api/runner/download/jar.sha256
+     *
+     * Returns the SHA256 checksum of the runner JAR in md5sum-compatible format:
+     *   &lt;sha256hex&gt;  automationqa-runner.jar
+     *
+     * Used by runners and install scripts to verify download integrity independently
+     * of the version JSON. The runner fetches this after downloading the JAR and
+     * compares before activating the new binary.
+     */
+    @GetMapping("/jar.sha256")
+    public ResponseEntity<String> downloadJarSha256() {
+        String sha256 = versionController.getJarSha256();
+        if (sha256 == null) {
+            log.warn("GET /api/runner/download/jar.sha256 - SHA256 no disponible (JAR ausente)");
+            return ResponseEntity.notFound().<String>build();
+        }
+        log.info("GET /api/runner/download/jar.sha256 - {}...", sha256.substring(0, 16));
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE,        "text/plain; charset=UTF-8")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"automationqa-runner.jar.sha256\"")
+                .body(sha256 + "  automationqa-runner.jar\n");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
