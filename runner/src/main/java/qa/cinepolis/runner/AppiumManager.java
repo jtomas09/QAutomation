@@ -13,11 +13,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Full Appium lifecycle manager.
  *
  * Resolution order:
+ *   0. APPIUM_BIN system property (embedded enterprise mode — absolute priority)
  *   1. Running Appium at http://127.0.0.1:4723/status (already up — use it)
  *   2. PATH: appium / appium.cmd
  *   3. Global npm: ~/.npm-global/bin/appium  (or $(npm root -g)/../.bin/appium)
  *   4. npx appium (no install, ephemeral)
- *   5. Install Appium globally via npm, then start
+ *   5. Install Appium locally (if NODE_BIN set) or globally via npm, then start
+ *
+ * When NODE_BIN system property is set, Appium is launched as:
+ *   $NODE_BIN $APPIUM_BIN --port 4723 ...
+ * This avoids any dependency on system Node or PATH.
  *
  * Once started, monitors the process and auto-restarts if it crashes.
  */
@@ -136,7 +141,13 @@ public class AppiumManager {
         List<String> list = new ArrayList<>();
         boolean win = isWindows();
 
-        // PATH first
+        // Priority 0: embedded Appium (enterprise mode — APPIUM_BIN set by installer)
+        String embeddedBin = System.getProperty("APPIUM_BIN");
+        if (embeddedBin != null && !embeddedBin.isBlank() && Files.exists(Path.of(embeddedBin))) {
+            list.add(embeddedBin);
+        }
+
+        // PATH
         list.add(win ? "appium.cmd" : "appium");
 
         // npm global prefix
@@ -164,11 +175,21 @@ public class AppiumManager {
 
     private boolean probeAppiumBin(String bin) {
         try {
-            String[] cmd = bin.contains(" ")
-                    ? (isWindows() ? new String[]{"cmd","/c",bin,"--version"} : new String[]{"sh","-c",bin+" --version"})
-                    : new String[]{bin, "--version"};
+            String nodeBin = System.getProperty("NODE_BIN");
+            boolean useNode = nodeBin != null && !nodeBin.isBlank()
+                    && Files.exists(Path.of(nodeBin))
+                    && !bin.contains(" ");
+            String[] cmd;
+            if (useNode) {
+                cmd = new String[]{nodeBin, bin, "--version"};
+            } else if (bin.contains(" ")) {
+                cmd = isWindows() ? new String[]{"cmd","/c",bin,"--version"}
+                                  : new String[]{"sh","-c",bin+" --version"};
+            } else {
+                cmd = new String[]{bin, "--version"};
+            }
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            boolean done = p.waitFor(8, TimeUnit.SECONDS);
             String out = new String(p.getInputStream().readAllBytes());
             if (!done) { p.destroyForcibly(); return false; }
             return p.exitValue() == 0 && out.matches("(?s).*\\d+\\.\\d+.*");
@@ -178,20 +199,39 @@ public class AppiumManager {
     // ── Install ───────────────────────────────────────────────────────────
 
     private void installAppium() throws IOException, InterruptedException {
-        System.out.println("[Appium] Ejecutando: npm install -g appium ...");
-        String npmCmd = isWindows() ? "npm.cmd" : "npm";
-        Process p = new ProcessBuilder(npmCmd, "install", "-g", "appium")
-                .inheritIO().start();
-        boolean done = p.waitFor(10, TimeUnit.MINUTES);
-        if (!done || p.exitValue() != 0) {
-            throw new IOException("npm install -g appium fallo con codigo " + (done ? p.exitValue() : "timeout"));
+        String nodeBin = System.getProperty("NODE_BIN");
+        boolean hasEmbeddedNode = nodeBin != null && !nodeBin.isBlank()
+                && Files.exists(Path.of(nodeBin));
+
+        if (hasEmbeddedNode) {
+            // Local install using embedded Node — no global npm, no PATH dependency
+            String agentDataDir = System.getProperty("AGENT_DATA_DIR",
+                    System.getProperty("user.home") + "/.automationqa");
+            String prefixDir = agentDataDir + "/runtime/appium";
+            Files.createDirectories(Path.of(prefixDir));
+            String npmBin = Path.of(nodeBin).getParent().resolve("npm").toString();
+            System.out.println("[Appium] Instalando localmente via Node embebido: " + prefixDir);
+            Process p = new ProcessBuilder(npmBin, "install", "--prefix", prefixDir, "appium@2",
+                    "--no-audit", "--no-fund")
+                    .inheritIO().start();
+            boolean done = p.waitFor(10, TimeUnit.MINUTES);
+            if (!done || p.exitValue() != 0) {
+                throw new IOException("npm install appium fallo con codigo " + (done ? p.exitValue() : "timeout"));
+            }
+        } else {
+            // Global install (fallback: requires system Node/npm in PATH)
+            System.out.println("[Appium] Ejecutando: npm install -g appium ...");
+            String npmCmd = isWindows() ? "npm.cmd" : "npm";
+            Process p = new ProcessBuilder(npmCmd, "install", "-g", "appium")
+                    .inheritIO().start();
+            boolean done = p.waitFor(10, TimeUnit.MINUTES);
+            if (!done || p.exitValue() != 0) {
+                throw new IOException("npm install -g appium fallo con codigo " + (done ? p.exitValue() : "timeout"));
+            }
         }
+
         System.out.println("[Appium] Instalacion completada.");
-
-        // Also install UIAutomator2 driver (Android)
         installDriver("uiautomator2");
-
-        // Install XCUITest driver only on macOS (needs Xcode)
         if ("MACOS".equals(os)) {
             installDriver("xcuitest");
         }
@@ -202,9 +242,18 @@ public class AppiumManager {
             System.out.println("[Appium] Instalando driver: " + driver);
             String appiumBin = findAppiumBin();
             if (appiumBin == null) return;
-            String[] cmd = isWindows()
-                    ? new String[]{"cmd", "/c", appiumBin, "driver", "install", driver}
-                    : new String[]{appiumBin, "driver", "install", driver};
+            String nodeBin = System.getProperty("NODE_BIN");
+            boolean useNode = nodeBin != null && !nodeBin.isBlank()
+                    && Files.exists(Path.of(nodeBin))
+                    && !appiumBin.startsWith("npx");
+            String[] cmd;
+            if (useNode) {
+                cmd = new String[]{nodeBin, appiumBin, "driver", "install", driver};
+            } else if (isWindows()) {
+                cmd = new String[]{"cmd", "/c", appiumBin, "driver", "install", driver};
+            } else {
+                cmd = new String[]{appiumBin, "driver", "install", driver};
+            }
             Process p = new ProcessBuilder(cmd).inheritIO().start();
             p.waitFor(5, TimeUnit.MINUTES);
         } catch (Exception e) {
@@ -217,12 +266,23 @@ public class AppiumManager {
     private void startAppium(String appiumBin) throws IOException, InterruptedException {
         System.out.println("[Appium] Iniciando: " + appiumBin + " --port " + PORT + " ...");
 
-        // Log file next to runner
-        Path logFile = Path.of(System.getProperty("user.home"), ".automationqa", "logs", "appium.log");
+        // Log path uses AGENT_DATA_DIR (set by installer), falls back to ~/.automationqa
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR",
+                System.getProperty("user.home") + "/.automationqa");
+        Path logFile = Path.of(agentDataDir, "logs", "appium.log");
         Files.createDirectories(logFile.getParent());
 
+        String nodeBin = System.getProperty("NODE_BIN");
+        boolean useEmbeddedNode = nodeBin != null && !nodeBin.isBlank()
+                && Files.exists(Path.of(nodeBin))
+                && !appiumBin.startsWith("npx");
+
         String[] cmd;
-        if (appiumBin.startsWith("npx")) {
+        if (useEmbeddedNode) {
+            // Launch Appium via embedded Node — no PATH dependency
+            cmd = new String[]{nodeBin, appiumBin, "--port", String.valueOf(PORT),
+                    "--log", logFile.toString(), "--log-timestamp"};
+        } else if (appiumBin.startsWith("npx")) {
             String npxBin = isWindows() ? "npx.cmd" : "npx";
             cmd = new String[]{npxBin, "appium", "--port", String.valueOf(PORT),
                     "--log", logFile.toString(), "--log-timestamp"};
