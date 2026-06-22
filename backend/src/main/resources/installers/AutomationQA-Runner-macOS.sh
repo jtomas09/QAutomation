@@ -65,6 +65,92 @@ err()  { echo "  [ERR]  $1"; }
 info() { echo "         $1"; }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# [V5] SHA256 Checksum Validation
+#
+# Flujo: Descarga → calcular SHA256 → comparar → instalar (o reintentar)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Calcula SHA256 de un archivo usando shasum (disponible en macOS por default)
+compute_sha256() {
+    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+}
+
+# Valida un archivo contra un SHA256 esperado.
+# Retorna 0 (ok) o 1 (mismatch). Pasa si expected_sha esta vacio.
+validate_sha256() {
+    local file="$1"
+    local expected="$2"
+    [ -z "$expected" ] && return 0
+    local actual
+    actual=$(compute_sha256 "$file")
+    if [ "$actual" = "$expected" ]; then
+        return 0
+    else
+        err "SHA256 invalido para $(basename "$file")"
+        info "  esperado: $expected"
+        info "  actual:   $actual"
+        return 1
+    fi
+}
+
+# Escribe un sidecar {file}.sha256 compatible con ChecksumValidator.matchesBaseline()
+# Formato: "hexhash  filename"  (igual al que escribe Java)
+write_sha256_sidecar() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    local hash
+    hash=$(compute_sha256 "$file")
+    printf '%s  %s\n' "$hash" "$(basename "$file")" > "${file}.sha256" 2>/dev/null || true
+}
+
+# Descarga el SHA256 oficial de Node.js desde nodejs.org SHASUMS256.txt
+fetch_node_sha256() {
+    local shasums_url="https://nodejs.org/dist/$NODE_VERSION/SHASUMS256.txt"
+    curl -fsSL --max-time 30 "$shasums_url" 2>/dev/null \
+        | grep "node-$NODE_VERSION-$NODE_ARCH\.tar\.gz$" \
+        | awk '{print $1}'
+}
+
+# Descarga el SHA256 del JRE 17 desde la API de Adoptium
+fetch_jre_sha256() {
+    local api_url="https://api.adoptium.net/v3/assets/latest/17/ga?architecture=${JRE_ARCH}&image_type=jre&jvm_impl=hotspot&os=mac&project=jdk&vendor=eclipse"
+    curl -fsSL --max-time 30 "$api_url" 2>/dev/null \
+        | grep -o '"checksum":"[^"]*"' \
+        | head -1 \
+        | cut -d'"' -f4
+}
+
+# Intenta descargar un archivo con validacion SHA256 y reintento automatico.
+# Uso: download_with_sha256 <url> <dest_tmp> <expected_sha> <label>
+# Retorna 0 si el archivo es valido, 1 si falla ambos intentos.
+download_with_sha256() {
+    local url="$1"
+    local dest="$2"
+    local expected_sha="$3"
+    local label="$4"
+
+    info "Descargando $label..."
+    if curl -fL --max-time 360 --progress-bar "$url" -o "$dest" 2>/dev/null; then
+        if [ -n "$expected_sha" ] && ! validate_sha256 "$dest" "$expected_sha"; then
+            warn "SHA256 invalido para $label — reintentando..."
+            rm -f "$dest"
+            if curl -fL --max-time 360 --progress-bar "$url" -o "$dest" 2>/dev/null \
+               && validate_sha256 "$dest" "$expected_sha"; then
+                ok "SHA256 $label verificado (reintento)."
+                return 0
+            else
+                warn "SHA256 invalido en segundo intento. $label no sera instalado."
+                rm -f "$dest"
+                return 1
+            fi
+        fi
+        [ -n "$expected_sha" ] && ok "SHA256 $label verificado."
+        return 0
+    fi
+    return 1
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 print_header() {
     echo ""
     echo "  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -99,8 +185,13 @@ install_jre() {
     local tmp
     tmp="$(mktemp /tmp/qa_jre17_XXXXXX.tar.gz)"
 
-    info "Descargando JRE 17 ($JRE_ARCH) desde Adoptium..."
-    if curl -fL --max-time 360 --progress-bar "$url" -o "$tmp" 2>/dev/null; then
+    # [V5] Obtener SHA256 esperado antes de la descarga
+    local expected_sha=""
+    info "Obteniendo SHA256 de Adoptium..."
+    expected_sha=$(fetch_jre_sha256 2>/dev/null || echo "")
+    [ -n "$expected_sha" ] && info "SHA256 esperado: ${expected_sha:0:16}..."
+
+    if download_with_sha256 "$url" "$tmp" "$expected_sha" "JRE 17"; then
         info "Extrayendo JRE 17..."
         if tar -xzf "$tmp" -C "$JRE_DIR" --strip-components=1 2>/dev/null; then
             chmod +x "$JRE_DIR/bin/java" 2>/dev/null || true
@@ -109,6 +200,7 @@ install_jre() {
                 ver=$("$JRE_DIR/bin/java" -version 2>&1 | head -1)
                 ok "JRE 17 instalado: $ver"
                 JRE_OK=true
+                write_sha256_sidecar "$JRE_DIR/bin/java"
             else
                 warn "JRE extraido pero binario no ejecutable."
             fi
@@ -142,8 +234,13 @@ install_node() {
     local tmp
     tmp="$(mktemp /tmp/qa_node_XXXXXX.tar.gz)"
 
-    info "Descargando Node.js $NODE_VERSION ($NODE_ARCH)..."
-    if curl -fL --max-time 180 --progress-bar "$url" -o "$tmp" 2>/dev/null; then
+    # [V5] Obtener SHA256 oficial de nodejs.org SHASUMS256.txt
+    local expected_sha=""
+    info "Obteniendo SHA256 desde nodejs.org..."
+    expected_sha=$(fetch_node_sha256 2>/dev/null || echo "")
+    [ -n "$expected_sha" ] && info "SHA256 esperado: ${expected_sha:0:16}..."
+
+    if download_with_sha256 "$url" "$tmp" "$expected_sha" "Node.js $NODE_VERSION"; then
         info "Extrayendo Node.js..."
         if tar -xzf "$tmp" -C "$NODE_DIR" --strip-components=1 2>/dev/null; then
             if [ -x "$NODE_DIR/bin/node" ]; then
@@ -151,6 +248,7 @@ install_node() {
                 ver=$("$NODE_DIR/bin/node" --version 2>/dev/null)
                 ok "Node.js instalado: $ver"
                 NODE_OK=true
+                write_sha256_sidecar "$NODE_DIR/bin/node"
             else
                 warn "Node.js extraido pero binario no ejecutable."
             fi
@@ -347,6 +445,7 @@ install_adb() {
                 ver=$("$PLATFORM_TOOLS_DIR/adb" version 2>/dev/null | head -1)
                 ok "ADB instalado: $ver"
                 ADB_OK=true
+                write_sha256_sidecar "$PLATFORM_TOOLS_DIR/adb"
             else
                 warn "ZIP extraido pero adb no encontrado."
             fi
@@ -380,6 +479,7 @@ install_jar() {
             cp "$candidate" "$JAR_DST"
             ok "JAR instalado desde paquete local."
             JAR_OK=true
+            write_sha256_sidecar "$JAR_DST"
             return
         fi
     done
@@ -397,6 +497,7 @@ install_jar() {
             cp "$tmp" "$JAR_DST"
             ok "JAR descargado e instalado."
             JAR_OK=true
+            write_sha256_sidecar "$JAR_DST"
         else
             warn "JAR descargado parece invalido (${sz} bytes)."
         fi

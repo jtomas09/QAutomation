@@ -150,6 +150,47 @@ public class PlatformToolsManager {
         this.adbFunctional = false;
     }
 
+    /**
+     * Full ADB daemon recovery:
+     *   1. adb kill-server  — stops any hung/crashed daemon
+     *   2. adb start-server — brings a fresh daemon up
+     *   3. reset() + resolveAdb() — re-validates the binary
+     *
+     * Returns true when ADB is functional after the operation.
+     *
+     * Used by DependencySelfHealingManager when ADB is unreachable
+     * but the binary still exists (daemon crash, not a missing-file scenario).
+     */
+    public boolean healAdbServer() {
+        Path adbBin = embeddedAdbPath();
+        if (Files.exists(adbBin)) {
+            String adb = adbBin.toString();
+            try {
+                System.out.println("[PlatformTools] Reiniciando ADB server (kill → start)...");
+
+                Process kill = new ProcessBuilder(adb, "kill-server")
+                        .redirectErrorStream(true).start();
+                kill.waitFor(8, TimeUnit.SECONDS);
+                if (kill.isAlive()) kill.destroyForcibly();
+
+                Thread.sleep(800L);
+
+                Process start = new ProcessBuilder(adb, "start-server")
+                        .redirectErrorStream(true).start();
+                start.waitFor(15, TimeUnit.SECONDS);
+                if (start.isAlive()) start.destroyForcibly();
+
+                Thread.sleep(1500L);
+                System.out.println("[PlatformTools] ADB server reiniciado.");
+            } catch (Exception e) {
+                System.err.println("[PlatformTools] Error al reiniciar ADB server: " + e.getMessage());
+            }
+        }
+        reset();
+        resolveAdb();
+        return isAdbFunctional();
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────
 
     private Path embeddedAdbPath() {

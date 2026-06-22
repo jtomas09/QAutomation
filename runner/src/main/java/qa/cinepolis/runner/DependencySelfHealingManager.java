@@ -1,5 +1,6 @@
 package qa.cinepolis.runner;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.*;
@@ -125,10 +126,19 @@ public class DependencySelfHealingManager {
     private boolean checkJre() {
         String agentDataDir = System.getProperty("AGENT_DATA_DIR", "");
         if (!agentDataDir.isBlank()) {
-            boolean ok = Files.isExecutable(
-                    Path.of(agentDataDir, "runtime", "jre17", "bin", "java"));
-            System.setProperty("JRE_EMBEDDED_OK", String.valueOf(ok));
-            return ok;
+            Path javaBin = Path.of(agentDataDir, "runtime", "jre17", "bin", "java");
+            if (!Files.isExecutable(javaBin)) {
+                System.err.println("[DependencyHealer] JRE embebido no ejecutable: " + javaBin);
+                System.setProperty("JRE_EMBEDDED_OK", "false");
+                return false;
+            }
+            // Checksum validation — detects file corruption or tampering
+            if (!checksumOk(javaBin, "JRE")) {
+                System.setProperty("JRE_EMBEDDED_OK", "false");
+                return false;
+            }
+            System.setProperty("JRE_EMBEDDED_OK", "true");
+            return true;
         }
         return true; // running on system JRE — still functional
     }
@@ -136,10 +146,18 @@ public class DependencySelfHealingManager {
     private boolean checkNode() {
         String nodeBin = System.getProperty("NODE_BIN", "");
         if (!nodeBin.isBlank()) {
-            boolean ok = Files.isExecutable(Path.of(nodeBin));
-            System.setProperty("NODE_OK", String.valueOf(ok));
-            if (!ok) System.err.println("[DependencyHealer] Node embebido no ejecutable: " + nodeBin);
-            return ok;
+            Path bin = Path.of(nodeBin);
+            if (!Files.isExecutable(bin)) {
+                System.err.println("[DependencyHealer] Node embebido no ejecutable: " + nodeBin);
+                System.setProperty("NODE_OK", "false");
+                return false;
+            }
+            if (!checksumOk(bin, "Node")) {
+                System.setProperty("NODE_OK", "false");
+                return false;
+            }
+            System.setProperty("NODE_OK", "true");
+            return true;
         }
         try {
             Process p = new ProcessBuilder("node", "--version")
@@ -188,12 +206,19 @@ public class DependencySelfHealingManager {
     }
 
     private boolean checkAndHealAdb() {
-        if (platformTools.isAdbFunctional()) return true;
+        if (platformTools.isAdbFunctional()) {
+            // Validate checksum of the ADB binary when a baseline exists
+            Path adbBin = platformTools.getToolsDir().resolve("adb");
+            if (!checksumOk(adbBin, "ADB")) {
+                System.out.println("[DependencyHealer] ADB checksum invalido — re-descargando...");
+                platformTools.reset();
+                platformTools.resolveAdb(); // triggers fresh download
+            }
+            return platformTools.isAdbFunctional();
+        }
 
-        System.out.println("[DependencyHealer] ADB no funcional — reparando...");
-        platformTools.reset();
-        platformTools.resolveAdb();
-        boolean ok = platformTools.isAdbFunctional();
+        System.out.println("[DependencyHealer] ADB no funcional — reparando (kill-server → start-server)...");
+        boolean ok = platformTools.healAdbServer(); // kill → start → reset → resolveAdb
 
         if (ok) {
             System.setProperty("ADB_PATH",    platformTools.resolveAdb());
@@ -205,6 +230,20 @@ public class DependencySelfHealingManager {
             System.err.println("[DependencyHealer] ADB no pudo repararse.");
         }
         return ok;
+    }
+
+    // Returns false ONLY when a baseline exists AND the hash doesn't match.
+    // No baseline → pass (first run after install, before sidecar was written).
+    private boolean checksumOk(Path file, String label) {
+        if (!Files.exists(file)) return true; // file-missing handled by caller
+        try {
+            boolean ok = ChecksumValidator.matchesBaseline(file);
+            if (!ok) System.err.printf("[DependencyHealer] %s checksum mismatch: %s%n", label, file);
+            return ok;
+        } catch (IOException e) {
+            System.err.printf("[DependencyHealer] %s checksum error: %s%n", label, e.getMessage());
+            return true; // IO error reading sidecar → don't false-alarm
+        }
     }
 
     private boolean checkXcode() {
