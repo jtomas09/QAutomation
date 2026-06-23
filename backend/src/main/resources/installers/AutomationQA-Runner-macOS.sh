@@ -194,32 +194,32 @@ install_jre() {
     if download_with_sha256 "$url" "$tmp" "$expected_sha" "JRE 17"; then
         info "Extrayendo JRE 17..."
         if tar -xzf "$tmp" -C "$JRE_DIR" --strip-components=1 2>/dev/null; then
-            # macOS Adoptium JREs usan bundle .jre: la estructura extraida es
-            #   Contents/Home/bin/java  (no bin/java directamente)
-            # Normalizamos moviendo Contents/Home al raiz de JRE_DIR.
+
+            # Adoptium macOS tarballs (ARM64 y x64) usan estructura de bundle .jre:
+            #   --strip-components=1 deja:  $JRE_DIR/Contents/Home/bin/java
+            #   pero el script espera:      $JRE_DIR/bin/java
+            #
+            # Solucion: detectar el binario real con find y crear un symlink en
+            # la ruta canonica.  No se borran ni mueven archivos — solo un symlink.
             if [ ! -x "$JRE_DIR/bin/java" ]; then
-                info "Detectando estructura del JRE macOS..."
+                info "Detectando estructura interna del JRE..."
                 local actual_java
-                actual_java=$(find "$JRE_DIR" -name "java" -type f -perm +0111 2>/dev/null | head -1)
+                actual_java=$(find "$JRE_DIR" -name "java" -type f 2>/dev/null | head -1)
+
                 if [ -n "$actual_java" ]; then
                     info "Binario encontrado: $actual_java"
-                    local actual_home
-                    actual_home=$(dirname "$(dirname "$actual_java")")
-                    info "Java home real: $actual_home — normalizando a $JRE_DIR"
-                    local tmp_home
-                    tmp_home="$(mktemp -d /tmp/qa_jre_home_XXXXXX)"
-                    cp -a "$actual_home/." "$tmp_home/"
-                    rm -rf "$JRE_DIR"
-                    mkdir -p "$JRE_DIR"
-                    cp -a "$tmp_home/." "$JRE_DIR/"
-                    rm -rf "$tmp_home"
+                    mkdir -p "$JRE_DIR/bin"
+                    ln -sf "$actual_java" "$JRE_DIR/bin/java"
+                    info "Symlink creado: $JRE_DIR/bin/java -> $actual_java"
                 else
-                    info "Estructura encontrada en $JRE_DIR:"
-                    find "$JRE_DIR" -maxdepth 4 -name "java" 2>/dev/null | while read f; do info "  $f"; done
+                    warn "No se encontro binario java en la estructura extraida."
+                    info "Contenido de $JRE_DIR (4 niveles):"
+                    find "$JRE_DIR" -maxdepth 4 2>/dev/null | while IFS= read -r f; do info "  $f"; done
                 fi
             fi
 
             chmod +x "$JRE_DIR/bin/java" 2>/dev/null || true
+
             if [ -x "$JRE_DIR/bin/java" ]; then
                 local ver
                 ver=$("$JRE_DIR/bin/java" -version 2>&1 | head -1)
@@ -227,7 +227,9 @@ install_jre() {
                 JRE_OK=true
                 write_sha256_sidecar "$JRE_DIR/bin/java"
             else
-                warn "JRE extraido pero binario no ejecutable en: $JRE_DIR/bin/java"
+                warn "JRE extraido pero binario no ejecutable."
+                info "Rutas java encontradas en $JRE_DIR:"
+                find "$JRE_DIR" -name "java" -maxdepth 6 2>/dev/null | while IFS= read -r f; do info "  $f"; done
             fi
         else
             warn "Error al extraer JRE 17."
