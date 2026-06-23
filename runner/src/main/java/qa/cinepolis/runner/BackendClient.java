@@ -120,6 +120,18 @@ public class BackendClient {
             payload.put("devices",          devices);
             payload.put("timestamp",        java.time.Instant.now().toString());
 
+            // Device metrics
+            long iosCount     = devices.stream().filter(d -> "IOS".equals(d.get("platform"))).count();
+            long androidCount = devices.stream().filter(d -> "ANDROID".equals(d.get("platform"))).count();
+            long available    = devices.stream().filter(d -> "AVAILABLE".equals(d.get("status"))).count();
+            Set<String> platforms = new HashSet<>();
+            devices.forEach(d -> { if (d.get("platform") != null) platforms.add(d.get("platform")); });
+            payload.put("devicesDetected",  devices.size());
+            payload.put("devicesAvailable", available);
+            payload.put("platformCount",    platforms.size());
+            payload.put("iosCount",         iosCount);
+            payload.put("androidCount",     androidCount);
+
             // Embedded ADB diagnostics — always included once ADB_PATH is set
             String adbPath = System.getProperty("ADB_PATH");
             if (adbPath != null && !adbPath.isBlank()) {
@@ -322,47 +334,9 @@ public class BackendClient {
     //  iOS discovery (macOS only — requires Xcode command-line tools)
     // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Discovers connected iOS physical devices via `xcrun xctrace list devices`.
-     * Skips simulators. Only works on macOS with Xcode installed.
-     */
+    /** Discovers connected iOS physical devices. Delegates to IOSDeviceScanner (devicectl → xctrace). */
     public static List<Map<String, String>> discoverIosDevices() {
-        List<Map<String, String>> result = new ArrayList<>();
-        try {
-            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
-                    .redirectErrorStream(true).start();
-            p.waitFor(10, TimeUnit.SECONDS);
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-            java.util.regex.Pattern pat = java.util.regex.Pattern.compile(
-                    "^(.+?)\\s+\\(([\\d.]+)\\)\\s+\\[([0-9A-Fa-f-]+)\\]\\s*$");
-
-            for (String line : out.split("\n")) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("==") || line.contains("Simulator")) continue;
-                java.util.regex.Matcher m = pat.matcher(line);
-                if (!m.find()) continue;
-
-                String deviceName      = m.group(1).trim();
-                String platformVersion = m.group(2).trim();
-                String udid            = m.group(3).trim();
-
-                Map<String, String> d = new LinkedHashMap<>();
-                d.put("udid",            udid);
-                d.put("deviceName",      deviceName);
-                d.put("model",           deviceName);
-                d.put("manufacturer",    "Apple");
-                d.put("platform",        "IOS");
-                d.put("platformVersion", platformVersion);
-                d.put("status",          "AVAILABLE");
-                result.add(d);
-
-                System.out.printf("[iOS] ✓ %s | iOS %s | %s%n", deviceName, platformVersion, udid);
-            }
-        } catch (Exception e) {
-            System.err.println("[iOS] Error al descubrir dispositivos: " + e.getMessage());
-        }
-        return result;
+        return IOSDeviceScanner.scan();
     }
 
     // ─────────────────────────────────────────────────────────────────────

@@ -25,9 +25,10 @@ public class DeviceSelfHealingManager {
     private final BackendClient        client;
     private final RunnerConfig         config;
 
-    private volatile boolean lastAdbOk    = false;
-    private volatile boolean lastAppiumOk = false;
-    private volatile int     lastDevices  = 0;
+    private volatile boolean lastAdbOk     = false;
+    private volatile boolean lastAppiumOk  = false;
+    private volatile int     lastDevices   = 0;
+    private volatile int     lastIosCount  = 0;
 
     public DeviceSelfHealingManager(
             PlatformToolsManager platformTools,
@@ -45,6 +46,8 @@ public class DeviceSelfHealingManager {
         this.lastAdbOk    = adbOk;
         this.lastAppiumOk = appiumOk;
         this.lastDevices  = deviceCount;
+        this.lastIosCount = (int) discoverDevices().stream()
+                .filter(d -> "IOS".equals(d.get("platform"))).count();
     }
 
     // ── Reactive callbacks ────────────────────────────────────────────────────
@@ -84,19 +87,23 @@ public class DeviceSelfHealingManager {
                 boolean adbOk    = platformTools.isAdbFunctional();
                 boolean appiumOk = appiumMgr.isAlive();
                 List<Map<String, String>> devices = discoverDevices();
-                int count = devices.size();
+                int count    = devices.size();
+                int iosCount = (int) devices.stream()
+                        .filter(d -> "IOS".equals(d.get("platform"))).count();
 
-                boolean changed = count != lastDevices
-                        || adbOk    != lastAdbOk
-                        || appiumOk != lastAppiumOk;
+                boolean changed = count    != lastDevices
+                        || iosCount  != lastIosCount
+                        || adbOk     != lastAdbOk
+                        || appiumOk  != lastAppiumOk;
 
                 if (changed) {
                     System.out.printf(
-                            "[DeviceHealer] Cambio detectado — disp: %d→%d  ADB: %s→%s  Appium: %s→%s%n",
-                            lastDevices, count,
+                            "[DeviceHealer] Cambio — total: %d→%d  iOS: %d→%d  ADB: %s→%s  Appium: %s→%s%n",
+                            lastDevices, count, lastIosCount, iosCount,
                             okStr(lastAdbOk), okStr(adbOk),
                             okStr(lastAppiumOk), okStr(appiumOk));
                     lastDevices  = count;
+                    lastIosCount = iosCount;
                     lastAdbOk    = adbOk;
                     lastAppiumOk = appiumOk;
                     client.registerDevices(config.runnerId, devices);
@@ -123,7 +130,7 @@ public class DeviceSelfHealingManager {
 
     private List<Map<String, String>> discoverDevices() {
         List<Map<String, String>> devices = new ArrayList<>(BackendClient.discoverAndroidDevices());
-        if (config.iosSupported) devices.addAll(BackendClient.discoverIosDevices());
+        if (config.iosSupported) devices.addAll(IOSDeviceScanner.scan());
         return devices;
     }
 

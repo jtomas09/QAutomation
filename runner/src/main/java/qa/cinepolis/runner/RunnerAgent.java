@@ -302,7 +302,24 @@ public class RunnerAgent {
 
     private static List<Map<String, String>> discoverAllDevices(RunnerConfig config) {
         List<Map<String, String>> devices = new ArrayList<>(BackendClient.discoverAndroidDevices());
-        if (config.iosSupported) devices.addAll(BackendClient.discoverIosDevices());
+        if (config.iosSupported) devices.addAll(IOSDeviceScanner.scan());
+
+        long iosCount     = devices.stream().filter(d -> "IOS".equals(d.get("platform"))).count();
+        long androidCount = devices.stream().filter(d -> "ANDROID".equals(d.get("platform"))).count();
+        long available    = devices.stream().filter(d -> "AVAILABLE".equals(d.get("status"))).count();
+
+        System.out.printf("[Runner] Dispositivos: total=%d  iOS=%d  Android=%d  disponibles=%d%n",
+                devices.size(), iosCount, androidCount, available);
+
+        if (!devices.isEmpty()) {
+            System.out.println("[Runner] Lista de dispositivos:");
+            for (Map<String, String> d : devices) {
+                System.out.printf("[Runner]   %-30s %-8s %s%n",
+                        d.getOrDefault("deviceName", "?"),
+                        d.getOrDefault("platform", "?"),
+                        d.getOrDefault("udid", "?"));
+            }
+        }
         return devices;
     }
 
