@@ -12,7 +12,7 @@ import {
 import { getDevices, getRunners, getExecutions, updateDeviceStatus, removeDevice } from '../api'
 import type { PhysicalDevice, DeviceStatus, Runner, ExecutionSummary } from '../types'
 import { detectOs, type OsType } from '../hooks/useOs'
-import { OsAvatar, PlatformBadge } from '../components/PlatformIcon'
+import { OsAvatar, PlatformBadge, PlatformIcon } from '../components/PlatformIcon'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -288,8 +288,8 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
   }
 
   const osTabs: { id: OsType; label: string; icon: React.ReactNode }[] = [
-    { id: 'windows', label: 'Windows', icon: <Monitor size={13} /> },
-    { id: 'macos',   label: 'macOS',   icon: <Apple   size={13} /> },
+    { id: 'windows', label: 'Windows', icon: <PlatformIcon platform="WINDOWS" size={13} /> },
+    { id: 'macos',   label: 'macOS',   icon: <PlatformIcon platform="MACOS"   size={13} /> },
   ]
 
   const afterInstall = [
@@ -413,7 +413,7 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                   style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}>
                   <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
                     style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
-                    {tab === 'macos' ? <Apple size={28} className="text-indigo-300" /> : <Monitor size={28} className="text-indigo-300" />}
+                    <PlatformIcon platform={tab === 'macos' ? 'MACOS' : 'WINDOWS'} size={28} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
@@ -445,7 +445,7 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                   <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
                     style={{ background: 'rgba(107,114,128,0.12)', border: '1px solid rgba(107,114,128,0.2)' }}>
-                    {tab === 'macos' ? <Apple size={28} className="text-slate-600" /> : <Monitor size={28} className="text-slate-600" />}
+                    <PlatformIcon platform={tab === 'macos' ? 'MACOS' : 'WINDOWS'} size={28} color="#4b5563" />
                   </div>
                   <div className="flex-1">
                     <div className="text-[13px] font-bold text-slate-500">Proximamente disponible</div>
