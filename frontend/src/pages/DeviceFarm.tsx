@@ -12,6 +12,7 @@ import {
 import { getDevices, getRunners, getExecutions, updateDeviceStatus, removeDevice } from '../api'
 import type { PhysicalDevice, DeviceStatus, Runner, ExecutionSummary } from '../types'
 import { detectOs, type OsType } from '../hooks/useOs'
+import { OsAvatar, PlatformBadge } from '../components/PlatformIcon'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -964,12 +965,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                         {/* HOST */}
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                              style={{ background: isMac ? 'rgba(129,140,248,0.12)' : 'rgba(96,165,250,0.12)', border: `1px solid ${isMac ? 'rgba(129,140,248,0.25)' : 'rgba(96,165,250,0.25)'}` }}>
-                              {isMac
-                                ? <Apple   size={16} style={{ color: '#818cf8' }} />
-                                : <Monitor size={16} style={{ color: '#60a5fa' }} />}
-                            </div>
+                            <OsAvatar os={os} size={36} status={runner.status} />
                             <div>
                               <div className="text-[12px] font-semibold" style={{ color: 'var(--text-pri)' }}>{hostName}</div>
                               <div className="text-[10px] font-mono text-slate-600 mt-0.5">ID: {runner.runnerId.slice(0, 16)}</div>
@@ -1169,10 +1165,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                         {/* DISPOSITIVO */}
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                              style={{ background: isIos ? 'rgba(129,140,248,0.12)' : 'rgba(16,185,129,0.12)', border: `1px solid ${isIos ? 'rgba(129,140,248,0.25)' : 'rgba(16,185,129,0.25)'}` }}>
-                              <Smartphone size={16} style={{ color: isIos ? '#818cf8' : '#10b981' }} />
-                            </div>
+                            <OsAvatar os={device.platform ?? (isIos ? 'IOS' : 'ANDROID')} size={36} status={device.status} />
                             <div>
                               <div className="text-[12px] font-semibold" style={{ color: 'var(--text-pri)' }}>
                                 {device.deviceName ?? device.model ?? 'Desconocido'}
@@ -1184,15 +1177,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
 
                         {/* PLATAFORMA */}
                         <td className="px-4 py-3">
-                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg"
-                            style={{ background: isIos ? 'rgba(129,140,248,0.1)' : 'rgba(16,185,129,0.1)', border: `1px solid ${isIos ? 'rgba(129,140,248,0.2)' : 'rgba(16,185,129,0.2)'}` }}>
-                            {isIos
-                              ? <Apple   size={10} style={{ color: '#818cf8' }} />
-                              : <Monitor size={10} style={{ color: '#10b981' }} />}
-                            <span className="text-[10px] font-bold" style={{ color: isIos ? '#818cf8' : '#10b981' }}>
-                              {isIos ? 'iOS' : 'Android'}
-                            </span>
-                          </div>
+                          <PlatformBadge platform={device.platform ?? (isIos ? 'IOS' : 'ANDROID')} />
                         </td>
 
                         {/* HOST */}
@@ -1211,9 +1196,11 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
 
                         {/* SO */}
                         <td className="px-4 py-3">
-                          <span className="text-[11px] font-mono text-slate-400">
-                            {isIos ? 'iOS' : 'Android'} {device.platformVersion ?? '—'}
-                          </span>
+                          <PlatformBadge
+                            platform={device.platform ?? (isIos ? 'IOS' : 'ANDROID')}
+                            version={device.platformVersion}
+                            size="xs"
+                          />
                         </td>
 
                         {/* ULTIMO USO */}

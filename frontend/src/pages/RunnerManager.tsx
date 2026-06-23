@@ -13,6 +13,7 @@ import {
 } from '../api'
 import type { RunnerDiagnostics, HostDiagnostics } from '../api'
 import type { Runner, RunnerDevice, RunnerStatus } from '../types'
+import { OsAvatar, PlatformIcon } from '../components/PlatformIcon'
 
 // ─── Status helpers ─────────────────────────────────────────────────────────
 
@@ -56,10 +57,6 @@ function resolveOs(runner: Runner): 'WINDOWS' | 'MACOS' | 'LINUX' {
   return 'WINDOWS'
 }
 
-function OsIcon({ os, size = 18 }: { os: string; size?: number }) {
-  if (os === 'MACOS') return <Apple size={size} />
-  return <Monitor size={size} />
-}
 
 function osLabel(os: string, hostname?: string) {
   const base = os === 'MACOS' ? 'macOS' : os === 'LINUX' ? 'Linux' : 'Windows'
@@ -339,12 +336,7 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
       <div className="flex items-start gap-3 p-5 pb-3">
 
         {/* OS icon */}
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-          style={{ background: `${color}16`, border: `1px solid ${color}30` }}>
-          <span style={{ color }}>
-            <OsIcon os={os} size={22} />
-          </span>
-        </div>
+        <OsAvatar os={os} size={48} status={runner.status} className="mt-0.5" />
 
         {/* Identity */}
         <div className="flex-1 min-w-0">
@@ -484,8 +476,7 @@ function DeviceRow({ device }: { device: RunnerDevice }) {
   return (
     <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl"
       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
-      {isIos ? <Apple size={13} style={{ color, flexShrink: 0 }} />
-             : <Monitor size={13} style={{ color, flexShrink: 0 }} />}
+      <PlatformIcon platform={isIos ? 'IOS' : 'ANDROID'} size={13} />
       <span className="text-[11px] font-medium flex-1 truncate" style={{ color: 'var(--text-sec)' }}>
         {device.deviceName}
       </span>
