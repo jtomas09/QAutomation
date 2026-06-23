@@ -289,26 +289,111 @@ install_node() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [3/6] Appium Server 2 + drivers — pre-empaquetado (V5: sin npm en produccion)
+# Valida que Appium sea completamente funcional:
+#   1. Binario ejecutable — devuelve version semver real (no "Need to install")
+#   2. Drivers instalados — uiautomator2 presente sin markers de incompatibilidad
+#   3. Servidor arranca en puerto 4723 y responde GET /status {"ready":true}
+#
+# Retorna 0 (OK) / 1 (FAIL).
+# Un binario existente NO es suficiente — appium@2 + drivers@3.x existe pero no arranca.
+# ══════════════════════════════════════════════════════════════════════════════
+validate_appium_full() {
+    local appium_bin="$1"
+    local node_bin="$NODE_DIR/bin/node"
+
+    # 1. Version check — semver real, no "Need to install the following packages"
+    local ver
+    ver=$("$node_bin" "$appium_bin" --version 2>/dev/null | head -1 | tr -d '[:space:]')
+    if [ -z "$ver" ] || ! echo "$ver" | grep -qE '^[0-9]+\.[0-9]+'; then
+        info "Appium: version check fallida (salida: '${ver:-vacio}')"
+        return 1
+    fi
+    info "Appium version: $ver"
+
+    # 2. Drivers — uiautomator2 requerido, sin markers "requires: ^3.0.0-rc.2" o similares
+    local drivers
+    drivers=$(APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" \
+              driver list --installed 2>&1)
+    if ! echo "$drivers" | grep -qi "uiautomator2"; then
+        info "Driver uiautomator2 no encontrado (APPIUM_HOME=$APPIUM_HOME_DIR)"
+        return 1
+    fi
+    if echo "$drivers" | grep -qi "requires:"; then
+        warn "Incompatibilidad de driver detectada:"
+        echo "$drivers" | grep -i "requires:" | while IFS= read -r l; do warn "  $l"; done
+        return 1
+    fi
+    info "Drivers: OK (uiautomator2 presente y compatible)"
+
+    # 3. Arrancar servidor temporalmente y verificar GET /status {"ready":true}
+    info "Validando servidor Appium en puerto 4723..."
+    lsof -ti:4723 2>/dev/null | xargs kill -9 2>/dev/null; sleep 1
+
+    local appium_log
+    appium_log="$(mktemp /tmp/qa_appium_val_XXXXXX.log)"
+    APPIUM_HOME="$APPIUM_HOME_DIR" \
+        "$node_bin" "$appium_bin" --port 4723 \
+        --log "$appium_log" --log-level error 2>/dev/null &
+    local appium_pid=$!
+
+    local status_ok=false
+    for i in $(seq 1 25); do
+        sleep 1
+        if curl -sf --max-time 2 "http://127.0.0.1:4723/status" 2>/dev/null \
+                | grep -q '"ready"'; then
+            status_ok=true
+            break
+        fi
+        kill -0 "$appium_pid" 2>/dev/null || { info "Proceso Appium murio prematuramente"; break; }
+    done
+
+    kill "$appium_pid" 2>/dev/null
+    wait "$appium_pid" 2>/dev/null
+    lsof -ti:4723 2>/dev/null | xargs kill -9 2>/dev/null || true
+    rm -f "$appium_log"
+
+    if $status_ok; then
+        info "Servidor Appium: /status OK"
+        return 0
+    else
+        info "Servidor Appium no respondio en /status en 25s"
+        return 1
+    fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [3/6] Appium Server + drivers — pre-empaquetado (V5: sin npm en produccion)
 #
 # Orden de busqueda:
 #   1. Bundle .app (Contents/Appium/) — PREFERIDO para distribuciones enterprise
 #   2. Descarga tarball pre-construido desde el backend
 #   3. npm install como FALLBACK de emergencia (solo si lo anterior falla)
+#
+# Validacion: version + driver list + /status endpoint.
+# No se considera instalado si el servidor no puede arrancar.
 # ══════════════════════════════════════════════════════════════════════════════
 install_appium() {
-    echo "  [3/6] Appium Server 2 + drivers..."
+    echo "  [3/6] Appium Server + drivers..."
 
     local appium_bin="$APPIUM_DIR/node_modules/.bin/appium"
 
-    # ── Ya instalado ─────────────────────────────────────────────────────────
+    # ── Validacion completa — existencia del binario NO es suficiente ─────────
+    # appium@2 + drivers@3.x tiene el archivo pero el servidor no puede arrancar.
     if [ -f "$appium_bin" ]; then
         local ver
-        ver=$("$NODE_DIR/bin/node" "$appium_bin" --version 2>/dev/null)
-        ok "Appium ya instalado: $ver"
-        APPIUM_OK=true
-        setup_appium_home
-        return
+        ver=$("$NODE_DIR/bin/node" "$appium_bin" --version 2>/dev/null | head -1)
+        info "Appium binario encontrado: v$ver — validando funcionalidad completa..."
+        if validate_appium_full "$appium_bin"; then
+            ok "Appium ya instalado y funcional: $ver"
+            APPIUM_OK=true
+            setup_appium_home
+            return
+        else
+            warn "Appium $ver detectado pero no funcional (drivers incompatibles)."
+            warn "Eliminando instalacion anterior y reinstalando desde cero..."
+            rm -rf "$APPIUM_DIR"
+            mkdir -p "$APPIUM_DIR"
+        fi
     fi
 
     # ── [V5] Opcion 1: Bundle pre-empaquetado en .app ────────────────────────
@@ -397,7 +482,18 @@ install_appium() {
             ok "Appium instalado via npm (fallback): $ver"
             APPIUM_OK=true
             install_drivers_fallback "$appium_bin"
-            setup_appium_home
+            # Validar que el servidor responda antes de declarar exito.
+            # install_drivers_fallback puede haber marcado APPIUM_OK=false si los drivers fallaron.
+            if [ "$APPIUM_OK" = true ]; then
+                info "Validando servidor Appium post-instalacion..."
+                if validate_appium_full "$appium_bin"; then
+                    ok "Appium validado: servidor responde /status"
+                    setup_appium_home
+                else
+                    warn "Appium instalado pero el servidor no responde. Agent iniciara en modo DEGRADED."
+                    APPIUM_OK=false
+                fi
+            fi
         else
             warn "npm exit OK pero appium bin no encontrado."
         fi
