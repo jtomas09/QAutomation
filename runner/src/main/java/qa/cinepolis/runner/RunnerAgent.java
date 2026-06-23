@@ -73,16 +73,8 @@ public class RunnerAgent {
         System.setProperty("APPIUM_OK",      String.valueOf(appiumOk));
         System.setProperty("APPIUM_VERSION",  appiumVersion);
 
-        // [AppiumValidator] diagnostic block
-        System.out.println("[AppiumValidator]");
-        System.out.printf("[AppiumValidator] Version=%s%n", appiumVersion);
-        System.out.printf("[AppiumValidator] StatusEndpoint=%s%n", appiumOk ? "OK" : "FAIL");
-        if (!appiumOk) {
-            System.out.println("[AppiumValidator] Drivers instalados:");
-            appiumMgr.getInstalledDriverList()
-                    .lines()
-                    .forEach(l -> System.out.println("[AppiumValidator]   " + l));
-        }
+        // Full binary + version + /status diagnostic
+        appiumMgr.logDiagnostic();
 
         // ── JRE telemetry ──────────────────────────────────────────────────────
         System.setProperty("JRE_VERSION", System.getProperty("java.version", "unavailable"));

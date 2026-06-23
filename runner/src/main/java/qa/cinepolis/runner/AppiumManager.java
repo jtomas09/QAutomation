@@ -139,8 +139,9 @@ public class AppiumManager {
         if (appiumBin == null) return "appium-bin-not-found";
         try {
             String nodeBin    = System.getProperty("NODE_BIN");
+            boolean isFilePath = Files.exists(Path.of(appiumBin));
             boolean useNode   = nodeBin != null && !nodeBin.isBlank()
-                    && Files.exists(Path.of(nodeBin)) && !appiumBin.contains(" ");
+                    && Files.exists(Path.of(nodeBin)) && isFilePath;
             String appiumHome = System.getProperty("APPIUM_HOME");
             String[] cmd = useNode
                     ? new String[]{nodeBin, appiumBin, "driver", "list", "--installed"}
@@ -199,12 +200,14 @@ public class AppiumManager {
         String bin = findAppiumBin();
         if (bin == null) return "unavailable";
         try {
-            String nodeBin  = System.getProperty("NODE_BIN");
-            boolean useNode = nodeBin != null && !nodeBin.isBlank()
-                    && Files.exists(Path.of(nodeBin)) && !bin.contains(" ");
+            String nodeBin    = System.getProperty("NODE_BIN");
+            boolean isFilePath = Files.exists(Path.of(bin));
+            boolean useNode   = nodeBin != null && !nodeBin.isBlank()
+                    && Files.exists(Path.of(nodeBin)) && isFilePath;
             String[] cmd = useNode
                     ? new String[]{nodeBin, bin, "--version"}
-                    : new String[]{bin, "--version"};
+                    : isFilePath ? new String[]{bin, "--version"}
+                    : new String[]{"sh", "-c", bin + " --version"};
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             boolean done = p.waitFor(5, TimeUnit.SECONDS);
             if (!done) { p.destroyForcibly(); return "unavailable"; }
@@ -226,15 +229,71 @@ public class AppiumManager {
 
     // ── Find ──────────────────────────────────────────────────────────────
 
+    /**
+     * Logs a full diagnostic snapshot for startup and DependencyHealer reporting.
+     * Does NOT assume Appium is running — just resolves and inspects.
+     */
+    public void logDiagnostic() {
+        String nodeBin    = System.getProperty("NODE_BIN", "");
+        boolean nodeExists = !nodeBin.isBlank() && Files.exists(Path.of(nodeBin));
+        String  appiumBin  = resolveEmbeddedBin(); // embedded path — no probe
+        boolean binExists  = appiumBin != null && Files.exists(Path.of(appiumBin));
+        boolean binExec    = appiumBin != null && Files.isExecutable(Path.of(appiumBin));
+        String  version    = "unavailable";
+        if (binExists && binExec && nodeExists) {
+            try {
+                Process p = new ProcessBuilder(nodeBin, appiumBin, "--version")
+                        .redirectErrorStream(true).start();
+                if (p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0) {
+                    String out = new String(p.getInputStream().readAllBytes()).trim();
+                    if (!out.isBlank()) version = out.split("\n")[0].trim();
+                } else {
+                    p.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                }
+            } catch (Exception ignored) {}
+        }
+        boolean alive = isAlive();
+
+        System.out.println("[AppiumValidator]");
+        System.out.printf("[AppiumValidator] NodeBin=%s Exists=%s%n",
+                nodeBin.isBlank() ? "unset" : nodeBin, nodeExists);
+        System.out.printf("[AppiumValidator] AppiumBin=%s%n",
+                appiumBin != null ? appiumBin : "NOT_FOUND");
+        System.out.printf("[AppiumValidator] Exists=%s Executable=%s%n", binExists, binExec);
+        System.out.printf("[AppiumValidator] Version=%s%n", version);
+        System.out.printf("[AppiumValidator] StatusEndpoint=%s%n", alive ? "OK" : "FAIL");
+    }
+
+    /**
+     * Returns the embedded Appium binary path derived from AGENT_DATA_DIR,
+     * without probing or running anything. Used for diagnostics.
+     */
+    private String resolveEmbeddedBin() {
+        boolean win = isWindows();
+        // Prefer AGENT_DATA_DIR-derived path (handles spaces via Path.of)
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR", "");
+        if (!agentDataDir.isBlank()) {
+            Path p = Path.of(agentDataDir, "runtime", "appium", "node_modules", ".bin",
+                             win ? "appium.cmd" : "appium");
+            if (Files.exists(p)) return p.toString();
+        }
+        // Fallback: explicit APPIUM_BIN property
+        String prop = System.getProperty("APPIUM_BIN");
+        if (prop != null && !prop.isBlank() && Files.exists(Path.of(prop))) return prop;
+        return null;
+    }
+
     // Package-visible so DependencySelfHealingManager can probe without duplicating logic
     String findAppiumBin() {
-        for (String candidate : buildCandidates()) {
+        List<String> candidates = buildCandidates();
+        for (String candidate : candidates) {
             if (candidate == null || candidate.isBlank()) continue;
             if (probeAppiumBin(candidate)) {
-                System.out.println("[AppiumValidator] Encontrado: " + candidate);
+                System.out.println("[AppiumValidator] AppiumBin=" + candidate);
                 return candidate;
             }
         }
+        System.err.println("[AppiumValidator] AppiumBin=NOT_FOUND — rutas intentadas: " + candidates.size());
         return null;
     }
 
@@ -242,16 +301,26 @@ public class AppiumManager {
         List<String> list = new ArrayList<>();
         boolean win = isWindows();
 
-        // Priority 0: embedded Appium (enterprise mode — APPIUM_BIN set by installer)
-        String embeddedBin = System.getProperty("APPIUM_BIN");
-        if (embeddedBin != null && !embeddedBin.isBlank() && Files.exists(Path.of(embeddedBin))) {
-            list.add(embeddedBin);
+        // Priority 1 (highest): AGENT_DATA_DIR-derived path — handles spaces via Path.of()
+        // This is the canonical embedded enterprise path; avoids dependence on APPIUM_BIN plist var.
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR", "");
+        if (!agentDataDir.isBlank()) {
+            Path derived = Path.of(agentDataDir, "runtime", "appium", "node_modules", ".bin",
+                                   win ? "appium.cmd" : "appium");
+            if (Files.exists(derived)) {
+                list.add(derived.toString());
+            }
         }
 
-        // PATH
+        // Priority 2: APPIUM_BIN system property (set by installer LaunchAgent plist)
+        String embeddedBin = System.getProperty("APPIUM_BIN");
+        if (embeddedBin != null && !embeddedBin.isBlank() && Files.exists(Path.of(embeddedBin))) {
+            if (!list.contains(embeddedBin)) list.add(embeddedBin);
+        }
+
+        // Priority 3+: fallbacks for dev/non-enterprise environments (not used in production)
         list.add(win ? "appium.cmd" : "appium");
 
-        // npm global prefix
         try {
             String npmRoot = runCapture("npm", "root", "-g");
             if (npmRoot != null) {
@@ -262,32 +331,43 @@ public class AppiumManager {
             }
         } catch (Exception ignored) {}
 
-        // Homebrew (macOS)
         if (!win) {
             list.add("/opt/homebrew/bin/appium");
             list.add("/usr/local/bin/appium");
         }
 
-        // npx as last resort
         list.add(win ? "npx.cmd appium" : "npx appium");
 
         return list;
     }
 
+    /**
+     * Tests whether an Appium binary candidate is runnable.
+     *
+     * Rule: if the candidate is a real file path (Files.exists), run it via
+     * ProcessBuilder array form — this handles paths with spaces (e.g. "Application Support")
+     * correctly without shell interpretation.
+     *
+     * Only commands like "npx appium" (not a file) fall back to sh -c.
+     */
     private boolean probeAppiumBin(String bin) {
         try {
-            String nodeBin  = System.getProperty("NODE_BIN");
-            boolean useNode = nodeBin != null && !nodeBin.isBlank()
-                    && Files.exists(Path.of(nodeBin))
-                    && !bin.contains(" ");
+            String nodeBin    = System.getProperty("NODE_BIN");
+            boolean isFilePath = Files.exists(Path.of(bin));   // true for all real file paths
+            boolean nodeReady  = nodeBin != null && !nodeBin.isBlank()
+                    && Files.exists(Path.of(nodeBin));
+
             String[] cmd;
-            if (useNode) {
+            if (isFilePath && nodeReady) {
+                // Canonical: use embedded Node with full path — no shell, no space issues
                 cmd = new String[]{nodeBin, bin, "--version"};
-            } else if (bin.contains(" ")) {
-                cmd = isWindows() ? new String[]{"cmd","/c",bin,"--version"}
-                                  : new String[]{"sh","-c",bin+" --version"};
-            } else {
+            } else if (isFilePath) {
+                // File exists but no embedded Node — run directly (system Node must be in PATH)
                 cmd = new String[]{bin, "--version"};
+            } else {
+                // Shell command like "npx appium" — needs shell interpretation
+                cmd = isWindows() ? new String[]{"cmd", "/c", bin, "--version"}
+                                  : new String[]{"sh", "-c", bin + " --version"};
             }
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             boolean done = p.waitFor(8, TimeUnit.SECONDS);
@@ -377,8 +457,9 @@ public class AppiumManager {
         try {
             System.out.println("[AppiumValidator] Desinstalando driver: " + driver);
             String nodeBin    = System.getProperty("NODE_BIN");
+            boolean isFilePath = Files.exists(Path.of(appiumBin));
             boolean useNode   = nodeBin != null && !nodeBin.isBlank()
-                    && Files.exists(Path.of(nodeBin)) && !appiumBin.contains(" ");
+                    && Files.exists(Path.of(nodeBin)) && isFilePath;
             String appiumHome = System.getProperty("APPIUM_HOME");
             String[] cmd = useNode
                     ? new String[]{nodeBin, appiumBin, "driver", "uninstall", driver}
