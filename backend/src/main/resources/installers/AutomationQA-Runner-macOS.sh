@@ -194,6 +194,31 @@ install_jre() {
     if download_with_sha256 "$url" "$tmp" "$expected_sha" "JRE 17"; then
         info "Extrayendo JRE 17..."
         if tar -xzf "$tmp" -C "$JRE_DIR" --strip-components=1 2>/dev/null; then
+            # macOS Adoptium JREs usan bundle .jre: la estructura extraida es
+            #   Contents/Home/bin/java  (no bin/java directamente)
+            # Normalizamos moviendo Contents/Home al raiz de JRE_DIR.
+            if [ ! -x "$JRE_DIR/bin/java" ]; then
+                info "Detectando estructura del JRE macOS..."
+                local actual_java
+                actual_java=$(find "$JRE_DIR" -name "java" -type f -perm +0111 2>/dev/null | head -1)
+                if [ -n "$actual_java" ]; then
+                    info "Binario encontrado: $actual_java"
+                    local actual_home
+                    actual_home=$(dirname "$(dirname "$actual_java")")
+                    info "Java home real: $actual_home — normalizando a $JRE_DIR"
+                    local tmp_home
+                    tmp_home="$(mktemp -d /tmp/qa_jre_home_XXXXXX)"
+                    cp -a "$actual_home/." "$tmp_home/"
+                    rm -rf "$JRE_DIR"
+                    mkdir -p "$JRE_DIR"
+                    cp -a "$tmp_home/." "$JRE_DIR/"
+                    rm -rf "$tmp_home"
+                else
+                    info "Estructura encontrada en $JRE_DIR:"
+                    find "$JRE_DIR" -maxdepth 4 -name "java" 2>/dev/null | while read f; do info "  $f"; done
+                fi
+            fi
+
             chmod +x "$JRE_DIR/bin/java" 2>/dev/null || true
             if [ -x "$JRE_DIR/bin/java" ]; then
                 local ver
@@ -202,7 +227,7 @@ install_jre() {
                 JRE_OK=true
                 write_sha256_sidecar "$JRE_DIR/bin/java"
             else
-                warn "JRE extraido pero binario no ejecutable."
+                warn "JRE extraido pero binario no ejecutable en: $JRE_DIR/bin/java"
             fi
         else
             warn "Error al extraer JRE 17."
@@ -386,17 +411,65 @@ setup_appium_home() {
 
 # Instala drivers via 'appium driver install' — solo como fallback cuando npm
 # tuvo que instalar Appium. En produccion los drivers vienen en el bundle.
+#
+# Appium 2.x y 3.x usan versiones de driver incompatibles entre si:
+#   Appium 2.x  →  uiautomator2@2  /  xcuitest@7
+#   Appium 3.x+ →  uiautomator2    /  xcuitest  (latest)
 install_drivers_fallback() {
     local appium_bin="$1"
     local node_bin="$NODE_DIR/bin/node"
+    local UA2_OK=false
+    local XCUI_OK=false
 
-    info "Instalando driver uiautomator2 (Android)..."
-    APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver install uiautomator2 2>&1 | tail -3 || true
+    # Detectar version instalada de Appium para seleccionar drivers compatibles
+    local appium_ver appium_major ua2_spec xcui_spec
+    appium_ver=$("$node_bin" "$appium_bin" --version 2>/dev/null | head -1 | tr -d '[:space:]')
+    appium_major=$(echo "$appium_ver" | cut -d'.' -f1)
+    info "Appium version detectada: $appium_ver (major: $appium_major)"
 
-    info "Instalando driver xcuitest (iOS — requiere Xcode)..."
-    APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver install xcuitest 2>&1 | tail -3 || true
+    if [ "$appium_major" = "2" ]; then
+        ua2_spec="uiautomator2@2"
+        xcui_spec="xcuitest@7"
+        info "Seleccionando drivers compatibles con Appium 2.x"
+    else
+        ua2_spec="uiautomator2"
+        xcui_spec="xcuitest"
+        info "Seleccionando drivers latest para Appium ${appium_major}.x"
+    fi
 
-    ok "Drivers instalados."
+    # Instalar uiautomator2 (Android — obligatorio)
+    info "Instalando driver $ua2_spec (Android)..."
+    if APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver install "$ua2_spec" 2>&1 | tail -5; then
+        if APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver list --installed 2>&1 | grep -qi "uiautomator2"; then
+            ok "uiautomator2 instalado."
+            UA2_OK=true
+        else
+            warn "uiautomator2 FAIL — no aparece en 'driver list --installed'."
+        fi
+    else
+        warn "uiautomator2 FAIL — error durante la instalacion."
+    fi
+
+    # Instalar xcuitest (iOS — opcional si no hay Xcode)
+    info "Instalando driver $xcui_spec (iOS — requiere Xcode)..."
+    if APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver install "$xcui_spec" 2>&1 | tail -5; then
+        if APPIUM_HOME="$APPIUM_HOME_DIR" "$node_bin" "$appium_bin" driver list --installed 2>&1 | grep -qi "xcuitest"; then
+            ok "xcuitest instalado."
+            XCUI_OK=true
+        else
+            warn "xcuitest FAIL — no aparece en 'driver list --installed'."
+        fi
+    else
+        warn "xcuitest FAIL — error durante la instalacion."
+    fi
+
+    # Appium solo es funcional si uiautomator2 (Android) esta presente
+    if [ "$UA2_OK" = true ]; then
+        ok "Drivers instalados (uiautomator2=$UA2_OK xcuitest=$XCUI_OK)."
+    else
+        warn "Driver uiautomator2 no disponible. Agent iniciara en modo DEGRADED."
+        APPIUM_OK=false
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
