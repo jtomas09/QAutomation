@@ -375,6 +375,8 @@ install_appium() {
     # ── [V5] Opcion 3: npm install — fallback de emergencia ──────────────────
     # Esto solo deberia ejecutarse en entornos de desarrollo o si el bundle
     # no esta disponible. En produccion el bundle SIEMPRE debe estar presente.
+    # Sin pin de version (@2 eliminado) para instalar la version estable mas
+    # reciente y que los drivers siempre sean compatibles.
     if [ ! -x "$NODE_DIR/bin/node" ]; then
         warn "Node.js no disponible — Appium omitido. El Agent iniciara en modo DEGRADED."
         return
@@ -385,7 +387,7 @@ install_appium() {
     mkdir -p "$APPIUM_DIR"
     if "$NODE_DIR/bin/npm" install \
             --prefix "$APPIUM_DIR" \
-            appium@2 \
+            appium \
             --no-audit \
             --no-fund \
             2>&1 | grep -E "(added|error|warn)" | head -10; then

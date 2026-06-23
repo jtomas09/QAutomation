@@ -3,11 +3,11 @@ package qa.cinepolis.runner;
 /**
  * Derives the canonical host operational status from component health flags.
  *
- * ONLINE   — JRE, Node, Appium, ADB (and Xcode on macOS) all healthy.
- * DEGRADED — Any required component missing or non-functional.
+ * ONLINE   — JRE, Node, Appium, ADB all healthy. Xcode is optional (macOS/iOS).
+ * DEGRADED — Any required component (JRE/Node/Appium/ADB) missing or non-functional.
  * OFFLINE  — Determined externally by the backend staleness detector.
  *
- * Also computes iosReady: Xcode installed AND iOS devices are supported on this host.
+ * iosReady: Xcode installed — signals iOS capability without requiring a device connected.
  */
 public class HostStatusManager {
 
@@ -72,7 +72,14 @@ public class HostStatusManager {
     public static void apply(HostReport report) {
         System.setProperty("HOST_STATUS", report.hostStatus.name());
         System.setProperty("IOS_READY",   String.valueOf(report.iosReady));
-        System.out.printf("[HostStatusManager] %s | iosReady=%s%n",
+        System.out.println("[HostStatus]");
+        System.out.printf("[HostStatus] JRE=%s Node=%s Appium=%s ADB=%s Xcode=%s%n",
+                flag(report.jreInstalled),    flag(report.nodeInstalled),
+                flag(report.appiumInstalled), flag(report.adbInstalled),
+                flag(report.xcodeInstalled));
+        System.out.printf("[HostStatus] Estado=%s iosReady=%s%n",
                 report.hostStatus, report.iosReady);
     }
+
+    private static String flag(boolean v) { return v ? "OK" : "FAIL"; }
 }

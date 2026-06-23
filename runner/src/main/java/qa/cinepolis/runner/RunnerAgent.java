@@ -68,9 +68,21 @@ public class RunnerAgent {
         } catch (Exception e) {
             System.err.println("[Runner] Appium no pudo iniciarse: " + e.getMessage());
         }
-        boolean appiumOk = appiumMgr.isAlive();
+        boolean appiumOk      = appiumMgr.isAlive();
+        String  appiumVersion = appiumOk ? appiumMgr.getAppiumVersion() : "unavailable";
         System.setProperty("APPIUM_OK",      String.valueOf(appiumOk));
-        System.setProperty("APPIUM_VERSION",  appiumOk ? appiumMgr.getAppiumVersion() : "unavailable");
+        System.setProperty("APPIUM_VERSION",  appiumVersion);
+
+        // [AppiumValidator] diagnostic block
+        System.out.println("[AppiumValidator]");
+        System.out.printf("[AppiumValidator] Version=%s%n", appiumVersion);
+        System.out.printf("[AppiumValidator] StatusEndpoint=%s%n", appiumOk ? "OK" : "FAIL");
+        if (!appiumOk) {
+            System.out.println("[AppiumValidator] Drivers instalados:");
+            appiumMgr.getInstalledDriverList()
+                    .lines()
+                    .forEach(l -> System.out.println("[AppiumValidator]   " + l));
+        }
 
         // ── JRE telemetry ──────────────────────────────────────────────────────
         System.setProperty("JRE_VERSION", System.getProperty("java.version", "unavailable"));
@@ -119,6 +131,7 @@ public class RunnerAgent {
         }
 
         // ── HostStatusManager (v6) ────────────────────────────────────────────
+        // ONLINE = JRE + Node + Appium + ADB. Xcode affects iosReady only.
         HostStatusManager.HostReport hostReport = HostStatusManager.evaluate(
                 true, nodeOk, appiumOk, adbFunctional, xcodeOk, config.iosSupported);
         HostStatusManager.apply(hostReport);
@@ -141,7 +154,8 @@ public class RunnerAgent {
 
         // ── Initial heartbeat ──────────────────────────────────────────────────
         System.out.println("[Runner] Registrando en Backend...");
-        boolean allOk        = adbFunctional && appiumOk && nodeOk && xcodeOk;
+        // ONLINE requires JRE + Node + Appium + ADB. Xcode affects iosReady only.
+        boolean allOk        = adbFunctional && appiumOk && nodeOk;
         String  initialStatus = allOk ? "ONLINE" : "DEGRADED";
         try {
             List<Map<String, String>> initDevices = discoverAllDevices(config);
