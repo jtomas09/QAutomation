@@ -743,7 +743,9 @@ public class JobExecutor {
         cmd.add("-DdeviceName="    + deviceName);
         cmd.add("-Denv="           + nvl(job.env,     "QA"));
         cmd.add("-Dcountry="       + nvl(job.country, "mexico"));
-        cmd.add("-Dappium.hub="    + config.appiumHub + "/wd/hub");
+        // Normalize: strip legacy /wd/hub suffix — Appium 2.x/3.x uses bare base URL
+        String cleanAppiumHub = config.appiumHub.replaceAll("/wd/hub$", "");
+        cmd.add("-Dappium.hub=" + cleanAppiumHub);
         cmd.add("-DexecutionName=" + nvl(job.suite,   "Suite"));
         cmd.add("-DREUSE_DRIVER=true");
 
@@ -812,24 +814,28 @@ public class JobExecutor {
     private void checkAppiumServer(String executionId) {
         // If AppiumManager is wired, ask it to ensure Appium is running
         if (appiumMgr != null) {
+            String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
+            client.sendLog(executionId, "INFO", "📡 Appium endpoint: " + hubBase);
             if (!appiumMgr.isAlive()) {
                 client.sendLog(executionId, "INFO", "Appium no responde — intentando iniciar...");
                 try {
                     appiumMgr.ensureRunning();
-                    client.sendLog(executionId, "INFO", "Appium iniciado correctamente.");
+                    client.sendLog(executionId, "INFO", "✅ Appium disponible");
                 } catch (Exception e) {
                     client.sendLog(executionId, "WARN",
-                            "Appium no pudo iniciarse: " + e.getMessage());
+                            "❌ Appium no pudo iniciarse: " + e.getMessage());
                 }
             } else {
-                client.sendLog(executionId, "INFO", "Appium server online.");
+                client.sendLog(executionId, "INFO", "✅ Appium disponible");
             }
             return;
         }
 
         // Fallback: passive check only (legacy path — no AppiumManager)
         String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
+        client.sendLog(executionId, "INFO", "📡 Appium endpoint: " + hubBase);
         HttpClient http = HttpClient.newHttpClient();
+        // Try Appium 2.x/3.x /status first; fall back to legacy /wd/hub/status
         for (String path : new String[]{"/status", "/wd/hub/status"}) {
             try {
                 HttpRequest req = HttpRequest.newBuilder()
@@ -837,13 +843,13 @@ public class JobExecutor {
                         .timeout(Duration.ofSeconds(5))
                         .GET().build();
                 if (http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode() == 200) {
-                    client.sendLog(executionId, "INFO", "Appium server online: " + hubBase);
+                    client.sendLog(executionId, "INFO", "✅ Appium disponible");
                     return;
                 }
             } catch (Exception ignored) {}
         }
         client.sendLog(executionId, "WARN",
-                "Appium no disponible en " + hubBase + " — inicialo con: appium --port 4723");
+                "❌ Appium no disponible en " + hubBase + " — inicia Appium con: appium --port 4723");
     }
 
     // ── Video upload ───────────────────────────────────────────────────────────

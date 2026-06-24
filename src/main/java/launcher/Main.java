@@ -2850,7 +2850,7 @@ private static final Color BORDER     = new Color(25, 35, 65);
         String curVersion  = System.getProperty("platformVersion", props.getProperty("platformVersion", "15"));
         String curUdid     = System.getProperty("udid",            props.getProperty("udid",            ""));
         String curActivity = props.getProperty("appActivity", "");
-        String curHub      = System.getProperty("appium.hub",      props.getProperty("appium.hub",      "http://127.0.0.1:4723/wd/hub"));
+        String curHub      = System.getProperty("appium.hub",      props.getProperty("appium.hub",      "http://127.0.0.1:4723"));
 
         JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(anchor) instanceof java.awt.Frame f ? f : null,
                 "Configuración del Dispositivo", true);
@@ -3027,7 +3027,7 @@ private static final Color BORDER     = new Color(25, 35, 65);
                         }
                     }
 
-                    // 4. Appium hub reachable — tries v2 /status then v1 /wd/hub/status
+                    // 4. Appium hub reachable — tries Appium 2.x/3.x /status then legacy /wd/hub/status
                     try {
                         String base = vHub.replaceAll("(/wd/hub)?$", "");
                         String[] candidates = { base + "/status", base + "/wd/hub/status" };

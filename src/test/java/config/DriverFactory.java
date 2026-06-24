@@ -233,7 +233,7 @@ public class DriverFactory {
     // ──────────────────────────────────────────────────────────────────────────
 
     private static URL buildLocal(UiAutomator2Options o) throws Exception {
-        String hubUrl  = prop("appium.hub",      "http://127.0.0.1:4723/wd/hub");
+        String hubUrl  = prop("appium.hub",      "http://127.0.0.1:4723");
         String udid    = prop("udid",            "");
         String pkg     = prop("appPackage",      "");
         String act     = prop("appActivity",     "");
@@ -291,9 +291,10 @@ public class DriverFactory {
 
         String envHub = System.getenv("APPIUM_SERVER_URL");
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
+        finalHub = finalHub.replaceAll("/wd/hub$", "");  // Appium 2.x/3.x uses bare base URL
 
-        log.info("[DriverFactory] local Android → device={} udid={} pkg={} activity={} hub={}",
-            prop("deviceName","?"), udid, pkg, act, finalHub);
+        log.info("[DriverFactory] 📡 Appium endpoint: {} | device={} udid={} pkg={} activity={}",
+            finalHub, prop("deviceName","?"), udid, pkg, act);
 
         return URI.create(finalHub).toURL();
     }
@@ -303,7 +304,7 @@ public class DriverFactory {
     // ──────────────────────────────────────────────────────────────────────────
 
     private static URL buildLocalIOS(XCUITestOptions o) throws Exception {
-        String hubUrl   = prop("appium.hub",     "http://127.0.0.1:4723/wd/hub");
+        String hubUrl   = prop("appium.hub",     "http://127.0.0.1:4723");
         String udid     = prop("udid",           "");
         String bundleId = prop("bundleId",       "");
         String ipaPath  = prop("ipaPath",        "");
@@ -330,9 +331,10 @@ public class DriverFactory {
 
         String envHub = System.getenv("APPIUM_SERVER_URL");
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
+        finalHub = finalHub.replaceAll("/wd/hub$", "");  // Appium 2.x/3.x uses bare base URL
 
-        log.info("[DriverFactory] local iOS → device={} udid={} bundleId={} hub={}",
-            prop("deviceName","?"), udid, bundleId, finalHub);
+        log.info("[DriverFactory] 📡 Appium endpoint: {} | device={} udid={} bundleId={}",
+            finalHub, prop("deviceName","?"), udid, bundleId);
 
         return URI.create(finalHub).toURL();
     }
@@ -343,11 +345,14 @@ public class DriverFactory {
 
     private static void validateAppiumServer(String hubUrl) {
         String base = hubUrl.replaceAll("/wd/hub$", "");
+        // Check Appium 2.x/3.x first (/status), fall back to Appium 1.x (/wd/hub/status)
         String[] paths = {"/status", "/wd/hub/status"};
 
         HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
+
+        log.info("[DriverFactory] 📡 Appium endpoint: {}", base);
 
         for (String path : paths) {
             try {
@@ -357,16 +362,16 @@ public class DriverFactory {
                     .GET().build();
                 int code = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();
                 if (code == 200) {
-                    log.info("[Preflight] Appium server OK: {}", base);
+                    log.info("[DriverFactory] ✅ Appium disponible: {}", base);
                     return;
                 }
             } catch (Exception ignored) {}
         }
 
         throw new IllegalStateException(
-            "[Preflight] Appium server NOT reachable at: " + base + "\n" +
-            "  Solucion: appium --port 4723\n" +
-            "  Verifica drivers instalados:\n" +
+            "❌ Appium no disponible en: " + base + "\n" +
+            "  Inicia Appium con: appium --port 4723\n" +
+            "  Drivers requeridos:\n" +
             "    Android: appium driver install uiautomator2\n" +
             "    iOS:     appium driver install xcuitest"
         );
