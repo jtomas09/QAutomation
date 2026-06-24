@@ -538,16 +538,30 @@ public class JobExecutor {
             // ── Build Gradle command ──────────────────────────────────────────
             List<String> cmd = buildCommand(job);
 
-            // Inject Android app identifiers from backend config (zero-config)
+            // Inject Android app identifiers — auto-resolve launcher activity via ADB
             if (!runnerCfg.appPackage.isBlank()) {
+                boolean isAndroid = !"ios".equalsIgnoreCase(receivedPlatform);
                 cmd.add("-DappPackage=" + runnerCfg.appPackage);
                 client.sendLog(job.executionId, "INFO",
-                        "[JobExecutor] 📱 Android Package: " + runnerCfg.appPackage);
-            }
-            if (!runnerCfg.appActivity.isBlank()) {
-                cmd.add("-DappActivity=" + runnerCfg.appActivity);
-                client.sendLog(job.executionId, "INFO",
-                        "[JobExecutor] 🚀 Android Activity: " + runnerCfg.appActivity);
+                        "[JobExecutor] 📱 Package: " + runnerCfg.appPackage);
+
+                if (isAndroid) {
+                    String resolvedActivity = resolveLauncherActivity(receivedUdid, runnerCfg.appPackage);
+                    if (resolvedActivity == null || resolvedActivity.isBlank()) {
+                        client.sendLog(job.executionId, "ERROR",
+                                "❌ Launcher Activity no encontrada para " + runnerCfg.appPackage
+                                + ". Verifica que la app esté instalada en el dispositivo.");
+                        client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                        return;
+                    }
+                    cmd.add("-DappActivity=" + resolvedActivity);
+                    client.sendLog(job.executionId, "INFO",
+                            "[JobExecutor] 🚀 Activity detectada: " + resolvedActivity);
+                } else if (!runnerCfg.appActivity.isBlank()) {
+                    cmd.add("-DappActivity=" + runnerCfg.appActivity);
+                    client.sendLog(job.executionId, "INFO",
+                            "[JobExecutor] 🚀 Android Activity: " + runnerCfg.appActivity);
+                }
             }
 
             // Notificar TOTAL_ESPERADO DESPUÉS de construir el comando para usar
@@ -826,6 +840,47 @@ public class JobExecutor {
             client.sendLog(executionId, "WARN",
                     "⚠️  ADB no disponible: " + e.getMessage());
         }
+    }
+
+    /**
+     * Resolves the real launcher Activity for an Android package via ADB.
+     * Uses "cmd package resolve-activity --brief" which returns the component
+     * the OS would launch for ACTION_MAIN / CATEGORY_LAUNCHER intents.
+     *
+     * Returns the fully-qualified activity name (e.g. com.example.app.SplashActivity)
+     * or null when the package is not installed / command fails.
+     */
+    private String resolveLauncherActivity(String udid, String appPackage) {
+        try {
+            List<String> adbCmd = new ArrayList<>();
+            adbCmd.add(embeddedAdbPath());
+            if (!udid.isBlank()) { adbCmd.add("-s"); adbCmd.add(udid); }
+            adbCmd.addAll(List.of("shell", "cmd", "package",
+                    "resolve-activity", "--brief", appPackage));
+
+            Process p = new ProcessBuilder(adbCmd)
+                    .redirectErrorStream(true)
+                    .start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor(10, TimeUnit.SECONDS);
+            p.destroyForcibly();
+
+            // Find the line in "package/activity" format
+            for (String line : out.split("\\n")) {
+                String t = line.trim();
+                if (!t.contains("/")) continue;
+                String[] parts = t.split("/", 2);
+                if (parts.length == 2 && parts[0].trim().equals(appPackage)) {
+                    String activity = parts[1].trim();
+                    // Normalize relative form ".SplashActivity" → "com.x.SplashActivity"
+                    return activity.startsWith(".") ? appPackage + activity : activity;
+                }
+            }
+            System.err.printf("[JobExecutor] resolve-activity output for %s: %s%n", appPackage, out);
+        } catch (Exception e) {
+            System.err.println("[JobExecutor] resolveLauncherActivity error: " + e.getMessage());
+        }
+        return null;
     }
 
     // ── Pre-flight: Appium ─────────────────────────────────────────────────────
