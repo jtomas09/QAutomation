@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES, getRandomSmokeTests } from './data'
-import { useTestRunner }    from './hooks/useTestRunner'
+import { useTestRunner }        from './hooks/useTestRunner'
+import { useExecutionDevices }  from './hooks/useExecutionDevices'
 import { useBackendHealth } from './hooks/useBackendHealth'
 import { useTheme }         from './hooks/useTheme'
 import { useRunnerStatus }  from './hooks/useRunnerStatus'
@@ -28,8 +29,10 @@ export default function App() {
   const [smokeTests,    setSmokeTests]    = useState(() => getRandomSmokeTests())
   const [videoEnabled,  setVideoEnabled]  = useState(false)
 
-  const [selectedDevices,      setSelectedDevices]      = useState<string[]>([])
-  const [selectedDeviceLabels, setSelectedDeviceLabels] = useState<string[]>([])
+  const {
+    configured, configuredUdids, toggleDevice: toggleConfigDevice,
+    saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
+  } = useExecutionDevices()
 
   const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
   const backendHealth = useBackendHealth()
@@ -38,7 +41,8 @@ export default function App() {
   const runningCount  = state.status === 'running' ? 1 : 0
 
   function handleRun() {
-    runTest(suite, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)
+    const labels = configured.map(d => d.name)
+    runTest(suite, env, configuredUdids, country, videoEnabled, labels)
   }
 
   function handleCountryChange(c: string) {
@@ -72,12 +76,17 @@ export default function App() {
             <Dashboard
               state={state}
               suite={suite}              env={env}
-              devices={selectedDevices}  deviceLabels={selectedDeviceLabels}
+              configured={configured}
               country={country}
+              videoEnabled={videoEnabled}
+              saving={savingConfig}
+              isDirty={configDirty}
               onSuiteChange={setSuite}   onEnvChange={setEnv}
-              onDevicesChange={(udids, labels) => { setSelectedDevices(udids); setSelectedDeviceLabels(labels) }}
               onCountryChange={handleCountryChange}
-              videoEnabled={videoEnabled} onVideoToggle={setVideoEnabled}
+              onVideoToggle={setVideoEnabled}
+              onToggleDevice={toggleConfigDevice}
+              onSaveConfig={saveConfig}
+              onSyncLive={syncWithLive}
               onRun={handleRun}          onStop={stopTest}
               onClearLog={clearLog}      onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}
@@ -127,8 +136,8 @@ export default function App() {
                   disabled={state.status === 'running'}
                   activeId={state.activeSuite}
                   onBack={() => setDrillSuite(null)}
-                  onRun={id => runTest(id, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)}
-                  onRunAll={() => runTest(drillSuite, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)}
+                  onRun={id => runTest(id, env, configuredUdids, country, videoEnabled, configured.map(d => d.name))}
+                  onRunAll={() => runTest(drillSuite, env, configuredUdids, country, videoEnabled, configured.map(d => d.name))}
                 />
               )
             }
@@ -140,7 +149,7 @@ export default function App() {
               } else if (SUITE_TESTS[id]) {
                 setDrillSuite(id)
               } else {
-                runTest(id, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)
+                runTest(id, env, configuredUdids, country, videoEnabled, configured.map(d => d.name))
               }
             }
 

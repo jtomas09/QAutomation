@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Calendar } from 'lucide-react'
 import type { RunState } from '../types'
+import type { ConfiguredDevice } from '../hooks/useExecutionDevices'
 import { getExecutions } from '../api'
 import StatsCards       from '../components/dashboard/StatsCards'
 import RunTestsPanel    from '../components/dashboard/RunTestsPanel'
@@ -12,24 +13,27 @@ import DailyChart       from '../components/dashboard/DailyChart'
 import ConnectedDevices from '../components/dashboard/ConnectedDevices'
 
 interface Props {
-  state:            RunState
-  suite:            string
-  env:              string
-  devices:          string[]
-  deviceLabels:     string[]
-  country:          string
-  videoEnabled:     boolean
-  onSuiteChange:    (v: string) => void
-  onEnvChange:      (v: string) => void
-  onDevicesChange:  (udids: string[], labels: string[]) => void
-  onCountryChange:  (v: string) => void
-  onVideoToggle:    (v: boolean) => void
-  onRun:            () => void
-  onStop:           () => void
-  onClearLog:       () => void
-  onViewAll:        () => void
-  onManageDevices:  () => void
-  onAttach:         (executionId: string, suiteName: string) => void
+  state:              RunState
+  suite:              string
+  env:                string
+  configured:         ConfiguredDevice[]
+  country:            string
+  videoEnabled:       boolean
+  saving:             boolean
+  isDirty:            boolean
+  onSuiteChange:      (v: string) => void
+  onEnvChange:        (v: string) => void
+  onCountryChange:    (v: string) => void
+  onVideoToggle:      (v: boolean) => void
+  onToggleDevice:     (device: import('../types').PhysicalDevice) => void
+  onSaveConfig:       () => void
+  onSyncLive:         (liveDevices: import('../types').PhysicalDevice[]) => string[]
+  onRun:              () => void
+  onStop:             () => void
+  onClearLog:         () => void
+  onViewAll:          () => void
+  onManageDevices:    () => void
+  onAttach:           (executionId: string, suiteName: string) => void
 }
 
 interface AggStats { passed: number; failed: number; skipped: number; total: number; avgMs: number }
@@ -41,9 +45,11 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, devices, deviceLabels, country, videoEnabled,
-  onSuiteChange, onEnvChange, onDevicesChange, onCountryChange,
-  onVideoToggle, onRun, onStop, onClearLog, onViewAll, onManageDevices, onAttach,
+  state, suite, env, configured, country, videoEnabled,
+  saving, isDirty,
+  onSuiteChange, onEnvChange, onCountryChange,
+  onVideoToggle, onToggleDevice, onSaveConfig, onSyncLive,
+  onRun, onStop, onClearLog, onViewAll, onManageDevices, onAttach,
 }: Props) {
   const [daysBack,   setDaysBack]   = useState<number>(7)
   const [clearedAt,  setClearedAt]  = useState<number>(0)
@@ -170,14 +176,19 @@ export default function Dashboard({
       {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
       <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
         <RunTestsPanel
-          suite={suite}             env={env}
-          devices={devices}         deviceLabels={deviceLabels}
+          suite={suite}                 env={env}
+          configuredDevices={configured}
           country={country}
-          status={state.status}     executionId={state.executionId ?? null}
-          videoEnabled={videoEnabled}         onVideoToggle={onVideoToggle}
-          onSuiteChange={onSuiteChange}       onEnvChange={onEnvChange}
-          onDevicesChange={onDevicesChange}   onCountryChange={onCountryChange}
-          onRun={onRun}             onStop={onStop}
+          status={state.status}         executionId={state.executionId ?? null}
+          videoEnabled={videoEnabled}   onVideoToggle={onVideoToggle}
+          onSuiteChange={onSuiteChange} onEnvChange={onEnvChange}
+          onCountryChange={onCountryChange}
+          onRun={onRun}                 onStop={onStop}
+          onConfigureDevices={() => {
+            // Scroll to the ConnectedDevices widget
+            const el = document.getElementById('connected-devices')
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
           passed={state.passed}
           failed={state.failed}
           skipped={state.skipped}
@@ -198,8 +209,16 @@ export default function Dashboard({
       </div>
 
       {/* Row 4: Devices + Quick Access */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
-        <ConnectedDevices onManage={onManageDevices} />
+      <div id="connected-devices" className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
+        <ConnectedDevices
+          configured={configured}
+          onToggleDevice={onToggleDevice}
+          onSave={onSaveConfig}
+          saving={saving}
+          isDirty={isDirty}
+          onSyncLive={onSyncLive}
+          onManage={onManageDevices}
+        />
         <QuickAccess />
       </div>
 

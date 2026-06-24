@@ -305,3 +305,16 @@ export async function updateDeviceStatus(udid: string, status: string): Promise<
 export async function removeDevice(udid: string): Promise<void> {
   await httpDelete(`/api/devices/${encodeURIComponent(udid)}`)
 }
+
+// ─── Execution device config ──────────────────────────────────────────────────
+
+/** GET /api/settings/execution-devices → string[] of UDIDs */
+export async function getExecutionDeviceConfig(): Promise<string[]> {
+  const data = await httpGet<{ devices: string[] } | string[]>('/api/settings/execution-devices')
+  return Array.isArray(data) ? data : (data as { devices: string[] }).devices ?? []
+}
+
+/** POST /api/settings/execution-devices { devices: string[] } */
+export async function saveExecutionDeviceConfig(udids: string[]): Promise<void> {
+  await httpPost<unknown>('/api/settings/execution-devices', { devices: udids })
+}
