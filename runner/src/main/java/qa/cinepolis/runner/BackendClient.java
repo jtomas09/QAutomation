@@ -383,41 +383,60 @@ public class BackendClient {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Repo / workspace settings
+    //  Runner central config  (GET /api/runner/config)
     // ─────────────────────────────────────────────────────────────────────
 
-    public static class RepoConfig {
-        public final String repoUrl;
-        public final String repoBranch;
-        public RepoConfig(String repoUrl, String repoBranch) {
-            this.repoUrl    = repoUrl    != null ? repoUrl    : "";
-            this.repoBranch = repoBranch != null ? repoBranch : "main";
+    /** Immutable config received from the backend. */
+    public static class RunnerConfigResponse {
+        public final String  repositoryUrl;
+        public final String  branch;
+        public final String  projectName;
+        public final boolean configured;
+
+        public RunnerConfigResponse(String repositoryUrl, String branch,
+                                    String projectName, boolean configured) {
+            this.repositoryUrl = repositoryUrl != null ? repositoryUrl : "";
+            this.branch        = branch        != null ? branch        : "main";
+            this.projectName   = projectName   != null ? projectName   : "automation-project";
+            this.configured    = configured;
         }
-        public boolean hasUrl() { return !repoUrl.isBlank(); }
+        public boolean isConfigured() { return configured && !repositoryUrl.isBlank(); }
     }
 
     /**
-     * Fetches the repo URL and branch stored in the backend.
-     * Returns an empty RepoConfig (no URL) if unreachable or unconfigured.
+     * Fetches the central runner config from the backend.
+     * Called at startup AND before each job execution so repo changes propagate
+     * to all runners without reinstall.
+     * Returns null only on network/parse error.
      */
-    public RepoConfig getRepoConfig() {
+    public RunnerConfigResponse getRunnerConfig() {
         try {
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/api/settings/repo-url"))
+                    .uri(URI.create(baseUrl + "/api/runner/config"))
                     .header("Authorization", "Bearer " + token)
                     .GET()
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (res.statusCode() != 200) return new RepoConfig("", "main");
+            if (res.statusCode() != 200) return null;
             @SuppressWarnings("unchecked")
             Map<String, Object> data = json.readValue(res.body(), Map.class);
-            String url    = data.getOrDefault("repoUrl",    "") instanceof String s ? s : "";
-            String branch = data.getOrDefault("repoBranch", "main") instanceof String b ? b : "main";
-            return new RepoConfig(url, branch);
+            String url        = str(data, "repositoryUrl");
+            String branch     = str(data, "branch",      "main");
+            String project    = str(data, "projectName", "automation-project");
+            boolean configured = Boolean.TRUE.equals(data.get("configured"));
+            return new RunnerConfigResponse(url, branch, project, configured);
         } catch (Exception e) {
-            System.err.println("[BackendClient] getRepoConfig error: " + e.getMessage());
-            return new RepoConfig("", "main");
+            System.err.println("[BackendClient] getRunnerConfig error: " + e.getMessage());
+            return null;
         }
+    }
+
+    private static String str(Map<String, Object> m, String key) {
+        return str(m, key, "");
+    }
+    private static String str(Map<String, Object> m, String key, String def) {
+        Object v = m.get(key);
+        return (v instanceof String s && !s.isBlank()) ? s : def;
     }
 
     /**

@@ -78,21 +78,6 @@ public class SettingsController {
         return ResponseEntity.ok(Map.of("result", "ok"));
     }
 
-    // ── Repo / workspace URL ──────────────────────────────────────────────────
-
-    @GetMapping("/repo-url")
-    public Map<String, Object> getRepoUrl() {
-        return Map.of(
-                "repoUrl",    pathStore.getRepoUrl(),
-                "repoBranch", pathStore.getRepoBranch());
-    }
-
-    @PostMapping("/repo-url")
-    public ResponseEntity<Map<String, String>> setRepoUrl(@RequestBody RepoUrlRequest req) {
-        pathStore.setRepoConfig(req.repoUrl(), req.repoBranch());
-        return ResponseEntity.ok(Map.of("result", "ok"));
-    }
-
     // ── Execution devices ─────────────────────────────────────────────────────
 
     @GetMapping("/execution-devices")
@@ -120,8 +105,6 @@ public class SettingsController {
             boolean settingsGradle,
             boolean valid,
             String  checkedAt) {}
-
-    record RepoUrlRequest(String repoUrl, String repoBranch) {}
 
     record ExecutionDevicesRequest(List<String> devices) {}
 }

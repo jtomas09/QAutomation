@@ -345,19 +345,16 @@ export async function saveProjectPath(path: string): Promise<void> {
   await httpPost<unknown>('/api/settings/project-path', { path })
 }
 
-// ─── Repo / workspace config ──────────────────────────────────────────────────
+// ─── Runner centralized config (single source of truth) ──────────────────────
 
-export interface RepoConfig {
-  repoUrl:    string
-  repoBranch: string
+export interface RunnerCentralConfig {
+  repositoryUrl: string
+  branch:        string
+  projectName:   string
+  configured:    boolean
 }
 
-/** GET /api/settings/repo-url */
-export async function getRepoConfig(): Promise<RepoConfig> {
-  return httpGet<RepoConfig>('/api/settings/repo-url')
-}
-
-/** POST /api/settings/repo-url */
-export async function saveRepoConfig(repoUrl: string, repoBranch: string): Promise<void> {
-  await httpPost<unknown>('/api/settings/repo-url', { repoUrl, repoBranch })
+/** GET /api/runner/config — fetched by Runner at startup and before each job */
+export async function getRunnerConfig(): Promise<RunnerCentralConfig> {
+  return httpGet<RunnerCentralConfig>('/api/runner/config')
 }

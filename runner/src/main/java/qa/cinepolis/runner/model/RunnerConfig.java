@@ -1,13 +1,9 @@
 package qa.cinepolis.runner.model;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Universal Runner configuration — auto-detects OS, capabilities, and hostname.
@@ -37,8 +33,11 @@ public class RunnerConfig {
     public int     appiumPort;     // default 4723
 
     // ── Auto-managed workspace ────────────────────────────────────────────
-    public String  repoUrl;        // git clone URL of the automation project
-    public String  repoBranch;     // branch to clone/pull (default: "main")
+    // repoUrl / repoBranch / projectName are NOT stored locally.
+    // They are fetched from GET /api/runner/config before every job.
+    public String  repoUrl;        // set at startup for banner display only — not persisted
+    public String  repoBranch;     // set at startup for banner display only — not persisted
+    public String  projectName;    // set at startup for banner display only — not persisted
     public String  workspaceDir;   // {agentDataDir}/workspace — workspace root (auto-set)
 
     public static RunnerConfig fromEnv() {
@@ -61,10 +60,7 @@ public class RunnerConfig {
                 : home + "/.automationqa";
         c.agentDataDir   = env("AGENT_DATA_DIR", defaultDataDir);
         c.workspaceDir   = c.agentDataDir + File.separator + "workspace";
-
-        // Repo config — can be set via env or loaded from settings.json at startup
-        c.repoUrl        = env("REPO_URL",    "");
-        c.repoBranch     = env("REPO_BRANCH", "main");
+        // repoUrl / repoBranch / projectName are populated at runtime from GET /api/runner/config
 
         // Auto-detect OS and hostname
         c.os       = detectOs();
@@ -186,46 +182,5 @@ public class RunnerConfig {
         String v = System.getProperty(key);
         if (v == null || v.isBlank()) v = System.getenv(key);
         return (v != null && !v.isBlank()) ? v : def;
-    }
-
-    // ── Local settings file (runner-local cache of backend settings) ─────────
-
-    private static final Pattern REPO_URL_PATTERN    =
-            Pattern.compile("\"repoUrl\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-    private static final Pattern REPO_BRANCH_PATTERN =
-            Pattern.compile("\"repoBranch\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-
-    public static class LocalSettings {
-        public String repoUrl    = "";
-        public String repoBranch = "main";
-    }
-
-    public static LocalSettings loadLocalSettings(String agentDataDir) {
-        LocalSettings s = new LocalSettings();
-        try {
-            Path file = Path.of(agentDataDir, "settings.json");
-            if (!Files.exists(file)) return s;
-            String content = Files.readString(file);
-            Matcher mu = REPO_URL_PATTERN.matcher(content);
-            if (mu.find()) s.repoUrl = mu.group(1).replace("\\\\", "\\").replace("\\\"", "\"");
-            Matcher mb = REPO_BRANCH_PATTERN.matcher(content);
-            if (mb.find()) s.repoBranch = mb.group(1);
-        } catch (Exception e) {
-            System.out.println("[Config] No se pudo leer settings.json: " + e.getMessage());
-        }
-        return s;
-    }
-
-    public static void saveLocalSettings(String agentDataDir, String repoUrl, String repoBranch) {
-        try {
-            Path file = Path.of(agentDataDir, "settings.json");
-            Files.createDirectories(file.getParent());
-            String escapedUrl    = (repoUrl    != null ? repoUrl    : "").replace("\\", "\\\\").replace("\"", "\\\"");
-            String escapedBranch = (repoBranch != null ? repoBranch : "main").replace("\\", "\\\\").replace("\"", "\\\"");
-            Files.writeString(file,
-                    "{\"repoUrl\":\"" + escapedUrl + "\",\"repoBranch\":\"" + escapedBranch + "\"}");
-        } catch (Exception e) {
-            System.out.println("[Config] No se pudo guardar settings.json: " + e.getMessage());
-        }
     }
 }

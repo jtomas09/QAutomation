@@ -129,28 +129,15 @@ public class RunnerAgent {
                 true, nodeOk, appiumOk, adbFunctional, xcodeOk, config.iosSupported);
         HostStatusManager.apply(hostReport);
 
-        // ── Repo / workspace config ────────────────────────────────────────────
-        // Load from local settings.json first (works offline), then sync from backend
-        qa.cinepolis.runner.model.RunnerConfig.LocalSettings localSettings =
-                qa.cinepolis.runner.model.RunnerConfig.loadLocalSettings(config.agentDataDir);
-        if (localSettings.repoUrl != null && !localSettings.repoUrl.isBlank()) {
-            config.repoUrl    = localSettings.repoUrl;
-            config.repoBranch = localSettings.repoBranch;
-            System.out.println("[Runner] Repo cargado (local): " + config.repoUrl + " [" + config.repoBranch + "]");
-        }
-        try {
-            BackendClient.RepoConfig backendRepo = client.getRepoConfig();
-            if (backendRepo.hasUrl()) {
-                config.repoUrl    = backendRepo.repoUrl;
-                config.repoBranch = backendRepo.repoBranch;
-                // Persist so runner still works when backend is unreachable
-                qa.cinepolis.runner.model.RunnerConfig.saveLocalSettings(
-                        config.agentDataDir, config.repoUrl, config.repoBranch);
-                System.out.println("[Runner] Repo sincronizado (backend): " + config.repoUrl
-                        + " [" + config.repoBranch + "]");
-            }
-        } catch (Exception e) {
-            System.err.println("[Runner] No se pudo obtener repo config del backend: " + e.getMessage());
+        // ── Runner config (single source of truth — fetched from backend, never stored locally) ──
+        BackendClient.RunnerConfigResponse runnerCfg = client.getRunnerConfig();
+        if (runnerCfg != null && runnerCfg.isConfigured()) {
+            config.repoUrl     = runnerCfg.repositoryUrl;
+            config.repoBranch  = runnerCfg.branch;
+            config.projectName = runnerCfg.projectName;
+            System.out.println("[Runner] Config del backend: " + config.repoUrl + " [" + config.repoBranch + "]");
+        } else {
+            System.out.println("[Runner] ⚠ REPO_URL no configurada en el backend. Los jobs no podrán ejecutarse.");
         }
 
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
@@ -378,8 +365,8 @@ public class RunnerAgent {
             System.out.println("    Workspace:   " + config.workspaceDir + File.separator
                     + WorkspaceManager.repoNameFromUrl(config.repoUrl));
         } else {
-            System.out.println("  ⚠ Repositorio no configurado.");
-            System.out.println("    Configure la URL en Configuración → Runner Settings → Repositorio.");
+            System.out.println("  ⚠ Repositorio no configurado en el backend.");
+            System.out.println("    Configure la variable REPO_URL en el backend (Railway → Variables).");
         }
         System.out.println();
     }

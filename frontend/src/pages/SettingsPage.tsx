@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useBackendHealth } from '../hooks/useBackendHealth'
 import { useRunnerStatus }  from '../hooks/useRunnerStatus'
-import { getProjectPath, saveProjectPath, type ProjectPathConfig, getRepoConfig, saveRepoConfig } from '../api'
+import { getProjectPath, saveProjectPath, type ProjectPathConfig, getRunnerConfig, type RunnerCentralConfig } from '../api'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
@@ -250,41 +250,18 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   const runnerOnline  = useRunnerStatus()
 
   // ── Runner Settings state ───────────────────────────────────────────────
-  const [repoUrlInput,      setRepoUrlInput]      = useState('')
-  const [repoBranchInput,   setRepoBranchInput]   = useState('main')
+  const [runnerCfg,         setRunnerCfg]         = useState<RunnerCentralConfig | null>(null)
   const [projectPathConfig, setProjectPathConfig] = useState<ProjectPathConfig | null>(null)
-  const [repoSaving,        setRepoSaving]        = useState(false)
-  const [repoSaved,         setRepoSaved]         = useState(false)
 
   useEffect(() => {
-    // Load repo config (URL + branch)
-    getRepoConfig()
-      .then(rc => {
-        if (rc.repoUrl)    setRepoUrlInput(rc.repoUrl)
-        if (rc.repoBranch) setRepoBranchInput(rc.repoBranch)
-      })
-      .catch(() => {})
-    // Load validation status (reported by Runner after workspace sync)
-    getProjectPath()
-      .then(setProjectPathConfig)
-      .catch(() => {})
-    // Poll validation every 10s
+    getRunnerConfig().then(setRunnerCfg).catch(() => {})
+    getProjectPath().then(setProjectPathConfig).catch(() => {})
     const id = setInterval(() => {
+      getRunnerConfig().then(setRunnerCfg).catch(() => {})
       getProjectPath().then(setProjectPathConfig).catch(() => {})
     }, 10_000)
     return () => clearInterval(id)
   }, [])
-
-  async function handleSaveRepo() {
-    if (!repoUrlInput.trim()) return
-    setRepoSaving(true)
-    try {
-      await saveRepoConfig(repoUrlInput.trim(), repoBranchInput.trim() || 'main')
-      setRepoSaved(true)
-      setTimeout(() => setRepoSaved(false), 2500)
-    } catch { /* best-effort */ }
-    finally { setRepoSaving(false) }
-  }
 
   function set<K extends keyof SettingsState>(k: K, v: SettingsState[K]) {
     setSettings(prev => ({ ...prev, [k]: v }))
@@ -571,66 +548,47 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   const cardRunnerSettings = (
     <Card title="Repositorio del Proyecto" icon={FolderOpen} accent="#6366f1">
       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.6 }}>
-        El Runner clona automáticamente el repositorio en su workspace local y lo actualiza
-        antes de cada ejecución. No es necesario configurar rutas ni clonar manualmente.
+        El Runner se autoconfigura desde el Backend. La URL del repositorio se define mediante
+        la variable de entorno <code style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}>REPO_URL</code> en Railway.
+        Los Runners nunca almacenan la configuración localmente.
       </div>
 
-      {/* Repo URL */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-          URL del repositorio
-        </div>
-        <input
-          value={repoUrlInput}
-          onChange={e => setRepoUrlInput(e.target.value)}
-          placeholder="https://github.com/org/automation-project.git"
-          onKeyDown={e => { if (e.key === 'Enter') handleSaveRepo() }}
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
-            borderRadius: 8, padding: '7px 12px', fontSize: 11,
-            color: 'var(--text-pri)', outline: 'none', fontFamily: 'monospace',
-          }}
-        />
-      </div>
-
-      {/* Branch + Save */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Rama
+      {/* Read-only config from backend */}
+      {runnerCfg?.configured ? (
+        <div style={{
+          borderRadius: 10, padding: '12px 14px', marginBottom: 14,
+          background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)',
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Configuración activa del backend
           </div>
-          <input
-            value={repoBranchInput}
-            onChange={e => setRepoBranchInput(e.target.value)}
-            placeholder="main"
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
-              borderRadius: 8, padding: '7px 12px', fontSize: 11,
-              color: 'var(--text-pri)', outline: 'none',
-            }}
-          />
+          {([
+            { label: 'Repositorio', value: runnerCfg.repositoryUrl },
+            { label: 'Rama',        value: runnerCfg.branch },
+            { label: 'Proyecto',    value: runnerCfg.projectName },
+          ] as { label: string; value: string }[]).map(row => (
+            <div key={row.label} style={{ display: 'flex', flexDirection: 'column', marginBottom: 8 }}>
+              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>
+                {row.label}
+              </span>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-pri)', wordBreak: 'break-all' }}>
+                {row.value}
+              </span>
+            </div>
+          ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button
-            onClick={handleSaveRepo}
-            disabled={repoSaving || !repoUrlInput.trim()}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 18px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-              background: repoSaved ? '#10b981' : 'rgba(99,102,241,0.2)',
-              border: `1px solid ${repoSaved ? '#10b981' : 'rgba(99,102,241,0.4)'}`,
-              color: repoSaved ? '#fff' : '#818cf8',
-              cursor: repoSaving || !repoUrlInput.trim() ? 'default' : 'pointer',
-              opacity: !repoUrlInput.trim() ? 0.5 : 1, transition: 'all .2s',
-            }}
-          >
-            {repoSaving ? <Loader2 size={12} className="animate-spin" /> : null}
-            {repoSaved ? '✓ Guardado' : 'Guardar'}
-          </button>
+      ) : (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
+          padding: '10px 14px', fontSize: 11, marginBottom: 14,
+          background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)', color: '#f87171',
+        }}>
+          <AlertTriangle size={13} />
+          {runnerCfg === null
+            ? 'No se pudo conectar al backend.'
+            : 'REPO_URL no configurada. Agrega la variable de entorno en Railway → Variables.'}
         </div>
-      </div>
+      )}
 
       {/* Workspace validation status (reported by Runner after sync) */}
       {v ? (
@@ -658,7 +616,7 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
             {v.checkedPath}
           </div>
         </div>
-      ) : repoUrlInput ? (
+      ) : runnerCfg?.configured ? (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
           padding: '10px 14px', fontSize: 11,
@@ -667,16 +625,7 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
           <AlertTriangle size={13} />
           El workspace se sincronizará al ejecutar la primera prueba.
         </div>
-      ) : (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
-          padding: '10px 14px', fontSize: 11,
-          background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)', color: '#f87171',
-        }}>
-          <AlertTriangle size={13} />
-          Configura la URL del repositorio para habilitar ejecuciones.
-        </div>
-      )}
+      ) : null}
     </Card>
   )
 
