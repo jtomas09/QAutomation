@@ -64,7 +64,7 @@ public class RunnerAgent {
         if (!adbFunctional) System.out.println("[Runner] ADB no disponible. Iniciando en DEGRADED.");
 
         // ── Android SDK (Plug & Play — sin ANDROID_HOME manual) ───────────────
-        AndroidEnvironmentBootstrap androidBootstrap = new AndroidEnvironmentBootstrap();
+        AndroidEnvironmentBootstrap androidBootstrap = AndroidEnvironmentBootstrap.get();
         System.out.println("[Runner] === Android SDK ===");
         if (androidBootstrap.isValid()) {
             System.setProperty("ANDROID_HOME",     androidBootstrap.getSdkPath());

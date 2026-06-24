@@ -338,9 +338,19 @@ public class AppiumManager {
     }
 
     private ProcessBuilder withAppiumHome(ProcessBuilder pb) {
+        // APPIUM_HOME — Appium's own node_modules location
         String appiumHome = System.getProperty("APPIUM_HOME");
         if (appiumHome != null && !appiumHome.isBlank())
             pb.environment().put("APPIUM_HOME", appiumHome);
+
+        // Android SDK — UiAutomator2 driver runs adb internally and needs ANDROID_HOME.
+        // The process inherits the Runner JVM env, which may lack these when running as a
+        // LaunchAgent / Windows Service (shell rc files are NOT sourced for services).
+        AndroidEnvironmentBootstrap androidEnv = AndroidEnvironmentBootstrap.get();
+        if (androidEnv.isValid()) {
+            pb.environment().putAll(androidEnv.buildEnv());
+        }
+
         return pb;
     }
 

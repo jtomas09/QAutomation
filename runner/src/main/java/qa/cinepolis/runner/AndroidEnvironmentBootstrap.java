@@ -17,6 +17,16 @@ import java.util.Map;
  */
 public class AndroidEnvironmentBootstrap {
 
+    /**
+     * Singleton — SDK detection runs exactly once at JVM startup.
+     * AppiumManager calls get() on every subprocess; creating a new instance
+     * each time would repeat filesystem scans unnecessarily.
+     */
+    private static final AndroidEnvironmentBootstrap INSTANCE = new AndroidEnvironmentBootstrap();
+
+    /** Returns the shared singleton. Use this instead of new AndroidEnvironmentBootstrap(). */
+    public static AndroidEnvironmentBootstrap get() { return INSTANCE; }
+
     private final String sdkPath;
 
     public AndroidEnvironmentBootstrap() {

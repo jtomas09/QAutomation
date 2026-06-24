@@ -556,7 +556,7 @@ public class JobExecutor {
             pb.redirectErrorStream(true);
 
             // ── Android SDK — Plug & Play (no manual ANDROID_HOME required) ──────
-            AndroidEnvironmentBootstrap androidEnv = new AndroidEnvironmentBootstrap();
+            AndroidEnvironmentBootstrap androidEnv = AndroidEnvironmentBootstrap.get();
             androidEnv.logStatus(job.executionId, client);
             if (androidEnv.isValid()) {
                 pb.environment().putAll(androidEnv.buildEnv());

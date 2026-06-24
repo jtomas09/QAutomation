@@ -92,7 +92,12 @@ public class AndroidSdkLocator {
         String os   = System.getProperty("os.name", "").toLowerCase();
 
         if (os.contains("mac")) {
+            // Standard Android Studio path (most common)
             list.add(home + "/Library/Android/sdk");
+            // Alternative: some users or CI tools install here
+            list.add(home + "/Android/Sdk");
+            // Enterprise bundled SDK (Runner may ship its own copy here)
+            list.add(home + "/Library/Application Support/AutomationQA/android-sdk");
             // Android Studio Giraffe+ may install here on Apple Silicon
             list.add("/Applications/Android Studio.app/Contents/sdk");
             list.add("/usr/local/share/android-sdk");
@@ -101,12 +106,14 @@ public class AndroidSdkLocator {
 
         } else if (os.contains("win")) {
             String localAppData = System.getenv("LOCALAPPDATA");
+            String userProfile  = System.getenv("USERPROFILE");
             String programFiles  = System.getenv("ProgramFiles");
             String programFilesX = System.getenv("ProgramFiles(x86)");
-            String userProfile   = System.getenv("USERPROFILE");
 
-            if (localAppData  != null) list.add(localAppData  + "\\Android\\Sdk");
-            if (userProfile   != null) list.add(userProfile   + "\\AppData\\Local\\Android\\Sdk");
+            // Standard Android Studio path on Windows
+            if (localAppData != null) list.add(localAppData + "\\Android\\Sdk");
+            if (userProfile  != null) list.add(userProfile  + "\\Android\\Sdk");
+            if (userProfile  != null) list.add(userProfile  + "\\AppData\\Local\\Android\\Sdk");
             if (programFiles  != null) list.add(programFiles  + "\\Android\\android-sdk");
             if (programFilesX != null) list.add(programFilesX + "\\Android\\android-sdk");
 
