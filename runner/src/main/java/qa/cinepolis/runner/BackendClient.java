@@ -383,6 +383,55 @@ public class BackendClient {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    //  Project path settings
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Fetches the project path stored in the backend.
+     * Returns null if the backend is unreachable or no path has been configured.
+     */
+    public String getProjectPath() {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/settings/project-path"))
+                    .header("Authorization", "Bearer " + token)
+                    .GET()
+                    .build();
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (res.statusCode() != 200) return null;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = json.readValue(res.body(), Map.class);
+            Object path = data.get("path");
+            return (path instanceof String s && !s.isBlank()) ? s : null;
+        } catch (Exception e) {
+            System.err.println("[BackendClient] getProjectPath error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Reports local project validation results back to the backend.
+     * The frontend polls GET /api/settings/project-path to show this status.
+     */
+    public void reportProjectValidation(String checkedPath, boolean gradlew,
+                                        boolean buildGradle, boolean settingsGradle,
+                                        boolean valid) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("checkedPath",    checkedPath != null ? checkedPath : "");
+            payload.put("gradlew",        gradlew);
+            payload.put("buildGradle",    buildGradle);
+            payload.put("settingsGradle", settingsGradle);
+            payload.put("valid",          valid);
+            payload.put("checkedAt",      java.time.Instant.now().toString());
+            String body = json.writeValueAsString(payload);
+            post("/api/settings/project-path/validation", body);
+        } catch (Exception e) {
+            System.err.println("[BackendClient] reportProjectValidation error: " + e.getMessage());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
 
     private HttpResponse<String> post(String path, String body) throws Exception {
         HttpRequest req = HttpRequest.newBuilder()

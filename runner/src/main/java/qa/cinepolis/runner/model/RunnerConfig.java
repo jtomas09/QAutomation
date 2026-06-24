@@ -1,9 +1,13 @@
 package qa.cinepolis.runner.model;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Universal Runner configuration — auto-detects OS, capabilities, and hostname.
@@ -31,6 +35,9 @@ public class RunnerConfig {
     // ── Agent data & Appium ────────────────────────────────────────────────
     public String  agentDataDir;   // root dir for downloaded tools, logs, updates
     public int     appiumPort;     // default 4723
+
+    // ── Project path (loaded from local settings + backend) ───────────────
+    public String  projectPath;    // absolute path to Gradle project root; null = not configured
 
     public static RunnerConfig fromEnv() {
         RunnerConfig c = new RunnerConfig();
@@ -172,5 +179,38 @@ public class RunnerConfig {
         String v = System.getProperty(key);
         if (v == null || v.isBlank()) v = System.getenv(key);
         return (v != null && !v.isBlank()) ? v : def;
+    }
+
+    // ── Local settings file helpers ───────────────────────────────────────────
+
+    private static final Pattern PROJECT_PATH_PATTERN =
+            Pattern.compile("\"projectPath\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    /** Reads projectPath from ~/.automationqa/settings.json; returns null if absent. */
+    public static String loadLocalProjectPath(String agentDataDir) {
+        try {
+            Path file = Path.of(agentDataDir, "settings.json");
+            if (!Files.exists(file)) return null;
+            String content = Files.readString(file);
+            Matcher m = PROJECT_PATH_PATTERN.matcher(content);
+            if (m.find()) {
+                return m.group(1).replace("\\\\", "\\").replace("\\\"", "\"");
+            }
+        } catch (Exception e) {
+            System.out.println("[Config] No se pudo leer settings.json: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /** Persists projectPath to ~/.automationqa/settings.json. */
+    public static void saveLocalProjectPath(String agentDataDir, String projectPath) {
+        try {
+            Path file = Path.of(agentDataDir, "settings.json");
+            Files.createDirectories(file.getParent());
+            String escaped = projectPath.replace("\\", "\\\\").replace("\"", "\\\"");
+            Files.writeString(file, "{\"projectPath\":\"" + escaped + "\"}");
+        } catch (Exception e) {
+            System.out.println("[Config] No se pudo guardar settings.json: " + e.getMessage());
+        }
     }
 }

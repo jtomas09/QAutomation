@@ -128,6 +128,26 @@ public class RunnerAgent {
                 true, nodeOk, appiumOk, adbFunctional, xcodeOk, config.iosSupported);
         HostStatusManager.apply(hostReport);
 
+        // ── Project path ───────────────────────────────────────────────────────
+        // Load from local file first (works offline), then sync from backend
+        String localPath = qa.cinepolis.runner.model.RunnerConfig.loadLocalProjectPath(config.agentDataDir);
+        if (localPath != null) {
+            config.projectPath = localPath;
+            System.out.println("[Runner] Proyecto cargado (local): " + localPath);
+        }
+        try {
+            String backendPath = client.getProjectPath();
+            if (backendPath != null && !backendPath.isBlank()) {
+                config.projectPath = backendPath;
+                // Persist so the runner still works when the backend is unreachable
+                qa.cinepolis.runner.model.RunnerConfig.saveLocalProjectPath(
+                        config.agentDataDir, backendPath);
+                System.out.println("[Runner] Proyecto sincronizado (backend): " + backendPath);
+            }
+        } catch (Exception e) {
+            System.err.println("[Runner] No se pudo obtener ruta del proyecto del backend: " + e.getMessage());
+        }
+
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
         printBanner(config, adbPath);
 
@@ -346,6 +366,14 @@ public class RunnerAgent {
         System.out.println("  ADB ver:    " + System.getProperty("ADB_VERSION", "-"));
         if ("MACOS".equals(config.os))
             System.out.println("  Xcode:      " + System.getProperty("XCODE_VERSION", "-"));
+        System.out.println();
+        // Project path status
+        if (config.projectPath != null && !config.projectPath.isBlank()) {
+            System.out.println("  ✓ Proyecto configurado: " + config.projectPath);
+        } else {
+            System.out.println("  ⚠ Proyecto de automatización no configurado.");
+            System.out.println("    Configura la ruta en Configuración → Runner Settings.");
+        }
         System.out.println();
     }
 

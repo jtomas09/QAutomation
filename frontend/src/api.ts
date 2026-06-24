@@ -318,3 +318,29 @@ export async function getExecutionDeviceConfig(): Promise<string[]> {
 export async function saveExecutionDeviceConfig(udids: string[]): Promise<void> {
   await httpPost<unknown>('/api/settings/execution-devices', { devices: udids })
 }
+
+// ─── Project path settings ────────────────────────────────────────────────────
+
+export interface ProjectPathValidation {
+  gradlew:        boolean
+  buildGradle:    boolean
+  settingsGradle: boolean
+  valid:          boolean
+  checkedPath:    string
+  checkedAt:      string
+}
+
+export interface ProjectPathConfig {
+  path:       string
+  validation: ProjectPathValidation | null
+}
+
+/** GET /api/settings/project-path */
+export async function getProjectPath(): Promise<ProjectPathConfig> {
+  return httpGet<ProjectPathConfig>('/api/settings/project-path')
+}
+
+/** POST /api/settings/project-path { path: string } */
+export async function saveProjectPath(path: string): Promise<void> {
+  await httpPost<unknown>('/api/settings/project-path', { path })
+}

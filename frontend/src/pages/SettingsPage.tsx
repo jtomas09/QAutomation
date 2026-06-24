@@ -4,10 +4,11 @@ import {
   Wifi, Database, BarChart3, Activity,
   FlaskConical, Trash2, Download, Upload,
   CheckCircle2, Loader2, Lightbulb,
-  HardDrive, Server,
+  HardDrive, Server, FolderOpen, AlertTriangle,
 } from 'lucide-react'
 import { useBackendHealth } from '../hooks/useBackendHealth'
 import { useRunnerStatus }  from '../hooks/useRunnerStatus'
+import { getProjectPath, saveProjectPath, type ProjectPathConfig } from '../api'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
@@ -231,6 +232,7 @@ const TABS = [
   { id: 'seguridad',      label: 'Seguridad' },
   { id: 'avanzado',       label: 'Avanzado' },
   { id: 'personalizacion',label: 'Personalización' },
+  { id: 'runner',         label: 'Runner Settings' },
 ]
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -246,6 +248,42 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
 
   const backendHealth = useBackendHealth()
   const runnerOnline  = useRunnerStatus()
+
+  // ── Runner Settings state ───────────────────────────────────────────────
+  const [projectPathInput,  setProjectPathInput]  = useState('')
+  const [projectPathConfig, setProjectPathConfig] = useState<ProjectPathConfig | null>(null)
+  const [pathSaving,        setPathSaving]        = useState(false)
+  const [pathSaved,         setPathSaved]         = useState(false)
+
+  useEffect(() => {
+    getProjectPath()
+      .then(cfg => {
+        setProjectPathConfig(cfg)
+        if (cfg.path) setProjectPathInput(cfg.path)
+      })
+      .catch(() => {})
+    // Poll every 10s so validation status updates when Runner reports back
+    const id = setInterval(() => {
+      getProjectPath()
+        .then(setProjectPathConfig)
+        .catch(() => {})
+    }, 10_000)
+    return () => clearInterval(id)
+  }, [])
+
+  async function handleSavePath() {
+    if (!projectPathInput.trim()) return
+    setPathSaving(true)
+    try {
+      await saveProjectPath(projectPathInput.trim())
+      setPathSaved(true)
+      setTimeout(() => setPathSaved(false), 2500)
+      // Refresh immediately
+      const cfg = await getProjectPath()
+      setProjectPathConfig(cfg)
+    } catch { /* best-effort */ }
+    finally { setPathSaving(false) }
+  }
 
   function set<K extends keyof SettingsState>(k: K, v: SettingsState[K]) {
     setSettings(prev => ({ ...prev, [k]: v }))
@@ -527,6 +565,97 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
     </Card>
   )
 
+  // ── Runner Settings card ──────────────────────────────────────────────────
+  const v = projectPathConfig?.validation
+  const cardRunnerSettings = (
+    <Card title="Proyecto de Automatización" icon={FolderOpen} accent="#6366f1">
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.5 }}>
+        Ruta absoluta al directorio raíz del proyecto Gradle (donde está <code>gradlew</code>).
+        El Runner usará esta ruta para ejecutar las pruebas.
+      </div>
+
+      {/* Path input */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <input
+          value={projectPathInput}
+          onChange={e => setProjectPathInput(e.target.value)}
+          placeholder="/Users/usuario/Documents/QAutomation"
+          onKeyDown={e => { if (e.key === 'Enter') handleSavePath() }}
+          style={{
+            flex: 1, background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+            borderRadius: 8, padding: '7px 12px', fontSize: 11,
+            color: 'var(--text-pri)', outline: 'none', fontFamily: 'monospace',
+          }}
+        />
+        <button
+          onClick={handleSavePath}
+          disabled={pathSaving || !projectPathInput.trim()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '7px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+            background: pathSaved ? '#10b981' : 'rgba(99,102,241,0.2)',
+            border: `1px solid ${pathSaved ? '#10b981' : 'rgba(99,102,241,0.4)'}`,
+            color: pathSaved ? '#fff' : '#818cf8',
+            cursor: pathSaving || !projectPathInput.trim() ? 'default' : 'pointer',
+            opacity: !projectPathInput.trim() ? 0.5 : 1,
+            transition: 'all .2s',
+          }}
+        >
+          {pathSaving ? <Loader2 size={12} className="animate-spin" /> : null}
+          {pathSaved ? '✓ Guardado' : 'Guardar'}
+        </button>
+      </div>
+
+      {/* Validation status */}
+      {v ? (
+        <div style={{
+          borderRadius: 10, padding: '10px 14px',
+          background: v.valid ? 'rgba(16,185,129,0.07)' : 'rgba(244,63,94,0.07)',
+          border: `1px solid ${v.valid ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'}`,
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Validación del Runner
+          </div>
+          {([
+            { label: 'gradlew / gradlew.bat', ok: v.gradlew },
+            { label: 'build.gradle[.kts]',     ok: v.buildGradle },
+            { label: 'settings.gradle[.kts]',  ok: v.settingsGradle },
+          ] as { label: string; ok: boolean }[]).map(row => (
+            <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+              <span style={{ fontSize: 13, color: row.ok ? '#10b981' : '#f43f5e' }}>
+                {row.ok ? '✓' : '✗'}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>{row.label}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>
+            Verificado: {v.checkedPath}
+          </div>
+        </div>
+      ) : projectPathConfig?.path ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
+          padding: '10px 14px', fontSize: 11,
+          background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.2)',
+          color: '#eab308',
+        }}>
+          <AlertTriangle size={13} />
+          Esperando validación del Runner…
+        </div>
+      ) : (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
+          padding: '10px 14px', fontSize: 11,
+          background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)',
+          color: '#f87171',
+        }}>
+          <AlertTriangle size={13} />
+          No hay ruta configurada — las ejecuciones Gradle fallarán.
+        </div>
+      )}
+    </Card>
+  )
+
   // ── Grid layouts per tab ──────────────────────────────────────────────────
   function MainContent() {
     if (tab === 'general') return (
@@ -559,6 +688,11 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
     if (tab === 'avanzado') return (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {cardAvanzado}{cardDatos}
+      </div>
+    )
+    if (tab === 'runner') return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, maxWidth: 560 }}>
+        {cardRunnerSettings}
       </div>
     )
     // dispositivos / personalizacion → coming soon
