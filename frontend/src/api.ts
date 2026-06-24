@@ -157,7 +157,8 @@ export function streamExecution(
   })
 
   es.addEventListener('done', () => {
-    addLog('INFO', `✅ Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)
+    const icon = failed > 0 ? '❌' : '✅'
+    addLog('INFO', `${icon} Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)
     es.close()
     onDone({ passed, failed, skipped, total })
   })

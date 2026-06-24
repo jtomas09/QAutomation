@@ -661,8 +661,10 @@ public class JobExecutor {
                            + failed.get() + " FAILED · "
                            + skipped.get() + " SKIPPED";
 
-            client.sendLog(job.executionId,
-                    exitCode == 0 ? "PASS" : "FAIL",
+            // INFO level: this is a runner summary, NOT an individual test result.
+            // Using PASS/FAIL here inflates the frontend counter by +1.
+            // The frontend generates its own "Suite finalizada" from the real PASS/FAIL/SKIP counts.
+            client.sendLog(job.executionId, "INFO",
                     exitCode == 0
                         ? "✅ Suite completada — " + summary
                         : "❌ Suite terminó con errores (exit " + exitCode + ") — " + summary);
