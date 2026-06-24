@@ -400,7 +400,7 @@ public class BackendClient {
             this.projectName   = projectName   != null ? projectName   : "automation-project";
             this.configured    = configured;
         }
-        public boolean isConfigured() { return configured && !repositoryUrl.isBlank(); }
+        public boolean isConfigured() { return !repositoryUrl.isBlank(); }
     }
 
     /**

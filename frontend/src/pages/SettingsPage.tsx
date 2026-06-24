@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useBackendHealth } from '../hooks/useBackendHealth'
 import { useRunnerStatus }  from '../hooks/useRunnerStatus'
-import { getProjectPath, saveProjectPath, type ProjectPathConfig, getRunnerConfig, type RunnerCentralConfig } from '../api'
+import { getProjectPath, saveProjectPath, type ProjectPathConfig, getRunnerConfig, saveRunnerConfig, type RunnerCentralConfig } from '../api'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
@@ -252,9 +252,22 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   // ── Runner Settings state ───────────────────────────────────────────────
   const [runnerCfg,         setRunnerCfg]         = useState<RunnerCentralConfig | null>(null)
   const [projectPathConfig, setProjectPathConfig] = useState<ProjectPathConfig | null>(null)
+  const [adminOpen,         setAdminOpen]         = useState(false)
+  const [adminUrl,          setAdminUrl]          = useState('')
+  const [adminBranch,       setAdminBranch]       = useState('main')
+  const [adminProject,      setAdminProject]      = useState('QAutomation')
+  const [adminSaving,       setAdminSaving]       = useState(false)
+  const [adminSaved,        setAdminSaved]        = useState(false)
 
   useEffect(() => {
-    getRunnerConfig().then(setRunnerCfg).catch(() => {})
+    getRunnerConfig().then(cfg => {
+      setRunnerCfg(cfg)
+      if (cfg) {
+        setAdminUrl(cfg.repositoryUrl)
+        setAdminBranch(cfg.branch)
+        setAdminProject(cfg.projectName)
+      }
+    }).catch(() => {})
     getProjectPath().then(setProjectPathConfig).catch(() => {})
     const id = setInterval(() => {
       getRunnerConfig().then(setRunnerCfg).catch(() => {})
@@ -262,6 +275,19 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
     }, 10_000)
     return () => clearInterval(id)
   }, [])
+
+  async function handleAdminSave() {
+    if (!adminUrl.trim()) return
+    setAdminSaving(true)
+    try {
+      await saveRunnerConfig(adminUrl.trim(), adminBranch.trim() || 'main', adminProject.trim() || 'QAutomation')
+      const fresh = await getRunnerConfig()
+      setRunnerCfg(fresh)
+      setAdminSaved(true)
+      setTimeout(() => setAdminSaved(false), 2500)
+    } catch { /* best-effort */ }
+    finally { setAdminSaving(false) }
+  }
 
   function set<K extends keyof SettingsState>(k: K, v: SettingsState[K]) {
     setSettings(prev => ({ ...prev, [k]: v }))
@@ -546,87 +572,176 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   // ── Runner Settings card ──────────────────────────────────────────────────
   const v = projectPathConfig?.validation
   const cardRunnerSettings = (
-    <Card title="Repositorio del Proyecto" icon={FolderOpen} accent="#6366f1">
-      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.6 }}>
-        El Runner se autoconfigura desde el Backend. La URL del repositorio se define mediante
-        la variable de entorno <code style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}>REPO_URL</code> en Railway.
-        Los Runners nunca almacenan la configuración localmente.
-      </div>
+    <>
+      {/* Active config — read-only, zero configuration needed */}
+      <Card title="Repositorio del Proyecto" icon={FolderOpen} accent="#6366f1">
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.6 }}>
+          El Runner se autoconfigura automáticamente desde el Backend.
+          No se requiere ninguna configuración manual.
+        </div>
 
-      {/* Read-only config from backend */}
-      {runnerCfg?.configured ? (
-        <div style={{
-          borderRadius: 10, padding: '12px 14px', marginBottom: 14,
-          background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)',
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Configuración activa del backend
-          </div>
-          {([
-            { label: 'Repositorio', value: runnerCfg.repositoryUrl },
-            { label: 'Rama',        value: runnerCfg.branch },
-            { label: 'Proyecto',    value: runnerCfg.projectName },
-          ] as { label: string; value: string }[]).map(row => (
-            <div key={row.label} style={{ display: 'flex', flexDirection: 'column', marginBottom: 8 }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>
-                {row.label}
-              </span>
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-pri)', wordBreak: 'break-all' }}>
-                {row.value}
-              </span>
+        {runnerCfg ? (
+          <div style={{
+            borderRadius: 10, padding: '12px 14px', marginBottom: 14,
+            background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)',
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              Configuración activa
             </div>
-          ))}
-        </div>
-      ) : (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
-          padding: '10px 14px', fontSize: 11, marginBottom: 14,
-          background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)', color: '#f87171',
-        }}>
-          <AlertTriangle size={13} />
-          {runnerCfg === null
-            ? 'No se pudo conectar al backend.'
-            : 'REPO_URL no configurada. Agrega la variable de entorno en Railway → Variables.'}
-        </div>
-      )}
+            {([
+              { label: 'Repositorio', value: runnerCfg.repositoryUrl },
+              { label: 'Rama',        value: runnerCfg.branch },
+              { label: 'Proyecto',    value: runnerCfg.projectName },
+            ] as { label: string; value: string }[]).map(row => (
+              <div key={row.label} style={{ display: 'flex', flexDirection: 'column', marginBottom: 8 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 2 }}>
+                  {row.label}
+                </span>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-pri)', wordBreak: 'break-all' }}>
+                  {row.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
+            padding: '10px 14px', fontSize: 11, marginBottom: 14,
+            background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)', color: '#f87171',
+          }}>
+            <AlertTriangle size={13} />
+            No se pudo conectar al backend.
+          </div>
+        )}
 
-      {/* Workspace validation status (reported by Runner after sync) */}
-      {v ? (
-        <div style={{
-          borderRadius: 10, padding: '10px 14px',
-          background: v.valid ? 'rgba(16,185,129,0.07)' : 'rgba(244,63,94,0.07)',
-          border: `1px solid ${v.valid ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'}`,
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Último workspace sincronizado
-          </div>
-          {([
-            { label: 'gradlew / gradlew.bat', ok: v.gradlew },
-            { label: 'build.gradle[.kts]',    ok: v.buildGradle },
-            { label: 'settings.gradle[.kts]', ok: v.settingsGradle },
-          ] as { label: string; ok: boolean }[]).map(row => (
-            <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-              <span style={{ fontSize: 13, color: row.ok ? '#10b981' : '#f43f5e' }}>
-                {row.ok ? '✓' : '✗'}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>{row.label}</span>
+        {/* Workspace validation (reported by Runner after sync) */}
+        {v ? (
+          <div style={{
+            borderRadius: 10, padding: '10px 14px',
+            background: v.valid ? 'rgba(16,185,129,0.07)' : 'rgba(244,63,94,0.07)',
+            border: `1px solid ${v.valid ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'}`,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              Último workspace sincronizado
             </div>
-          ))}
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6, fontFamily: 'monospace' }}>
-            {v.checkedPath}
+            {([
+              { label: 'gradlew / gradlew.bat', ok: v.gradlew },
+              { label: 'build.gradle[.kts]',    ok: v.buildGradle },
+              { label: 'settings.gradle[.kts]', ok: v.settingsGradle },
+            ] as { label: string; ok: boolean }[]).map(row => (
+              <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                <span style={{ fontSize: 13, color: row.ok ? '#10b981' : '#f43f5e' }}>
+                  {row.ok ? '✓' : '✗'}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>{row.label}</span>
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6, fontFamily: 'monospace' }}>
+              {v.checkedPath}
+            </div>
           </div>
+        ) : (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
+            padding: '10px 14px', fontSize: 11,
+            background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.2)', color: '#eab308',
+          }}>
+            <AlertTriangle size={13} />
+            El workspace se sincronizará al ejecutar la primera prueba.
+          </div>
+        )}
+      </Card>
+
+      {/* Admin override — collapsed by default */}
+      <Card title="Configuración Avanzada" icon={Server} accent="#f97316">
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.6 }}>
+          Permite cambiar el repositorio sin modificar variables de entorno en Railway.
+          El cambio se propaga a todos los Runners en la siguiente ejecución.
         </div>
-      ) : runnerCfg?.configured ? (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
-          padding: '10px 14px', fontSize: 11,
-          background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.2)', color: '#eab308',
-        }}>
-          <AlertTriangle size={13} />
-          El workspace se sincronizará al ejecutar la primera prueba.
-        </div>
-      ) : null}
-    </Card>
+        <button
+          onClick={() => setAdminOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginBottom: adminOpen ? 14 : 0,
+            padding: '6px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.3)', color: '#f97316',
+          }}
+        >
+          <Settings size={12} />
+          {adminOpen ? 'Cerrar' : 'Cambiar repositorio'}
+        </button>
+
+        {adminOpen && (
+          <div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                URL del repositorio
+              </div>
+              <input
+                value={adminUrl}
+                onChange={e => setAdminUrl(e.target.value)}
+                placeholder="https://github.com/org/project.git"
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+                  borderRadius: 8, padding: '7px 12px', fontSize: 11,
+                  color: 'var(--text-pri)', outline: 'none', fontFamily: 'monospace',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  Rama
+                </div>
+                <input
+                  value={adminBranch}
+                  onChange={e => setAdminBranch(e.target.value)}
+                  placeholder="main"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+                    borderRadius: 8, padding: '7px 12px', fontSize: 11,
+                    color: 'var(--text-pri)', outline: 'none',
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                  Nombre del proyecto
+                </div>
+                <input
+                  value={adminProject}
+                  onChange={e => setAdminProject(e.target.value)}
+                  placeholder="QAutomation"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+                    borderRadius: 8, padding: '7px 12px', fontSize: 11,
+                    color: 'var(--text-pri)', outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleAdminSave}
+              disabled={adminSaving || !adminUrl.trim()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 18px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                background: adminSaved ? '#10b981' : 'rgba(249,115,22,0.18)',
+                border: `1px solid ${adminSaved ? '#10b981' : 'rgba(249,115,22,0.4)'}`,
+                color: adminSaved ? '#fff' : '#f97316',
+                cursor: adminSaving || !adminUrl.trim() ? 'default' : 'pointer',
+                opacity: !adminUrl.trim() ? 0.5 : 1, transition: 'all .2s',
+              }}
+            >
+              {adminSaving ? <Loader2 size={12} className="animate-spin" /> : null}
+              {adminSaved ? '✓ Actualizado' : 'Aplicar a todos los Runners'}
+            </button>
+          </div>
+        )}
+      </Card>
+    </>
   )
 
   // ── Grid layouts per tab ──────────────────────────────────────────────────

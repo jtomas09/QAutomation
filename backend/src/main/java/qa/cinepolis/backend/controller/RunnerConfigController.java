@@ -27,16 +27,11 @@ public class RunnerConfigController {
     @GetMapping("/config")
     public ResponseEntity<Map<String, Object>> getRunnerConfig() {
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success",       true);
         body.put("repositoryUrl", store.getRepositoryUrl());
         body.put("branch",        store.getBranch());
         body.put("projectName",   store.getProjectName());
-        body.put("configured",    store.isConfigured());
-
-        if (!store.isConfigured()) {
-            body.put("warning",
-                "REPO_URL not set. Set the REPO_URL environment variable on the backend, "
-                + "or POST to /api/runner/config to configure at runtime.");
-        }
+        body.put("configured",    true);
         return ResponseEntity.ok(body);
     }
 

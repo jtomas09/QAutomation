@@ -130,14 +130,16 @@ public class RunnerAgent {
         HostStatusManager.apply(hostReport);
 
         // ── Runner config (single source of truth — fetched from backend, never stored locally) ──
+        System.out.println("[Runner] 📥 Obteniendo configuración desde Backend...");
         BackendClient.RunnerConfigResponse runnerCfg = client.getRunnerConfig();
         if (runnerCfg != null && runnerCfg.isConfigured()) {
             config.repoUrl     = runnerCfg.repositoryUrl;
             config.repoBranch  = runnerCfg.branch;
             config.projectName = runnerCfg.projectName;
-            System.out.println("[Runner] Config del backend: " + config.repoUrl + " [" + config.repoBranch + "]");
+            System.out.println("[Runner] ✅ Configuración recibida.");
+            System.out.println("[Runner]    Repositorio: " + config.repoUrl + " [" + config.repoBranch + "]");
         } else {
-            System.out.println("[Runner] ⚠ REPO_URL no configurada en el backend. Los jobs no podrán ejecutarse.");
+            System.out.println("[Runner] ⚠ No fue posible obtener la configuración del proyecto.");
         }
 
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);

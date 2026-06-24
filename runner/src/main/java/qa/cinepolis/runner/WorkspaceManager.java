@@ -60,20 +60,29 @@ public class WorkspaceManager {
         File dotGit = new File(workspaceDir, ".git");
 
         if (!dotGit.exists()) {
-            // Directory may exist but be incomplete — remove it before cloning
+            if (workspaceDir.exists() && isValidGradleProject()) {
+                // Valid workspace without .git (e.g. offline / previously extracted)
+                client.sendLog(executionId, "ERROR", "❌ No fue posible sincronizar el repositorio.");
+                client.sendLog(executionId, "WARN",  "⚠ Utilizando última versión disponible.");
+                return validateAndReturn(executionId);
+            }
+            // No usable local copy — delete partial dir and clone fresh
             if (workspaceDir.exists()) {
                 client.sendLog(executionId, "WARN",
-                        "⚠️ Workspace incompleto encontrado. Eliminando y re-clonando…");
+                        "⚠ Workspace incompleto detectado. Eliminando y re-clonando…");
                 deleteDirectory(workspaceDir);
             }
             client.sendLog(executionId, "INFO", "📥 Repositorio no encontrado. Clonando...");
-            if (!cloneRepo(executionId)) return null;
+            if (!cloneRepo(executionId)) {
+                client.sendLog(executionId, "ERROR", "❌ No fue posible sincronizar el repositorio.");
+                return null;
+            }
             client.sendLog(executionId, "INFO", "📥 Clonación completada.");
         } else {
             client.sendLog(executionId, "INFO", "🔄 Actualizando repositorio...");
             if (!updateRepo(executionId)) {
-                client.sendLog(executionId, "WARN",
-                        "⚠️ No se pudo actualizar el repositorio — se usa la versión local.");
+                client.sendLog(executionId, "ERROR", "❌ No fue posible sincronizar el repositorio.");
+                client.sendLog(executionId, "WARN",  "⚠ Utilizando última versión disponible.");
             } else {
                 client.sendLog(executionId, "INFO", "✅ Repositorio actualizado.");
             }

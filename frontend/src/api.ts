@@ -358,3 +358,12 @@ export interface RunnerCentralConfig {
 export async function getRunnerConfig(): Promise<RunnerCentralConfig> {
   return httpGet<RunnerCentralConfig>('/api/runner/config')
 }
+
+/** POST /api/runner/config — admin override, propagates to all Runners instantly */
+export async function saveRunnerConfig(
+  repositoryUrl: string,
+  branch: string,
+  projectName: string,
+): Promise<void> {
+  await httpPost<unknown>('/api/runner/config', { repositoryUrl, branch, projectName })
+}

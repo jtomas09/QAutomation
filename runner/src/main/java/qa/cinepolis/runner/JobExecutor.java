@@ -491,15 +491,15 @@ public class JobExecutor {
                     "📹 Grabación de video: " + (job.videoEnabled ? "ACTIVA" : "INACTIVA"));
 
             // ── Fetch central config from backend (single source of truth) ──────
+            client.sendLog(job.executionId, "INFO", "📥 Obteniendo configuración desde Backend...");
             BackendClient.RunnerConfigResponse runnerCfg = client.getRunnerConfig();
             if (runnerCfg == null || !runnerCfg.isConfigured()) {
-                String msg = runnerCfg == null
-                        ? "No se pudo contactar el backend para obtener la configuración del Runner."
-                        : "REPO_URL no configurada en el backend. Configura la variable de entorno REPO_URL.";
-                client.sendLog(job.executionId, "ERROR", "❌ " + msg);
+                client.sendLog(job.executionId, "ERROR",
+                        "❌ No fue posible obtener la configuración del proyecto.");
                 client.sendResult(job.executionId, 0, 0, 0, null, List.of());
                 return;
             }
+            client.sendLog(job.executionId, "INFO", "✅ Configuración recibida.");
 
             // ── Sync workspace (clone/pull) + validate Gradle structure ──────────
             File   wsDir   = new File(config.workspaceDir, runnerCfg.projectName);

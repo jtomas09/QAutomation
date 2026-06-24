@@ -5,10 +5,11 @@ import org.springframework.stereotype.Component;
 /**
  * Single source of truth for the automation project repository configuration.
  *
- * Seeded at startup from environment variables:
+ * Built-in defaults make the platform work out of the box — no env vars required.
+ * Optional env var overrides for custom deployments:
  *   REPO_URL         — git clone URL  (e.g. https://github.com/org/project.git)
  *   REPO_BRANCH      — branch name    (default: main)
- *   PROJECT_NAME     — workspace dir  (default: automation-project)
+ *   PROJECT_NAME     — workspace dir  (default: QAutomation)
  *
  * All Runner instances pull this config via GET /api/runner/config.
  * Users never configure repos per-machine.
@@ -16,20 +17,24 @@ import org.springframework.stereotype.Component;
 @Component
 public class RunnerConfigStore {
 
+    private static final String DEFAULT_REPO_URL     = "https://github.com/jtomas09/QAutomation.git";
+    private static final String DEFAULT_BRANCH       = "main";
+    private static final String DEFAULT_PROJECT_NAME = "QAutomation";
+
     private volatile String repositoryUrl;
     private volatile String branch;
     private volatile String projectName;
 
     public RunnerConfigStore() {
-        this.repositoryUrl = getEnv("REPO_URL",      "");
-        this.branch        = getEnv("REPO_BRANCH",   "main");
-        this.projectName   = getEnv("PROJECT_NAME",  "automation-project");
+        this.repositoryUrl = getEnv("REPO_URL",     DEFAULT_REPO_URL);
+        this.branch        = getEnv("REPO_BRANCH",  DEFAULT_BRANCH);
+        this.projectName   = getEnv("PROJECT_NAME", DEFAULT_PROJECT_NAME);
     }
 
     public String  getRepositoryUrl() { return repositoryUrl; }
     public String  getBranch()        { return branch;        }
     public String  getProjectName()   { return projectName;   }
-    public boolean isConfigured()     { return !repositoryUrl.isBlank(); }
+    public boolean isConfigured()     { return true; }  // always configured via defaults
 
     /** Admin override — applied to all Runners without restart. */
     public void setConfig(String repositoryUrl, String branch, String projectName) {
