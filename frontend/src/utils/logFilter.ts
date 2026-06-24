@@ -28,6 +28,17 @@ const TECH_PATTERNS: RegExp[] = [
   /No fue posible obtener la configuraci[oó]n del proyecto/i,
   /La configuraci[oó]n almacenada no coincide/i,
 
+  // ── Android SDK / environment variables ────────────────────────────────
+  /\bANDROID_HOME\b/,
+  /\bANDROID_SDK_ROOT\b/,
+  /\bAndroid SDK\b/i,
+  /\bplatform-tools\b/i,
+  /\bbuild-tools\b/i,
+
+  // ── Capabilities / session config ──────────────────────────────────────
+  /\bcapabilit/i,
+  /\bLogcat\b/i,
+
   // ── Gradle & build ──────────────────────────────────────────────────────
   /🔧\s*Verificando permisos de gradlew/i,
   /✅\s*Permisos aplicados correctamente/i,
