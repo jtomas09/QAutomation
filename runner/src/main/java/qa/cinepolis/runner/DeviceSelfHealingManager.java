@@ -106,7 +106,7 @@ public class DeviceSelfHealingManager {
                     lastIosCount = iosCount;
                     lastAdbOk    = adbOk;
                     lastAppiumOk = appiumOk;
-                    client.registerDevices(config.runnerId, devices);
+                    client.syncDevices(config.runnerId, devices);
                 }
             } catch (Exception e) {
                 System.err.println("[DeviceHealer] Monitor error: " + e.getMessage());
@@ -120,8 +120,8 @@ public class DeviceSelfHealingManager {
         try {
             List<Map<String, String>> devices = discoverDevices();
             lastDevices = devices.size();
-            client.registerDevices(config.runnerId, devices);
-            System.out.printf("[DeviceHealer] %s → %d dispositivo(s) re-registrado(s).%n",
+            client.syncDevices(config.runnerId, devices);
+            System.out.printf("[DeviceHealer] %s → %d dispositivo(s) sincronizado(s).%n",
                     reason, devices.size());
         } catch (Exception e) {
             System.err.println("[DeviceHealer] Rescan error (" + reason + "): " + e.getMessage());

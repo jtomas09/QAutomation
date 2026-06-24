@@ -129,12 +129,28 @@ public class DeviceStore {
         devices.remove(udid);
     }
 
-    /** Marks devices with lastSeen > 90s ago as OFFLINE (unless BUSY or MAINTENANCE). */
+    /** Marks devices with lastSeen > 30s ago as OFFLINE (unless BUSY or MAINTENANCE). */
     public void markOfflineIfStale() {
-        Instant cutoff = Instant.now().minusSeconds(90);
+        Instant cutoff = Instant.now().minusSeconds(30);
         devices.values().forEach(d -> {
             if (d.getStatus() == DeviceStatus.BUSY || d.getStatus() == DeviceStatus.MAINTENANCE) return;
             if (d.getLastSeen() != null && d.getLastSeen().isBefore(cutoff)) {
+                d.setStatus(DeviceStatus.OFFLINE);
+            }
+        });
+    }
+
+    /**
+     * Replaces a runner's device inventory by marking absent devices OFFLINE.
+     * Called on every sync heartbeat so ghost devices disappear immediately
+     * when disconnected rather than waiting for the stale cutoff.
+     * BUSY and MAINTENANCE devices are never touched.
+     */
+    public void markOfflineForRunner(String runnerId, Set<String> activeUdids) {
+        devices.values().forEach(d -> {
+            if (!runnerId.equals(d.getRunnerId())) return;
+            if (d.getStatus() == DeviceStatus.BUSY || d.getStatus() == DeviceStatus.MAINTENANCE) return;
+            if (!activeUdids.contains(d.getUdid())) {
                 d.setStatus(DeviceStatus.OFFLINE);
             }
         });

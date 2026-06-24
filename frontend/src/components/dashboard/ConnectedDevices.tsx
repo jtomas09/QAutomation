@@ -173,9 +173,13 @@ export default function ConnectedDevices({
     return () => clearInterval(id)
   }, [refresh])
 
+  // Only show devices that are actually reachable — OFFLINE/MAINTENANCE devices are
+  // excluded so users cannot configure a device that is no longer connected.
+  const onlineDevices = devices.filter(d => d.status !== 'OFFLINE' && d.status !== 'MAINTENANCE')
+
   const configuredSet = new Set(configured.map(d => d.udid))
-  const available     = devices.filter(d => mapStatus(d.status) === 'available').length
-  const inuse         = devices.filter(d => mapStatus(d.status) === 'inuse').length
+  const available     = onlineDevices.filter(d => mapStatus(d.status) === 'available').length
+  const inuse         = onlineDevices.filter(d => mapStatus(d.status) === 'inuse').length
 
   return (
     <motion.div
@@ -205,8 +209,8 @@ export default function ConnectedDevices({
         <div>
           <div className="text-sm font-bold text-slate-100">Dispositivos Conectados</div>
           <div className="text-xs text-slate-500 mt-0.5">
-            {devices.length === 0 ? (
-              <span className="text-slate-600">Sin dispositivos detectados</span>
+            {onlineDevices.length === 0 ? (
+              <span className="text-slate-600">Sin dispositivos conectados</span>
             ) : (
               <>
                 <span style={{ color: '#10b981' }}>{available} disponible{available !== 1 ? 's' : ''}</span>
@@ -243,14 +247,16 @@ export default function ConnectedDevices({
       </AnimatePresence>
 
       {/* Device cards */}
-      {devices.length === 0 ? (
+      {onlineDevices.length === 0 ? (
         <div className="flex items-center justify-center py-10 text-xs text-slate-600">
-          Conecta un dispositivo al Runner para verlo aquí
+          {devices.length > 0
+            ? 'Todos los dispositivos detectados están offline'
+            : 'Conecta un dispositivo al Runner para verlo aquí'}
         </div>
       ) : (
         <div className="grid grid-cols-5 gap-3 p-4">
           <AnimatePresence mode="popLayout">
-            {devices.map((device, i) => (
+            {onlineDevices.map((device, i) => (
               <DeviceCard
                 key={device.udid}
                 device={device}

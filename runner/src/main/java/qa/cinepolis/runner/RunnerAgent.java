@@ -181,7 +181,7 @@ public class RunnerAgent {
         try {
             List<Map<String, String>> initDevices = discoverAllDevices(config);
             System.out.println("[Runner] Devices Found: " + initDevices.size());
-            client.registerDevices(config.runnerId, initDevices);
+            client.syncDevices(config.runnerId, initDevices);
             client.sendHeartbeat(
                     config.runnerId, config.platform, config.version,
                     initialStatus, config.os, config.hostname,
@@ -235,7 +235,7 @@ public class RunnerAgent {
                     String newStatus = report.isFullyOperational() ? "ONLINE" : "DEGRADED";
                     try {
                         List<Map<String, String>> healed = discoverAllDevices(config);
-                        client.registerDevices(config.runnerId, healed);
+                        client.syncDevices(config.runnerId, healed);
                         client.sendHeartbeat(
                                 config.runnerId, config.platform, config.version,
                                 newStatus, config.os, config.hostname,
@@ -275,7 +275,7 @@ public class RunnerAgent {
         scheduler.scheduleAtFixedRate(() -> {
             try {
                 List<Map<String, String>> devices = discoverAllDevices(config);
-                client.registerDevices(config.runnerId, devices);
+                client.syncDevices(config.runnerId, devices);
 
                 DependencySelfHealingManager sh     = selfHealingRef.get();
                 DependencySelfHealingManager.HealthReport health =

@@ -201,6 +201,28 @@ public class BackendClient {
         }
     }
 
+    /**
+     * Replaces this runner's complete device inventory on the backend.
+     * POST /api/devices/sync — body: { runnerId, devices: [...] }
+     *
+     * Unlike registerDevices(), this sends even an empty list so the backend
+     * can immediately mark all previously-known devices from this runner as OFFLINE.
+     * Prevents ghost devices from appearing connected after USB disconnect.
+     */
+    public void syncDevices(String runnerId, List<Map<String, String>> devices) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("runnerId", runnerId);
+            payload.put("devices",  devices);
+            String body = json.writeValueAsString(payload);
+            HttpResponse<String> res = post("/api/devices/sync", body);
+            System.out.printf("[Runner] Device Sync: %d dispositivo(s) sincronizado(s) (HTTP %d)%n",
+                    devices.size(), res.statusCode());
+        } catch (Exception e) {
+            System.err.println("[BackendClient] syncDevices error: " + e.getMessage());
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     //  ADB auto-discovery
     // ─────────────────────────────────────────────────────────────────────

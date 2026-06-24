@@ -7,6 +7,7 @@ import qa.cinepolis.backend.model.DeviceStatus;
 import qa.cinepolis.backend.store.DeviceStore;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Device Farm API — all device information originates from Runner Agent discovery.
@@ -68,6 +69,43 @@ public class DeviceController {
         }
 
         return Map.of("result", "ok", "registered", registered);
+    }
+
+    /**
+     * POST /api/devices/sync — replace a runner's device inventory atomically.
+     * Body: { runnerId, devices: [ {udid, deviceName, ...} ] }
+     *
+     * Devices absent from the list are immediately marked OFFLINE (unless BUSY/MAINTENANCE).
+     * This eliminates ghost devices — disconnected hardware disappears on the next heartbeat
+     * instead of waiting for the stale cutoff.
+     */
+    @PostMapping("/sync")
+    public Map<String, Object> syncDevices(@RequestBody Map<String, Object> payload) {
+        String runnerId = (String) payload.get("runnerId");
+        if (runnerId == null || runnerId.isBlank())
+            return Map.of("error", "runnerId required");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rawDevices = (List<Map<String, Object>>) payload.get("devices");
+        if (rawDevices == null) rawDevices = Collections.emptyList();
+
+        // Build set of UDIDs reported as currently connected
+        Set<String> activeUdids = rawDevices.stream()
+                .map(raw -> (String) raw.get("udid"))
+                .filter(udid -> udid != null && !udid.isBlank())
+                .collect(Collectors.toSet());
+
+        // Mark runner's absent devices OFFLINE immediately
+        deviceStore.markOfflineForRunner(runnerId, activeUdids);
+
+        // Upsert all reported devices
+        int registered = 0;
+        for (Map<String, Object> raw : rawDevices) {
+            deviceStore.upsert(mapToDevice(raw, runnerId));
+            registered++;
+        }
+
+        return Map.of("result", "ok", "registered", registered, "runner", runnerId);
     }
 
     /**

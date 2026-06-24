@@ -126,6 +126,21 @@ public class AndroidSdkLocator {
             list.add("/snap/androidsdk/current/Android");        // snap package
         }
 
+        // ── Last resort: Runner's embedded platform-tools directory ────────────
+        // ~/.automationqa/platform-tools/adb is downloaded by PlatformToolsManager.
+        // isValidSdk() only requires platform-tools/ to exist, so this minimal
+        // layout works as ANDROID_HOME for adb and UiAutomator2 driver.
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR",
+                home + "/.automationqa");
+        list.add(agentDataDir);
+
+        // Windows embedded location (under %LOCALAPPDATA%\AutomationQA\runner)
+        if (os.contains("win")) {
+            String localAppData = System.getenv("LOCALAPPDATA");
+            if (localAppData != null)
+                list.add(localAppData + "\\AutomationQA\\runner");
+        }
+
         return list;
     }
 
