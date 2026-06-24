@@ -36,8 +36,10 @@ public class RunnerConfig {
     public String  agentDataDir;   // root dir for downloaded tools, logs, updates
     public int     appiumPort;     // default 4723
 
-    // ── Project path (loaded from local settings + backend) ───────────────
-    public String  projectPath;    // absolute path to Gradle project root; null = not configured
+    // ── Auto-managed workspace ────────────────────────────────────────────
+    public String  repoUrl;        // git clone URL of the automation project
+    public String  repoBranch;     // branch to clone/pull (default: "main")
+    public String  workspaceDir;   // {agentDataDir}/workspace — workspace root (auto-set)
 
     public static RunnerConfig fromEnv() {
         RunnerConfig c = new RunnerConfig();
@@ -57,7 +59,12 @@ public class RunnerConfig {
         String defaultDataDir = isWindows()
                 ? System.getenv().getOrDefault("LOCALAPPDATA", home + "\\AppData\\Local") + "\\AutomationQA"
                 : home + "/.automationqa";
-        c.agentDataDir = env("AGENT_DATA_DIR", defaultDataDir);
+        c.agentDataDir   = env("AGENT_DATA_DIR", defaultDataDir);
+        c.workspaceDir   = c.agentDataDir + File.separator + "workspace";
+
+        // Repo config — can be set via env or loaded from settings.json at startup
+        c.repoUrl        = env("REPO_URL",    "");
+        c.repoBranch     = env("REPO_BRANCH", "main");
 
         // Auto-detect OS and hostname
         c.os       = detectOs();
@@ -181,34 +188,42 @@ public class RunnerConfig {
         return (v != null && !v.isBlank()) ? v : def;
     }
 
-    // ── Local settings file helpers ───────────────────────────────────────────
+    // ── Local settings file (runner-local cache of backend settings) ─────────
 
-    private static final Pattern PROJECT_PATH_PATTERN =
-            Pattern.compile("\"projectPath\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+    private static final Pattern REPO_URL_PATTERN    =
+            Pattern.compile("\"repoUrl\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+    private static final Pattern REPO_BRANCH_PATTERN =
+            Pattern.compile("\"repoBranch\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
 
-    /** Reads projectPath from ~/.automationqa/settings.json; returns null if absent. */
-    public static String loadLocalProjectPath(String agentDataDir) {
+    public static class LocalSettings {
+        public String repoUrl    = "";
+        public String repoBranch = "main";
+    }
+
+    public static LocalSettings loadLocalSettings(String agentDataDir) {
+        LocalSettings s = new LocalSettings();
         try {
             Path file = Path.of(agentDataDir, "settings.json");
-            if (!Files.exists(file)) return null;
+            if (!Files.exists(file)) return s;
             String content = Files.readString(file);
-            Matcher m = PROJECT_PATH_PATTERN.matcher(content);
-            if (m.find()) {
-                return m.group(1).replace("\\\\", "\\").replace("\\\"", "\"");
-            }
+            Matcher mu = REPO_URL_PATTERN.matcher(content);
+            if (mu.find()) s.repoUrl = mu.group(1).replace("\\\\", "\\").replace("\\\"", "\"");
+            Matcher mb = REPO_BRANCH_PATTERN.matcher(content);
+            if (mb.find()) s.repoBranch = mb.group(1);
         } catch (Exception e) {
             System.out.println("[Config] No se pudo leer settings.json: " + e.getMessage());
         }
-        return null;
+        return s;
     }
 
-    /** Persists projectPath to ~/.automationqa/settings.json. */
-    public static void saveLocalProjectPath(String agentDataDir, String projectPath) {
+    public static void saveLocalSettings(String agentDataDir, String repoUrl, String repoBranch) {
         try {
             Path file = Path.of(agentDataDir, "settings.json");
             Files.createDirectories(file.getParent());
-            String escaped = projectPath.replace("\\", "\\\\").replace("\"", "\\\"");
-            Files.writeString(file, "{\"projectPath\":\"" + escaped + "\"}");
+            String escapedUrl    = (repoUrl    != null ? repoUrl    : "").replace("\\", "\\\\").replace("\"", "\\\"");
+            String escapedBranch = (repoBranch != null ? repoBranch : "main").replace("\\", "\\\\").replace("\"", "\\\"");
+            Files.writeString(file,
+                    "{\"repoUrl\":\"" + escapedUrl + "\",\"repoBranch\":\"" + escapedBranch + "\"}");
         } catch (Exception e) {
             System.out.println("[Config] No se pudo guardar settings.json: " + e.getMessage());
         }

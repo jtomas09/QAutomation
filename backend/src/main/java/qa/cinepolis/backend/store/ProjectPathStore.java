@@ -11,6 +11,10 @@ public class ProjectPathStore {
 
     private volatile String projectPath = "";
 
+    // ── Repo config (set by user via UI, used by Runner to auto-manage workspace) ─
+    private volatile String repoUrl    = "";
+    private volatile String repoBranch = "main";
+
     // ── Validation result (reported by the Runner) ────────────────────────────
     private volatile boolean   validGradlew        = false;
     private volatile boolean   validBuildGradle     = false;
@@ -54,4 +58,14 @@ public class ProjectPathStore {
     public String  getValidatedAt()        { return validatedAt;         }
 
     public boolean hasValidation()         { return !validatedAt.isEmpty(); }
+
+    // ── Repo config ───────────────────────────────────────────────────────────
+
+    public String getRepoUrl()    { return repoUrl;    }
+    public String getRepoBranch() { return repoBranch; }
+
+    public void setRepoConfig(String url, String branch) {
+        this.repoUrl    = (url    != null) ? url.trim()    : "";
+        this.repoBranch = (branch != null && !branch.isBlank()) ? branch.trim() : "main";
+    }
 }

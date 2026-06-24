@@ -490,10 +490,12 @@ public class JobExecutor {
             client.sendLog(job.executionId, "INFO",
                     "📹 Grabación de video: " + (job.videoEnabled ? "ACTIVA" : "INACTIVA"));
 
-            // ── Resolve + validate project directory (must be first) ─────────────
-            File projectDir = resolveProjectDir(job, client);
+            // ── Sync workspace (clone/pull) + validate Gradle structure ──────────
+            String repoName = WorkspaceManager.repoNameFromUrl(config.repoUrl);
+            File   wsDir    = new File(config.workspaceDir, repoName);
+            WorkspaceManager wsMgr = new WorkspaceManager(wsDir, config.repoUrl, config.repoBranch, client);
+            File projectDir = wsMgr.ensureWorkspace(job.executionId);
             if (projectDir == null) {
-                // resolveProjectDir already sent error logs
                 client.sendResult(job.executionId, 0, 0, 0, null, List.of());
                 return;
             }
@@ -1035,73 +1037,4 @@ public class JobExecutor {
 
     private static String nvl(String s) { return s != null ? s : ""; }
     private static String nvl(String s, String def) { return (s != null && !s.isBlank()) ? s : def; }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Project directory resolution
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Resolves the Gradle project directory for this job.
-     * Priority: job.projectPath → config.projectPath → config.workDir (legacy).
-     * Validates the directory and sends error logs if invalid.
-     * Returns null if the directory cannot be used (caller must fail the job).
-     */
-    private File resolveProjectDir(JobDto job, BackendClient client) {
-        // 1. Job-level override (backend can embed per-job path)
-        String path = job.projectPath;
-
-        // 2. Runner-level configured path
-        if (path == null || path.isBlank()) path = config.projectPath;
-
-        // 3. Legacy WORK_DIR env var (defaults to "." — old behaviour)
-        if (path == null || path.isBlank()) path = config.workDir;
-
-        File dir = new File(path).getAbsoluteFile();
-        client.sendLog(job.executionId, "INFO", "📁 Directorio del proyecto: " + dir.getAbsolutePath());
-
-        if (!dir.exists() || !dir.isDirectory()) {
-            client.sendLog(job.executionId, "ERROR",
-                    "❌ La ruta del proyecto no existe: " + dir.getAbsolutePath());
-            client.sendLog(job.executionId, "ERROR",
-                    "   Configura la ruta en Configuración → Runner Settings.");
-            return null;
-        }
-
-        boolean isWindows   = "WINDOWS".equals(config.os);
-        boolean gradlew     = new File(dir, isWindows ? "gradlew.bat" : "gradlew").exists();
-        boolean buildGradle = new File(dir, "build.gradle").exists()
-                           || new File(dir, "build.gradle.kts").exists();
-        boolean settingsGradle = new File(dir, "settings.gradle").exists()
-                              || new File(dir, "settings.gradle.kts").exists();
-        boolean valid       = gradlew && buildGradle && settingsGradle;
-
-        // Report validation to backend so the UI can show ✓/✗ status
-        client.reportProjectValidation(dir.getAbsolutePath(),
-                gradlew, buildGradle, settingsGradle, valid);
-
-        if (!gradlew) {
-            client.sendLog(job.executionId, "ERROR",
-                    "❌ No se encontró " + (isWindows ? "gradlew.bat" : "gradlew")
-                    + " en: " + dir.getAbsolutePath());
-        }
-        if (!buildGradle) {
-            client.sendLog(job.executionId, "ERROR",
-                    "❌ No se encontró build.gradle[.kts] en: " + dir.getAbsolutePath());
-        }
-        if (!settingsGradle) {
-            client.sendLog(job.executionId, "ERROR",
-                    "❌ No se encontró settings.gradle[.kts] en: " + dir.getAbsolutePath());
-        }
-
-        if (!valid) {
-            client.sendLog(job.executionId, "ERROR",
-                    "❌ El directorio no es un proyecto Gradle válido. "
-                    + "Configura la ruta en Configuración → Runner Settings.");
-            return null;
-        }
-
-        client.sendLog(job.executionId, "INFO",
-                "✅ Proyecto Gradle válido: " + dir.getAbsolutePath());
-        return dir;
-    }
 }

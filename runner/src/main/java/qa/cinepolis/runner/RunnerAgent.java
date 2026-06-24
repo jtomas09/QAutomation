@@ -3,6 +3,7 @@ package qa.cinepolis.runner;
 import qa.cinepolis.runner.model.JobDto;
 import qa.cinepolis.runner.model.RunnerConfig;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -128,24 +129,28 @@ public class RunnerAgent {
                 true, nodeOk, appiumOk, adbFunctional, xcodeOk, config.iosSupported);
         HostStatusManager.apply(hostReport);
 
-        // ── Project path ───────────────────────────────────────────────────────
-        // Load from local file first (works offline), then sync from backend
-        String localPath = qa.cinepolis.runner.model.RunnerConfig.loadLocalProjectPath(config.agentDataDir);
-        if (localPath != null) {
-            config.projectPath = localPath;
-            System.out.println("[Runner] Proyecto cargado (local): " + localPath);
+        // ── Repo / workspace config ────────────────────────────────────────────
+        // Load from local settings.json first (works offline), then sync from backend
+        qa.cinepolis.runner.model.RunnerConfig.LocalSettings localSettings =
+                qa.cinepolis.runner.model.RunnerConfig.loadLocalSettings(config.agentDataDir);
+        if (localSettings.repoUrl != null && !localSettings.repoUrl.isBlank()) {
+            config.repoUrl    = localSettings.repoUrl;
+            config.repoBranch = localSettings.repoBranch;
+            System.out.println("[Runner] Repo cargado (local): " + config.repoUrl + " [" + config.repoBranch + "]");
         }
         try {
-            String backendPath = client.getProjectPath();
-            if (backendPath != null && !backendPath.isBlank()) {
-                config.projectPath = backendPath;
-                // Persist so the runner still works when the backend is unreachable
-                qa.cinepolis.runner.model.RunnerConfig.saveLocalProjectPath(
-                        config.agentDataDir, backendPath);
-                System.out.println("[Runner] Proyecto sincronizado (backend): " + backendPath);
+            BackendClient.RepoConfig backendRepo = client.getRepoConfig();
+            if (backendRepo.hasUrl()) {
+                config.repoUrl    = backendRepo.repoUrl;
+                config.repoBranch = backendRepo.repoBranch;
+                // Persist so runner still works when backend is unreachable
+                qa.cinepolis.runner.model.RunnerConfig.saveLocalSettings(
+                        config.agentDataDir, config.repoUrl, config.repoBranch);
+                System.out.println("[Runner] Repo sincronizado (backend): " + config.repoUrl
+                        + " [" + config.repoBranch + "]");
             }
         } catch (Exception e) {
-            System.err.println("[Runner] No se pudo obtener ruta del proyecto del backend: " + e.getMessage());
+            System.err.println("[Runner] No se pudo obtener repo config del backend: " + e.getMessage());
         }
 
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
@@ -367,12 +372,14 @@ public class RunnerAgent {
         if ("MACOS".equals(config.os))
             System.out.println("  Xcode:      " + System.getProperty("XCODE_VERSION", "-"));
         System.out.println();
-        // Project path status
-        if (config.projectPath != null && !config.projectPath.isBlank()) {
-            System.out.println("  ✓ Proyecto configurado: " + config.projectPath);
+        // Workspace / repo status
+        if (config.repoUrl != null && !config.repoUrl.isBlank()) {
+            System.out.println("  ✓ Repositorio: " + config.repoUrl + "  [" + config.repoBranch + "]");
+            System.out.println("    Workspace:   " + config.workspaceDir + File.separator
+                    + WorkspaceManager.repoNameFromUrl(config.repoUrl));
         } else {
-            System.out.println("  ⚠ Proyecto de automatización no configurado.");
-            System.out.println("    Configura la ruta en Configuración → Runner Settings.");
+            System.out.println("  ⚠ Repositorio no configurado.");
+            System.out.println("    Configure la URL en Configuración → Runner Settings → Repositorio.");
         }
         System.out.println();
     }

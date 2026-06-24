@@ -344,3 +344,20 @@ export async function getProjectPath(): Promise<ProjectPathConfig> {
 export async function saveProjectPath(path: string): Promise<void> {
   await httpPost<unknown>('/api/settings/project-path', { path })
 }
+
+// ─── Repo / workspace config ──────────────────────────────────────────────────
+
+export interface RepoConfig {
+  repoUrl:    string
+  repoBranch: string
+}
+
+/** GET /api/settings/repo-url */
+export async function getRepoConfig(): Promise<RepoConfig> {
+  return httpGet<RepoConfig>('/api/settings/repo-url')
+}
+
+/** POST /api/settings/repo-url */
+export async function saveRepoConfig(repoUrl: string, repoBranch: string): Promise<void> {
+  await httpPost<unknown>('/api/settings/repo-url', { repoUrl, repoBranch })
+}

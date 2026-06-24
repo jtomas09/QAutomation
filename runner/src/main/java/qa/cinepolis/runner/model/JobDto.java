@@ -25,6 +25,4 @@ public class JobDto {
     public String  platformVersion; // e.g. "15", "17.5"
     public String  deviceName;      // canonical discovered device name
 
-    // ── Runner project path ───────────────────────────────────────────────────
-    public String  projectPath;     // absolute path to Gradle project root (overrides Runner config)
 }

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useBackendHealth } from '../hooks/useBackendHealth'
 import { useRunnerStatus }  from '../hooks/useRunnerStatus'
-import { getProjectPath, saveProjectPath, type ProjectPathConfig } from '../api'
+import { getProjectPath, saveProjectPath, type ProjectPathConfig, getRepoConfig, saveRepoConfig } from '../api'
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
@@ -250,39 +250,40 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   const runnerOnline  = useRunnerStatus()
 
   // ── Runner Settings state ───────────────────────────────────────────────
-  const [projectPathInput,  setProjectPathInput]  = useState('')
+  const [repoUrlInput,      setRepoUrlInput]      = useState('')
+  const [repoBranchInput,   setRepoBranchInput]   = useState('main')
   const [projectPathConfig, setProjectPathConfig] = useState<ProjectPathConfig | null>(null)
-  const [pathSaving,        setPathSaving]        = useState(false)
-  const [pathSaved,         setPathSaved]         = useState(false)
+  const [repoSaving,        setRepoSaving]        = useState(false)
+  const [repoSaved,         setRepoSaved]         = useState(false)
 
   useEffect(() => {
-    getProjectPath()
-      .then(cfg => {
-        setProjectPathConfig(cfg)
-        if (cfg.path) setProjectPathInput(cfg.path)
+    // Load repo config (URL + branch)
+    getRepoConfig()
+      .then(rc => {
+        if (rc.repoUrl)    setRepoUrlInput(rc.repoUrl)
+        if (rc.repoBranch) setRepoBranchInput(rc.repoBranch)
       })
       .catch(() => {})
-    // Poll every 10s so validation status updates when Runner reports back
+    // Load validation status (reported by Runner after workspace sync)
+    getProjectPath()
+      .then(setProjectPathConfig)
+      .catch(() => {})
+    // Poll validation every 10s
     const id = setInterval(() => {
-      getProjectPath()
-        .then(setProjectPathConfig)
-        .catch(() => {})
+      getProjectPath().then(setProjectPathConfig).catch(() => {})
     }, 10_000)
     return () => clearInterval(id)
   }, [])
 
-  async function handleSavePath() {
-    if (!projectPathInput.trim()) return
-    setPathSaving(true)
+  async function handleSaveRepo() {
+    if (!repoUrlInput.trim()) return
+    setRepoSaving(true)
     try {
-      await saveProjectPath(projectPathInput.trim())
-      setPathSaved(true)
-      setTimeout(() => setPathSaved(false), 2500)
-      // Refresh immediately
-      const cfg = await getProjectPath()
-      setProjectPathConfig(cfg)
+      await saveRepoConfig(repoUrlInput.trim(), repoBranchInput.trim() || 'main')
+      setRepoSaved(true)
+      setTimeout(() => setRepoSaved(false), 2500)
     } catch { /* best-effort */ }
-    finally { setPathSaving(false) }
+    finally { setRepoSaving(false) }
   }
 
   function set<K extends keyof SettingsState>(k: K, v: SettingsState[K]) {
@@ -568,45 +569,70 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   // ── Runner Settings card ──────────────────────────────────────────────────
   const v = projectPathConfig?.validation
   const cardRunnerSettings = (
-    <Card title="Proyecto de Automatización" icon={FolderOpen} accent="#6366f1">
-      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12, lineHeight: 1.5 }}>
-        Ruta absoluta al directorio raíz del proyecto Gradle (donde está <code>gradlew</code>).
-        El Runner usará esta ruta para ejecutar las pruebas.
+    <Card title="Repositorio del Proyecto" icon={FolderOpen} accent="#6366f1">
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.6 }}>
+        El Runner clona automáticamente el repositorio en su workspace local y lo actualiza
+        antes de cada ejecución. No es necesario configurar rutas ni clonar manualmente.
       </div>
 
-      {/* Path input */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+      {/* Repo URL */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          URL del repositorio
+        </div>
         <input
-          value={projectPathInput}
-          onChange={e => setProjectPathInput(e.target.value)}
-          placeholder="/Users/usuario/Documents/QAutomation"
-          onKeyDown={e => { if (e.key === 'Enter') handleSavePath() }}
+          value={repoUrlInput}
+          onChange={e => setRepoUrlInput(e.target.value)}
+          placeholder="https://github.com/org/automation-project.git"
+          onKeyDown={e => { if (e.key === 'Enter') handleSaveRepo() }}
           style={{
-            flex: 1, background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+            width: '100%', boxSizing: 'border-box',
+            background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
             borderRadius: 8, padding: '7px 12px', fontSize: 11,
             color: 'var(--text-pri)', outline: 'none', fontFamily: 'monospace',
           }}
         />
-        <button
-          onClick={handleSavePath}
-          disabled={pathSaving || !projectPathInput.trim()}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-            background: pathSaved ? '#10b981' : 'rgba(99,102,241,0.2)',
-            border: `1px solid ${pathSaved ? '#10b981' : 'rgba(99,102,241,0.4)'}`,
-            color: pathSaved ? '#fff' : '#818cf8',
-            cursor: pathSaving || !projectPathInput.trim() ? 'default' : 'pointer',
-            opacity: !projectPathInput.trim() ? 0.5 : 1,
-            transition: 'all .2s',
-          }}
-        >
-          {pathSaving ? <Loader2 size={12} className="animate-spin" /> : null}
-          {pathSaved ? '✓ Guardado' : 'Guardar'}
-        </button>
       </div>
 
-      {/* Validation status */}
+      {/* Branch + Save */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            Rama
+          </div>
+          <input
+            value={repoBranchInput}
+            onChange={e => setRepoBranchInput(e.target.value)}
+            placeholder="main"
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: 'var(--terminal-bg)', border: '1px solid var(--btn-border)',
+              borderRadius: 8, padding: '7px 12px', fontSize: 11,
+              color: 'var(--text-pri)', outline: 'none',
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+          <button
+            onClick={handleSaveRepo}
+            disabled={repoSaving || !repoUrlInput.trim()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '7px 18px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+              background: repoSaved ? '#10b981' : 'rgba(99,102,241,0.2)',
+              border: `1px solid ${repoSaved ? '#10b981' : 'rgba(99,102,241,0.4)'}`,
+              color: repoSaved ? '#fff' : '#818cf8',
+              cursor: repoSaving || !repoUrlInput.trim() ? 'default' : 'pointer',
+              opacity: !repoUrlInput.trim() ? 0.5 : 1, transition: 'all .2s',
+            }}
+          >
+            {repoSaving ? <Loader2 size={12} className="animate-spin" /> : null}
+            {repoSaved ? '✓ Guardado' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+
+      {/* Workspace validation status (reported by Runner after sync) */}
       {v ? (
         <div style={{
           borderRadius: 10, padding: '10px 14px',
@@ -614,43 +640,41 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
           border: `1px solid ${v.valid ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)'}`,
         }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Validación del Runner
+            Último workspace sincronizado
           </div>
           {([
             { label: 'gradlew / gradlew.bat', ok: v.gradlew },
-            { label: 'build.gradle[.kts]',     ok: v.buildGradle },
-            { label: 'settings.gradle[.kts]',  ok: v.settingsGradle },
+            { label: 'build.gradle[.kts]',    ok: v.buildGradle },
+            { label: 'settings.gradle[.kts]', ok: v.settingsGradle },
           ] as { label: string; ok: boolean }[]).map(row => (
-            <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+            <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
               <span style={{ fontSize: 13, color: row.ok ? '#10b981' : '#f43f5e' }}>
                 {row.ok ? '✓' : '✗'}
               </span>
               <span style={{ fontSize: 11, color: 'var(--text-sec)' }}>{row.label}</span>
             </div>
           ))}
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6 }}>
-            Verificado: {v.checkedPath}
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 6, fontFamily: 'monospace' }}>
+            {v.checkedPath}
           </div>
         </div>
-      ) : projectPathConfig?.path ? (
+      ) : repoUrlInput ? (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
           padding: '10px 14px', fontSize: 11,
-          background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.2)',
-          color: '#eab308',
+          background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.2)', color: '#eab308',
         }}>
           <AlertTriangle size={13} />
-          Esperando validación del Runner…
+          El workspace se sincronizará al ejecutar la primera prueba.
         </div>
       ) : (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
           padding: '10px 14px', fontSize: 11,
-          background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)',
-          color: '#f87171',
+          background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)', color: '#f87171',
         }}>
           <AlertTriangle size={13} />
-          No hay ruta configurada — las ejecuciones Gradle fallarán.
+          Configura la URL del repositorio para habilitar ejecuciones.
         </div>
       )}
     </Card>

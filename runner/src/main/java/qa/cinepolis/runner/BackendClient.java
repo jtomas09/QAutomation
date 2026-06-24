@@ -383,29 +383,40 @@ public class BackendClient {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Project path settings
+    //  Repo / workspace settings
     // ─────────────────────────────────────────────────────────────────────
 
+    public static class RepoConfig {
+        public final String repoUrl;
+        public final String repoBranch;
+        public RepoConfig(String repoUrl, String repoBranch) {
+            this.repoUrl    = repoUrl    != null ? repoUrl    : "";
+            this.repoBranch = repoBranch != null ? repoBranch : "main";
+        }
+        public boolean hasUrl() { return !repoUrl.isBlank(); }
+    }
+
     /**
-     * Fetches the project path stored in the backend.
-     * Returns null if the backend is unreachable or no path has been configured.
+     * Fetches the repo URL and branch stored in the backend.
+     * Returns an empty RepoConfig (no URL) if unreachable or unconfigured.
      */
-    public String getProjectPath() {
+    public RepoConfig getRepoConfig() {
         try {
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/api/settings/project-path"))
+                    .uri(URI.create(baseUrl + "/api/settings/repo-url"))
                     .header("Authorization", "Bearer " + token)
                     .GET()
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (res.statusCode() != 200) return null;
+            if (res.statusCode() != 200) return new RepoConfig("", "main");
             @SuppressWarnings("unchecked")
             Map<String, Object> data = json.readValue(res.body(), Map.class);
-            Object path = data.get("path");
-            return (path instanceof String s && !s.isBlank()) ? s : null;
+            String url    = data.getOrDefault("repoUrl",    "") instanceof String s ? s : "";
+            String branch = data.getOrDefault("repoBranch", "main") instanceof String b ? b : "main";
+            return new RepoConfig(url, branch);
         } catch (Exception e) {
-            System.err.println("[BackendClient] getProjectPath error: " + e.getMessage());
-            return null;
+            System.err.println("[BackendClient] getRepoConfig error: " + e.getMessage());
+            return new RepoConfig("", "main");
         }
     }
 
