@@ -555,7 +555,14 @@ public class JobExecutor {
             pb.directory(projectDir);
             pb.redirectErrorStream(true);
 
-            // Environment variables — tests read these via System.getenv()
+            // ── Android SDK — Plug & Play (no manual ANDROID_HOME required) ──────
+            AndroidEnvironmentBootstrap androidEnv = new AndroidEnvironmentBootstrap();
+            androidEnv.logStatus(job.executionId, client);
+            if (androidEnv.isValid()) {
+                pb.environment().putAll(androidEnv.buildEnv());
+            }
+
+            // ── Test environment variables (read via System.getenv() in tests) ───
             pb.environment().put("SUITE_ID",      nvl(job.suite));
             pb.environment().put("ENV",            nvl(job.env));
             pb.environment().put("DEVICE_NAME",    nvl(job.device));

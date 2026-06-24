@@ -63,6 +63,21 @@ public class RunnerAgent {
         System.out.println("[Runner] ADB OK:      " + adbFunctional);
         if (!adbFunctional) System.out.println("[Runner] ADB no disponible. Iniciando en DEGRADED.");
 
+        // ── Android SDK (Plug & Play — sin ANDROID_HOME manual) ───────────────
+        AndroidEnvironmentBootstrap androidBootstrap = new AndroidEnvironmentBootstrap();
+        System.out.println("[Runner] === Android SDK ===");
+        if (androidBootstrap.isValid()) {
+            System.setProperty("ANDROID_HOME",     androidBootstrap.getSdkPath());
+            System.setProperty("ANDROID_SDK_ROOT", androidBootstrap.getSdkPath());
+            System.out.println("[Runner] SDK Path:          " + androidBootstrap.getSdkPath());
+            String sdkAdb = AndroidSdkLocator.locateAdb(androidBootstrap.getSdkPath());
+            System.out.println("[Runner] SDK ADB:           " + (sdkAdb != null ? sdkAdb : "no encontrado"));
+            System.out.println("[Runner] ANDROID_HOME:      " + androidBootstrap.getSdkPath());
+            System.out.println("[Runner] ANDROID_SDK_ROOT:  " + androidBootstrap.getSdkPath());
+        } else {
+            System.out.println("[Runner] Android SDK no encontrado — Gradle usará local.properties si existe.");
+        }
+
         // ── Appium ─────────────────────────────────────────────────────────────
         try {
             appiumMgr.ensureRunning();
