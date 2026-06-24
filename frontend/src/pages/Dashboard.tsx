@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Calendar } from 'lucide-react'
+import { Plus, Calendar, Clapperboard, Circle, ChevronRight, Clock, Code2, Layers3 } from 'lucide-react'
 import type { RunState } from '../types'
 import type { ConfiguredDevice } from '../hooks/useExecutionDevices'
 import { getExecutions } from '../api'
@@ -34,6 +34,7 @@ interface Props {
   onViewAll:          () => void
   onManageDevices:    () => void
   onAttach:           (executionId: string, suiteName: string) => void
+  onNavigate?:        (page: string) => void
 }
 
 interface AggStats { passed: number; failed: number; skipped: number; total: number; avgMs: number }
@@ -50,6 +51,7 @@ export default function Dashboard({
   onSuiteChange, onEnvChange, onCountryChange,
   onVideoToggle, onToggleDevice, onSaveConfig, onSyncLive,
   onRun, onStop, onClearLog, onViewAll, onManageDevices, onAttach,
+  onNavigate,
 }: Props) {
   const [daysBack,   setDaysBack]   = useState<number>(7)
   const [clearedAt,  setClearedAt]  = useState<number>(0)
@@ -222,7 +224,123 @@ export default function Dashboard({
         <QuickAccess />
       </div>
 
+      {/* Row 5: Record Studio Feature Highlight */}
+      <RecordStudioWidget onOpen={() => onNavigate?.('record-studio')} />
+
     </div>
+  )
+}
+
+// ── Record Studio Widget ──────────────────────────────────────────────────────
+
+interface RecordStudioSession { id: string; name: string; date: string; steps: number; lang: string }
+
+function RecordStudioWidget({ onOpen }: { onOpen: () => void }) {
+  const [sessions, setSessions] = useState<RecordStudioSession[]>([])
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('qa_record_sessions')
+      if (saved) setSessions(JSON.parse(saved).slice(-3).reverse())
+    } catch { /* ignore */ }
+  }, [])
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="overflow-hidden rounded-2xl"
+      style={{
+        background: 'linear-gradient(135deg, rgba(225,29,72,0.06) 0%, rgba(99,102,241,0.06) 100%)',
+        border: '1px solid rgba(225,29,72,0.2)',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+      }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'rgba(225,29,72,0.15)', border: '1px solid rgba(225,29,72,0.3)' }}>
+            <Clapperboard size={16} style={{ color: '#fb7185' }} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-slate-100">Record Studio</span>
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
+                style={{ background: 'rgba(225,29,72,0.2)', color: '#fb7185', border: '1px solid rgba(225,29,72,0.3)' }}>
+                NUEVO
+              </span>
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              Graba interacciones y genera pruebas Appium automáticamente
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onOpen}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-bold transition-all"
+          style={{
+            background: 'rgba(225,29,72,0.15)',
+            border: '1px solid rgba(225,29,72,0.3)',
+            color: '#fb7185',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(225,29,72,0.25)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(225,29,72,0.15)' }}
+        >
+          <Clapperboard size={13} />
+          Abrir Record Studio
+          <ChevronRight size={12} />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="grid gap-0" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
+        {/* Feature cards */}
+        {[
+          { icon: <Circle size={14} style={{ color: '#fb7185' }} />, label: 'Grabación en vivo', desc: 'Captura elementos reales' },
+          { icon: <Code2 size={14} style={{ color: '#818cf8' }} />, label: 'Código automático', desc: 'Java + Appium + TestNG' },
+          { icon: <Layers3 size={14} style={{ color: '#34d399' }} />, label: 'Page Objects', desc: 'Patrón profesional' },
+          { icon: <Clock size={14} style={{ color: '#f59e0b' }} />, label: 'Smart Waits', desc: 'Esperas inteligentes' },
+        ].map((f, i) => (
+          <div key={i} className="flex items-center gap-3 px-5 py-4"
+            style={{ borderRight: i < 3 ? '1px solid rgba(255,255,255,0.05)' : 'none' }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.05)' }}>
+              {f.icon}
+            </div>
+            <div>
+              <div className="text-[11px] font-bold text-slate-200">{f.label}</div>
+              <div className="text-[10px] text-slate-600">{f.desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Recent sessions */}
+      {sessions.length > 0 && (
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="px-6 py-3 flex items-center gap-2">
+            <span className="text-[10px] font-black tracking-widest text-slate-500">SESIONES RECIENTES</span>
+          </div>
+          <div className="flex gap-3 px-6 pb-4">
+            {sessions.map(s => (
+              <button key={s.id} onClick={onOpen}
+                className="flex-1 flex flex-col gap-1 px-4 py-3 rounded-xl text-left transition-all"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(225,29,72,0.3)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.07)' }}
+              >
+                <div className="text-[12px] font-bold text-slate-200 truncate">{s.name}</div>
+                <div className="text-[10px] text-slate-500">{s.steps} pasos · {s.lang}</div>
+                <div className="text-[9px] text-slate-600">{s.date}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </motion.div>
   )
 }
 

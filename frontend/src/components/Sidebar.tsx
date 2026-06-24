@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Play, ListOrdered, Layers3,
   Smartphone, Globe, Settings2, BarChart3,
   TrendingUp, Clock4, Activity, BookOpen, Video, Headphones,
-  Zap, ChevronDown, CalendarClock, Server, HardDrive, Download,
+  Zap, ChevronDown, CalendarClock, Server, HardDrive, Download, Clapperboard,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -13,18 +13,20 @@ export type Page =
   | 'reports' | 'metrics' | 'history' | 'trends'
   | 'docs' | 'videos' | 'support' | 'schedule'
   | 'runner-manager' | 'device-farm' | 'download-agent'
+  | 'record-studio'
 
 interface NavItem { id: Page; label: string; icon: React.ElementType; accent?: string; tag?: string }
 
 const MAIN_NAV: NavItem[] = [
-  { id: 'dashboard',    label: 'Dashboard',        icon: LayoutDashboard, accent: '#6366f1' },
-  { id: 'execute',      label: 'Ejecutar Pruebas', icon: Play,            accent: '#10b981' },
-  { id: 'executions',   label: 'Ejecuciones',      icon: ListOrdered,     accent: '#818cf8' },
-  { id: 'suites',       label: 'Suites',           icon: Layers3,         accent: '#14b8a6' },
-  { id: 'devices',      label: 'Dispositivos',     icon: Smartphone,      accent: '#f97316' },
-  { id: 'environments', label: 'Ambientes',        icon: Globe,           accent: '#eab308' },
-  { id: 'settings',     label: 'Configuración',    icon: Settings2,       accent: '#94a3b8' },
-  { id: 'schedule',     label: 'Programación',     icon: CalendarClock,   accent: '#8b5cf6' },
+  { id: 'dashboard',     label: 'Dashboard',        icon: LayoutDashboard, accent: '#6366f1' },
+  { id: 'execute',       label: 'Ejecutar Pruebas', icon: Play,            accent: '#10b981' },
+  { id: 'executions',    label: 'Ejecuciones',      icon: ListOrdered,     accent: '#818cf8' },
+  { id: 'suites',        label: 'Suites',           icon: Layers3,         accent: '#14b8a6' },
+  { id: 'devices',       label: 'Dispositivos',     icon: Smartphone,      accent: '#f97316' },
+  { id: 'environments',  label: 'Ambientes',        icon: Globe,           accent: '#eab308' },
+  { id: 'settings',      label: 'Configuración',    icon: Settings2,       accent: '#94a3b8' },
+  { id: 'schedule',      label: 'Programación',     icon: CalendarClock,   accent: '#8b5cf6' },
+  { id: 'record-studio', label: 'Record Studio',    icon: Clapperboard,    accent: '#e11d48', tag: 'NUEVO' },
 ]
 
 const ANALYTICS_NAV: NavItem[] = [

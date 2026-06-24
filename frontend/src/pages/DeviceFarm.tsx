@@ -7,10 +7,11 @@ import {
   HardDrive, BatteryMedium, BatteryLow, BatteryFull, Download,
   ShieldAlert, Loader2, Package, CheckCircle, XCircle, RotateCcw,
   Play, TrendingUp, BarChart3, Flag, Wifi, WifiOff, Activity,
-  AlertCircle, Zap,
+  AlertCircle, Zap, Settings2,
 } from 'lucide-react'
-import { getDevices, getRunners, getExecutions, updateDeviceStatus, removeDevice } from '../api'
-import type { PhysicalDevice, DeviceStatus, Runner, ExecutionSummary } from '../types'
+import { getDevices, getRunners, getExecutions, updateDeviceStatus, removeDevice, getAllDeviceAppConfigs } from '../api'
+import type { PhysicalDevice, DeviceStatus, Runner, ExecutionSummary, DeviceAppConfig } from '../types'
+import DeviceAppConfigDrawer from '../components/DeviceAppConfigDrawer'
 import { detectOs, type OsType } from '../hooks/useOs'
 import { OsAvatar, PlatformBadge, PlatformIcon } from '../components/PlatformIcon'
 
@@ -645,13 +646,21 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
   const [deviceMenuId, setDeviceMenuId] = useState<string | null>(null)
   const DEVICE_ROWS = 5
 
+  // App config drawer state
+  const [appConfigDevice,    setAppConfigDevice]    = useState<PhysicalDevice | null>(null)
+  const [showAppConfigDrawer, setShowAppConfigDrawer] = useState(false)
+  const [appConfigs,         setAppConfigs]         = useState<Record<string, DeviceAppConfig>>({})
+
   const refresh = useCallback(async () => {
     try {
       setError(null)
-      const [devs, runs, execs] = await Promise.all([getDevices(), getRunners(), getExecutions()])
+      const [devs, runs, execs, cfgs] = await Promise.all([
+        getDevices(), getRunners(), getExecutions(), getAllDeviceAppConfigs(),
+      ])
       setDevices(devs)
       setRunners(runs)
       setExecutions(execs)
+      setAppConfigs(cfgs)
       setLastRefresh(Date.now())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error de conexion')
@@ -1171,6 +1180,14 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                                 {device.deviceName ?? device.model ?? 'Desconocido'}
                               </div>
                               <div className="text-[10px] font-mono text-slate-600 mt-0.5 max-w-[110px] truncate">{device.udid}</div>
+                              {appConfigs[device.udid] && (
+                                <div className="text-[9px] text-slate-500 mt-0.5 flex items-center gap-1">
+                                  <span>{appConfigs[device.udid].appName || 'App'}</span>
+                                  {appConfigs[device.udid].appVersion && (
+                                    <span className="font-mono">v{appConfigs[device.udid].appVersion}</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -1210,7 +1227,22 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
 
                         {/* MENU */}
                         <td className="px-3 py-3 relative">
-                          <div className="relative">
+                          <div className="relative flex items-center gap-1">
+                            <button
+                              title="Configurar App"
+                              onClick={() => { setAppConfigDevice(device); setShowAppConfigDrawer(true) }}
+                              className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{
+                                background: appConfigs[device.udid]
+                                  ? 'rgba(99,102,241,0.15)'
+                                  : 'rgba(255,255,255,0.06)',
+                                color: appConfigs[device.udid] ? '#818cf8' : 'var(--text-dim)',
+                                border: appConfigs[device.udid]
+                                  ? '1px solid rgba(99,102,241,0.3)'
+                                  : '1px solid transparent',
+                              }}>
+                              <Settings2 size={14} />
+                            </button>
                             <button
                               onClick={() => setDeviceMenuId(v => v === device.udid ? null : device.udid)}
                               className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1462,6 +1494,16 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
           />
         )}
       </AnimatePresence>
+
+      {/* ── App Config Drawer ──────────────────────────────────────────────────── */}
+      <DeviceAppConfigDrawer
+        device={appConfigDevice}
+        isOpen={showAppConfigDrawer}
+        onClose={() => { setShowAppConfigDrawer(false); setAppConfigDevice(null) }}
+        onSaved={(udid, config) => {
+          setAppConfigs(prev => ({ ...prev, [udid]: config }))
+        }}
+      />
     </div>
   )
 }

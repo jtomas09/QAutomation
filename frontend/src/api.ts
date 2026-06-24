@@ -18,7 +18,7 @@
  *   POST   /api/results           → finalize execution (runner)
  */
 
-import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice } from './types'
+import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice, DeviceAppConfig } from './types'
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 
@@ -344,6 +344,33 @@ export async function getProjectPath(): Promise<ProjectPathConfig> {
 /** POST /api/settings/project-path { path: string } */
 export async function saveProjectPath(path: string): Promise<void> {
   await httpPost<unknown>('/api/settings/project-path', { path })
+}
+
+// ─── Device App Config ────────────────────────────────────────────────────────
+
+/** GET /api/device-app-configs/{udid} — app config for a specific device (null if not set) */
+export async function getDeviceAppConfig(udid: string): Promise<DeviceAppConfig | null> {
+  try {
+    return await httpGet<DeviceAppConfig>(`/api/device-app-configs/${encodeURIComponent(udid)}`)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 204) return null
+    throw e
+  }
+}
+
+/** POST /api/device-app-configs/{udid} — save app config for a device */
+export async function saveDeviceAppConfig(udid: string, config: DeviceAppConfig): Promise<DeviceAppConfig> {
+  return httpPost<DeviceAppConfig>(`/api/device-app-configs/${encodeURIComponent(udid)}`, config)
+}
+
+/** GET /api/device-app-configs — all configs keyed by udid */
+export async function getAllDeviceAppConfigs(): Promise<Record<string, DeviceAppConfig>> {
+  return httpGet<Record<string, DeviceAppConfig>>('/api/device-app-configs')
+}
+
+/** DELETE /api/device-app-configs/{udid} — remove app config for a device */
+export async function deleteDeviceAppConfig(udid: string): Promise<void> {
+  await httpDelete(`/api/device-app-configs/${encodeURIComponent(udid)}`)
 }
 
 // ─── Runner centralized config (single source of truth) ──────────────────────

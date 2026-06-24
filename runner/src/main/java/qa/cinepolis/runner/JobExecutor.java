@@ -538,29 +538,46 @@ public class JobExecutor {
             // ── Build Gradle command ──────────────────────────────────────────
             List<String> cmd = buildCommand(job);
 
-            // Inject Android app identifiers — auto-resolve launcher activity via ADB
-            if (!runnerCfg.appPackage.isBlank()) {
-                boolean isAndroid = !"ios".equalsIgnoreCase(receivedPlatform);
-                cmd.add("-DappPackage=" + runnerCfg.appPackage);
-                client.sendLog(job.executionId, "INFO",
-                        "[JobExecutor] 📱 Package: " + runnerCfg.appPackage);
+            // Per-device config takes precedence over global runner config
+            String effectivePackage  = (job.appPackage != null && !job.appPackage.isBlank())
+                    ? job.appPackage : runnerCfg.appPackage;
+            String effectiveBundleId = (job.bundleId   != null && !job.bundleId.isBlank())
+                    ? job.bundleId : "";
+            boolean isAndroid = !"ios".equalsIgnoreCase(receivedPlatform);
 
-                if (isAndroid) {
-                    String resolvedActivity = resolveLauncherActivity(receivedUdid, runnerCfg.appPackage);
-                    if (resolvedActivity == null || resolvedActivity.isBlank()) {
-                        client.sendLog(job.executionId, "ERROR",
-                                "❌ Launcher Activity no encontrada para " + runnerCfg.appPackage
-                                + ". Verifica que la app esté instalada en el dispositivo.");
-                        client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                        return;
+            // Android: inject package + auto-resolve launcher activity via ADB
+            if (isAndroid && !effectivePackage.isBlank()) {
+                cmd.add("-DappPackage=" + effectivePackage);
+                client.sendLog(job.executionId, "INFO",
+                        "[JobExecutor] 📱 Package: " + effectivePackage
+                        + (job.appPackage != null && !job.appPackage.isBlank() ? " (config dispositivo)" : " (config global)"));
+
+                String resolvedActivity = resolveLauncherActivity(receivedUdid, effectivePackage);
+                if (resolvedActivity == null || resolvedActivity.isBlank()) {
+                    client.sendLog(job.executionId, "ERROR",
+                            "❌ Launcher Activity no encontrada para " + effectivePackage
+                            + ". Verifica que la app esté instalada en el dispositivo.");
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    return;
+                }
+                cmd.add("-DappActivity=" + resolvedActivity);
+                client.sendLog(job.executionId, "INFO",
+                        "[JobExecutor] 🚀 Activity detectada: " + resolvedActivity);
+            }
+
+            // iOS: inject bundleId (per-device config first, then appPackage fallback)
+            if (!isAndroid) {
+                String iosBundleId = !effectiveBundleId.isBlank() ? effectiveBundleId
+                        : !effectivePackage.isBlank()             ? effectivePackage
+                        : "";
+                if (!iosBundleId.isBlank()) {
+                    cmd.add("-DbundleId=" + iosBundleId);
+                    cmd.add("-DappPackage=" + iosBundleId);
+                    client.sendLog(job.executionId, "INFO",
+                            "[JobExecutor] 🍎 Bundle ID: " + iosBundleId);
+                    if (!runnerCfg.appActivity.isBlank()) {
+                        cmd.add("-DappActivity=" + runnerCfg.appActivity);
                     }
-                    cmd.add("-DappActivity=" + resolvedActivity);
-                    client.sendLog(job.executionId, "INFO",
-                            "[JobExecutor] 🚀 Activity detectada: " + resolvedActivity);
-                } else if (!runnerCfg.appActivity.isBlank()) {
-                    cmd.add("-DappActivity=" + runnerCfg.appActivity);
-                    client.sendLog(job.executionId, "INFO",
-                            "[JobExecutor] 🚀 Android Activity: " + runnerCfg.appActivity);
                 }
             }
 

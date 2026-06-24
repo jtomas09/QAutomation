@@ -19,6 +19,7 @@ import ReportsPage            from './pages/ReportsPage'
 import MetricsPage            from './pages/MetricsPage'
 import RunnerManager          from './pages/RunnerManager'
 import DeviceFarm             from './pages/DeviceFarm'
+import RecordStudio           from './pages/RecordStudio'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
@@ -91,6 +92,7 @@ export default function App() {
               onClearLog={clearLog}      onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}
               onAttach={attachToExecution}
+              onNavigate={(p) => setPage(p as import('./components/Sidebar').Page)}
             />
           )}
 
@@ -118,6 +120,8 @@ export default function App() {
               initialOpenDownload={page === 'download-agent'}
             />
           )}
+
+          {page === 'record-studio' && <RecordStudio />}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []
@@ -192,7 +196,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent','record-studio'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Settings, Wifi, WifiOff, Activity, Save, Check } from 'lucide-react'
-import { getDevices } from '../../api'
-import type { PhysicalDevice } from '../../types'
+import { getDevices, getAllDeviceAppConfigs } from '../../api'
+import type { PhysicalDevice, DeviceAppConfig } from '../../types'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
 import { PlatformIcon } from '../PlatformIcon'
 
@@ -148,12 +148,14 @@ export default function ConnectedDevices({
 }: Props) {
   const [devices,       setDevices]       = useState<PhysicalDevice[]>([])
   const [notifications, setNotifications] = useState<string[]>([])
+  const [appConfigs,    setAppConfigs]    = useState<Record<string, DeviceAppConfig>>({})
   const prevLiveRef                       = useRef<PhysicalDevice[]>([])
 
   const refresh = useCallback(async () => {
     try {
-      const data = await getDevices()
+      const [data, cfgs] = await Promise.all([getDevices(), getAllDeviceAppConfigs()])
       setDevices(data)
+      setAppConfigs(cfgs)
 
       // Detect disconnected configured devices
       const removed = onSyncLive(data)
@@ -263,6 +265,7 @@ export default function ConnectedDevices({
                 index={i}
                 selected={configuredSet.has(device.udid)}
                 onToggle={() => onToggleDevice(device)}
+                appConfig={appConfigs[device.udid]}
               />
             ))}
           </AnimatePresence>
@@ -275,12 +278,13 @@ export default function ConnectedDevices({
 // ─── DeviceCard ───────────────────────────────────────────────────────────────
 
 function DeviceCard({
-  device, index, selected, onToggle,
+  device, index, selected, onToggle, appConfig,
 }: {
-  device:   PhysicalDevice
-  index:    number
-  selected: boolean
-  onToggle: () => void
+  device:    PhysicalDevice
+  index:     number
+  selected:  boolean
+  onToggle:  () => void
+  appConfig?: DeviceAppConfig
 }) {
   const statusKey = mapStatus(device.status)
   const s         = STATUS[statusKey]
@@ -383,6 +387,19 @@ function DeviceCard({
         <s.Icon size={8} />
         {s.label}
       </span>
+
+      {/* App config badge */}
+      {appConfig && (
+        <div className="w-full text-center">
+          <div className="text-[8px] font-semibold text-slate-500 truncate">
+            {appConfig.appName || 'App'}
+            {appConfig.appVersion ? ` v${appConfig.appVersion}` : ''}
+          </div>
+          <div className="text-[8px] text-slate-600 truncate">
+            {appConfig.source}
+          </div>
+        </div>
+      )}
 
       {/* CONFIGURADO badge — only when selected */}
       <AnimatePresence>

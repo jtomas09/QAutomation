@@ -5,9 +5,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Device;
+import qa.cinepolis.backend.model.DeviceAppConfig;
 import qa.cinepolis.backend.model.Execution;
 import qa.cinepolis.backend.model.JobStatusUpdate;
 import qa.cinepolis.backend.service.ExecutionService;
+import qa.cinepolis.backend.store.DeviceAppConfigStore;
 import qa.cinepolis.backend.store.DeviceStore;
 import qa.cinepolis.backend.store.ReportEmailStore;
 
@@ -20,15 +22,17 @@ public class JobController {
 
     private static final Logger log = LoggerFactory.getLogger(JobController.class);
 
-    private final ExecutionService execService;
-    private final ReportEmailStore reportEmailStore;
-    private final DeviceStore      deviceStore;
+    private final ExecutionService    execService;
+    private final ReportEmailStore    reportEmailStore;
+    private final DeviceStore         deviceStore;
+    private final DeviceAppConfigStore appConfigStore;
 
     public JobController(ExecutionService execService, ReportEmailStore reportEmailStore,
-                         DeviceStore deviceStore) {
+                         DeviceStore deviceStore, DeviceAppConfigStore appConfigStore) {
         this.execService      = execService;
         this.reportEmailStore = reportEmailStore;
         this.deviceStore      = deviceStore;
+        this.appConfigStore   = appConfigStore;
     }
 
     /**
@@ -87,6 +91,15 @@ public class JobController {
         job.put("platformVersion", exec.getDevicePlatformVersion() != null ? exec.getDevicePlatformVersion() : "");
         job.put("deviceName",      exec.getDevice());
         job.put("platform",        assignedPlatform);
+
+        // Inject per-device app config if present
+        String lookupUdid = exec.getDeviceUdid() != null ? exec.getDeviceUdid() : requestedDevice;
+        appConfigStore.get(lookupUdid).ifPresent(cfg -> {
+            job.put("appPackage", cfg.getAppPackage() != null ? cfg.getAppPackage() : "");
+            job.put("bundleId",   cfg.getBundleId()   != null ? cfg.getBundleId()   : "");
+            job.put("appMode",    cfg.getAppMode()    != null ? cfg.getAppMode()    : "INSTALLED");
+        });
+
         return ResponseEntity.ok(job);
     }
 

@@ -26,4 +26,9 @@ public class JobDto {
     public String  deviceName;      // canonical discovered device name
     public String  platform;        // ANDROID | IOS
 
+    // ── Per-device app config (populated by DeviceAppConfigStore) ────────────
+    public String  appPackage;      // Android package name — overrides global RunnerConfig
+    public String  bundleId;        // iOS bundle identifier
+    public String  appMode;         // INSTALLED | APK | IPA
+
 }

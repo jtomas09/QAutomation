@@ -136,6 +136,19 @@ export interface Runner {
   xcodeVersion?:          string
 }
 
+// ─── Device App Config ────────────────────────────────────────────────────────
+
+export interface DeviceAppConfig {
+  deviceId:   string
+  platform:   string
+  appMode:    'INSTALLED' | 'APK' | 'IPA'
+  appName:    string
+  appPackage: string
+  bundleId:   string
+  appVersion: string
+  source:     string
+}
+
 export interface ExecutionSummary {
   executionId: string;
   suite: string;
