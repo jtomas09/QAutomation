@@ -19,7 +19,7 @@ const TECH_PATTERNS: RegExp[] = [
   /Eliminando y re-clon/i,
 
   // ── Runner / backend internals (bracket-prefixed) ───────────────────────
-  /^\[(Runner|BackendClient|ADB|Appium|JobExecutor|api)\]/i,
+  /^\[(Runner|BackendClient|ADB|Appium|JobExecutor|api|DriverFactory|Preflight|Diagnose)\]/i,
 
   // ── Runner config & workspace fetch ────────────────────────────────────
   /📥\s*Obteniendo configuraci[oó]n desde Backend/i,

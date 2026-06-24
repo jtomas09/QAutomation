@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Cross-platform AppiumDriver factory (Android + iOS).
@@ -165,6 +166,25 @@ public class DriverFactory {
                 log.error("[DriverFactory] Causa raiz: {}", rootCause(e).getMessage());
                 e.printStackTrace();
 
+                // Req 3+4: Capture logcat and emit user-friendly root cause to Dashboard
+                if (!"iOS".equalsIgnoreCase(platform)) {
+                    String targetUdid = prop("udid", "");
+                    if (!targetUdid.isBlank()) {
+                        log.info("[ADB] Capturando logcat de {} para diagnostico...", targetUdid);
+                        String logcat = captureLogcat(targetUdid);
+                        // Functional: no bracket prefix → visible in Dashboard
+                        log.error(classifyFailureCause(logcat, e.getMessage()));
+                        // Technical details → [ADB] prefix → filtered to Log Tecnico
+                        if (!logcat.isBlank() && !logcat.startsWith("[logcat")) {
+                            log.info("[ADB] === Logcat relevante ===");
+                            for (String line : logcat.split("\n")) {
+                                if (!line.isBlank()) log.info("[ADB] {}", line);
+                            }
+                            log.info("[ADB] === Fin logcat ===");
+                        }
+                    }
+                }
+
                 diagnose(e, platform);
 
                 if (attempt < MAX_RETRIES) {
@@ -239,13 +259,44 @@ public class DriverFactory {
         String act     = prop("appActivity",     "");
         String apkPath = prop("apkPath",         "");
 
-        if ((act.isBlank() || "auto".equalsIgnoreCase(act)) && !udid.isBlank() && !pkg.isBlank()) {
+        // Req 5: Fail fast if appPackage is missing — avoids 120s instrumentation timeout
+        if (pkg.isBlank()) {
+            throw new IllegalStateException(
+                "appPackage no definido — ejecucion cancelada.\n" +
+                "  Define appPackage en appium.properties o con -DappPackage=com.tu.app\n" +
+                "  Sin appPackage Appium espera 120s y falla sin motivo claro.");
+        }
+
+        if ((act.isBlank() || "auto".equalsIgnoreCase(act)) && !udid.isBlank()) {
             act = resolveAppActivity(udid, pkg);
         }
 
         validateAppiumServer(hubUrl);
+
+        boolean isAndroid16  = false;
+        boolean isSamsungA16 = false;
+
         if (!udid.isBlank()) {
             validateAdbDevice(udid);
+
+            // Req 1+2: Verify UiAutomator2 server packages; reinstall if absent/corrupt
+            validateAndRepairUiAutomator2(udid);
+
+            // Req 6+7: Detect Android API level and manufacturer
+            int    apiLevel     = getAndroidApiLevel(udid);
+            String manufacturer = getManufacturer(udid);
+            isAndroid16  = apiLevel >= 35; // Android 16 = API 35/36
+            isSamsungA16 = isAndroid16 && manufacturer.contains("samsung");
+
+            log.info("[DriverFactory] Dispositivo: {} | API={} | fabricante={}",
+                     prop("deviceName", udid), apiLevel, manufacturer);
+
+            // Req 7: Samsung Android 16 — clear stale server data + reinstall before session
+            if (isSamsungA16) {
+                log.info("[DriverFactory] Samsung Android 16 detectado — reinicializando UiAutomator2...");
+                reinitSamsungAndroid16(udid);
+            }
+
             if (!pkg.isBlank()) validatePackageInstalled(udid, pkg);
             cleanupUiAutomator2Session(udid, Integer.parseInt(prop("systemPort", "8200")));
         }
@@ -268,7 +319,12 @@ public class DriverFactory {
         long cmdTimeout = Long.parseLong(prop("newCommandTimeout", "300"));
         o.setNewCommandTimeout(Duration.ofSeconds(cmdTimeout));
 
-        long uia2Launch  = Long.parseLong(prop("uia2LaunchTimeout",  "120"));
+        // Req 6: Auto-increase launch timeout for Android 16 (instrumentation starts slower)
+        long uia2Launch = isAndroid16
+                ? 240L
+                : Long.parseLong(prop("uia2LaunchTimeout", "120"));
+        if (isAndroid16)
+            log.info("[DriverFactory] Android 16+: uiautomator2ServerLaunchTimeout = {}s (auto-ajustado)", uia2Launch);
         long uia2Install = Long.parseLong(prop("uia2InstallTimeout", "120"));
         int  adbExec     = Integer.parseInt(prop("adbExecTimeout",   "90000"));
         int  apkInstall  = Integer.parseInt(prop("androidInstallTimeout", "90000"));
@@ -379,7 +435,7 @@ public class DriverFactory {
 
     private static void validateAdbDevice(String udid) {
         try {
-            Process p = new ProcessBuilder("adb", "-s", udid, "get-state")
+            Process p = new ProcessBuilder(adbBin(), "-s", udid, "get-state")
                 .redirectErrorStream(true).start();
             String out  = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             int    exit = p.waitFor();
@@ -410,7 +466,7 @@ public class DriverFactory {
     private static void validatePackageInstalled(String udid, String appPackage) {
         try {
             Process p = new ProcessBuilder(
-                "adb", "-s", udid, "shell", "pm", "list", "packages", appPackage)
+                adbBin(), "-s", udid, "shell", "pm", "list", "packages", appPackage)
                 .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             p.waitFor();
@@ -612,7 +668,7 @@ public class DriverFactory {
 
     private static String resolveAppActivity(String udid, String pkg) {
         try {
-            String[] cmd = {"adb", "-s", udid, "shell", "cmd", "package",
+            String[] cmd = {adbBin(), "-s", udid, "shell", "cmd", "package",
                             "resolve-activity", "--brief",
                             "-a", "android.intent.action.MAIN",
                             "-c", "android.intent.category.LAUNCHER", pkg};
@@ -727,9 +783,10 @@ public class DriverFactory {
         if (udid == null || udid.isBlank()) return;
         log.info("[DriverFactory] Limpiando sesión UiAutomator2 (udid={}, port={})...", udid, systemPort);
 
+        String adb = adbBin();
         String[][] killCmds = {
-            {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server"},
-            {"adb", "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server.test"},
+            {adb, "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server"},
+            {adb, "-s", udid, "shell", "am", "force-stop", "io.appium.uiautomator2.server.test"},
         };
         for (String[] cmd : killCmds) {
             try {
@@ -740,7 +797,7 @@ public class DriverFactory {
 
         // Liberar el systemPort si está ocupado (fuser -k es silencioso si no está en uso)
         try {
-            String[] fuserKill = {"adb", "-s", udid, "shell", "fuser", "-k", systemPort + "/tcp"};
+            String[] fuserKill = {adbBin(), "-s", udid, "shell", "fuser", "-k", systemPort + "/tcp"};
             Process p = new ProcessBuilder(fuserKill).redirectErrorStream(true).start();
             p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception ignored) {}
@@ -760,5 +817,185 @@ public class DriverFactory {
         if (props == null) return def;
         String v = props.getProperty(key);
         return (v == null || v.isBlank()) ? def : v.trim();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Android device diagnostics
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** ADB binary — uses ADB_PATH system property (set by PlatformToolsManager), falls back to system adb. */
+    private static String adbBin() {
+        String path = System.getProperty("ADB_PATH", "");
+        return path.isBlank() ? "adb" : path;
+    }
+
+    /** Returns the device Android API level, or 0 on error. */
+    private static int getAndroidApiLevel(String udid) {
+        try {
+            Process p = new ProcessBuilder(adbBin(), "-s", udid, "shell",
+                    "getprop", "ro.build.version.sdk")
+                    .redirectErrorStream(true).start();
+            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); return 0; }
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim()
+                    .replaceAll("[^0-9]", "");
+            return out.isBlank() ? 0 : Integer.parseInt(out);
+        } catch (Exception e) {
+            log.warn("[DriverFactory] getAndroidApiLevel error: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    /** Returns the device manufacturer name in lowercase, or empty string on error. */
+    private static String getManufacturer(String udid) {
+        try {
+            Process p = new ProcessBuilder(adbBin(), "-s", udid, "shell",
+                    "getprop", "ro.product.manufacturer")
+                    .redirectErrorStream(true).start();
+            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); return ""; }
+            return new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim().toLowerCase();
+        } catch (Exception e) {
+            log.warn("[DriverFactory] getManufacturer error: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * Req 1+2: Verifies io.appium.uiautomator2.server and its test package are installed.
+     * If either is absent, uninstalls both so Appium performs a clean reinstall.
+     */
+    private static void validateAndRepairUiAutomator2(String udid) {
+        log.info("[ADB] Verificando paquetes UiAutomator2 en {}...", udid);
+        try {
+            Process p = new ProcessBuilder(adbBin(), "-s", udid, "shell", "pm", "list", "packages")
+                    .redirectErrorStream(true).start();
+            boolean done = p.waitFor(10, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); return; }
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+            boolean hasServer = out.lines().anyMatch(
+                    l -> l.trim().equals("package:io.appium.uiautomator2.server"));
+            boolean hasTest = out.lines().anyMatch(
+                    l -> l.trim().equals("package:io.appium.uiautomator2.server.test"));
+
+            log.info("[ADB] io.appium.uiautomator2.server      : {}", hasServer ? "OK" : "AUSENTE");
+            log.info("[ADB] io.appium.uiautomator2.server.test : {}", hasTest   ? "OK" : "AUSENTE");
+
+            if (!hasServer || !hasTest) {
+                log.warn("[ADB] Paquetes UiAutomator2 incompletos — desinstalando para reinstalacion limpia...");
+                uninstallUiAutomator2Packages(udid);
+                log.info("[ADB] Appium reinstalara UiAutomator2 automaticamente al crear la sesion.");
+            }
+        } catch (Exception e) {
+            log.warn("[ADB] validateAndRepairUiAutomator2 error: {}", e.getMessage());
+        }
+    }
+
+    /** Force-uninstalls UiAutomator2 server + test APKs from the device. */
+    private static void uninstallUiAutomator2Packages(String udid) {
+        for (String pkg : new String[]{
+                "io.appium.uiautomator2.server",
+                "io.appium.uiautomator2.server.test"}) {
+            try {
+                Process p = new ProcessBuilder(adbBin(), "-s", udid, "uninstall", pkg)
+                        .redirectErrorStream(true).start();
+                boolean done = p.waitFor(15, TimeUnit.SECONDS);
+                String out = done
+                        ? new String(p.getInputStream().readAllBytes()).trim()
+                        : "timeout";
+                log.info("[ADB] uninstall {}: {}", pkg, out);
+            } catch (Exception e) {
+                log.warn("[ADB] uninstall {} error: {}", pkg, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Req 7: Samsung Android 16 — clears UiAutomator2 app data + reinstalls before session.
+     * Samsung Android 16 rejects stale or mismatched server APKs at instrumentation start.
+     */
+    private static void reinitSamsungAndroid16(String udid) {
+        log.info("[ADB] Samsung Android 16: limpiando datos de UiAutomator2...");
+        for (String pkg : new String[]{
+                "io.appium.uiautomator2.server",
+                "io.appium.uiautomator2.server.test"}) {
+            try {
+                Process p = new ProcessBuilder(adbBin(), "-s", udid, "shell", "pm", "clear", pkg)
+                        .redirectErrorStream(true).start();
+                boolean done = p.waitFor(5, TimeUnit.SECONDS);
+                String out = done
+                        ? new String(p.getInputStream().readAllBytes()).trim()
+                        : "timeout";
+                log.info("[ADB] pm clear {}: {}", pkg, out);
+            } catch (Exception e) {
+                log.warn("[ADB] pm clear {} error: {}", pkg, e.getMessage());
+            }
+        }
+        uninstallUiAutomator2Packages(udid);
+        log.info("[ADB] Samsung Android 16: reinstalacion pendiente — Appium lo hara al crear la sesion.");
+        sleep(1000L);
+    }
+
+    /**
+     * Req 3: Captures recent logcat entries relevant to session creation failures.
+     * Filters for AndroidRuntime errors, Appium server output, and ActivityManager warnings.
+     */
+    private static String captureLogcat(String udid) {
+        try {
+            Process p = new ProcessBuilder(
+                    adbBin(), "-s", udid, "logcat", "-d", "-t", "200",
+                    "AndroidRuntime:E", "AppiumUIA2-Server:D", "UiAutomator:D",
+                    "ActivityManager:W", "PackageManager:W", "System.err:W", "*:S")
+                    .redirectErrorStream(true).start();
+            boolean done = p.waitFor(10, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); return "[logcat timeout]"; }
+            return new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+        } catch (Exception e) {
+            return "[logcat error: " + e.getMessage() + "]";
+        }
+    }
+
+    /**
+     * Req 4: Classifies the failure cause from logcat and exception message.
+     * Returns a user-readable functional error shown in the Dashboard.
+     */
+    private static String classifyFailureCause(String logcat, String errorMsg) {
+        String s = (logcat + "\n" + (errorMsg != null ? errorMsg : "")).toLowerCase();
+
+        if (s.contains("fatal exception") || (s.contains("process") && s.contains("died")))
+            return "Crash de la aplicacion detectado en el dispositivo.\n" +
+                   "  Revisa los permisos de la app y que este correctamente instalada.";
+
+        if (s.contains("instrumentation") &&
+                (s.contains("crash") || s.contains("failed to run") || s.contains("cannot be initialized")))
+            return "Crash del instrumentation (UiAutomator2 server) — APK corrupto o incompatible con Android.";
+
+        if (s.contains("install_failed") || s.contains("no such package") ||
+                (s.contains("package") && s.contains("is not installed")))
+            return "La app no esta instalada en el dispositivo.\n" +
+                   "  Verifica que el APK este instalado o configura apkPath en appium.properties.";
+
+        if (s.contains("permission denied") || s.contains("unauthorized"))
+            return "Acceso denegado por el dispositivo.\n" +
+                   "  Acepta el dialogo 'Permitir depuracion USB' en la pantalla del dispositivo.";
+
+        if ((s.contains("versioncode") && s.contains("mismatch")) ||
+                (s.contains("version") && s.contains("incompatible")))
+            return "UiAutomator2 incompatible con la version de Android del dispositivo.\n" +
+                   "  Ejecuta desde el Runner: appium driver update uiautomator2";
+
+        if (s.contains("cannot be initialized within") || s.contains("120000ms") ||
+                (s.contains("timed out") && s.contains("uiautomator")))
+            return "UiAutomator2 no pudo inicializarse a tiempo (timeout).\n" +
+                   "  Causa probable: servidor corrupto, permisos USB o Android 16 incompatible.\n" +
+                   "  Solucion: desconecta y reconecta el dispositivo e intenta de nuevo.";
+
+        if (s.contains("connection refused") || s.contains("econnrefused"))
+            return "Appium no esta corriendo o no acepta conexiones.\n" +
+                   "  Verifica que el Runner haya iniciado Appium correctamente.";
+
+        return "Error al iniciar la sesion Appium Android.\n" +
+               "  Revisa el Log Tecnico para ver el logcat completo del dispositivo.";
     }
 }
