@@ -501,6 +501,22 @@ public class JobExecutor {
             }
             client.sendLog(job.executionId, "INFO", "✅ Configuración recibida.");
 
+            // ── Device received from backend ───────────────────────────────────
+            String receivedDevice   = nvl(job.deviceName, job.device);
+            String receivedPlatform = nvl(job.platform, "");
+            String receivedUdid     = nvl(job.udid, "");
+            client.sendLog(job.executionId, "INFO",
+                    "📱 DISPOSITIVO RECIBIDO DEL BACKEND: " + receivedDevice
+                    + (receivedPlatform.isBlank() ? "" : " / " + receivedPlatform)
+                    + (receivedUdid.isBlank()     ? "" : " / " + receivedUdid));
+            if (receivedUdid.isBlank()) {
+                client.sendLog(job.executionId, "ERROR",
+                        "❌ La configuración almacenada no coincide con el dispositivo enviado. " +
+                        "Verifica que el dispositivo esté conectado y registrado en el Runner.");
+                client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                return;
+            }
+
             // ── Sync workspace (clone/pull) + validate Gradle structure ──────────
             File   wsDir   = new File(config.workspaceDir, runnerCfg.projectName);
             WorkspaceManager wsMgr = new WorkspaceManager(

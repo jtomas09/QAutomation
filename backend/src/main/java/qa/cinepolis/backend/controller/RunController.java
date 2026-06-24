@@ -7,8 +7,10 @@ import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Execution;
 import qa.cinepolis.backend.model.RunRequest;
 import qa.cinepolis.backend.service.ExecutionService;
+import qa.cinepolis.backend.store.ExecutionDeviceStore;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -18,17 +20,27 @@ public class RunController {
 
     private static final Logger log = LoggerFactory.getLogger(RunController.class);
 
-    private final ExecutionService execService;
+    private final ExecutionService    execService;
+    private final ExecutionDeviceStore deviceConfigStore;
 
-    public RunController(ExecutionService execService) {
-        this.execService = execService;
+    public RunController(ExecutionService execService, ExecutionDeviceStore deviceConfigStore) {
+        this.execService       = execService;
+        this.deviceConfigStore = deviceConfigStore;
     }
 
     @PostMapping("/run")
     public ResponseEntity<?> runSuite(@RequestBody RunRequest request) {
-        log.info("[RunController] POST /api/run suite={} env={} device={} country={} videoEnabled={}",
-                request.getSuite(), request.getEnvironment(), request.getDevice(),
+        List<String> configured = deviceConfigStore.getDeviceUdids();
+        log.info("[RunController] CONFIGURACIÓN GUARDADA: {}", configured);
+        log.info("[RunController] RUN GENERADO: device={} suite={} env={} country={} videoEnabled={}",
+                request.getDevice(), request.getSuite(), request.getEnvironment(),
                 request.getCountry(), request.isVideoEnabled());
+
+        if (!configured.isEmpty() && !configured.contains(request.getDevice())) {
+            log.warn("[RunController] ⚠ La configuración almacenada no coincide con el dispositivo enviado. " +
+                    "Configurado={} | Recibido={}", configured, request.getDevice());
+        }
+
         Execution exec = execService.create(
                 request.getSuite(),
                 request.getEnvironment(),

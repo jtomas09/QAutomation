@@ -61,22 +61,39 @@ public class DeviceStore {
     }
 
     /**
-     * Atomically claims the best AVAILABLE device matching the given hints.
-     * Priority: exact deviceName match > platform match > any available.
-     * Returns empty if no AVAILABLE device found.
+     * Atomically claims the AVAILABLE device that matches the given identifier.
+     *
+     * Priority:
+     *   0) Exact UDID match          — frontend always sends UDID; this is the primary path
+     *   1) Exact deviceName match    — fallback for human-readable name sent by older clients
+     *   2) Partial deviceName match  — e.g. "A56" matches "Samsung Galaxy A56"
+     *
+     * NO implicit fallback to "any available device" — if the requested device is not
+     * found the caller must handle the empty result (not silently pick a random device).
+     *
+     * Returns empty if no AVAILABLE device matches.
      */
-    public synchronized Optional<Device> claimDevice(String preferredName, String platform, String executionId) {
-        // 1) Exact name match (case-insensitive)
+    public synchronized Optional<Device> claimDevice(String preferredUdidOrName, String platform, String executionId) {
+        if (preferredUdidOrName == null || preferredUdidOrName.isBlank()) return Optional.empty();
+
+        // 0) Exact UDID match — highest priority
         Optional<Device> candidate = devices.values().stream()
                 .filter(d -> d.getStatus() == DeviceStatus.AVAILABLE)
-                .filter(d -> preferredName != null && !preferredName.isBlank()
-                        && d.getDeviceName() != null
-                        && d.getDeviceName().equalsIgnoreCase(preferredName))
+                .filter(d -> preferredUdidOrName.equalsIgnoreCase(d.getUdid()))
                 .findFirst();
 
-        // 2) Partial name match
-        if (candidate.isEmpty() && preferredName != null && !preferredName.isBlank()) {
-            final String nameLower = preferredName.toLowerCase().replaceAll("\\s+", "");
+        // 1) Exact deviceName match (case-insensitive)
+        if (candidate.isEmpty()) {
+            candidate = devices.values().stream()
+                    .filter(d -> d.getStatus() == DeviceStatus.AVAILABLE)
+                    .filter(d -> d.getDeviceName() != null
+                            && d.getDeviceName().equalsIgnoreCase(preferredUdidOrName))
+                    .findFirst();
+        }
+
+        // 2) Partial deviceName match — only for name-like strings (not UDID-length tokens)
+        if (candidate.isEmpty() && preferredUdidOrName.length() < 20) {
+            final String nameLower = preferredUdidOrName.toLowerCase().replaceAll("\\s+", "");
             candidate = devices.values().stream()
                     .filter(d -> d.getStatus() == DeviceStatus.AVAILABLE)
                     .filter(d -> d.getDeviceName() != null)
@@ -85,14 +102,7 @@ public class DeviceStore {
                     .findFirst();
         }
 
-        // 3) Any available device for the platform
-        if (candidate.isEmpty()) {
-            candidate = devices.values().stream()
-                    .filter(d -> d.getStatus() == DeviceStatus.AVAILABLE)
-                    .filter(d -> platform == null || platform.isBlank()
-                            || platform.equalsIgnoreCase(d.getPlatform()))
-                    .findFirst();
-        }
+        // No step 3 — never pick a random device as fallback.
 
         candidate.ifPresent(d -> {
             d.setStatus(DeviceStatus.BUSY);

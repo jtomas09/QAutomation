@@ -1,5 +1,7 @@
 package qa.cinepolis.backend.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Device;
@@ -15,6 +17,8 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/jobs")
 public class JobController {
+
+    private static final Logger log = LoggerFactory.getLogger(JobController.class);
 
     private final ExecutionService execService;
     private final ReportEmailStore reportEmailStore;
@@ -43,34 +47,46 @@ public class JobController {
 
         Execution exec = opt.get();
 
-        // ── Dynamic device selection ──────────────────────────────────────────
-        // Infer platform from device name hint (e.g. "iPhone" → IOS)
-        String preferredName = exec.getDevice();
-        String platform      = inferPlatform(preferredName, runnerId);
+        // ── Device selection — UDID-first, no implicit fallback ──────────────
+        String requestedDevice = exec.getDevice();   // UDID sent by frontend
+        String platform        = inferPlatform(requestedDevice, runnerId);
 
-        Optional<Device> deviceOpt = deviceStore.claimDevice(preferredName, platform, exec.getExecutionId());
-        deviceOpt.ifPresent(d -> {
+        log.info("[JobController] DISPOSITIVO CONFIGURADO EN EL RUN: {} | executionId={}",
+                requestedDevice, exec.getExecutionId());
+
+        Optional<Device> deviceOpt = deviceStore.claimDevice(requestedDevice, platform, exec.getExecutionId());
+
+        String assignedPlatform = "";
+        if (deviceOpt.isPresent()) {
+            Device d = deviceOpt.get();
             exec.setDeviceUdid(d.getUdid());
             exec.setDevicePlatformVersion(d.getPlatformVersion());
-            // Override device name with the auto-discovered canonical name
-            exec.setDevice(d.getDeviceName() != null ? d.getDeviceName() : exec.getDevice());
+            exec.setDevice(d.getDeviceName() != null ? d.getDeviceName() : requestedDevice);
             exec.setAssignedRunnerId(runnerId);
-        });
+            assignedPlatform = d.getPlatform() != null ? d.getPlatform() : "";
+
+            log.info("[JobController] DISPOSITIVO ASIGNADO: {} / {} / {}",
+                    exec.getDevice(), assignedPlatform, d.getUdid());
+        } else {
+            log.warn("[JobController] DISPOSITIVO NO DISPONIBLE: '{}' no encontrado en Device Farm. " +
+                    "Verifica que el dispositivo esté conectado y el Runner activo. executionId={}",
+                    requestedDevice, exec.getExecutionId());
+        }
 
         Map<String, Object> job = new java.util.LinkedHashMap<>();
-        job.put("executionId",        exec.getExecutionId());
-        job.put("suite",              exec.getSuite());
-        job.put("env",                exec.getEnv());
-        job.put("device",             exec.getDevice());
-        job.put("country",            exec.getCountry());
-        job.put("videoEnabled",       exec.isVideoEnabled());
-        job.put("testClass",          exec.getTestClass());
-        job.put("sendMail",           reportEmailStore.isEnabled());
-        job.put("reportEmails",       reportEmailStore.getMailTo());
-        // Dynamic capabilities — populated when a device was auto-selected
-        job.put("udid",               exec.getDeviceUdid() != null ? exec.getDeviceUdid() : "");
-        job.put("platformVersion",    exec.getDevicePlatformVersion() != null ? exec.getDevicePlatformVersion() : "");
-        job.put("deviceName",         exec.getDevice());
+        job.put("executionId",     exec.getExecutionId());
+        job.put("suite",           exec.getSuite());
+        job.put("env",             exec.getEnv());
+        job.put("device",          exec.getDevice());
+        job.put("country",         exec.getCountry());
+        job.put("videoEnabled",    exec.isVideoEnabled());
+        job.put("testClass",       exec.getTestClass());
+        job.put("sendMail",        reportEmailStore.isEnabled());
+        job.put("reportEmails",    reportEmailStore.getMailTo());
+        job.put("udid",            exec.getDeviceUdid()          != null ? exec.getDeviceUdid()          : "");
+        job.put("platformVersion", exec.getDevicePlatformVersion() != null ? exec.getDevicePlatformVersion() : "");
+        job.put("deviceName",      exec.getDevice());
+        job.put("platform",        assignedPlatform);
         return ResponseEntity.ok(job);
     }
 
