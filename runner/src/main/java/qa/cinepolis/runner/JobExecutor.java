@@ -538,6 +538,18 @@ public class JobExecutor {
             // ── Build Gradle command ──────────────────────────────────────────
             List<String> cmd = buildCommand(job);
 
+            // Inject Android app identifiers from backend config (zero-config)
+            if (!runnerCfg.appPackage.isBlank()) {
+                cmd.add("-DappPackage=" + runnerCfg.appPackage);
+                client.sendLog(job.executionId, "INFO",
+                        "[JobExecutor] 📱 Android Package: " + runnerCfg.appPackage);
+            }
+            if (!runnerCfg.appActivity.isBlank()) {
+                cmd.add("-DappActivity=" + runnerCfg.appActivity);
+                client.sendLog(job.executionId, "INFO",
+                        "[JobExecutor] 🚀 Android Activity: " + runnerCfg.appActivity);
+            }
+
             // Notificar TOTAL_ESPERADO DESPUÉS de construir el comando para usar
             // el conteo real: para smoke = número de --tests flags seleccionados;
             // para clases = lookup en SUITE_FILTER_SIZE. Esto garantiza que

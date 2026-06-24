@@ -7,33 +7,43 @@ import org.springframework.stereotype.Component;
  *
  * Built-in defaults make the platform work out of the box — no env vars required.
  * Optional env var overrides for custom deployments:
- *   REPO_URL         — git clone URL  (e.g. https://github.com/org/project.git)
- *   REPO_BRANCH      — branch name    (default: main)
- *   PROJECT_NAME     — workspace dir  (default: QAutomation)
+ *   REPO_URL               — git clone URL  (e.g. https://github.com/org/project.git)
+ *   REPO_BRANCH            — branch name    (default: main)
+ *   PROJECT_NAME           — workspace dir  (default: QAutomation)
+ *   ANDROID_APP_PACKAGE    — Android app package  (default: com.cinepolis.go)
+ *   ANDROID_APP_ACTIVITY   — Android app activity (default: com.cinepolis.go.MainActivity)
  *
  * All Runner instances pull this config via GET /api/runner/config.
- * Users never configure repos per-machine.
+ * Users never configure repos or app identifiers per-machine.
  */
 @Component
 public class RunnerConfigStore {
 
-    private static final String DEFAULT_REPO_URL     = "https://github.com/jtomas09/QAutomation.git";
-    private static final String DEFAULT_BRANCH       = "main";
-    private static final String DEFAULT_PROJECT_NAME = "QAutomation";
+    private static final String DEFAULT_REPO_URL      = "https://github.com/jtomas09/QAutomation.git";
+    private static final String DEFAULT_BRANCH        = "main";
+    private static final String DEFAULT_PROJECT_NAME  = "QAutomation";
+    private static final String DEFAULT_APP_PACKAGE   = "com.cinepolis.go";
+    private static final String DEFAULT_APP_ACTIVITY  = "com.cinepolis.go.MainActivity";
 
     private volatile String repositoryUrl;
     private volatile String branch;
     private volatile String projectName;
+    private volatile String appPackage;
+    private volatile String appActivity;
 
     public RunnerConfigStore() {
-        this.repositoryUrl = getEnv("REPO_URL",     DEFAULT_REPO_URL);
-        this.branch        = getEnv("REPO_BRANCH",  DEFAULT_BRANCH);
-        this.projectName   = getEnv("PROJECT_NAME", DEFAULT_PROJECT_NAME);
+        this.repositoryUrl = getEnv("REPO_URL",             DEFAULT_REPO_URL);
+        this.branch        = getEnv("REPO_BRANCH",          DEFAULT_BRANCH);
+        this.projectName   = getEnv("PROJECT_NAME",         DEFAULT_PROJECT_NAME);
+        this.appPackage    = getEnv("ANDROID_APP_PACKAGE",  DEFAULT_APP_PACKAGE);
+        this.appActivity   = getEnv("ANDROID_APP_ACTIVITY", DEFAULT_APP_ACTIVITY);
     }
 
     public String  getRepositoryUrl() { return repositoryUrl; }
     public String  getBranch()        { return branch;        }
     public String  getProjectName()   { return projectName;   }
+    public String  getAppPackage()    { return appPackage;    }
+    public String  getAppActivity()   { return appActivity;   }
     public boolean isConfigured()     { return true; }  // always configured via defaults
 
     /** Admin override — applied to all Runners without restart. */
@@ -44,6 +54,12 @@ public class RunnerConfigStore {
             this.branch = branch.trim();
         if (projectName != null && !projectName.isBlank())
             this.projectName = projectName.trim();
+    }
+
+    /** Admin override for Android app identifiers — applied to all Runners without restart. */
+    public void setAndroidConfig(String appPackage, String appActivity) {
+        if (appPackage  != null && !appPackage.isBlank())  this.appPackage  = appPackage.trim();
+        if (appActivity != null && !appActivity.isBlank()) this.appActivity = appActivity.trim();
     }
 
     private static String getEnv(String key, String def) {

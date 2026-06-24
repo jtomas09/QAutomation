@@ -413,13 +413,18 @@ public class BackendClient {
         public final String  repositoryUrl;
         public final String  branch;
         public final String  projectName;
+        public final String  appPackage;
+        public final String  appActivity;
         public final boolean configured;
 
         public RunnerConfigResponse(String repositoryUrl, String branch,
-                                    String projectName, boolean configured) {
+                                    String projectName, String appPackage,
+                                    String appActivity, boolean configured) {
             this.repositoryUrl = repositoryUrl != null ? repositoryUrl : "";
             this.branch        = branch        != null ? branch        : "main";
             this.projectName   = projectName   != null ? projectName   : "automation-project";
+            this.appPackage    = appPackage    != null ? appPackage    : "";
+            this.appActivity   = appActivity   != null ? appActivity   : "";
             this.configured    = configured;
         }
         public boolean isConfigured() { return !repositoryUrl.isBlank(); }
@@ -445,8 +450,10 @@ public class BackendClient {
             String url        = str(data, "repositoryUrl");
             String branch     = str(data, "branch",      "main");
             String project    = str(data, "projectName", "automation-project");
+            String appPkg     = str(data, "appPackage",  "");
+            String appAct     = str(data, "appActivity", "");
             boolean configured = Boolean.TRUE.equals(data.get("configured"));
-            return new RunnerConfigResponse(url, branch, project, configured);
+            return new RunnerConfigResponse(url, branch, project, appPkg, appAct, configured);
         } catch (Exception e) {
             System.err.println("[BackendClient] getRunnerConfig error: " + e.getMessage());
             return null;

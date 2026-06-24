@@ -31,6 +31,8 @@ public class RunnerConfigController {
         body.put("repositoryUrl", store.getRepositoryUrl());
         body.put("branch",        store.getBranch());
         body.put("projectName",   store.getProjectName());
+        body.put("appPackage",    store.getAppPackage());
+        body.put("appActivity",   store.getAppActivity());
         body.put("configured",    true);
         return ResponseEntity.ok(body);
     }
@@ -39,8 +41,10 @@ public class RunnerConfigController {
     public ResponseEntity<Map<String, String>> setRunnerConfig(
             @RequestBody RunnerConfigRequest req) {
         store.setConfig(req.repositoryUrl(), req.branch(), req.projectName());
+        store.setAndroidConfig(req.appPackage(), req.appActivity());
         return ResponseEntity.ok(Map.of("result", "ok"));
     }
 
-    record RunnerConfigRequest(String repositoryUrl, String branch, String projectName) {}
+    record RunnerConfigRequest(String repositoryUrl, String branch, String projectName,
+                               String appPackage, String appActivity) {}
 }
