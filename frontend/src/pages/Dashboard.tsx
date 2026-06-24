@@ -12,23 +12,24 @@ import DailyChart       from '../components/dashboard/DailyChart'
 import ConnectedDevices from '../components/dashboard/ConnectedDevices'
 
 interface Props {
-  state:           RunState
-  suite:           string
-  env:             string
-  device:          string
-  country:         string
-  videoEnabled:    boolean
-  onSuiteChange:   (v: string) => void
-  onEnvChange:     (v: string) => void
-  onDeviceChange:  (v: string) => void
-  onCountryChange: (v: string) => void
-  onVideoToggle:   (v: boolean) => void
-  onRun:           () => void
-  onStop:          () => void
-  onClearLog:      () => void
-  onViewAll:       () => void
-  onManageDevices: () => void
-  onAttach:        (executionId: string, suiteName: string) => void
+  state:            RunState
+  suite:            string
+  env:              string
+  devices:          string[]
+  deviceLabels:     string[]
+  country:          string
+  videoEnabled:     boolean
+  onSuiteChange:    (v: string) => void
+  onEnvChange:      (v: string) => void
+  onDevicesChange:  (udids: string[], labels: string[]) => void
+  onCountryChange:  (v: string) => void
+  onVideoToggle:    (v: boolean) => void
+  onRun:            () => void
+  onStop:           () => void
+  onClearLog:       () => void
+  onViewAll:        () => void
+  onManageDevices:  () => void
+  onAttach:         (executionId: string, suiteName: string) => void
 }
 
 interface AggStats { passed: number; failed: number; skipped: number; total: number; avgMs: number }
@@ -40,8 +41,8 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, device, country, videoEnabled,
-  onSuiteChange, onEnvChange, onDeviceChange, onCountryChange,
+  state, suite, env, devices, deviceLabels, country, videoEnabled,
+  onSuiteChange, onEnvChange, onDevicesChange, onCountryChange,
   onVideoToggle, onRun, onStop, onClearLog, onViewAll, onManageDevices, onAttach,
 }: Props) {
   const [daysBack,   setDaysBack]   = useState<number>(7)
@@ -169,13 +170,14 @@ export default function Dashboard({
       {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
       <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
         <RunTestsPanel
-          suite={suite}           env={env}
-          device={device}         country={country}
-          status={state.status}   executionId={state.executionId ?? null}
-          videoEnabled={videoEnabled}       onVideoToggle={onVideoToggle}
-          onSuiteChange={onSuiteChange}     onEnvChange={onEnvChange}
-          onDeviceChange={onDeviceChange}   onCountryChange={onCountryChange}
-          onRun={onRun}           onStop={onStop}
+          suite={suite}             env={env}
+          devices={devices}         deviceLabels={deviceLabels}
+          country={country}
+          status={state.status}     executionId={state.executionId ?? null}
+          videoEnabled={videoEnabled}         onVideoToggle={onVideoToggle}
+          onSuiteChange={onSuiteChange}       onEnvChange={onEnvChange}
+          onDevicesChange={onDevicesChange}   onCountryChange={onCountryChange}
+          onRun={onRun}             onStop={onStop}
           passed={state.passed}
           failed={state.failed}
           skipped={state.skipped}

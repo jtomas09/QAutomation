@@ -16,9 +16,10 @@ const initState: RunState = {
 }
 
 export function useTestRunner() {
-  const [state, setState]     = useState<RunState>(initState)
-  const executionIdRef        = useRef<string | null>(null)
-  const closeStreamRef        = useRef<(() => void) | null>(null)
+  const [state, setState]       = useState<RunState>(initState)
+  const executionIdRef          = useRef<string | null>(null)
+  const executionIdsRef         = useRef<string[]>([])     // all active IDs for multi-device stop
+  const closeStreamRef          = useRef<(() => void) | null>(null)
 
   const addLog = useCallback((level: LogLevel, message: string) => {
     const entry: LogEntry = {
@@ -28,13 +29,11 @@ export function useTestRunner() {
       message,
     }
     setState(prev => {
-      // Actualizar contadores en vivo con cada resultado de test
       let { passed, failed, skipped, total, totalExpected } = prev
       if (level === 'PASS') { passed++; total++ }
       if (level === 'FAIL') { failed++; total++ }
       if (level === 'SKIP') { skipped++; total++ }
 
-      // Detectar total esperado enviado por el runner (⚡ TOTAL_ESPERADO:N)
       if (level === 'INFO') {
         const m = message.match(/TOTAL_ESPERADO:(\d+)/)
         if (m) totalExpected = parseInt(m[1], 10)
@@ -44,13 +43,26 @@ export function useTestRunner() {
     })
   }, [])
 
+  /**
+   * Fires one POST /api/run per device (in parallel), then opens one SSE stream
+   * per execution. Logs are prefixed with the device name when running multi-device.
+   *
+   * @param devices      Array of device UDIDs. Pass [] to abort early.
+   * @param deviceLabels Optional friendly names parallel to `devices` array.
+   */
   const runTest = useCallback(async (
     suiteId:      string,
     env:          string,
-    device:       string,
+    devices:      string[],          // UDIDs — one POST per element
     country:      string  = 'mexico',
     videoEnabled: boolean = false,
+    deviceLabels: string[] = [],     // display names for log prefixes
   ) => {
+    if (devices.length === 0) {
+      addLog('WARN', '⚠️ Sin dispositivos seleccionados')
+      return
+    }
+
     setState(prev => ({
       ...prev,
       status:        'running',
@@ -62,40 +74,65 @@ export function useTestRunner() {
       activeSuite:   suiteId,
       executionId:   null,
     }))
-    addLog('INFO', `▶ Ejecutando suite: ${suiteId}  |  Env: ${env}  |  Device: ${device}`)
+
+    const multi   = devices.length > 1
+    const labelOf = (i: number) => deviceLabels[i] ?? devices[i].slice(0, 8)
+
+    addLog('INFO', `▶ Suite: ${suiteId}  |  Env: ${env}  |  ${devices.length} dispositivo(s)`)
 
     try {
-      // Step 1: POST /api/run → get executionId
-      console.log('[runTest] postRun payload:', { suite: suiteId, env, device, country, videoEnabled })
-      const { executionId } = await postRun({ suite: suiteId, env, device, country, videoEnabled })
-      executionIdRef.current = executionId
-      setState(prev => ({ ...prev, executionId }))
-      addLog('INFO', `🆔 ${executionId} — En cola. Esperando runner local...`)
-
-      // Step 2: subscribe to SSE stream for live logs
-      const unsubscribe = streamExecution(
-        executionId,
-        addLog,
-        (result) => {
-          closeStreamRef.current  = null
-          executionIdRef.current  = null
-          setState(prev => ({
-            ...prev,
-            status:      'finished',
-            ...result,
-            lastRun:     new Date().toLocaleString('es-MX'),
-            activeSuite: null,
-            executionId: null,
-          }))
-        },
-        (errMsg) => {
-          closeStreamRef.current = null
-          executionIdRef.current = null
-          addLog('ERROR', errMsg)
-          setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
-        },
+      // Fire all POSTs simultaneously
+      const runs = await Promise.all(
+        devices.map(udid => postRun({ suite: suiteId, env, device: udid, country, videoEnabled }))
       )
-      closeStreamRef.current = unsubscribe
+
+      const allIds = runs.map(r => r.executionId)
+      executionIdsRef.current = allIds
+      executionIdRef.current  = allIds[0] ?? null
+      setState(prev => ({ ...prev, executionId: allIds[0] ?? null }))
+
+      runs.forEach((r, i) =>
+        addLog('INFO', `🆔 ${r.executionId}${multi ? ` → ${labelOf(i)}` : ''}`)
+      )
+
+      // Open one SSE stream per execution
+      let finished = 0
+
+      const unsubscribers = runs.map(({ executionId }, i) => {
+        const prefix = multi ? `[${labelOf(i)}] ` : ''
+        return streamExecution(
+          executionId,
+          (level, message) => addLog(level, `${prefix}${message}`),
+          () => {
+            finished++
+            if (finished === runs.length) {
+              closeStreamRef.current  = null
+              executionIdRef.current  = null
+              executionIdsRef.current = []
+              setState(prev => ({
+                ...prev,
+                status:      'finished',
+                lastRun:     new Date().toLocaleString('es-MX'),
+                activeSuite: null,
+                executionId: null,
+              }))
+            }
+          },
+          (errMsg) => {
+            addLog('ERROR', errMsg)
+            finished++
+            if (finished === runs.length) {
+              closeStreamRef.current  = null
+              executionIdRef.current  = null
+              executionIdsRef.current = []
+              setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
+            }
+          },
+        )
+      })
+
+      // Close ALL streams on stop
+      closeStreamRef.current = () => unsubscribers.forEach(u => u())
 
     } catch (err) {
       const msg = err instanceof ApiError
@@ -111,11 +148,10 @@ export function useTestRunner() {
       closeStreamRef.current()
       closeStreamRef.current = null
     }
-    const id = executionIdRef.current
-    if (id) {
-      stopExecution(id).catch(console.warn)
-      executionIdRef.current = null
-    }
+    // Abort all active executions on the backend
+    executionIdsRef.current.forEach(id => stopExecution(id).catch(console.warn))
+    executionIdsRef.current = []
+    executionIdRef.current  = null
     addLog('WARN', '⛔ Ejecución abortada por el usuario')
     setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
   }, [addLog])
@@ -125,16 +161,13 @@ export function useTestRunner() {
   }, [])
 
   const attachToExecution = useCallback((executionId: string, suiteName: string) => {
-    if (executionIdRef.current) return  // already tracking one
-    executionIdRef.current = executionId
+    if (executionIdRef.current) return
+    executionIdRef.current  = executionId
+    executionIdsRef.current = [executionId]
     setState(prev => ({
       ...prev,
       status:        'running',
-      passed:        0,
-      failed:        0,
-      skipped:       0,
-      total:         0,
-      totalExpected: 0,
+      passed:        0, failed: 0, skipped: 0, total: 0, totalExpected: 0,
       activeSuite:   suiteName,
       executionId,
       logs:          [],
@@ -145,20 +178,22 @@ export function useTestRunner() {
       executionId,
       addLog,
       (result) => {
-        closeStreamRef.current = null
-        executionIdRef.current = null
+        closeStreamRef.current  = null
+        executionIdRef.current  = null
+        executionIdsRef.current = []
         setState(prev => ({
           ...prev,
-          status:      'finished',
+          status:  'finished',
           ...result,
-          lastRun:     new Date().toLocaleString('es-MX'),
+          lastRun: new Date().toLocaleString('es-MX'),
           activeSuite: null,
           executionId: null,
         }))
       },
       (errMsg) => {
-        closeStreamRef.current = null
-        executionIdRef.current = null
+        closeStreamRef.current  = null
+        executionIdRef.current  = null
+        executionIdsRef.current = []
         addLog('ERROR', errMsg)
         setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
       },

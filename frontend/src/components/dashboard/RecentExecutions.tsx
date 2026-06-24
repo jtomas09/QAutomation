@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { ExternalLink, Play } from 'lucide-react'
 import type { ExecutionSummary, ExecutionStatus } from '../../types'
 import { getExecutions } from '../../api'
+import { PlatformBadge } from '../PlatformIcon'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
   PENDING:   'Pendiente',
@@ -33,6 +34,16 @@ const STATUS_BG: Record<ExecutionStatus, string> = {
   SKIPPED:   'rgba(234,179,8,0.10)',
   COMPLETED: 'rgba(16,185,129,0.12)',
   ABORTED:   'rgba(148,163,184,0.10)',
+}
+
+const IOS_UDID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$/
+
+function inferPlatform(device: string): string {
+  if (IOS_UDID.test(device.trim())) return 'IOS'
+  const d = device.toUpperCase()
+  if (d.includes('IPHONE') || d.includes('IPAD')) return 'IOS'
+  if (d.includes('PIXEL') || d.includes('GALAXY') || d.includes('REDMI') || d.includes('SM-')) return 'ANDROID'
+  return 'ANDROID'
 }
 
 function fmt(iso: string) {
@@ -93,7 +104,7 @@ export default function RecentExecutions({ onViewAll }: Props) {
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr style={{ borderBottom: '1px solid var(--panel-divide)' }}>
-              {['EJECUCIÓN','SUITE','DISPOSITIVO','ESTADO','INICIO','DURACIÓN',''].map(h => (
+              {['EJECUCIÓN','SUITE','DISPOSITIVO','PLATAFORMA','ESTADO','INICIO','DURACIÓN',''].map(h => (
                 <th
                   key={h}
                   className="px-4 py-3 text-left font-bold tracking-widest text-[10px] uppercase"
@@ -107,7 +118,7 @@ export default function RecentExecutions({ onViewAll }: Props) {
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-xs text-slate-600">
+                <td colSpan={8} className="px-4 py-10 text-center text-xs text-slate-600">
                   Sin ejecuciones aún
                 </td>
               </tr>
@@ -134,6 +145,9 @@ export default function RecentExecutions({ onViewAll }: Props) {
                   <td className="px-4 py-3 font-mono font-bold text-indigo-400">{row.executionId}</td>
                   <td className="px-4 py-3 text-slate-200 font-medium">{row.suite}</td>
                   <td className="px-4 py-3 text-slate-500">{row.device}</td>
+                  <td className="px-4 py-3">
+                    <PlatformBadge platform={inferPlatform(row.device ?? '')} size="xs" />
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider"

@@ -2,7 +2,6 @@ import React, { useState } from 'react'
 import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES, getRandomSmokeTests } from './data'
 import { useTestRunner }    from './hooks/useTestRunner'
 import { useBackendHealth } from './hooks/useBackendHealth'
-import { useDeviceStore }   from './hooks/useDeviceStore'
 import { useTheme }         from './hooks/useTheme'
 import { useRunnerStatus }  from './hooks/useRunnerStatus'
 import Sidebar, { type Page } from './components/Sidebar'
@@ -29,12 +28,8 @@ export default function App() {
   const [smokeTests,    setSmokeTests]    = useState(() => getRandomSmokeTests())
   const [videoEnabled,  setVideoEnabled]  = useState(false)
 
-  // Device comes from the store (persisted, configurable)
-  const { devices, activeDevice, setActive } = useDeviceStore()
-  const [deviceOverride, setDeviceOverride] = useState<string | null>(null)
-
-  // The effective device name sent to the backend
-  const effectiveDevice = deviceOverride ?? activeDevice?.deviceName ?? activeDevice?.name ?? 'Galaxy A56 5G'
+  const [selectedDevices,      setSelectedDevices]      = useState<string[]>([])
+  const [selectedDeviceLabels, setSelectedDeviceLabels] = useState<string[]>([])
 
   const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
   const backendHealth = useBackendHealth()
@@ -43,16 +38,15 @@ export default function App() {
   const runningCount  = state.status === 'running' ? 1 : 0
 
   function handleRun() {
-    runTest(suite, env, effectiveDevice, country, videoEnabled)
+    runTest(suite, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)
   }
 
   function handleCountryChange(c: string) {
     setCountry(c)
-    setDrillSuite(null)   // reset drill-down when country changes
+    setDrillSuite(null)
   }
 
-  function handleSelectDevice(deviceName: string) {
-    setDeviceOverride(deviceName)
+  function handleSelectDevice(_deviceName: string) {
     setPage('dashboard')
   }
 
@@ -77,15 +71,15 @@ export default function App() {
           {page === 'dashboard' && (
             <Dashboard
               state={state}
-              suite={suite}     env={env}
-              device={effectiveDevice}
+              suite={suite}              env={env}
+              devices={selectedDevices}  deviceLabels={selectedDeviceLabels}
               country={country}
-              onSuiteChange={setSuite}     onEnvChange={setEnv}
-              onDeviceChange={setDeviceOverride}
+              onSuiteChange={setSuite}   onEnvChange={setEnv}
+              onDevicesChange={(udids, labels) => { setSelectedDevices(udids); setSelectedDeviceLabels(labels) }}
               onCountryChange={handleCountryChange}
-              videoEnabled={videoEnabled}   onVideoToggle={setVideoEnabled}
-              onRun={handleRun}            onStop={stopTest}
-              onClearLog={clearLog}        onViewAll={() => setPage('executions')}
+              videoEnabled={videoEnabled} onVideoToggle={setVideoEnabled}
+              onRun={handleRun}          onStop={stopTest}
+              onClearLog={clearLog}      onViewAll={() => setPage('executions')}
               onManageDevices={() => setPage('devices')}
               onAttach={attachToExecution}
             />
@@ -133,8 +127,8 @@ export default function App() {
                   disabled={state.status === 'running'}
                   activeId={state.activeSuite}
                   onBack={() => setDrillSuite(null)}
-                  onRun={id => runTest(id, env, effectiveDevice, country, videoEnabled)}
-                  onRunAll={() => runTest(drillSuite, env, effectiveDevice, country, videoEnabled)}
+                  onRun={id => runTest(id, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)}
+                  onRunAll={() => runTest(drillSuite, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)}
                 />
               )
             }
@@ -146,7 +140,7 @@ export default function App() {
               } else if (SUITE_TESTS[id]) {
                 setDrillSuite(id)
               } else {
-                runTest(id, env, effectiveDevice, country, videoEnabled)
+                runTest(id, env, selectedDevices, country, videoEnabled, selectedDeviceLabels)
               }
             }
 
