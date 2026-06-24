@@ -494,8 +494,7 @@ public class JobExecutor {
             File projectDir = resolveProjectDir(job, client);
             if (projectDir == null) {
                 // resolveProjectDir already sent error logs
-                client.sendResult(job.executionId, "FAILED",
-                        0, 0, 0, null, List.of());
+                client.sendResult(job.executionId, 0, 0, 0, null, List.of());
                 return;
             }
             String workDir = projectDir.getAbsolutePath();
