@@ -1,12 +1,12 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Plus, Settings, Wifi, WifiOff, Activity, Zap,
-  X, Save, Trash2, CheckCircle2, RefreshCw,
-  Smartphone, Monitor, Cloud, Apple, Info,
+  Wifi, WifiOff, Activity, Zap,
+  RefreshCw, Smartphone, AlertTriangle,
 } from 'lucide-react'
-import type { DeviceConfig } from '../types'
-import { useDeviceStore } from '../hooks/useDeviceStore'
+import { getDevices } from '../api'
+import type { PhysicalDevice } from '../types'
+import { OsAvatar, PlatformBadge } from '../components/PlatformIcon'
 
 import ip15  from '../assets/devices/iphone-15.svg'
 import p8pro from '../assets/devices/pixel-8-pro.svg'
@@ -14,75 +14,197 @@ import s24   from '../assets/devices/galaxy-s24.svg'
 import a56   from '../assets/devices/galaxy-a56.svg'
 import rn13  from '../assets/devices/redmi-note13.svg'
 
-const DEVICE_IMAGE: Record<string, string> = {
-  'galaxy-a56': a56, 'pixel-8-pro': p8pro,
-  'iphone-15':  ip15, 'galaxy-s24': s24, 'redmi-note13': rn13,
+// ─── Image selection ──────────────────────────────────────────────────────────
+
+const ANDROID_MOCKS = [a56, p8pro, s24, rn13]
+
+function pickImage(device: PhysicalDevice): string {
+  if (device.platform?.toUpperCase() === 'IOS') return ip15
+  // Deterministic selection based on UDID so the same device always gets the same image
+  let hash = 0
+  for (let i = 0; i < device.udid.length; i++)
+    hash = (hash * 31 + device.udid.charCodeAt(i)) & 0xffff
+  return ANDROID_MOCKS[hash % ANDROID_MOCKS.length]
 }
 
-const STATUS_META = {
-  available: { label: 'Disponible', color: '#10b981', bg: 'rgba(16,185,129,0.12)', Icon: Wifi     },
-  inuse:     { label: 'En uso',     color: '#6366f1', bg: 'rgba(99,102,241,0.12)', Icon: Activity },
-  offline:   { label: 'Offline',    color: '#f43f5e', bg: 'rgba(244,63,94,0.12)', Icon: WifiOff  },
+// ─── Status helpers ───────────────────────────────────────────────────────────
+
+type CardStatus = 'available' | 'inuse' | 'offline'
+
+function mapStatus(raw: string): CardStatus {
+  const u = (raw ?? '').toUpperCase()
+  if (u === 'AVAILABLE')        return 'available'
+  if (u === 'BUSY' || u === 'INUSE') return 'inuse'
+  return 'offline'
 }
 
-const HUB_META = {
-  'local':           { label: 'Local',            icon: Monitor, color: '#10b981' },
-  'browserstack':    { label: 'BrowserStack',     icon: Cloud,   color: '#f59e0b' },
-  'aws-device-farm': { label: 'AWS Device Farm',  icon: Cloud,   color: '#f97316' },
-  'genymotion':      { label: 'Genymotion Cloud', icon: Cloud,   color: '#818cf8' },
+const STATUS_META: Record<CardStatus, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
+  available: { label: 'Disponible', color: '#10b981', bg: 'rgba(16,185,129,0.12)',  Icon: Wifi     },
+  inuse:     { label: 'En uso',     color: '#6366f1', bg: 'rgba(99,102,241,0.12)',  Icon: Activity },
+  offline:   { label: 'Offline',    color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   Icon: WifiOff  },
 }
 
-const EMPTY: Omit<DeviceConfig, 'id'> = {
-  name: '', platform: 'android', platformVersion: '',
-  deviceName: '', udid: '', automationName: 'UiAutomator2',
-  hub: 'local', appPackage: 'com.cinepolis.movil',
-  appActivity: 'com.cinepolis.movil.MainActivity',
-  status: 'available', isActive: false,
+function accentFor(device: PhysicalDevice, active: boolean): string {
+  if (device.platform?.toUpperCase() === 'IOS') return 'rgba(169,184,216,0.3)'
+  return active ? 'rgba(61,220,132,0.45)' : 'rgba(61,220,132,0.2)'
 }
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
+function SkeletonCard() {
+  return (
+    <div
+      className="flex flex-col rounded-2xl overflow-hidden animate-pulse"
+      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', height: 280 }}
+    >
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-16 h-28 rounded-xl" style={{ background: 'rgba(255,255,255,0.05)' }} />
+      </div>
+      <div className="px-3 pb-3 flex flex-col gap-2">
+        <div className="h-3 rounded-full mx-4" style={{ background: 'rgba(255,255,255,0.07)' }} />
+        <div className="h-2.5 rounded-full mx-6" style={{ background: 'rgba(255,255,255,0.05)' }} />
+        <div className="grid grid-cols-2 gap-1.5 mt-1">
+          <div className="h-7 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }} />
+          <div className="h-7 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SkeletonGrid() {
+  return (
+    <div className="p-6 pb-10">
+      <div className="mb-6">
+        <div className="h-7 w-48 rounded-xl mb-2" style={{ background: 'rgba(255,255,255,0.06)' }} />
+        <div className="h-4 w-72 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)' }} />
+      </div>
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        {[0,1,2,3].map(i => (
+          <div key={i} className="h-20 rounded-2xl animate-pulse" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }} />
+        ))}
+      </div>
+      <div className="grid grid-cols-5 gap-4">
+        {[0,1,2].map(i => <SkeletonCard key={i} />)}
+      </div>
+    </div>
+  )
+}
+
+// ─── Empty / Error states ─────────────────────────────────────────────────────
+
+function EmptyState({ onRefresh }: { onRefresh: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex flex-col items-center justify-center py-24 gap-4"
+    >
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <Smartphone size={28} className="text-slate-600" />
+      </div>
+      <div className="text-center">
+        <div className="text-sm font-bold text-slate-400">No hay dispositivos conectados</div>
+        <div className="text-xs text-slate-600 mt-1">Conecta un dispositivo por USB al equipo donde está instalado el Runner</div>
+      </div>
+      <button
+        onClick={onRefresh}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
+        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <RefreshCw size={12} />
+        Actualizar
+      </button>
+    </motion.div>
+  )
+}
+
+function ErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex flex-col items-center justify-center py-24 gap-4"
+    >
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.15)' }}>
+        <AlertTriangle size={28} style={{ color: '#f43f5e' }} />
+      </div>
+      <div className="text-center">
+        <div className="text-sm font-bold text-slate-300">Runner desconectado</div>
+        <div className="text-xs text-slate-600 mt-1">No fue posible obtener dispositivos. Verifica que el Runner Agent esté activo.</div>
+      </div>
+      <button
+        onClick={onRetry}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
+        style={{ background: 'linear-gradient(135deg, #4f46e5, #6366f1)', boxShadow: '0 4px 14px rgba(99,102,241,0.4)' }}
+      >
+        <RefreshCw size={12} />
+        Reintentar
+      </button>
+    </motion.div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 interface Props {
   onSelectDevice?: (deviceName: string) => void
 }
 
 export default function DevicesPage({ onSelectDevice }: Props) {
-  const { devices, saveDevice, deleteDevice, setActive } = useDeviceStore()
-  const [editing, setEditing] = useState<DeviceConfig | null>(null)
-  const [testing, setTesting] = useState<string | null>(null)
+  const [devices,    setDevices]    = useState<PhysicalDevice[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [activeId,   setActiveId]   = useState<string | null>(null)
+  const [testing,    setTesting]    = useState<string | null>(null)
   const [testResult, setTestResult] = useState<Record<string, 'ok' | 'fail'>>({})
 
-  function openNew() {
-    setEditing({ id: `device-${Date.now()}`, ...EMPTY })
-  }
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(true)
+    try {
+      const data = await getDevices()
+      setDevices(data)
+      setError(false)
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
 
-  function openEdit(d: DeviceConfig) {
-    setEditing({ ...d })
-  }
+  useEffect(() => {
+    load(false)
+    const id = setInterval(() => load(true), 15_000)
+    return () => clearInterval(id)
+  }, [load])
 
-  function handleSave() {
-    if (!editing) return
-    saveDevice(editing)
-    setEditing(null)
-  }
+  const total     = devices.length
+  const available = devices.filter(d => mapStatus(d.status) === 'available').length
+  const inuse     = devices.filter(d => mapStatus(d.status) === 'inuse').length
+  const offline   = devices.filter(d => mapStatus(d.status) === 'offline').length
 
-  function handleDelete(id: string) {
-    deleteDevice(id)
-    if (editing?.id === id) setEditing(null)
-  }
-
-  async function handleTestConnection(d: DeviceConfig) {
-    setTesting(d.id)
+  async function handleTestConnection(d: PhysicalDevice) {
+    setTesting(d.udid)
     await new Promise(r => setTimeout(r, 1800))
-    setTestResult(prev => ({ ...prev, [d.id]: d.status !== 'offline' ? 'ok' : 'fail' }))
+    setTestResult(prev => ({ ...prev, [d.udid]: mapStatus(d.status) !== 'offline' ? 'ok' : 'fail' }))
     setTesting(null)
   }
 
-  function handleSetActive(d: DeviceConfig) {
-    setActive(d.id)
-    onSelectDevice?.(d.deviceName || d.name)
+  function handleSetActive(d: PhysicalDevice) {
+    const next = activeId === d.udid ? null : d.udid
+    setActiveId(next)
+    if (next) onSelectDevice?.(d.deviceName || d.model || d.udid)
   }
+
+  if (loading) return <SkeletonGrid />
 
   return (
     <div className="p-6 pb-10">
+
       {/* Page header */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
@@ -93,29 +215,31 @@ export default function DevicesPage({ onSelectDevice }: Props) {
         <div>
           <h1 className="text-2xl font-extrabold text-slate-100">Dispositivos</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Configura los capabilities de Appium para cada dispositivo
+            Dispositivos físicos detectados por el Runner Agent · actualización automática cada 15s
           </p>
         </div>
         <motion.button
           whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-          onClick={openNew}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white"
+          onClick={() => load(false)}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-60"
           style={{
             background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
             boxShadow: '0 4px 14px rgba(99,102,241,0.4)',
           }}
         >
-          <Plus size={15} />
-          Agregar Dispositivo
+          <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          {refreshing ? 'Actualizando…' : 'Actualizar'}
         </motion.button>
       </motion.div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Total',       value: devices.length,                                 color: '#818cf8' },
-          { label: 'Disponibles', value: devices.filter(d => d.status === 'available').length, color: '#10b981' },
-          { label: 'En uso',      value: devices.filter(d => d.status === 'inuse').length,     color: '#6366f1' },
+          { label: 'Total',       value: total,     color: '#818cf8' },
+          { label: 'Disponibles', value: available,  color: '#10b981' },
+          { label: 'En uso',      value: inuse,      color: '#6366f1' },
+          { label: 'Offline',     value: offline,    color: '#f43f5e' },
         ].map((s, i) => (
           <motion.div
             key={s.label}
@@ -134,34 +258,53 @@ export default function DevicesPage({ onSelectDevice }: Props) {
         ))}
       </div>
 
-      {/* Device grid */}
-      <div className="grid grid-cols-5 gap-4">
-        {devices.map((device, i) => (
-          <DeviceCard
-            key={device.id}
-            device={device}
-            index={i}
-            testResult={testResult[device.id]}
-            isTesting={testing === device.id}
-            onEdit={() => openEdit(device)}
-            onSetActive={() => handleSetActive(device)}
-            onTestConnection={() => handleTestConnection(device)}
-          />
-        ))}
-      </div>
-
-      {/* Edit/Add Modal */}
+      {/* Error banner (non-blocking — show last data + warning) */}
       <AnimatePresence>
-        {editing && (
-          <DeviceModal
-            device={editing}
-            onChange={setEditing}
-            onSave={handleSave}
-            onClose={() => setEditing(null)}
-            onDelete={() => handleDelete(editing.id)}
-          />
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl mb-4"
+            style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)' }}
+          >
+            <AlertTriangle size={14} style={{ color: '#f43f5e', flexShrink: 0 }} />
+            <span className="text-xs text-red-400">Runner desconectado · mostrando último estado conocido</span>
+            <button
+              onClick={() => load(false)}
+              className="ml-auto text-xs font-semibold text-red-400 hover:text-red-200 transition-colors"
+            >
+              Reintentar
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Empty state */}
+      {devices.length === 0 && !error && <EmptyState onRefresh={() => load(false)} />}
+
+      {/* Full error state (no previous data) */}
+      {devices.length === 0 && error && <ErrorState onRetry={() => load(false)} />}
+
+      {/* Device grid */}
+      {devices.length > 0 && (
+        <div className="grid grid-cols-5 gap-4">
+          <AnimatePresence mode="popLayout">
+            {devices.map((device, i) => (
+              <DeviceCard
+                key={device.udid}
+                device={device}
+                index={i}
+                isActive={activeId === device.udid}
+                testResult={testResult[device.udid]}
+                isTesting={testing === device.udid}
+                onSetActive={() => handleSetActive(device)}
+                onTestConnection={() => handleTestConnection(device)}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   )
 }
@@ -169,87 +312,101 @@ export default function DevicesPage({ onSelectDevice }: Props) {
 // ── Device Card ────────────────────────────────────────────────────────────────
 
 function DeviceCard({
-  device, index, testResult, isTesting,
-  onEdit, onSetActive, onTestConnection,
+  device, index, isActive, testResult, isTesting,
+  onSetActive, onTestConnection,
 }: {
-  device: DeviceConfig
+  device: PhysicalDevice
   index: number
+  isActive: boolean
   testResult?: 'ok' | 'fail'
   isTesting: boolean
-  onEdit: () => void
   onSetActive: () => void
   onTestConnection: () => void
 }) {
-  const sm   = STATUS_META[device.status]
-  const hub  = HUB_META[device.hub]
-  const img  = DEVICE_IMAGE[device.id]
+  const statusKey = mapStatus(device.status)
+  const sm        = STATUS_META[statusKey]
+  const img       = pickImage(device)
+  const accent    = accentFor(device, isActive)
+  const isIos     = device.platform?.toUpperCase() === 'IOS'
 
-  const accent = device.platform === 'ios'
-    ? 'rgba(229,229,234,0.25)'
-    : device.isActive ? 'rgba(99,102,241,0.4)' : 'rgba(129,140,248,0.2)'
+  const displayName = device.deviceName || device.model || 'Dispositivo'
+  const platformLabel = isIos ? 'iOS' : 'Android'
+  const version = device.platformVersion ?? '—'
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.06, duration: 0.4 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ delay: index * 0.05, duration: 0.35 }}
       whileHover={{ y: -4, transition: { duration: 0.2 } }}
+      layout
       className="relative flex flex-col rounded-2xl overflow-hidden"
       style={{
-        background: device.isActive
+        background: isActive
           ? 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(99,102,241,0.05))'
           : 'linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))',
-        border: device.isActive
+        border: isActive
           ? '1px solid rgba(99,102,241,0.4)'
           : '1px solid rgba(255,255,255,0.08)',
-        boxShadow: device.isActive
+        boxShadow: isActive
           ? '0 0 24px rgba(99,102,241,0.2), 0 4px 24px rgba(0,0,0,0.4)'
           : '0 4px 24px rgba(0,0,0,0.3)',
       }}
     >
       {/* Active badge */}
-      {device.isActive && (
+      {isActive && (
         <div
-          className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold"
+          className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold z-10"
           style={{ background: 'rgba(99,102,241,0.3)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.4)' }}
         >
-          <CheckCircle2 size={9} />
           ACTIVO
         </div>
       )}
 
-      {/* Settings button */}
-      <button
-        onClick={onEdit}
-        className="absolute top-2.5 right-2.5 w-6 h-6 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-300 transition-colors"
-        style={{ background: 'rgba(255,255,255,0.06)' }}
-      >
-        <Settings size={11} />
-      </button>
+      {/* Status pulse dot top-right */}
+      <motion.div
+        className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full z-10"
+        style={{ background: sm.color, boxShadow: `0 0 8px ${sm.color}` }}
+        animate={statusKey === 'inuse'
+          ? { opacity: [1, 0.35, 1], scale: [1, 1.2, 1] }
+          : { opacity: 1 }
+        }
+        transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+      />
 
       {/* Device image */}
       <div className="flex justify-center items-end pt-8 pb-2" style={{ height: 130 }}>
-        {img ? (
-          <img
-            src={img} alt={device.name}
-            className="h-full w-auto object-contain"
-            style={{
-              filter: `drop-shadow(0 0 12px ${accent}) drop-shadow(0 4px 8px rgba(0,0,0,0.5))`,
-            }}
-          />
-        ) : (
-          <Smartphone size={56} className="text-slate-700" />
-        )}
+        <motion.img
+          src={img}
+          alt={displayName}
+          className="h-full w-auto object-contain relative z-10"
+          style={{
+            filter: `drop-shadow(0 0 14px ${accent}) drop-shadow(0 4px 8px rgba(0,0,0,0.5))`,
+          }}
+          whileHover={{
+            filter: `drop-shadow(0 0 22px ${accent}) drop-shadow(0 6px 12px rgba(0,0,0,0.6))`,
+            transition: { duration: 0.3 },
+          }}
+        />
+        {/* Ground reflection */}
+        <div
+          className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-3 rounded-full pointer-events-none"
+          style={{ background: isIos ? '#a8b8d8' : '#3DDC84', filter: 'blur(8px)', opacity: 0.18 }}
+        />
       </div>
 
       {/* Info */}
       <div className="flex flex-col gap-2 px-3 pb-3">
+        {/* Name + platform */}
         <div className="text-center">
-          <div className="text-[11px] font-bold text-slate-200 leading-tight">{device.name}</div>
-          <div className="text-[9px] text-slate-600 mt-0.5">{device.platform === 'ios' ? 'iOS' : 'Android'} {device.platformVersion}</div>
+          <div className="text-[11px] font-bold text-slate-200 leading-tight line-clamp-2" title={displayName}>
+            {displayName}
+          </div>
+          <div className="text-[9px] text-slate-600 mt-0.5">{platformLabel} {version}</div>
         </div>
 
-        {/* Status + Hub */}
+        {/* Status + Platform badge */}
         <div className="flex items-center justify-between gap-1">
           <span
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold"
@@ -258,12 +415,15 @@ function DeviceCard({
             <sm.Icon size={8} />
             {sm.label}
           </span>
-          <span className="text-[9px] text-slate-600 font-medium">{hub.label}</span>
+          <PlatformBadge platform={device.platform} size="xs" />
         </div>
 
-        {/* UDID / deviceName */}
-        <div className="text-[9px] text-slate-700 font-mono truncate" title={device.udid || device.deviceName}>
-          {device.udid || device.deviceName || '—'}
+        {/* UDID */}
+        <div
+          className="text-[9px] text-slate-700 font-mono truncate"
+          title={device.udid}
+        >
+          {device.udid}
         </div>
 
         {/* Connection test result */}
@@ -271,7 +431,7 @@ function DeviceCard({
           <div
             className="text-center text-[9px] font-bold py-0.5 rounded-lg"
             style={{
-              color: testResult === 'ok' ? '#10b981' : '#f43f5e',
+              color:      testResult === 'ok' ? '#10b981' : '#f43f5e',
               background: testResult === 'ok' ? 'rgba(16,185,129,0.1)' : 'rgba(244,63,94,0.1)',
             }}
           >
@@ -298,363 +458,16 @@ function DeviceCard({
             onClick={onSetActive}
             className="flex items-center justify-center gap-1 py-1.5 rounded-lg text-[9px] font-bold transition-colors"
             style={
-              device.isActive
+              isActive
                 ? { background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }
                 : { background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }
             }
           >
             <Zap size={9} />
-            {device.isActive ? 'En uso' : 'Usar'}
+            {isActive ? 'En uso' : 'Usar'}
           </button>
         </div>
       </div>
     </motion.div>
-  )
-}
-
-// ── Device Modal ───────────────────────────────────────────────────────────────
-
-function DeviceModal({
-  device, onChange, onSave, onClose, onDelete,
-}: {
-  device: DeviceConfig
-  onChange: (d: DeviceConfig) => void
-  onSave: () => void
-  onClose: () => void
-  onDelete: () => void
-}) {
-  const isIOS = device.platform === 'ios'
-
-  const set = (key: keyof DeviceConfig, val: string) =>
-    onChange({ ...device, [key]: val })
-
-  function handlePlatformChange(platform: string) {
-    onChange({
-      ...device,
-      platform: platform as DeviceConfig['platform'],
-      automationName: platform === 'ios' ? 'XCUITest' : 'UiAutomator2',
-    })
-  }
-
-  const iosBorderColor = isIOS ? 'rgba(229,229,234,0.2)' : 'rgba(255,255,255,0.1)'
-  const iosGlow        = isIOS ? '0 0 40px rgba(200,200,220,0.06)' : 'none'
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.93, y: 20 }}
-        animate={{ opacity: 1, scale: 1,    y: 0  }}
-        exit={{   opacity: 0, scale: 0.93, y: 20  }}
-        transition={{ duration: 0.25, ease: 'easeOut' }}
-        className="w-full max-w-2xl rounded-2xl overflow-hidden"
-        style={{
-          background: isIOS
-            ? 'linear-gradient(135deg, #0e1220, #0a0f1b)'
-            : 'linear-gradient(135deg, #0d1226, #080e1c)',
-          border: `1px solid ${iosBorderColor}`,
-          boxShadow: `0 24px 80px rgba(0,0,0,0.7), ${iosGlow}`,
-        }}
-      >
-        {/* Modal header */}
-        <div
-          className="flex items-center justify-between px-6 py-4"
-          style={{ borderBottom: `1px solid ${iosBorderColor}` }}
-        >
-          <div className="flex items-center gap-3">
-            {isIOS ? (
-              <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center"
-                style={{ background: 'rgba(229,229,234,0.1)', border: '1px solid rgba(229,229,234,0.15)' }}
-              >
-                <Apple size={16} style={{ color: '#e5e5ea' }} />
-              </div>
-            ) : (
-              <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center"
-                style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)' }}
-              >
-                <Smartphone size={16} className="text-indigo-400" />
-              </div>
-            )}
-            <div>
-              <div className="text-sm font-bold text-slate-100">Configurar Dispositivo</div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {isIOS ? 'Capabilities XCUITest · iOS' : 'Capabilities de Appium · Android'}
-              </div>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-300 transition-colors"
-            style={{ background: 'rgba(255,255,255,0.05)' }}>
-            <X size={14} />
-          </button>
-        </div>
-
-        {/* Modal body */}
-        <div className="p-6 grid grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
-
-          {/* Nombre */}
-          <Field label="Nombre del Dispositivo" span>
-            <Input value={device.name} onChange={v => set('name', v)}
-              placeholder={isIOS ? 'iPhone 15 Pro' : 'Galaxy A56 5G'} />
-          </Field>
-
-          {/* Platform */}
-          <Field label="Plataforma">
-            <Select value={device.platform} onChange={handlePlatformChange}
-              options={[{ value: 'android', label: 'Android' }, { value: 'ios', label: 'iOS' }]} />
-          </Field>
-
-          {/* Platform Version */}
-          <Field label="Versión de Plataforma">
-            <Input value={device.platformVersion} onChange={v => set('platformVersion', v)}
-              placeholder={isIOS ? '17.4' : '14'} />
-          </Field>
-
-          {/* Device Name (Appium cap) */}
-          <Field label="deviceName (Appium)">
-            <Input value={device.deviceName} onChange={v => set('deviceName', v)}
-              placeholder={isIOS ? 'iPhone 15' : 'Galaxy A56 5G'} />
-          </Field>
-
-          {/* UDID */}
-          <Field label={isIOS ? 'UDID del dispositivo' : 'UDID / Serial'} span>
-            <Input value={device.udid} onChange={v => set('udid', v)}
-              placeholder={isIOS ? '00008110-001A34C13E02401E' : 'emulator-5554 ó R3CT203YHVA'} mono />
-          </Field>
-
-          {/* Automation Name */}
-          <Field label="automationName">
-            <Select value={device.automationName}
-              onChange={v => set('automationName', v as DeviceConfig['automationName'])}
-              options={isIOS
-                ? [{ value: 'XCUITest', label: 'XCUITest (iOS)' }]
-                : [
-                    { value: 'UiAutomator2', label: 'UiAutomator2' },
-                    { value: 'Espresso',     label: 'Espresso'     },
-                  ]
-              } />
-          </Field>
-
-          {/* Hub */}
-          <Field label="Hub de Ejecución">
-            <Select value={device.hub}
-              onChange={v => set('hub', v as DeviceConfig['hub'])}
-              options={[
-                { value: 'local',           label: 'Local'            },
-                { value: 'browserstack',    label: 'BrowserStack'     },
-                { value: 'aws-device-farm', label: 'AWS Device Farm'  },
-                { value: 'genymotion',      label: 'Genymotion Cloud' },
-              ]} />
-          </Field>
-
-          {/* Status */}
-          <Field label="Estado">
-            <Select value={device.status}
-              onChange={v => set('status', v as DeviceConfig['status'])}
-              options={[
-                { value: 'available', label: 'Disponible' },
-                { value: 'inuse',     label: 'En uso'     },
-                { value: 'offline',   label: 'Offline'    },
-              ]} />
-          </Field>
-
-          {/* ── Android fields ── */}
-          {!isIOS && (
-            <>
-              <Field label="appPackage" span>
-                <Input value={device.appPackage} onChange={v => set('appPackage', v)}
-                  placeholder="com.cinepolis.movil" mono />
-              </Field>
-              <Field label="appActivity" span>
-                <Input value={device.appActivity} onChange={v => set('appActivity', v)}
-                  placeholder="com.cinepolis.movil.MainActivity" mono />
-              </Field>
-            </>
-          )}
-
-          {/* ── iOS fields ── */}
-          {isIOS && (
-            <>
-              {/* Separator */}
-              <div className="col-span-2 flex items-center gap-3 mt-1">
-                <Apple size={11} style={{ color: '#e5e5ea', flexShrink: 0 }} />
-                <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#e5e5ea99' }}>
-                  Configuración iOS
-                </div>
-                <div className="flex-1" style={{ height: 1, background: 'rgba(229,229,234,0.1)' }} />
-              </div>
-
-              {/* Bundle ID */}
-              <Field label="bundleId *" span>
-                <Input value={device.appPackage} onChange={v => set('appPackage', v)}
-                  placeholder="com.cinepolis.ios" mono />
-              </Field>
-
-              {/* Xcode Org ID */}
-              <Field label="xcodeOrgId (dispositivo real)">
-                <Input value={device.xcodeOrgId ?? ''} onChange={v => set('xcodeOrgId', v)}
-                  placeholder="A1B2C3D4E5" mono />
-              </Field>
-
-              {/* Signing Identity */}
-              <Field label="xcodeSigningId (dispositivo real)">
-                <Input value={device.xcodeSigningId ?? ''} onChange={v => set('xcodeSigningId', v)}
-                  placeholder="iPhone Developer" />
-              </Field>
-
-              {/* WDA Port */}
-              <Field label="wdaLocalPort (opcional)">
-                <Input value={device.wdaLocalPort ?? ''} onChange={v => set('wdaLocalPort', v)}
-                  placeholder="8100" mono />
-              </Field>
-
-              {/* IPA path */}
-              <Field label="Ruta IPA · app (opcional)" span>
-                <Input value={device.ipaPath ?? ''} onChange={v => set('ipaPath', v)}
-                  placeholder="/builds/CinePolis.ipa" mono />
-              </Field>
-
-              {/* Info banner */}
-              <div
-                className="col-span-2 flex items-start gap-2 px-3 py-2.5 rounded-xl"
-                style={{ background: 'rgba(229,229,234,0.05)', border: '1px solid rgba(229,229,234,0.1)' }}
-              >
-                <Info size={12} style={{ color: '#e5e5ea88', marginTop: 1, flexShrink: 0 }} />
-                <p className="text-[10px] leading-relaxed" style={{ color: '#e5e5ea77' }}>
-                  Para <strong style={{ color: '#e5e5eaaa' }}>dispositivos físicos</strong>, completa
-                  {' '}xcodeOrgId y xcodeSigningId (Ajustes › Apple Developer).
-                  Para el <strong style={{ color: '#e5e5eaaa' }}>simulador</strong>, solo se necesita udid y bundleId.
-                </p>
-              </div>
-            </>
-          )}
-
-          {/* Capabilities JSON preview */}
-          <Field label="Preview JSON capabilities" span>
-            <div
-              className="p-3 rounded-xl text-[10px] font-mono text-slate-400 leading-relaxed overflow-auto"
-              style={{ background: 'rgba(0,0,0,0.3)', border: `1px solid ${iosBorderColor}`, maxHeight: 150 }}
-            >
-              <pre>{JSON.stringify({
-                platformName:    isIOS ? 'iOS' : 'Android',
-                platformVersion: device.platformVersion,
-                deviceName:      device.deviceName,
-                udid:            device.udid || undefined,
-                automationName:  device.automationName,
-                ...(isIOS ? {
-                  bundleId: device.appPackage,
-                  ...(device.xcodeOrgId     && { xcodeOrgId:     device.xcodeOrgId     }),
-                  ...(device.xcodeSigningId && { xcodeSigningId: device.xcodeSigningId }),
-                  ...(device.wdaLocalPort   && { wdaLocalPort:   Number(device.wdaLocalPort) }),
-                  ...(device.ipaPath        && { app:            device.ipaPath }),
-                } : {
-                  appPackage:  device.appPackage,
-                  appActivity: device.appActivity,
-                }),
-              }, null, 2)}</pre>
-            </div>
-          </Field>
-        </div>
-
-        {/* Modal footer */}
-        <div
-          className="flex items-center justify-between px-6 py-4 gap-3"
-          style={{ borderTop: `1px solid ${iosBorderColor}` }}
-        >
-          <button
-            onClick={onDelete}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-400 hover:text-red-300 transition-colors"
-            style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.15)' }}
-          >
-            <Trash2 size={13} />
-            Eliminar
-          </button>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-            >
-              Cancelar
-            </button>
-            <motion.button
-              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-              onClick={onSave}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white"
-              style={isIOS
-                ? { background: 'linear-gradient(135deg, #3a3a4a, #4a4a5a)', boxShadow: '0 4px 14px rgba(200,200,220,0.15)' }
-                : { background: 'linear-gradient(135deg, #4f46e5, #6366f1)', boxShadow: '0 4px 14px rgba(99,102,241,0.35)' }
-              }
-            >
-              <Save size={13} />
-              Guardar
-            </motion.button>
-          </div>
-        </div>
-      </motion.div>
-    </motion.div>
-  )
-}
-
-// ── Primitives ─────────────────────────────────────────────────────────────────
-
-function Field({ label, children, span }: { label: string; children: React.ReactNode; span?: boolean }) {
-  return (
-    <div className={span ? 'col-span-2' : 'col-span-1'}>
-      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-        {label}
-      </label>
-      {children}
-    </div>
-  )
-}
-
-function Input({ value, onChange, placeholder, mono }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean
-}) {
-  return (
-    <input
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={`w-full px-3 py-2 rounded-xl text-xs text-slate-200 outline-none transition-all ${mono ? 'font-mono' : ''}`}
-      style={{
-        background: 'rgba(255,255,255,0.05)',
-        border: '1px solid rgba(255,255,255,0.1)',
-      }}
-      onFocus={e  => (e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)')}
-      onBlur={e   => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)')}
-    />
-  )
-}
-
-function Select({ value, onChange, options }: {
-  value: string
-  onChange: (v: string) => void
-  options: { value: string; label: string }[]
-}) {
-  return (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      className="w-full appearance-none px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 outline-none"
-      style={{
-        background: 'rgba(255,255,255,0.05)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E\")",
-        backgroundRepeat: 'no-repeat',
-        backgroundPosition: 'right 8px center',
-      }}
-    >
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
   )
 }
