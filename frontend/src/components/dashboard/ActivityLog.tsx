@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check } from 'lucide-react'
+import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check, Wrench } from 'lucide-react'
 import type { LogEntry } from '../../types'
+import { isFunctionalLog } from '../../utils/logFilter'
 
 const LEVEL_COLOR: Record<string, string> = {
   INFO:    '#60a5fa',
@@ -39,6 +40,11 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
   const bottomRef  = useRef<HTMLDivElement>(null)
   const [showExtract, setShowExtract] = useState(false)
   const [copied,      setCopied]      = useState(false)
+  const [showTech,    setShowTech]    = useState(false)
+
+  const functionalLogs = logs.filter(isFunctionalLog)
+  const visibleLogs    = showTech ? logs : functionalLogs
+  const hiddenCount    = logs.length - functionalLogs.length
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -84,7 +90,10 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
           <div>
             <div className="text-sm font-bold text-slate-100">Actividad en Tiempo Real</div>
             <div className="text-xs text-slate-500 mt-0.5">
-              {logs.length} eventos recientes
+              {showTech
+                ? `${logs.length} eventos totales`
+                : `${functionalLogs.length} eventos funcionales${hiddenCount > 0 ? ` · ${hiddenCount} técnicos ocultos` : ''}`
+              }
             </div>
           </div>
         </div>
@@ -106,6 +115,18 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
             Extraer Log
           </button>
           <button
+            onClick={() => setShowTech(s => !s)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-colors"
+            style={{
+              background: showTech ? 'rgba(249,115,22,0.18)' : 'rgba(249,115,22,0.08)',
+              border: `1px solid ${showTech ? 'rgba(249,115,22,0.45)' : 'rgba(249,115,22,0.2)'}`,
+              color: showTech ? '#fb923c' : '#f97316',
+            }}
+          >
+            <Wrench size={11} />
+            {showTech ? 'Vista QA' : 'Log Técnico'}
+          </button>
+          <button
             onClick={onViewAll}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
             style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}
@@ -121,14 +142,19 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
         className="flex-1 min-h-0 overflow-y-auto px-4 py-3 font-mono text-[11px] leading-relaxed"
         style={{ background: 'var(--terminal-bg)' }}
       >
-        {logs.length === 0 ? (
+        {visibleLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-600">
             <Terminal size={28} className="opacity-30" />
-            <span className="text-xs">Sin actividad reciente…</span>
+            <span className="text-xs">
+              {logs.length === 0
+                ? 'Sin actividad reciente…'
+                : 'Sin eventos funcionales aún — pulsa "Log Técnico" para ver la actividad de infraestructura'
+              }
+            </span>
           </div>
         ) : (
           <AnimatePresence initial={false}>
-            {logs.slice(-60).map(entry => (
+            {visibleLogs.slice(-60).map(entry => (
               <motion.div
                 key={entry.id}
                 initial={{ opacity: 0, x: -8 }}
@@ -195,7 +221,7 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
                   </div>
                   <div>
                     <div className="text-sm font-bold text-slate-100">Extraer Log en Texto</div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">{logs.length} entradas</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{logs.length} entradas (log completo)</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
