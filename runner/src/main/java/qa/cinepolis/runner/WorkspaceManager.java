@@ -156,22 +156,45 @@ public class WorkspaceManager {
     // ── Gradle validation ─────────────────────────────────────────────────────
 
     private File validateAndReturn(String executionId) {
-        boolean isWindows      = System.getProperty("os.name", "").toLowerCase().contains("win");
-        boolean gradlew        = new File(workspaceDir, isWindows ? "gradlew.bat" : "gradlew").exists();
+        boolean isWindows   = System.getProperty("os.name", "").toLowerCase().contains("win");
+        String  gradlewName = isWindows ? "gradlew.bat" : "gradlew";
+        File    gradlewFile = new File(workspaceDir, gradlewName);
+
+        boolean gradlew        = gradlewFile.exists();
         boolean buildGradle    = new File(workspaceDir, "build.gradle").exists()
                               || new File(workspaceDir, "build.gradle.kts").exists();
         boolean settingsGradle = new File(workspaceDir, "settings.gradle").exists()
                               || new File(workspaceDir, "settings.gradle.kts").exists();
-        boolean valid          = gradlew && buildGradle && settingsGradle;
+
+        // ── Ensure gradlew is executable (git clone does not preserve +x on all systems) ──
+        if (gradlew && !isWindows) {
+            client.sendLog(executionId, "INFO", "🔧 Verificando permisos de gradlew...");
+            if (gradlewFile.canExecute()) {
+                client.sendLog(executionId, "INFO", "⚠ gradlew ya tenía permisos de ejecución.");
+            } else {
+                gradlewFile.setExecutable(true);
+                if (gradlewFile.canExecute()) {
+                    client.sendLog(executionId, "INFO", "✅ Permisos aplicados correctamente.");
+                } else {
+                    client.sendLog(executionId, "ERROR",
+                            "❌ No se pudieron aplicar permisos de ejecución a gradlew.");
+                }
+            }
+        }
+
+        boolean execOk = isWindows || gradlewFile.canExecute();
+        boolean valid  = gradlew && buildGradle && settingsGradle && execOk;
 
         // Report to backend so the UI can show ✓/✗ badges
         client.reportProjectValidation(
-                workspaceDir.getAbsolutePath(), gradlew, buildGradle, settingsGradle, valid);
+                workspaceDir.getAbsolutePath(), gradlew && execOk, buildGradle, settingsGradle, valid);
 
         if (!gradlew)
             client.sendLog(executionId, "ERROR",
-                    "❌ No se encontró " + (isWindows ? "gradlew.bat" : "gradlew")
-                    + " en: " + workspaceDir.getAbsolutePath());
+                    "❌ No se encontró " + gradlewName + " en: " + workspaceDir.getAbsolutePath());
+        if (gradlew && !execOk)
+            client.sendLog(executionId, "ERROR",
+                    "❌ gradlew no tiene permisos de ejecución: " + gradlewFile.getAbsolutePath());
         if (!buildGradle)
             client.sendLog(executionId, "ERROR",
                     "❌ No se encontró build.gradle[.kts] en: " + workspaceDir.getAbsolutePath());
@@ -187,8 +210,11 @@ public class WorkspaceManager {
     }
 
     private boolean isValidGradleProject() {
-        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
-        return new File(workspaceDir, isWindows ? "gradlew.bat" : "gradlew").exists()
+        boolean isWindows   = System.getProperty("os.name", "").toLowerCase().contains("win");
+        File    gradlewFile = new File(workspaceDir, isWindows ? "gradlew.bat" : "gradlew");
+        if (!gradlewFile.exists()) return false;
+        if (!isWindows && !gradlewFile.canExecute()) gradlewFile.setExecutable(true);
+        return (isWindows || gradlewFile.canExecute())
             && (new File(workspaceDir, "build.gradle").exists()
                 || new File(workspaceDir, "build.gradle.kts").exists())
             && (new File(workspaceDir, "settings.gradle").exists()
