@@ -227,10 +227,29 @@ public class DriverFactory {
             }
             log.info("[DriverFactory] Hub URL : {}", hub);
             log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
-            IOSDriver d = new IOSDriver(hub, options);
-            d.manage().timeouts().implicitlyWait(Duration.ZERO);
-            log.info("[DriverFactory] IOSDriver OK — sessionId={}", d.getSessionId());
-            return d;
+            try {
+                IOSDriver d = new IOSDriver(hub, options);
+                d.manage().timeouts().implicitlyWait(Duration.ZERO);
+                log.info("[DriverFactory] IOSDriver OK — sessionId={}", d.getSessionId());
+                return d;
+            } catch (Exception iosEx) {
+                log.error("[DriverFactory][iOS] ══════════ APPIUM SESSION CREATION FAILED ══════════");
+                log.error("[DriverFactory][iOS] Hub            : {}", hub);
+                log.error("[DriverFactory][iOS] Capabilities   :\n{}", options.toJson());
+                log.error("[DriverFactory][iOS] Exception class: {}", iosEx.getClass().getName());
+                log.error("[DriverFactory][iOS] Full message   :\n{}", iosEx.getMessage());
+                int depth = 0;
+                Throwable t = iosEx;
+                while (t.getCause() != null) {
+                    t = t.getCause();
+                    depth++;
+                    log.error("[DriverFactory][iOS] Cause[{}] {}: {}",
+                            depth, t.getClass().getName(), t.getMessage());
+                }
+                log.error("[DriverFactory][iOS] Full stacktrace:", iosEx);
+                log.error("[DriverFactory][iOS] ══════════════════════════════════════════════════");
+                throw iosEx;
+            }
         } else {
             UiAutomator2Options options = new UiAutomator2Options();
             URL hub;
