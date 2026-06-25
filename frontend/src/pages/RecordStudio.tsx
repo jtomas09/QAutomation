@@ -9,7 +9,7 @@ import {
   MoveHorizontal, ChevronsDown, Keyboard, Clock, Code2,
   FileCode2, Layers3, Plus, Trash2, Play, Circle,
   Hand, Zap, Search, Wifi, Eye, AlertCircle, Link2,
-  Pencil, CheckCircle,
+  Pencil, CheckCircle, Package, PlayCircle,
 } from 'lucide-react'
 import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
@@ -4092,13 +4092,24 @@ interface HeaderStepProps {
   n: number
   label: string
   value: string | null
+  sub?: string | null
+  statusBadge?: 'available' | 'busy' | 'offline' | null
   active: boolean
   options: string[]
   onSelect: (val: string) => void
   placeholder?: string
+  icon?: React.ReactNode
 }
 
-function HeaderStepPill({ n, label, value, active, options, onSelect }: HeaderStepProps) {
+const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+  available: { label: 'Disponible', color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
+  busy:      { label: 'Ocupado',    color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
+  offline:   { label: 'Offline',   color: '#64748b', bg: 'rgba(100,116,139,0.12)' },
+}
+
+function HeaderStepPill({
+  n, label, value, sub, statusBadge, active, options, onSelect, icon,
+}: HeaderStepProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -4110,6 +4121,8 @@ function HeaderStepPill({ n, label, value, active, options, onSelect }: HeaderSt
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const badge = statusBadge ? STATUS_BADGE[statusBadge] : null
+
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
@@ -4117,29 +4130,31 @@ function HeaderStepPill({ n, label, value, active, options, onSelect }: HeaderSt
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 7,
-          padding: '6px 10px',
-          borderRadius: 7,
-          backgroundColor: active ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-          border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
+          gap: 10,
+          padding: '8px 12px',
+          borderRadius: 8,
+          backgroundColor: active ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${active ? 'rgba(99,102,241,0.35)' : 'rgba(255,255,255,0.08)'}`,
           cursor: options.length > 0 ? 'pointer' : 'default',
           color: '#d4d4d4',
           transition: 'all 0.15s',
+          minWidth: 170,
+          textAlign: 'left',
         }}
       >
-        {/* Number */}
+        {/* Step number badge */}
         <div
           style={{
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             borderRadius: '50%',
             backgroundColor: active ? '#6366f1' : 'rgba(255,255,255,0.08)',
-            border: active ? 'none' : '1px solid rgba(255,255,255,0.15)',
+            border: active ? 'none' : '1px solid rgba(255,255,255,0.12)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: active ? '#fff' : '#666',
-            fontSize: 10,
+            color: active ? '#fff' : '#555',
+            fontSize: 11,
             fontWeight: 700,
             flexShrink: 0,
           }}
@@ -4147,14 +4162,78 @@ function HeaderStepPill({ n, label, value, active, options, onSelect }: HeaderSt
           {n}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-          <span style={{ fontSize: 9, color: '#666', lineHeight: 1 }}>{label}</span>
-          <span style={{ fontSize: 11, color: value ? '#e0e0e0' : '#555', lineHeight: 1.3 }}>
+        {/* Optional icon */}
+        {icon && (
+          <div style={{ flexShrink: 0, opacity: active ? 1 : 0.4 }}>{icon}</div>
+        )}
+
+        {/* Text block */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 9, color: '#5c6370', lineHeight: 1, marginBottom: 3 }}>
+            {label}
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: value ? '#e2e8f0' : '#475569',
+              lineHeight: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: 140,
+            }}
+          >
             {value ?? 'Seleccionar'}
-          </span>
+          </div>
+          {sub && (
+            <div
+              style={{
+                fontSize: 9,
+                color: '#475569',
+                lineHeight: 1,
+                marginTop: 3,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: 140,
+              }}
+            >
+              {sub}
+            </div>
+          )}
         </div>
 
-        {options.length > 0 && <ChevronDown size={11} color="#666" />}
+        {/* Status badge */}
+        {badge && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 7px',
+              borderRadius: 10,
+              backgroundColor: badge.bg,
+              flexShrink: 0,
+            }}
+          >
+            <div
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: '50%',
+                backgroundColor: badge.color,
+              }}
+            />
+            <span style={{ fontSize: 9, color: badge.color, fontWeight: 600 }}>
+              {badge.label}
+            </span>
+          </div>
+        )}
+
+        {options.length > 0 && (
+          <ChevronDown size={11} color="#4b5563" style={{ flexShrink: 0 }} />
+        )}
       </button>
 
       <AnimatePresence>
@@ -4169,28 +4248,25 @@ function HeaderStepPill({ n, label, value, active, options, onSelect }: HeaderSt
               top: '100%',
               left: 0,
               marginTop: 4,
-              backgroundColor: '#1e2027',
+              backgroundColor: '#161b22',
               border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 7,
-              minWidth: 180,
-              zIndex: 100,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              borderRadius: 8,
+              minWidth: 200,
+              zIndex: 200,
+              boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
               overflow: 'hidden',
             }}
           >
             {options.map((opt) => (
               <button
                 key={opt}
-                onClick={() => {
-                  onSelect(opt)
-                  setOpen(false)
-                }}
+                onClick={() => { onSelect(opt); setOpen(false) }}
                 style={{
                   display: 'block',
                   width: '100%',
                   textAlign: 'left',
-                  padding: '7px 12px',
-                  fontSize: 11,
+                  padding: '8px 14px',
+                  fontSize: 12,
                   color: '#d4d4d4',
                   background: 'none',
                   border: 'none',
@@ -4198,8 +4274,7 @@ function HeaderStepPill({ n, label, value, active, options, onSelect }: HeaderSt
                   borderBottom: '1px solid rgba(255,255,255,0.04)',
                 }}
                 onMouseEnter={(e) => {
-                  ;(e.currentTarget as HTMLButtonElement).style.backgroundColor =
-                    'rgba(255,255,255,0.06)'
+                  ;(e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(99,102,241,0.12)'
                 }}
                 onMouseLeave={(e) => {
                   ;(e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'
@@ -4623,59 +4698,107 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           zIndex: 10,
         }}
       >
-        {/* Steps pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Video size={16} color="#6366f1" style={{ flexShrink: 0 }} />
-          <span
-            style={{ color: '#e0e0e0', fontWeight: 700, fontSize: 14, marginRight: 12 }}
-          >
-            Record Studio
-          </span>
-
+        {/* Steps */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap' }}>
           <HeaderStepPill
             n={1}
             label="Seleccionar Dispositivo"
             value={selectedDevice?.deviceName ?? null}
+            sub={selectedDevice ? `${selectedDevice.platform} ${selectedDevice.platformVersion ?? ''}`.trim() : null}
+            statusBadge={
+              selectedDevice
+                ? selectedDevice.status === 'AVAILABLE'
+                  ? 'available'
+                  : selectedDevice.status === 'BUSY'
+                  ? 'busy'
+                  : 'offline'
+                : null
+            }
             active={!!selectedDevice}
             options={deviceNames}
             onSelect={handleSelectDevice}
+            icon={<Smartphone size={14} color={selectedDevice ? '#818cf8' : '#374151'} />}
           />
 
-          <ChevronRight size={12} color="rgba(255,255,255,0.2)" />
+          <ChevronRight size={12} color="rgba(255,255,255,0.15)" style={{ flexShrink: 0 }} />
 
           <HeaderStepPill
             n={2}
             label="Seleccionar Aplicación"
             value={appConfig?.appName ?? null}
+            sub={appConfig?.appPackage ?? appConfig?.bundleId ?? null}
             active={!!appConfig}
             options={appNames}
             onSelect={handleSelectApp}
+            icon={<Package size={14} color={appConfig ? '#34d399' : '#374151'} />}
           />
 
-          <ChevronRight size={12} color="rgba(255,255,255,0.2)" />
+          <ChevronRight size={12} color="rgba(255,255,255,0.15)" style={{ flexShrink: 0 }} />
 
           <HeaderStepPill
             n={3}
             label="Modo de Ejecución"
-            value={appMode}
+            value={
+              appMode === 'INSTALLED'
+                ? 'App Instalada (Play Store)'
+                : appMode === 'APK'
+                ? 'Archivo APK'
+                : appMode === 'IPA'
+                ? 'Archivo IPA'
+                : appMode
+            }
             active={true}
             options={modes}
             onSelect={handleSelectMode}
+            icon={<PlayCircle size={14} color="#60a5fa" />}
           />
         </div>
 
-        {/* Recording controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {/* Minimal indicator when recording — the bar below shows full details */}
+        {/* Recording section */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           {recState === 'recording' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <motion.div
-                animate={{ opacity: [1, 0.2, 1] }}
-                transition={{ repeat: Infinity, duration: 1 }}
-                style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#ef4444' }}
-              />
-              <span style={{ color: '#ef4444', fontWeight: 700, fontSize: 11, letterSpacing: 0.5 }}>
-                GRABANDO
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                gap: 2,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <motion.div
+                  animate={{ opacity: [1, 0.2, 1] }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: '#ef4444',
+                    boxShadow: '0 0 6px rgba(239,68,68,0.7)',
+                  }}
+                />
+                <span
+                  style={{
+                    color: '#ef4444',
+                    fontWeight: 800,
+                    fontSize: 13,
+                    letterSpacing: 1.5,
+                  }}
+                >
+                  GRABANDO
+                </span>
+              </div>
+              <span
+                style={{
+                  fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: '#e2e8f0',
+                  letterSpacing: 2,
+                  lineHeight: 1,
+                }}
+              >
+                {elapsedStr}
               </span>
             </div>
           )}
@@ -4685,24 +4808,26 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
-              padding: '7px 16px',
-              borderRadius: 7,
+              gap: 7,
+              padding: '9px 18px',
+              borderRadius: 8,
               fontSize: 12,
-              fontWeight: 600,
+              fontWeight: 700,
               cursor: 'pointer',
               transition: 'all 0.2s',
+              letterSpacing: 0.3,
               ...(recState === 'idle'
                 ? {
-                    background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(74,222,128,0.12))',
-                    border: '1px solid rgba(34,197,94,0.4)',
+                    background: 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(74,222,128,0.1))',
+                    border: '1px solid rgba(34,197,94,0.45)',
                     color: '#4ade80',
-                    boxShadow: '0 0 12px rgba(34,197,94,0.1)',
+                    boxShadow: '0 0 14px rgba(34,197,94,0.08)',
                   }
                 : {
-                    background: 'rgba(239,68,68,0.08)',
-                    border: '1px solid rgba(239,68,68,0.3)',
-                    color: '#ef4444',
+                    background: 'rgba(239,68,68,0.1)',
+                    border: '1px solid rgba(239,68,68,0.4)',
+                    color: '#f87171',
+                    boxShadow: '0 0 14px rgba(239,68,68,0.08)',
                   }),
             }}
           >
@@ -4713,8 +4838,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               </>
             ) : (
               <>
-                <Square size={11} />
-                Detener
+                <Square size={11} fill="#f87171" />
+                Detener Grabación
               </>
             )}
           </button>
