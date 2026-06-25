@@ -245,13 +245,20 @@ public class DriverFactory {
                 log.error("[DriverFactory][iOS] Hub            : {}", hub);
                 log.error("[DriverFactory][iOS] Capabilities   :\n{}", options.toJson());
                 log.error("[DriverFactory][iOS] Exception class: {}", iosEx.getClass().getName());
-                log.error("[DriverFactory][iOS] Full message   :\n{}", iosEx.getMessage());
+
+                // Structured W3C response fields extracted from the Appium exception message.
+                // Appium returns: {"value":{"error":"...","message":"...","stacktrace":"..."}}
+                // Selenium deserializes these into the exception message as:
+                //   "... Message: <value.message>\nStacktrace:\n<value.stacktrace>"
+                extractAndLogAppiumResponse(iosEx, hub);
+
+                // Full cause chain
                 int depth = 0;
                 Throwable t = iosEx;
                 while (t.getCause() != null) {
                     t = t.getCause();
                     depth++;
-                    log.error("[DriverFactory][iOS] Cause[{}] {}: {}",
+                    log.error("[DriverFactory][iOS] Cause[{}] {} : {}",
                             depth, t.getClass().getName(), t.getMessage());
                 }
                 log.error("[DriverFactory][iOS] Full stacktrace:", iosEx);
@@ -769,12 +776,27 @@ public class DriverFactory {
 
         if ("iOS".equalsIgnoreCase(platform)) {
             if (msg.contains("xcuitest") && (msg.contains("not found") || msg.contains("not installed"))) {
-                log.error("[Diagnose] XCUITest driver NOT installed in Appium.");
-                log.error("  Solucion: appium driver install xcuitest");
+                log.error("[Diagnose][iOS] XCUITest driver NOT installed in Appium.");
+                log.error("[Diagnose][iOS]   Solucion: appium driver install xcuitest");
             } else if (msg.contains("connection refused") || root.contains("connection refused")) {
-                log.error("[Diagnose] Appium server NO esta corriendo. Solucion: appium --port 4723");
-            } else if (msg.contains("xcode") || msg.contains("instruments")) {
-                log.error("[Diagnose] Error de Xcode/Instruments. Verifica que Xcode Command Line Tools esten instalados.");
+                log.error("[Diagnose][iOS] Appium server NO esta corriendo. Solucion: appium --port 4723");
+            } else if (msg.contains("xcode") || msg.contains("instruments")
+                    || msg.contains("wda") || msg.contains("webdriveragent")) {
+                // Never replace the Appium error with a generic hint — print the actual cause.
+                String rawMsg = e.getMessage() != null ? e.getMessage() : "";
+                String origErr = extractSection(rawMsg, "Original error:", "\n");
+                if (!origErr.isBlank()) {
+                    log.error("[Diagnose][iOS] Original error : {}", origErr.trim());
+                }
+                String valueMsg = extractSection(rawMsg, "Message:", "\nStacktrace:");
+                if (!valueMsg.isBlank()) {
+                    log.error("[Diagnose][iOS] value.message  : {}", valueMsg.trim());
+                }
+                if (origErr.isBlank() && valueMsg.isBlank() && !rawMsg.isBlank()) {
+                    log.error("[Diagnose][iOS] Appium error   : {}",
+                            rawMsg.lines().limit(15).reduce("", (a, b) -> a + "\n" + b).trim());
+                }
+                log.error("[Diagnose][iOS] Revisa el Log Tecnico para el stacktrace completo.");
             }
         } else {
             if (msg.contains("uiautomator2") && (msg.contains("not found") || msg.contains("not installed"))) {
@@ -789,6 +811,81 @@ public class DriverFactory {
                 log.error("[Diagnose] Timeout. Considera aumentar uia2LaunchTimeout en appium.properties.");
             }
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // iOS — Appium W3C response parser
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Parses and logs the W3C response fields that Appium embeds in the exception message.
+     * Appium response format:
+     *   {"value":{"error":"session not created","message":"...","stacktrace":"..."}}
+     * Selenium 4 maps these to exception message as:
+     *   "... Response code 500. Message: <value.message>\nStacktrace:\n<value.stacktrace>"
+     *
+     * Also queries GET /sessions on the Appium server so the caller can see whether
+     * Appium is still alive and which sessions (if any) survived the failure.
+     */
+    private static void extractAndLogAppiumResponse(Exception ex, URL hub) {
+        String raw = ex.getMessage();
+
+        log.error("[DriverFactory][iOS] ── Appium W3C Response ───────────────────────────────");
+
+        // value.error — W3C error code (the exception class name is the clearest proxy)
+        log.error("[DriverFactory][iOS] value.error      : {}", ex.getClass().getSimpleName());
+
+        if (raw != null && !raw.isBlank()) {
+            // value.message — content between "Message:" and "\nStacktrace:"
+            String valueMessage = extractSection(raw, "Message:", "\nStacktrace:");
+            if (valueMessage.isBlank()) valueMessage = raw; // fallback: entire message
+            log.error("[DriverFactory][iOS] value.message    :\n{}", valueMessage.trim());
+
+            // Original error — innermost cause line; most diagnostic single line
+            String origError = extractSection(raw, "Original error:", "\n");
+            if (!origError.isBlank())
+                log.error("[DriverFactory][iOS] Original error   : {}", origError.trim());
+
+            // value.stacktrace — everything after "Stacktrace:" in the message
+            String stacktrace = extractSection(raw, "Stacktrace:", null);
+            if (!stacktrace.isBlank())
+                log.error("[DriverFactory][iOS] value.stacktrace :\n{}", stacktrace.trim());
+        } else {
+            log.error("[DriverFactory][iOS] (exception message is null/empty)");
+        }
+
+        // Query Appium to confirm it is still alive after the failure
+        try {
+            String base = hub.toString().replaceAll("/wd/hub$", "");
+            HttpClient http = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(3)).build();
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(base + "/sessions"))
+                    .timeout(Duration.ofSeconds(3)).GET().build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            log.error("[DriverFactory][iOS] GET /sessions → HTTP {} :\n{}",
+                    resp.statusCode(), resp.body());
+        } catch (Exception httpEx) {
+            log.error("[DriverFactory][iOS] GET /sessions → no response ({})", httpEx.getMessage());
+        }
+
+        log.error("[DriverFactory][iOS] ─────────────────────────────────────────────────────");
+    }
+
+    /**
+     * Extracts the text between {@code startMarker} and {@code endMarker} in {@code text}.
+     * Case-insensitive start search. If {@code endMarker} is null, returns everything after start.
+     * Returns empty string when {@code startMarker} is not found.
+     */
+    private static String extractSection(String text, String startMarker, String endMarker) {
+        if (text == null || text.isBlank()) return "";
+        int start = text.indexOf(startMarker);
+        if (start < 0) start = text.toLowerCase().indexOf(startMarker.toLowerCase());
+        if (start < 0) return "";
+        start += startMarker.length();
+        if (endMarker == null) return text.substring(start);
+        int end = text.indexOf(endMarker, start);
+        return end > start ? text.substring(start, end) : text.substring(start);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
