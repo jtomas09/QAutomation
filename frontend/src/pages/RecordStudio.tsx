@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
+import { RecordStudioHeader } from '../components/record-studio/RecordStudioHeader'
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
@@ -4684,167 +4685,20 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
-      {/* ── Header ── */}
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.07)',
-          flexShrink: 0,
-          gap: 12,
-          backgroundColor: '#0d1117',
-          zIndex: 10,
-        }}
-      >
-        {/* Steps */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, flexWrap: 'wrap' }}>
-          <HeaderStepPill
-            n={1}
-            label="Seleccionar Dispositivo"
-            value={selectedDevice?.deviceName ?? null}
-            sub={selectedDevice ? `${selectedDevice.platform} ${selectedDevice.platformVersion ?? ''}`.trim() : null}
-            statusBadge={
-              selectedDevice
-                ? selectedDevice.status === 'AVAILABLE'
-                  ? 'available'
-                  : selectedDevice.status === 'BUSY'
-                  ? 'busy'
-                  : 'offline'
-                : null
-            }
-            active={!!selectedDevice}
-            options={deviceNames}
-            onSelect={handleSelectDevice}
-            icon={<Smartphone size={14} color={selectedDevice ? '#818cf8' : '#374151'} />}
-          />
-
-          <ChevronRight size={12} color="rgba(255,255,255,0.15)" style={{ flexShrink: 0 }} />
-
-          <HeaderStepPill
-            n={2}
-            label="Seleccionar Aplicación"
-            value={appConfig?.appName ?? null}
-            sub={appConfig?.appPackage ?? appConfig?.bundleId ?? null}
-            active={!!appConfig}
-            options={appNames}
-            onSelect={handleSelectApp}
-            icon={<Package size={14} color={appConfig ? '#34d399' : '#374151'} />}
-          />
-
-          <ChevronRight size={12} color="rgba(255,255,255,0.15)" style={{ flexShrink: 0 }} />
-
-          <HeaderStepPill
-            n={3}
-            label="Modo de Ejecución"
-            value={
-              appMode === 'INSTALLED'
-                ? 'App Instalada (Play Store)'
-                : appMode === 'APK'
-                ? 'Archivo APK'
-                : appMode === 'IPA'
-                ? 'Archivo IPA'
-                : appMode
-            }
-            active={true}
-            options={modes}
-            onSelect={handleSelectMode}
-            icon={<PlayCircle size={14} color="#60a5fa" />}
-          />
-        </div>
-
-        {/* Recording section */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-          {recState === 'recording' && (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-end',
-                gap: 2,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <motion.div
-                  animate={{ opacity: [1, 0.2, 1] }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    backgroundColor: '#ef4444',
-                    boxShadow: '0 0 6px rgba(239,68,68,0.7)',
-                  }}
-                />
-                <span
-                  style={{
-                    color: '#ef4444',
-                    fontWeight: 800,
-                    fontSize: 13,
-                    letterSpacing: 1.5,
-                  }}
-                >
-                  GRABANDO
-                </span>
-              </div>
-              <span
-                style={{
-                  fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: '#e2e8f0',
-                  letterSpacing: 2,
-                  lineHeight: 1,
-                }}
-              >
-                {elapsedStr}
-              </span>
-            </div>
-          )}
-
-          <button
-            onClick={handleToggleRecording}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              padding: '9px 18px',
-              borderRadius: 8,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              letterSpacing: 0.3,
-              ...(recState === 'idle'
-                ? {
-                    background: 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(74,222,128,0.1))',
-                    border: '1px solid rgba(34,197,94,0.45)',
-                    color: '#4ade80',
-                    boxShadow: '0 0 14px rgba(34,197,94,0.08)',
-                  }
-                : {
-                    background: 'rgba(239,68,68,0.1)',
-                    border: '1px solid rgba(239,68,68,0.4)',
-                    color: '#f87171',
-                    boxShadow: '0 0 14px rgba(239,68,68,0.08)',
-                  }),
-            }}
-          >
-            {recState === 'idle' ? (
-              <>
-                <Circle size={11} />
-                Iniciar Grabación
-              </>
-            ) : (
-              <>
-                <Square size={11} fill="#f87171" />
-                Detener Grabación
-              </>
-            )}
-          </button>
-        </div>
-      </header>
+      {/* ── Configuration header (title + 4 cards) ── */}
+      <RecordStudioHeader
+        devices={devices}
+        selectedDevice={selectedDevice}
+        onSelectDevice={handleSelectDevice}
+        appConfigs={appConfigs}
+        appConfig={appConfig}
+        onSelectApp={handleSelectApp}
+        appMode={appMode}
+        onSelectMode={handleSelectMode}
+        isRecording={recState === 'recording'}
+        elapsed={elapsed}
+        onToggleRecording={handleToggleRecording}
+      />
 
       {/* ── Recording Bar ── */}
       <AnimatePresence>
