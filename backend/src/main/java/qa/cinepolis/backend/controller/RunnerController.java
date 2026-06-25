@@ -110,6 +110,8 @@ public class RunnerController {
         // Host Status (v6 — HostStatusManager)
         if (payload.containsKey("hostStatus"))  update.setHostStatus((String) payload.get("hostStatus"));
         if (payload.containsKey("iosReady"))    update.setIosReady(Boolean.TRUE.equals(payload.get("iosReady")));
+        // Device Stream Service (Phase 10 — Live Preview)
+        if (payload.containsKey("streamUrl"))   update.setStreamUrl((String) payload.get("streamUrl"));
 
         // Device list (from heartbeat)
         @SuppressWarnings("unchecked")

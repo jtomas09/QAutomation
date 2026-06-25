@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useDeviceStream, type DeviceStreamData } from '../hooks/useDeviceStream'
+import type { StreamState } from '../services/deviceStream'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Video, Square, ChevronDown, ChevronRight, ChevronUp,
@@ -1472,6 +1474,8 @@ interface PhoneFrameProps {
   onScreenChange: (s: AppScreen) => void
   isLandscape?: boolean
   inspectedElId?: string
+  previewUrl?: string | null
+  previewState?: StreamState
 }
 
 const PhoneFrame = React.memo(function PhoneFrame({
@@ -1481,6 +1485,8 @@ const PhoneFrame = React.memo(function PhoneFrame({
   onScreenChange,
   isLandscape = false,
   inspectedElId,
+  previewUrl,
+  previewState,
 }: PhoneFrameProps) {
   const PHONE_W = 296
   const SCREEN_W = 262
@@ -1561,48 +1567,144 @@ const PhoneFrame = React.memo(function PhoneFrame({
           width: SCREEN_W,
           height: SCREEN_H,
           overflow: 'hidden',
-          backgroundColor: '#fff',
+          backgroundColor: '#000',
           transform: `scale(${SCALE})`,
           transformOrigin: 'top center',
           marginBottom: -(SCREEN_H * (1 - SCALE)),
+          position: 'relative',
         }}
       >
-        <AnimatePresence mode="wait">
-          {screen === 'home' ? (
-            <motion.div
-              key="home"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
-              transition={{ duration: 0.15 }}
-              style={{ width: '100%', height: '100%' }}
-            >
-              <CinepolisHomeScreen
-                recording={recording}
-                onRecord={onRecord}
-                pkg={ANDROID_PKG}
-                onScreenChange={onScreenChange}
-                inspectedElId={inspectedElId}
+        {/* ── Live Preview layer (DeviceStreamProvider) ── */}
+        {previewUrl ? (
+          <>
+            {/* Real device screenshot */}
+            <img
+              src={previewUrl}
+              draggable={false}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block',
+              }}
+              alt="Device screen"
+            />
+            {/* Subtle "Updating" indicator — top-right dot */}
+            {previewState === 'updating' && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 6,
+                  right: 6,
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#6366f1',
+                  opacity: 0.85,
+                  animation: 'pulse 1s ease-in-out infinite',
+                  zIndex: 10,
+                }}
               />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="login"
-              initial={{ opacity: 0, x: 10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              transition={{ duration: 0.15 }}
-              style={{ width: '100%', height: '100%' }}
-            >
-              <CinepolisLoginScreen
-                recording={recording}
-                onRecord={onRecord}
-                onScreenChange={onScreenChange}
-                inspectedElId={inspectedElId}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+            )}
+          </>
+        ) : (
+          /* ── Static mockup fallback (no device / no preview) ── */
+          <>
+            {(previewState === 'loading' || previewState === 'connecting') && (
+              /* Loading state overlay */
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: '#0d1117',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 10,
+                  zIndex: 20,
+                }}
+              >
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    border: '2px solid rgba(99,102,241,0.2)',
+                    borderTopColor: '#6366f1',
+                    animation: 'spin 0.8s linear infinite',
+                  }}
+                />
+                <span style={{ color: '#475569', fontSize: 10, fontWeight: 600 }}>
+                  {previewState === 'connecting' ? 'Conectando...' : 'Cargando pantalla...'}
+                </span>
+              </div>
+            )}
+            {(previewState === 'device_disconnected' || previewState === 'runner_offline') && (
+              /* Error state */
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  backgroundColor: '#0d1117',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  zIndex: 20,
+                }}
+              >
+                <div style={{ fontSize: 22, opacity: 0.4 }}>
+                  {previewState === 'device_disconnected' ? '📵' : '⚡'}
+                </div>
+                <span style={{ color: '#475569', fontSize: 10, fontWeight: 600, textAlign: 'center', padding: '0 16px' }}>
+                  {previewState === 'device_disconnected'
+                    ? 'Dispositivo desconectado'
+                    : 'Runner no disponible'}
+                </span>
+              </div>
+            )}
+            <AnimatePresence mode="wait">
+              {screen === 'home' ? (
+                <motion.div
+                  key="home"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10 }}
+                  transition={{ duration: 0.15 }}
+                  style={{ width: '100%', height: '100%' }}
+                >
+                  <CinepolisHomeScreen
+                    recording={recording}
+                    onRecord={onRecord}
+                    pkg={ANDROID_PKG}
+                    onScreenChange={onScreenChange}
+                    inspectedElId={inspectedElId}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="login"
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.15 }}
+                  style={{ width: '100%', height: '100%' }}
+                >
+                  <CinepolisLoginScreen
+                    recording={recording}
+                    onRecord={onRecord}
+                    onScreenChange={onScreenChange}
+                    inspectedElId={inspectedElId}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
       </div>
 
       {/* Home indicator */}
@@ -4188,6 +4290,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // ── Inspector state ───────────────────────────────────────────────────────
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [inspectedElId, setInspectedElId] = useState<string | null>(null)
+  // ── Live device preview (Phase 10 — DeviceStreamProvider) ─────────────────
+  const { url: previewUrl, state: previewState } = useDeviceStream(selectedDevice?.udid ?? null)
   // ── Device viewer state ────────────────────────────────────────────────────
   const [isLandscape, setIsLandscape] = useState(false)
   const [isVideoRecording, setIsVideoRecording] = useState(false)
@@ -4490,6 +4594,11 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
+    <>
+    <style>{`
+      @keyframes pulse { 0%,100% { opacity: 0.85; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.4); } }
+      @keyframes spin  { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    `}</style>
     <div
       style={{
         minHeight: '100vh',
@@ -5088,6 +5197,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                 onScreenChange={setScreen}
                 isLandscape={isLandscape}
                 inspectedElId={inspectedElId ?? undefined}
+                previewUrl={previewUrl}
+                previewState={previewState}
               />
             </motion.div>
           </div>
@@ -5350,5 +5461,6 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         )}
       </AnimatePresence>
     </div>
+    </>
   )
 }

@@ -49,6 +49,8 @@ public class RunnerStore {
             // Host Status (v6 — HostStatusManager)
             if (update.getHostStatus() != null) r.setHostStatus(update.getHostStatus());
             if (update.getIosReady()   != null) r.setIosReady(update.getIosReady());
+            // Device Stream Service (Phase 10 — Live Preview)
+            if (update.getStreamUrl()  != null) r.setStreamUrl(update.getStreamUrl());
             return r;
         });
     }

@@ -166,6 +166,12 @@ public class BackendClient {
             payload.put("hostStatus", System.getProperty("HOST_STATUS", status));
             payload.put("iosReady",   Boolean.parseBoolean(System.getProperty("IOS_READY", "false")));
 
+            // Device Stream Service (Phase 10 — Live Preview)
+            String streamUrl = System.getProperty("STREAM_URL");
+            if (streamUrl != null && !streamUrl.isBlank()) {
+                payload.put("streamUrl", streamUrl);
+            }
+
             String body = json.writeValueAsString(payload);
             HttpResponse<String> res = post("/api/runners", body);
             return res.headers().firstValue("X-Runner-Command").orElse(null);

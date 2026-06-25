@@ -31,6 +31,9 @@ public class Runner {
     private String  hostStatus;    // "ONLINE" | "DEGRADED" | "OFFLINE"
     private Boolean iosReady;
 
+    // Device Stream Service (Phase 10 — Live Preview)
+    private String  streamUrl;     // http://{hostname}:{streamPort}
+
     // Component telemetry (v4.0 — enterprise agent)
     private Boolean jreInstalled;
     private String  jreVersion;
@@ -85,6 +88,9 @@ public class Runner {
     public void    setHostStatus(String v)       { this.hostStatus = v; }
     public Boolean getIosReady()                 { return iosReady; }
     public void    setIosReady(Boolean v)        { this.iosReady = v; }
+
+    public String  getStreamUrl()                { return streamUrl; }
+    public void    setStreamUrl(String v)        { this.streamUrl = v; }
 
     // Component telemetry
     public Boolean getJreInstalled()             { return jreInstalled; }

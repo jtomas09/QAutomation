@@ -157,6 +157,19 @@ public class RunnerAgent {
             System.out.println("[Runner] ⚠ No fue posible obtener la configuración del proyecto.");
         }
 
+        // ── Device Stream Service (Phase 10 — Live Preview) ───────────────────────
+        DeviceStreamServer streamServer = new DeviceStreamServer(config.streamPort, adbPath);
+        try {
+            streamServer.start();
+            String streamUrl = "http://" + config.hostname + ":" + config.streamPort;
+            System.setProperty("STREAM_URL", streamUrl);
+            System.out.println("[Runner] Device Stream Service: " + streamUrl);
+        } catch (Exception e) {
+            System.err.println("[Runner] DeviceStreamServer no pudo iniciar en puerto "
+                    + config.streamPort + ": " + e.getMessage());
+            System.err.println("[Runner] Live Preview no estara disponible.");
+        }
+
         JobExecutor executor = new JobExecutor(config, client, appiumMgr);
         printBanner(config, adbPath);
 
@@ -171,6 +184,7 @@ public class RunnerAgent {
             if (sh != null) sh.stop();
             executor.killActiveProcess();
             appiumMgr.stop();
+            streamServer.stop();
         }, "shutdown-hook"));
 
         // ── Initial heartbeat ──────────────────────────────────────────────────

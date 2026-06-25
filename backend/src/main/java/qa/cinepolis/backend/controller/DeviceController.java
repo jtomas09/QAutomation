@@ -1,26 +1,43 @@
 package qa.cinepolis.backend.controller;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Device;
 import qa.cinepolis.backend.model.DeviceStatus;
+import qa.cinepolis.backend.model.Runner;
 import qa.cinepolis.backend.store.DeviceStore;
+import qa.cinepolis.backend.store.RunnerStore;
 
+import java.net.URI;
+import java.net.http.*;
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Device Farm API — all device information originates from Runner Agent discovery.
  * No manual env-var configuration required.
+ *
+ * Phase 10 addition: GET /api/devices/{udid}/preview
+ *   Proxies screenshot requests to the Runner that owns the device.
+ *   The backend is a pure gateway — it never touches ADB directly.
  */
 @RestController
 @RequestMapping("/api/devices")
 public class DeviceController {
 
     private final DeviceStore deviceStore;
+    private final RunnerStore runnerStore;
 
-    public DeviceController(DeviceStore deviceStore) {
+    private final HttpClient proxyClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(4))
+            .build();
+
+    public DeviceController(DeviceStore deviceStore, RunnerStore runnerStore) {
         this.deviceStore = deviceStore;
+        this.runnerStore = runnerStore;
     }
 
     /** GET /api/devices — all registered devices (stale ones marked OFFLINE first) */
@@ -147,6 +164,71 @@ public class DeviceController {
     public Map<String, String> removeDevice(@PathVariable String udid) {
         deviceStore.remove(udid);
         return Map.of("result", "ok");
+    }
+
+    /**
+     * GET /api/devices/{udid}/preview → image/png
+     *
+     * Proxies the screenshot request to the Runner that owns the device.
+     * The Backend never captures screenshots — it is a pure gateway.
+     *
+     * Response codes:
+     *   200  image/png  — live screenshot
+     *   404             — device not registered or not connected
+     *   503             — runner offline / DeviceStreamServer not started / capture failed
+     */
+    @GetMapping(value = "/{udid}/preview", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> getDevicePreview(@PathVariable String udid) {
+        // Security: reject invalid characters before any network call
+        if (udid == null || !udid.matches("[a-zA-Z0-9\\-_.]+")) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        // 1 — Locate the device
+        Optional<Device> deviceOpt = deviceStore.findByUdid(udid);
+        if (deviceOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        String runnerId = deviceOpt.get().getRunnerId();
+        if (runnerId == null || runnerId.isBlank()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
+
+        // 2 — Locate the runner that owns this device
+        Optional<Runner> runnerOpt = runnerStore.findById(runnerId);
+        if (runnerOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
+
+        String streamUrl = runnerOpt.get().getStreamUrl();
+        if (streamUrl == null || streamUrl.isBlank()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
+
+        // 3 — Proxy to Device Stream Service
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(streamUrl + "/api/device-stream/" + udid))
+                    .timeout(Duration.ofSeconds(7))
+                    .GET()
+                    .build();
+
+            HttpResponse<byte[]> res = proxyClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
+
+            return switch (res.statusCode()) {
+                case 200 -> ResponseEntity.ok()
+                        .contentType(MediaType.IMAGE_PNG)
+                        .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        .header("Pragma",        "no-cache")
+                        .body(res.body());
+                case 404 -> ResponseEntity.notFound().build();
+                default  -> ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+            };
+
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
     }
 
     private Device mapToDevice(Map<String, Object> raw, String runnerId) {

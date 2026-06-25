@@ -31,6 +31,7 @@ public class RunnerConfig {
     // ── Agent data & Appium ────────────────────────────────────────────────
     public String  agentDataDir;   // root dir for downloaded tools, logs, updates
     public int     appiumPort;     // default 4723
+    public int     streamPort;     // Device Stream Service port (default 8082)
 
     // ── Auto-managed workspace ────────────────────────────────────────────
     // repoUrl / repoBranch / projectName are NOT stored locally.
@@ -51,7 +52,8 @@ public class RunnerConfig {
         c.appiumHub      = env("APPIUM_HUB",        "http://127.0.0.1:4723");
         c.allureBaseUrl  = env("ALLURE_BASE_URL",   "");
         c.version        = env("RUNNER_VERSION",    "2.3.0");
-        c.appiumPort     = Integer.parseInt(env("APPIUM_PORT", "4723"));
+        c.appiumPort     = Integer.parseInt(env("APPIUM_PORT",  "4723"));
+        c.streamPort     = Integer.parseInt(env("STREAM_PORT", "8082"));
 
         // Agent data directory (user-level, no admin required)
         String home = System.getProperty("user.home", ".");

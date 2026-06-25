@@ -22,7 +22,7 @@ import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice, 
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 console.log('[api] API_URL:', API_URL)
 
