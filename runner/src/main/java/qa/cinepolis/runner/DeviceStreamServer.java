@@ -94,20 +94,32 @@ public class DeviceStreamServer {
                 // Security: reject path traversal and invalid characters
                 if (udid.isEmpty() || udid.contains("/") || udid.contains("..") ||
                     !udid.matches("[a-zA-Z0-9\\-_.]+")) {
+                    System.out.println("[DeviceStream][AUDIT] Rejected invalid UDID: " + udid);
                     sendText(ex, 400, "Invalid device identifier");
                     return;
                 }
 
-                if (!isDeviceConnected(udid)) {
+                System.out.println("[DeviceStream][AUDIT] Preview request for UDID: " + udid
+                        + " | from: " + ex.getRemoteAddress());
+
+                boolean connected = isDeviceConnected(udid);
+                System.out.println("[DeviceStream][AUDIT] Device connected: " + connected + " | UDID: " + udid);
+                if (!connected) {
                     sendText(ex, 404, "Device not connected: " + udid);
                     return;
                 }
 
+                long t0  = System.currentTimeMillis();
                 byte[] png = captureScreenshot(udid);
+                long ms  = System.currentTimeMillis() - t0;
+
                 if (png == null) {
+                    System.out.println("[DeviceStream][AUDIT] Capture FAILED for " + udid + " (" + ms + "ms)");
                     sendText(ex, 503, "Screenshot capture failed or device busy");
                     return;
                 }
+
+                System.out.println("[DeviceStream][AUDIT] Capture OK: " + png.length + " bytes in " + ms + "ms | UDID: " + udid);
 
                 ex.getResponseHeaders().set("Content-Type",  "image/png");
                 ex.getResponseHeaders().set("Cache-Control", "no-cache, no-store, must-revalidate");

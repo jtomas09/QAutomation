@@ -117,49 +117,260 @@ public class IosPreflightManager {
         }
     }
 
-    // ── 2. Apple Developer Team ───────────────────────────────────────────────
+    // ── 2. Apple Developer Team — detección multi-estrategia ─────────────────
+    //
+    // Apple Team IDs are always 10 uppercase alphanumeric characters (e.g. 5TQQL22JSV).
+    // They appear in multiple places on the system; we try them all in order and log
+    // each attempt so failures are diagnosable even when find-identity returns empty.
+
+    /** Apple Team ID pattern: exactly 10 uppercase letters and digits. */
+    private static final Pattern TEAM_ID = Pattern.compile("[A-Z0-9]{10}");
 
     public static String detectAppleTeamId(BackendClient client, String executionId) {
+        client.sendLog(executionId, "INFO",
+                "🔍 Buscando Apple Developer Team ID...");
+
+        String id;
+
+        // ── Estrategia 1: security find-identity -v -p codesigning ────────────
+        // Most common but fails when the certificate exists but isn't trusted for codesigning.
+        client.sendLog(executionId, "INFO",
+                "   [1/6] security find-identity -v -p codesigning");
+        id = strategy1FindIdentity(client, executionId);
+        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 1");
+
+        // ── Estrategia 2: security find-certificate -c "Apple Development" -Z ──
+        // Finds the certificate by its common-name label, even when not in codesigning policy.
+        client.sendLog(executionId, "INFO",
+                "   [2/6] security find-certificate -c \"Apple Development\" -Z");
+        id = strategy2FindCertByLabel(client, executionId, "Apple Development");
+        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 2");
+
+        // ── Estrategia 3: X.509 OU field vía openssl ──────────────────────────
+        // The certificate's Organizational Unit (OU) field IS the Team ID.
+        // Works even when the label format is unusual or localized.
+        client.sendLog(executionId, "INFO",
+                "   [3/6] security find-certificate -p | openssl x509 -subject (OU/UID)");
+        id = strategy3OpensslSubject(client, executionId, "Apple Development");
+        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 3");
+
+        // ── Estrategia 4: legacy "iPhone Developer" certificate name ─────────
+        // Older Xcode versions issue certs labeled "iPhone Developer" instead of "Apple Development".
+        client.sendLog(executionId, "INFO",
+                "   [4/6] security find-certificate -c \"iPhone Developer\" -Z (legacy)");
+        id = strategy2FindCertByLabel(client, executionId, "iPhone Developer");
+        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 4 (iPhone Developer)");
+
+        // ── Estrategia 5: perfiles de provisioning instalados ─────────────────
+        // Provisioning profiles in ~/Library/MobileDevice/Provisioning Profiles/ always
+        // embed the Team ID explicitly in their TeamIdentifier plist key.
+        client.sendLog(executionId, "INFO",
+                "   [5/6] ~/Library/MobileDevice/Provisioning Profiles/*.mobileprovision");
+        id = strategy5ProvisioningProfiles(client, executionId);
+        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 5 (provisioning profile)");
+
+        // ── Estrategia 6: security find-certificate -a (todos los certificados) ─
+        // Last resort: scan every certificate in every keychain for any Apple Development entry.
+        client.sendLog(executionId, "INFO",
+                "   [6/6] security find-certificate -a (keychain completo)");
+        id = strategy6AllCertificates(client, executionId);
+        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 6 (keychain scan)");
+
+        // All strategies exhausted
+        client.sendLog(executionId, "WARN",
+                "⚠️  Team ID no encontrado por ninguna estrategia.\n"
+                + "   WDA no podrá firmarse sin Team ID en dispositivos físicos.\n"
+                + "   Solución: Xcode → Settings → Accounts → agrega tu Apple ID\n"
+                + "   y descarga tus certificados de desarrollo.");
+        return "";
+    }
+
+    private static String reportFound(BackendClient client, String executionId,
+                                       String id, String via) {
+        client.sendLog(executionId, "INFO",
+                "✅ Apple Developer Team ID: " + id + " (vía " + via + ")");
+        return id;
+    }
+
+    // ── Estrategia 1: find-identity ───────────────────────────────────────────
+
+    private static String strategy1FindIdentity(BackendClient client, String executionId) {
         try {
-            Process p = new ProcessBuilder("security", "find-identity",
-                    "-v", "-p", "codesigning")
+            Process p = new ProcessBuilder("security", "find-identity", "-v", "-p", "codesigning")
                     .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes()).trim();
             p.waitFor(10, TimeUnit.SECONDS);
 
-            // "Apple Development: Full Name (TEAMID10)" — Team ID = 10 uppercase alphanum
-            Pattern primary = Pattern.compile(
-                    "\"Apple Development:[^(]+\\(([A-Z0-9]{10})\\)\"");
-            Matcher m = primary.matcher(out);
-            if (m.find()) {
-                String id = m.group(1);
-                client.sendLog(executionId, "INFO",
-                        "✅ Apple Developer Team: " + id);
-                return id;
-            }
+            // "Apple Development: Name (TEAMID)" in double-quoted label
+            Pattern pat = Pattern.compile(
+                    "\"(?:Apple Development|iPhone Developer):[^(]+\\(([A-Z0-9]{10})\\)\"");
+            Matcher m = pat.matcher(out);
+            if (m.find()) return m.group(1);
 
-            // Older Xcode: "iPhone Developer: Name (TEAMID)"
-            Pattern legacy = Pattern.compile(
-                    "\"iPhone Developer:[^(]+\\(([A-Z0-9]{10})\\)\"");
-            Matcher ml = legacy.matcher(out);
-            if (ml.find()) {
-                String id = ml.group(1);
-                client.sendLog(executionId, "INFO",
-                        "✅ Apple Developer Team (legacy): " + id);
-                return id;
-            }
+            // Any line containing a 10-char alphanum in parens after an Apple cert prefix
+            Pattern loose = Pattern.compile(
+                    "Apple(?:\\s+Development|\\s+Developer|\\s+Distribution)[^(]*\\(([A-Z0-9]{10})\\)");
+            Matcher ml = loose.matcher(out);
+            if (ml.find()) return ml.group(1);
 
-            client.sendLog(executionId, "WARN",
-                    "⚠️  Apple Developer Team no encontrado en el keychain.\n"
-                    + "   Sin Team ID, WebDriverAgent no podrá firmarse.\n"
-                    + "   Solución: Xcode → Settings → Accounts → agrega tu Apple ID\n"
-                    + "   y acepta la licencia de desarrollador.");
-            return "";
+            if (!out.isBlank())
+                client.sendLog(executionId, "INFO",
+                        "      Sin coincidencia (output: "
+                        + out.substring(0, Math.min(120, out.length())).replace("\n", " | ") + ")");
         } catch (Exception e) {
-            client.sendLog(executionId, "WARN",
-                    "⚠️  No se pudo detectar Team ID: " + e.getMessage());
-            return "";
+            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
         }
+        return "";
+    }
+
+    // ── Estrategia 2: find-certificate por nombre ─────────────────────────────
+
+    private static String strategy2FindCertByLabel(BackendClient client, String executionId,
+                                                    String certName) {
+        try {
+            Process p = new ProcessBuilder("security", "find-certificate",
+                    "-c", certName, "-Z")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor(10, TimeUnit.SECONDS);
+
+            if (out.isBlank()) {
+                client.sendLog(executionId, "INFO", "      Certificado \"" + certName + "\" no encontrado.");
+                return "";
+            }
+
+            // "labl"<blob>="Apple Development: Name (TEAMID)" — preferred
+            Pattern labelled = Pattern.compile(
+                    "\"(?:Apple Development|iPhone Developer):[^(]+\\(([A-Z0-9]{10})\\)\"");
+            Matcher m = labelled.matcher(out);
+            if (m.find()) return m.group(1);
+
+            // Fallback: any (TEAMID) pattern in the output
+            Pattern paren = Pattern.compile("\\(([A-Z0-9]{10})\\)");
+            Matcher mp = paren.matcher(out);
+            if (mp.find()) return mp.group(1);
+
+            client.sendLog(executionId, "INFO",
+                    "      Certificado encontrado pero sin Team ID extraíble: "
+                    + out.substring(0, Math.min(120, out.length())).replace("\n", " | "));
+        } catch (Exception e) {
+            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+        }
+        return "";
+    }
+
+    // ── Estrategia 3: openssl X.509 subject OU/UID ────────────────────────────
+
+    private static String strategy3OpensslSubject(BackendClient client, String executionId,
+                                                   String certName) {
+        try {
+            // Shell pipe: security outputs PEM → openssl reads subject
+            String cmd = "security find-certificate -c '" + certName + "' -p 2>/dev/null"
+                       + " | openssl x509 -noout -subject 2>/dev/null";
+            Process p = new ProcessBuilder("/bin/sh", "-c", cmd).start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor(10, TimeUnit.SECONDS);
+
+            if (out.isBlank()) {
+                client.sendLog(executionId, "INFO", "      Sin output de openssl.");
+                return "";
+            }
+
+            // subject=UID=5TQQL22JSV, CN=Apple Development: ..., OU=5TQQL22JSV, O=..., C=US
+            Pattern ouUid = Pattern.compile("(?:OU|UID)\\s*=\\s*([A-Z0-9]{10})(?:[,\\s/]|$)");
+            Matcher m = ouUid.matcher(out);
+            if (m.find()) return m.group(1);
+
+            // openssl legacy format: /OU=TEAMID/
+            Pattern slash = Pattern.compile("/(?:OU|UID)=([A-Z0-9]{10})(?:/|$)");
+            Matcher ms = slash.matcher(out);
+            if (ms.find()) return ms.group(1);
+
+            client.sendLog(executionId, "INFO",
+                    "      Subject sin OU/UID de 10 chars: " + out.substring(0, Math.min(120, out.length())));
+        } catch (Exception e) {
+            client.sendLog(executionId, "INFO", "      openssl no disponible: " + e.getMessage());
+        }
+        return "";
+    }
+
+    // ── Estrategia 5: perfiles de provisioning ────────────────────────────────
+
+    private static String strategy5ProvisioningProfiles(BackendClient client, String executionId) {
+        try {
+            File dir = new File(System.getProperty("user.home")
+                    + "/Library/MobileDevice/Provisioning Profiles");
+            if (!dir.exists()) {
+                client.sendLog(executionId, "INFO", "      Directorio de perfiles no existe.");
+                return "";
+            }
+            File[] profiles = dir.listFiles((d, n) -> n.endsWith(".mobileprovision"));
+            if (profiles == null || profiles.length == 0) {
+                client.sendLog(executionId, "INFO", "      Sin perfiles instalados.");
+                return "";
+            }
+
+            client.sendLog(executionId, "INFO",
+                    "      Analizando " + profiles.length + " perfil(es)...");
+
+            for (File f : profiles) {
+                try {
+                    // Decode CMS-signed plist to readable XML
+                    Process p = new ProcessBuilder("security", "cms", "-D", "-i", f.getAbsolutePath())
+                            .redirectErrorStream(false).start();
+                    String plist = new String(p.getInputStream().readAllBytes());
+                    p.waitFor(10, TimeUnit.SECONDS);
+
+                    // <key>TeamIdentifier</key><array><string>5TQQL22JSV</string></array>
+                    int keyIdx = plist.indexOf("TeamIdentifier");
+                    if (keyIdx < 0) continue;
+                    String region = plist.substring(keyIdx,
+                            Math.min(plist.length(), keyIdx + 300));
+                    Pattern sp = Pattern.compile("<string>([A-Z0-9]{10})</string>");
+                    Matcher sm = sp.matcher(region);
+                    if (sm.find()) {
+                        client.sendLog(executionId, "INFO",
+                                "      Encontrado en: " + f.getName());
+                        return sm.group(1);
+                    }
+                } catch (Exception ignored) {}
+            }
+            client.sendLog(executionId, "INFO",
+                    "      Team ID no encontrado en ningún perfil.");
+        } catch (Exception e) {
+            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+        }
+        return "";
+    }
+
+    // ── Estrategia 6: todos los certificados del keychain ────────────────────
+
+    private static String strategy6AllCertificates(BackendClient client, String executionId) {
+        try {
+            Process p = new ProcessBuilder("security", "find-certificate", "-a", "-Z")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor(20, TimeUnit.SECONDS);
+
+            // Look for Apple Development / iPhone Developer labels in the full dump
+            Pattern labeled = Pattern.compile(
+                    "\"(?:Apple Development|iPhone Developer|Apple Worldwide Developer):"
+                    + "[^(]+\\(([A-Z0-9]{10})\\)\"");
+            Matcher m = labeled.matcher(out);
+            if (m.find()) return m.group(1);
+
+            // Fallback: scan for any (TEAMID) pattern near the word "Development"
+            Pattern nearDev = Pattern.compile(
+                    "(?:Development|Developer)[^(]{0,60}\\(([A-Z0-9]{10})\\)");
+            Matcher mn = nearDev.matcher(out);
+            if (mn.find()) return mn.group(1);
+
+            client.sendLog(executionId, "INFO",
+                    "      Sin certificados Apple Development en ningún keychain.");
+        } catch (Exception e) {
+            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+        }
+        return "";
     }
 
     // ── 3. iOS Version ────────────────────────────────────────────────────────
