@@ -121,10 +121,16 @@ export default function App() {
             />
           )}
 
-          {page === 'record-studio' && <RecordStudio />}
+          {page === 'record-studio' && (
+            <RecordStudio onNavigateToExecute={() => setPage('execute')} />
+          )}
 
           {page === 'execute' && (() => {
-            const countrySuites = COUNTRY_SUITES[country] ?? []
+            // Merge static suites with custom suites saved from Record Studio
+            const customSuites: Array<{ id: string; country: string; title: string; description: string; icon: string; accent: string }> =
+              JSON.parse(localStorage.getItem('qa_custom_suites') ?? '[]')
+            const customForCountry = customSuites.filter((s) => s.country === country)
+            const countrySuites = [...(COUNTRY_SUITES[country] ?? []), ...customForCountry]
             // All known suite cards (needed for drill-down lookup)
             const allKnownCards = [...(COUNTRY_SUITES['mexico'] ?? []), ...ALIMENTOS_TESTS,
                                    ...(COUNTRY_SUITES['argentina'] ?? []), ...(COUNTRY_SUITES['chile'] ?? [])]

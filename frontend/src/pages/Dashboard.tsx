@@ -233,15 +233,32 @@ export default function Dashboard({
 
 // ── Record Studio Widget ──────────────────────────────────────────────────────
 
-interface RecordStudioSession { id: string; name: string; date: string; steps: number; lang: string }
+interface RecordStudioSession { id: string; name: string; date: string; steps: number; lang: string; mode?: string }
 
 function RecordStudioWidget({ onOpen }: { onOpen: () => void }) {
-  const [sessions, setSessions] = useState<RecordStudioSession[]>([])
+  const [sessions,     setSessions]     = useState<RecordStudioSession[]>([])
+  const [customSuites, setCustomSuites] = useState(0)
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem('qa_record_sessions')
-      if (saved) setSessions(JSON.parse(saved).slice(-3).reverse())
+      if (saved) {
+        // Normalize field names: savedAt → date, stepCount → steps
+        const raw = JSON.parse(saved) as Array<Record<string, unknown>>
+        const normalized: RecordStudioSession[] = raw.slice(-3).reverse().map(s => ({
+          id:   String(s.id   ?? ''),
+          name: String(s.name ?? 'Sin nombre'),
+          date: String(s.savedAt ?? s.date ?? ''),
+          steps: Number(s.stepCount ?? s.steps ?? 0),
+          lang:  String(s.lang ?? ''),
+          mode:  String(s.mode ?? ''),
+        }))
+        setSessions(normalized)
+      }
+    } catch { /* ignore */ }
+    try {
+      const cs = localStorage.getItem('qa_custom_suites')
+      if (cs) setCustomSuites(JSON.parse(cs).length)
     } catch { /* ignore */ }
   }, [])
 
@@ -273,8 +290,14 @@ function RecordStudioWidget({ onOpen }: { onOpen: () => void }) {
                 NUEVO
               </span>
             </div>
-            <div className="text-xs text-slate-500 mt-0.5">
+            <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
               Graba interacciones y genera pruebas Appium automáticamente
+              {customSuites > 0 && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
+                  {customSuites} suite{customSuites !== 1 ? 's' : ''}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -333,7 +356,15 @@ function RecordStudioWidget({ onOpen }: { onOpen: () => void }) {
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.07)' }}
               >
                 <div className="text-[12px] font-bold text-slate-200 truncate">{s.name}</div>
-                <div className="text-[10px] text-slate-500">{s.steps} pasos · {s.lang}</div>
+                <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                  {s.steps} pasos · {s.lang}
+                  {s.mode === 'suite' && (
+                    <span className="text-[8px] font-bold px-1 py-0.5 rounded"
+                      style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8' }}>
+                      SUITE
+                    </span>
+                  )}
+                </div>
                 <div className="text-[9px] text-slate-600">{s.date}</div>
               </button>
             ))}
