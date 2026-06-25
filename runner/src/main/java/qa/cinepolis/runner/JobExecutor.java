@@ -533,10 +533,12 @@ public class JobExecutor {
             client.sendLog(job.executionId, "INFO",
                     "🖥  Plataforma detectada: " + (isAndroid ? "Android" : "iOS")
                     + " | UDID: " + receivedUdid);
+            IosPreflightManager.IosPreflightResult iosResult = null;
             if (isAndroid) {
                 checkAdbDevices(job.executionId);
             } else {
-                checkIosDevices(job.executionId, receivedUdid);
+                iosResult = IosPreflightManager.runPreflight(
+                        client, job.executionId, receivedUdid);
             }
             checkAppiumServer(job.executionId);
 
@@ -585,6 +587,25 @@ public class JobExecutor {
                     if (!runnerCfg.appActivity.isBlank()) {
                         cmd.add("-DappActivity=" + runnerCfg.appActivity);
                     }
+                }
+
+                // WDA signing + caching — results from IosPreflightManager
+                if (iosResult != null) {
+                    if (!iosResult.teamId.isBlank()) {
+                        cmd.add("-DxcodeOrgId=" + iosResult.teamId);
+                        cmd.add("-DxcodeSigningId=Apple Development");
+                        client.sendLog(job.executionId, "INFO",
+                                "[JobExecutor] 🔑 Team ID: " + iosResult.teamId);
+                    }
+                    if (!iosResult.iosVersion.isBlank()) {
+                        // Override any backend-provided platformVersion with the real device value
+                        cmd.add("-DplatformVersion=" + iosResult.iosVersion);
+                    }
+                    cmd.add("-DupdatedWDABundleId=" + iosResult.wdaBundleId);
+                    cmd.add("-DwdaPrebuilt=" + iosResult.wdaCached);
+                    client.sendLog(job.executionId, "INFO",
+                            "[JobExecutor] 📦 WDA bundle: " + iosResult.wdaBundleId
+                            + " | prebuilt: " + iosResult.wdaCached);
                 }
             }
 
@@ -875,36 +896,7 @@ public class JobExecutor {
         }
     }
 
-    private void checkIosDevices(String executionId, String udid) {
-        try {
-            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
-                    .redirectErrorStream(true).start();
-            String output = new String(p.getInputStream().readAllBytes());
-            p.waitFor();
-
-            boolean found = !udid.isBlank() && output.contains(udid);
-            long count = output.lines()
-                    .filter(l -> l.contains("iPhone") || l.contains("iPad"))
-                    .count();
-
-            if (found) {
-                client.sendLog(executionId, "INFO",
-                        "📱 iOS device OK: " + udid + " detectado via xcrun");
-            } else if (count > 0) {
-                client.sendLog(executionId, "WARN",
-                        "⚠️  UDID " + udid + " no encontrado en xcrun, pero se detectaron "
-                        + count + " dispositivo(s) iOS.");
-            } else {
-                client.sendLog(executionId, "WARN",
-                        "⚠️  No se detectaron dispositivos iOS. "
-                        + "Conecta el iPhone y confirma que confíe en este Mac.");
-            }
-        } catch (Exception e) {
-            client.sendLog(executionId, "WARN",
-                    "⚠️  xcrun no disponible: " + e.getMessage()
-                    + " — verifica que Xcode esté instalado.");
-        }
-    }
+    // checkIosDevices() replaced by IosPreflightManager.runPreflight() — see execute()
 
     /**
      * Resolves the real launcher Activity for an Android package via ADB.

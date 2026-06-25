@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.Properties;
@@ -231,6 +232,13 @@ public class DriverFactory {
                 IOSDriver d = new IOSDriver(hub, options);
                 d.manage().timeouts().implicitlyWait(Duration.ZERO);
                 log.info("[DriverFactory] IOSDriver OK — sessionId={}", d.getSessionId());
+                // WDA built and installed successfully — persist cache so next run skips compilation
+                markWdaBuilt(
+                    prop("udid",              ""),
+                    prop("updatedWDABundleId", ""),
+                    prop("xcodeOrgId",        ""),
+                    prop("platformVersion",   "")
+                );
                 return d;
             } catch (Exception iosEx) {
                 log.error("[DriverFactory][iOS] ══════════ APPIUM SESSION CREATION FAILED ══════════");
@@ -402,15 +410,63 @@ public class DriverFactory {
         long cmdTimeout = Long.parseLong(prop("newCommandTimeout", "300"));
         o.setNewCommandTimeout(Duration.ofSeconds(cmdTimeout));
 
-        o.setCapability("autoAcceptAlerts",   true);
+        o.setCapability("autoAcceptAlerts",    true);
         o.setCapability("nativeWebScreenshot", true);
+
+        // ── WebDriverAgent signing + caching ─────────────────────────────────
+        // xcodeOrgId and xcodeSigningId are required for physical devices.
+        // They are auto-detected by IosPreflightManager (Runner) and passed
+        // as JVM properties -DxcodeOrgId=XXXX -DxcodeSigningId="Apple Development".
+        String teamId = prop("xcodeOrgId", "");
+        if (!teamId.isBlank()) {
+            o.setCapability("xcodeOrgId",     teamId);
+            String signingId = prop("xcodeSigningId", "Apple Development");
+            o.setCapability("xcodeSigningId", signingId);
+            log.info("[DriverFactory] 🔑 xcodeOrgId={}  xcodeSigningId={}", teamId, signingId);
+        } else {
+            log.warn("[DriverFactory] ⚠️  xcodeOrgId no configurado — xcodebuild no podrá firmar WDA.");
+            log.warn("[DriverFactory]    Solución: Xcode → Settings → Accounts → agrega tu Apple ID.");
+        }
+
+        // updatedWDABundleId — unique stable ID per device, prevents conflicts
+        // between simultaneous runners. Auto-generated if Runner didn't provide it.
+        String wdaBundleId = prop("updatedWDABundleId", "");
+        if (wdaBundleId.isBlank() && !udid.isBlank()) {
+            String suffix = udid.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+            if (suffix.length() > 10) suffix = suffix.substring(0, 10);
+            wdaBundleId = "io.qautomation.wda." + suffix;
+            System.setProperty("updatedWDABundleId", wdaBundleId);
+        }
+        if (!wdaBundleId.isBlank()) {
+            o.setCapability("updatedWDABundleId", wdaBundleId);
+            log.info("[DriverFactory] 🆔 updatedWDABundleId={}", wdaBundleId);
+        }
+
+        // showXcodeLog=true — exposes full xcodebuild output in Appium server log,
+        // including the real error when WDA fails to compile (e.g. code 65).
+        o.setCapability("showXcodeLog", true);
+
+        // useNewWDA=false — reuse WDA if already running on device (don't restart it).
+        o.setCapability("useNewWDA", false);
+
+        // skipServerInstallation — if Runner confirms WDA was already built and
+        // installed on this device, skip xcodebuild entirely on this run.
+        boolean wdaPrebuilt = Boolean.parseBoolean(prop("wdaPrebuilt", "false"));
+        if (wdaPrebuilt) {
+            o.setCapability("skipServerInstallation",      true);
+            o.setCapability("shouldUseSingletonTestManager", true);
+            log.info("[DriverFactory] ⚡ WDA precompilado — skipServerInstallation=true (sin recompilación)");
+        } else {
+            o.setCapability("skipServerInstallation",      false);
+            log.info("[DriverFactory] 🔨 Primera ejecución — Appium compilará e instalará WDA automáticamente");
+        }
 
         String envHub = System.getenv("APPIUM_SERVER_URL");
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
         finalHub = finalHub.replaceAll("/wd/hub$", "");  // Appium 2.x/3.x uses bare base URL
 
-        log.info("[DriverFactory] 📡 Appium endpoint: {} | device={} udid={} bundleId={}",
-            finalHub, prop("deviceName","?"), udid, bundleId);
+        log.info("[DriverFactory] 📡 Appium endpoint: {} | device={} udid={} bundleId={} teamId={}",
+            finalHub, prop("deviceName","?"), udid, bundleId, teamId.isBlank() ? "?" : teamId);
 
         return URI.create(finalHub).toURL();
     }
@@ -502,6 +558,37 @@ public class DriverFactory {
             throw e;
         } catch (Exception e) {
             log.warn("[Preflight] xcrun check skipped ({}) — verifica que Xcode esté instalado.", e.getMessage());
+        }
+    }
+
+    /**
+     * Persists a successful WDA build to ~/.qautomation/wda/{udid}.properties
+     * so IosPreflightManager (Runner) can detect it on the next run and set
+     * -DwdaPrebuilt=true, which causes skipServerInstallation=true in this class.
+     *
+     * Uses the same file format as IosPreflightManager.saveWdaCache().
+     * No dependency on Runner classes — pure Java IO + Properties.
+     */
+    private static void markWdaBuilt(String udid, String bundleId,
+                                     String teamId, String iosVersion) {
+        if (udid == null || udid.isBlank()) return;
+        try {
+            String cacheDir = System.getProperty("user.home") + "/.qautomation/wda";
+            new File(cacheDir).mkdirs();
+            Properties p = new Properties();
+            p.setProperty("udid",       udid);
+            p.setProperty("bundleId",   bundleId.isBlank() ? "unknown" : bundleId);
+            p.setProperty("teamId",     teamId.isBlank()   ? "unknown" : teamId);
+            p.setProperty("iosVersion", iosVersion.isBlank() ? "unknown" : iosVersion);
+            p.setProperty("builtAt",    Instant.now().toString());
+            String safe = udid.replaceAll("[^a-zA-Z0-9_-]", "_");
+            File f = new File(cacheDir, safe + ".properties");
+            try (FileOutputStream out = new FileOutputStream(f)) {
+                p.store(out, "QAutomation WDA cache — written by DriverFactory");
+            }
+            log.info("[DriverFactory][iOS] 💾 WDA cache guardado: {} — próxima ejecución omitirá compilación", f);
+        } catch (Exception e) {
+            log.warn("[DriverFactory][iOS] No se pudo guardar WDA cache: {}", e.getMessage());
         }
     }
 
