@@ -529,7 +529,15 @@ public class JobExecutor {
             String workDir = projectDir.getAbsolutePath();
 
             // ── Pre-flight ────────────────────────────────────────────────────
-            checkAdbDevices(job.executionId);
+            boolean isAndroid = !"ios".equalsIgnoreCase(receivedPlatform);
+            client.sendLog(job.executionId, "INFO",
+                    "🖥  Plataforma detectada: " + (isAndroid ? "Android" : "iOS")
+                    + " | UDID: " + receivedUdid);
+            if (isAndroid) {
+                checkAdbDevices(job.executionId);
+            } else {
+                checkIosDevices(job.executionId, receivedUdid);
+            }
             checkAppiumServer(job.executionId);
 
             // ── Pre-clean locked test-results to avoid file-lock failures ────
@@ -543,7 +551,6 @@ public class JobExecutor {
                     ? job.appPackage : runnerCfg.appPackage;
             String effectiveBundleId = (job.bundleId   != null && !job.bundleId.isBlank())
                     ? job.bundleId : "";
-            boolean isAndroid = !"ios".equalsIgnoreCase(receivedPlatform);
 
             // Android: inject package + auto-resolve launcher activity via ADB
             if (isAndroid && !effectivePackage.isBlank()) {
@@ -795,6 +802,13 @@ public class JobExecutor {
         cmd.add("-DdeviceName="    + deviceName);
         cmd.add("-Denv="           + nvl(job.env,     "QA"));
         cmd.add("-Dcountry="       + nvl(job.country, "mexico"));
+
+        // Platform — DriverFactory.createDriverWithRetries() reads prop("platformName","Android").
+        // Without this flag it always defaults to Android even when the device is an iPhone.
+        String platformName = "ios".equalsIgnoreCase(job.platform) ? "iOS" : "Android";
+        cmd.add("-DplatformName=" + platformName);
+        System.out.println("[JobExecutor] 🖥  Driver platform: " + platformName
+                + " | raw platform field: " + nvl(job.platform, "<null>"));
         // Normalize: strip legacy /wd/hub suffix — Appium 2.x/3.x uses bare base URL
         String cleanAppiumHub = config.appiumHub.replaceAll("/wd/hub$", "");
         cmd.add("-Dappium.hub=" + cleanAppiumHub);
@@ -858,6 +872,37 @@ public class JobExecutor {
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
                     "⚠️  ADB no disponible: " + e.getMessage());
+        }
+    }
+
+    private void checkIosDevices(String executionId, String udid) {
+        try {
+            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
+                    .redirectErrorStream(true).start();
+            String output = new String(p.getInputStream().readAllBytes());
+            p.waitFor();
+
+            boolean found = !udid.isBlank() && output.contains(udid);
+            long count = output.lines()
+                    .filter(l -> l.contains("iPhone") || l.contains("iPad"))
+                    .count();
+
+            if (found) {
+                client.sendLog(executionId, "INFO",
+                        "📱 iOS device OK: " + udid + " detectado via xcrun");
+            } else if (count > 0) {
+                client.sendLog(executionId, "WARN",
+                        "⚠️  UDID " + udid + " no encontrado en xcrun, pero se detectaron "
+                        + count + " dispositivo(s) iOS.");
+            } else {
+                client.sendLog(executionId, "WARN",
+                        "⚠️  No se detectaron dispositivos iOS. "
+                        + "Conecta el iPhone y confirma que confíe en este Mac.");
+            }
+        } catch (Exception e) {
+            client.sendLog(executionId, "WARN",
+                    "⚠️  xcrun no disponible: " + e.getMessage()
+                    + " — verifica que Xcode esté instalado.");
         }
     }
 

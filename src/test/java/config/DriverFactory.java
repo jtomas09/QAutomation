@@ -365,6 +365,7 @@ public class DriverFactory {
         String bundleId = prop("bundleId",       "");
         String ipaPath  = prop("ipaPath",        "");
 
+        if (!udid.isBlank()) validateIosDevice(udid);
         validateAppiumServer(hubUrl);
 
         o.setPlatformName("iOS");
@@ -460,6 +461,28 @@ public class DriverFactory {
             throw e;
         } catch (Exception e) {
             log.warn("[Preflight] adb check skipped ({}) — verifica que adb este en el PATH.", e.getMessage());
+        }
+    }
+
+    private static void validateIosDevice(String udid) {
+        try {
+            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
+                .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor();
+            if (out.contains(udid)) {
+                log.info("[Preflight] iOS device OK: {} (visible via xcrun)", udid);
+            } else {
+                throw new IllegalStateException(
+                    "[Preflight] iOS device " + udid + " NOT found via 'xcrun xctrace list devices'.\n" +
+                    "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n" +
+                    "  Alternativa: xcrun devicectl list devices"
+                );
+            }
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("[Preflight] xcrun check skipped ({}) — verifica que Xcode esté instalado.", e.getMessage());
         }
     }
 
