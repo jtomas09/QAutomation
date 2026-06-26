@@ -406,7 +406,13 @@ public class DriverFactory {
         o.setDeviceName(prop("deviceName", "iPhone"));
 
         String platformVersion = prop("platformVersion", "");
-        if (!platformVersion.isBlank()) o.setPlatformVersion(platformVersion);
+        if (isValidPlatformVersion(platformVersion)) {
+            o.setPlatformVersion(platformVersion);
+            log.info("[DriverFactory][iOS] platformVersion    : {} (enviada a Appium)", platformVersion);
+        } else {
+            log.info("[DriverFactory][iOS] platformVersion    : omitida{} — Appium la detectará automáticamente",
+                    platformVersion.isBlank() ? "" : " (valor inválido: '" + platformVersion + "')");
+        }
         if (!udid.isBlank())     o.setUdid(udid);
         if (!bundleId.isBlank()) o.setBundleId(bundleId);
         if (!ipaPath.isBlank())  o.setApp(ipaPath);
@@ -591,6 +597,22 @@ public class DriverFactory {
         } catch (Exception e) {
             log.warn("[Preflight] xcrun check skipped ({}) — verifica que Xcode esté instalado.", e.getMessage());
         }
+    }
+
+    /**
+     * Validates a platformVersion string before sending it to Appium.
+     * Appium rejects null, blank, "unknown", and non-numeric strings with
+     * SessionNotCreatedException — so we omit the capability entirely when invalid,
+     * allowing Appium to auto-detect the iOS version from the connected device.
+     *
+     * Valid examples: "17.7", "18.0", "26.5", "18.0.1"
+     * Invalid: null, "", "unknown", "abc", "17"
+     */
+    // Package-private for unit testing in config.DriverFactoryTest
+    static boolean isValidPlatformVersion(String v) {
+        if (v == null || v.isBlank()) return false;
+        if ("unknown".equalsIgnoreCase(v.trim())) return false;
+        return v.trim().matches("\\d+\\.\\d+.*");
     }
 
     /**

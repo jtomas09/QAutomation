@@ -399,56 +399,86 @@ public class IosPreflightManager {
 
     // ── 3. iOS Version ────────────────────────────────────────────────────────
 
+    // Version field names used across Xcode/macOS versions in devicectl --json-output
+    private static final String[] DEVICECTL_VERSION_FIELDS = {
+        "osVersionNumber", "operatingSystemVersion", "softwareVersion", "osVersion"
+    };
+
     public static String detectIosVersion(
             BackendClient client, String executionId, String udid) {
         if (udid == null || udid.isBlank()) return "";
 
-        // xcrun devicectl (Xcode 14+ / macOS 14+) — most accurate
+        // Strategy 1: xcrun devicectl --json-output (Xcode 14+, CoreDevice-aware)
+        // Xcode 26: "identifier" field holds CoreDevice UUID; "osVersionNumber" may be
+        // hundreds of chars before "identifier" inside the same device JSON object —
+        // so we use a 2000-char window before the UUID position to cover that gap.
         try {
             Process p = new ProcessBuilder(
                     "xcrun", "devicectl", "list", "devices", "--json-output", "-")
                     .redirectErrorStream(false).start();
-            String out = new String(p.getInputStream().readAllBytes());
+            String json = new String(p.getInputStream().readAllBytes());
             p.waitFor(10, TimeUnit.SECONDS);
-            if (out.contains(udid)) {
-                int idx = out.indexOf(udid);
-                String region = out.substring(
-                        Math.max(0, idx - 300), Math.min(out.length(), idx + 600));
-                Pattern vp = Pattern.compile(
-                        "\"osVersionNumber\"\\s*:\\s*\"([\\d.]+)\"");
-                Matcher vm = vp.matcher(region);
-                if (vm.find()) {
-                    String v = vm.group(1);
-                    client.sendLog(executionId, "INFO",
-                            "📱 iOS " + v + " (vía devicectl)");
-                    return v;
+            if (json.contains(udid)) {
+                int idx = json.indexOf(udid);
+                String region = json.substring(
+                        Math.max(0, idx - 2000), Math.min(json.length(), idx + 500));
+                for (String field : DEVICECTL_VERSION_FIELDS) {
+                    Matcher vm = Pattern.compile(
+                            "\"" + field + "\"\\s*:\\s*\"([\\d]+\\.[\\d.]+)\"").matcher(region);
+                    if (vm.find()) {
+                        String v = vm.group(1);
+                        client.sendLog(executionId, "INFO", "📱 iOS " + v + " (vía devicectl JSON, campo: " + field + ")");
+                        return v;
+                    }
                 }
             }
         } catch (Exception ignored) {}
 
-        // Fallback: xcrun xctrace list devices
-        // Output line: "iPhone 15 Pro (17.5.1) (00008130-XXXX)"
+        // Strategy 2: xcrun xctrace list devices
+        // Format: "iPhone name (version) (UDID)"
+        // Works for traditional 8-16 UDIDs. For CoreDevice UUIDs (Xcode 26), we fall back
+        // to the first physical device in the == Devices == section (usually only one phone).
         try {
             Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
                     .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes());
             p.waitFor(10, TimeUnit.SECONDS);
-            Pattern lp = Pattern.compile(
-                    "\\(([\\d]+\\.[\\d.]+)\\)\\s*\\(\\s*"
-                    + Pattern.quote(udid) + "\\s*\\)");
-            Matcher lm = lp.matcher(out);
-            if (lm.find()) {
-                String v = lm.group(1);
-                client.sendLog(executionId, "INFO",
-                        "📱 iOS " + v + " (vía xctrace)");
+
+            // Exact match — works when udid is in traditional 8-16 UDID format
+            Pattern exact = Pattern.compile(
+                    "\\(([\\d]+\\.[\\d.]+)\\)\\s*\\(\\s*" + Pattern.quote(udid) + "\\s*\\)");
+            Matcher em = exact.matcher(out);
+            if (em.find()) {
+                String v = em.group(1);
+                client.sendLog(executionId, "INFO", "📱 iOS " + v + " (vía xctrace)");
                 return v;
             }
+
+            // CoreDevice UUID fallback: scan == Devices == section for first physical device
+            // xctrace always shows legacy UDIDs — direct match on CoreDevice UUID is impossible,
+            // but if only one iPhone is connected its version is still the right one.
+            boolean inDevices = false;
+            Pattern physLine = Pattern.compile(
+                    "^.+\\s+\\(([\\d]+\\.[\\d.]+)\\)\\s+\\([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}\\)\\s*$");
+            for (String line : out.split("\n")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("== Devices ==")) { inDevices = true; continue; }
+                if (trimmed.startsWith("=="))            { inDevices = false; continue; }
+                if (!inDevices) continue;
+                Matcher dm = physLine.matcher(trimmed);
+                if (dm.matches()) {
+                    String v = dm.group(1);
+                    client.sendLog(executionId, "INFO",
+                            "📱 iOS " + v + " (vía xctrace — primer dispositivo físico conectado)");
+                    return v;
+                }
+            }
+
             client.sendLog(executionId, "WARN",
-                    "⚠️  No se pudo extraer la versión iOS del dispositivo "
-                    + udid + " — se usará la configurada en appium.properties.");
+                    "⚠️  Versión iOS no detectada para " + udid
+                    + " — Appium la detectará automáticamente del dispositivo.");
         } catch (Exception e) {
-            client.sendLog(executionId, "WARN",
-                    "⚠️  xcrun no respondió: " + e.getMessage());
+            client.sendLog(executionId, "WARN", "⚠️  xcrun no respondió: " + e.getMessage());
         }
         return "";
     }

@@ -847,7 +847,10 @@ public class JobExecutor {
         if (job.udid != null && !job.udid.isBlank()) {
             cmd.add("-Dudid=" + job.udid);
         }
-        if (job.platformVersion != null && !job.platformVersion.isBlank()) {
+        // Guard: never propagate "unknown" — Appium rejects it with SessionNotCreatedException.
+        // IosPreflightManager.detectIosVersion() overrides this with the real device version when available.
+        if (job.platformVersion != null && !job.platformVersion.isBlank()
+                && !"unknown".equalsIgnoreCase(job.platformVersion)) {
             cmd.add("-DplatformVersion=" + job.platformVersion);
         }
 

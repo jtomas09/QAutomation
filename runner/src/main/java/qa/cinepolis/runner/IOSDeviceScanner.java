@@ -100,7 +100,8 @@ public class IOSDeviceScanner {
         return result;
     }
 
-    private static void parseDevicectlOutput(String out, List<Map<String, String>> result) {
+    // Package-private for unit testing
+    static void parseDevicectlOutput(String out, List<Map<String, String>> result) {
         // devicectl may output multiple formats. Anchor on iPhone UDID per line.
         for (String raw : out.split("\n")) {
             String line = raw.trim();
@@ -129,7 +130,10 @@ public class IOSDeviceScanner {
 
             // Version: first digits.digits pattern after UDID
             Matcher verM = VERSION_PAT.matcher(after);
-            String version = verM.find() ? verM.group(1) : "unknown";
+            // Empty string when version is not in the text line (e.g. Xcode 26 CoreDevice format).
+            // IosPreflightManager.detectIosVersion() uses devicectl --json-output to get the real value.
+            // Never use "unknown" — it propagates to -DplatformVersion=unknown and breaks Appium.
+            String version = verM.find() ? verM.group(1) : "";
 
             // Name: text before UDID (common in tabular format where UDID is first)
             // or text after UDID but before the version/platform tokens
