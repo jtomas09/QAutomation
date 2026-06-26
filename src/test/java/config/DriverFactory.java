@@ -280,9 +280,7 @@ public class DriverFactory {
                 }
                 log.error("[DriverFactory][iOS] Full stacktrace:", iosEx);
                 log.error("[DriverFactory][iOS] ══════════════════════════════════════════════════");
-                if ("local".equals(mode)
-                        && iosEx.getMessage() != null
-                        && iosEx.getMessage().contains("Unknown device or simulator UDID")) {
+                if ("local".equals(mode)) {
                     classifyIosSessionFailure(prop("udid", ""), hub, options, iosEx);
                 }
                 throw iosEx;
@@ -435,6 +433,11 @@ public class DriverFactory {
         validateAppiumServer(hubUrl);
 
         o.setPlatformName("iOS");
+        // Selenium 4.23 converts setPlatformName("iOS") → Platform.IOS enum via
+        // SharedCapabilitiesMethods.setCapability(). Platform.IOS.toString() = "IOS"
+        // (Enum.name(), no override). Bypass the enum and write the raw string directly
+        // so that Appium receives "iOS" — not "IOS" — in the W3C capability payload.
+        forceStringCapability(o, "platformName", "iOS");
         o.setDeviceName(prop("deviceName", "iPhone"));
 
         String platformVersion = prop("platformVersion", "");
@@ -773,23 +776,28 @@ public class DriverFactory {
         // 1. Device synchronization — throws SyncException if device not ready for Appium
         IOSDeviceSynchronizationManager.ensureReady(udid, log);
 
-        // 2. Appium server health
+        // 2. XCUITest driver — throws SyncException(XCUITEST_DRIVER_NOT_INSTALLED) if missing;
+        //    session creation MUST NOT proceed without it
+        validateXcuitestDriverInstalled();
+
+        // 3. Appium server health (advisory — ensureReady already confirmed xctrace visibility)
         checkAppiumExtendedStatus(hub);
 
-        // 3. XCUITest driver presence
-        checkXcuitestDriverInstalled();
-
-        // 4. platformName guard + capability snapshot
+        // 4. Log all 9 capabilities exactly as Appium will receive them in POST /session
         Object pName = options.getCapability("platformName");
-        if (pName != null && !"iOS".equals(pName.toString())) {
-            log.warn("[DriverFactory][iOS] ⚠️  platformName='{}' — debe ser exactamente 'iOS'", pName);
-        }
-        log.info("[DriverFactory][iOS] Key caps → udid={} | platformName={} | automationName={} | platformVersion={}",
-                options.getCapability("appium:udid"),
-                options.getCapability("platformName"),
-                options.getCapability("appium:automationName"),
-                options.getCapability("appium:platformVersion"));
-        log.info("[DriverFactory][iOS] ════════════════════════════");
+        String pNameStr = pName != null ? pName.toString() : "(null)";
+        log.info("[DriverFactory][iOS] ══ Capabilities → POST /session ══════");
+        log.info("[DriverFactory][iOS]   platformName      : {} {}",
+                pNameStr, "iOS".equals(pNameStr) ? "✅" : "⚠️  (esperado: 'iOS')");
+        log.info("[DriverFactory][iOS]   automationName    : {}", prop("automationName", "XCUITest"));
+        log.info("[DriverFactory][iOS]   deviceName        : {}", prop("deviceName",     "(no configurado)"));
+        log.info("[DriverFactory][iOS]   udid              : {}", prop("udid",            "(no configurado)"));
+        log.info("[DriverFactory][iOS]   platformVersion   : {}", prop("platformVersion", "(auto)"));
+        log.info("[DriverFactory][iOS]   bundleId          : {}", prop("bundleId",        "(no configurado)"));
+        log.info("[DriverFactory][iOS]   updatedWDABundleId: {}", prop("updatedWDABundleId", "(auto-generado)"));
+        log.info("[DriverFactory][iOS]   xcodeOrgId        : {}", prop("xcodeOrgId",      "(no configurado)"));
+        log.info("[DriverFactory][iOS]   xcodeSigningId    : {}", prop("xcodeSigningId",  "Apple Development"));
+        log.info("[DriverFactory][iOS] ═══════════════════════════════════════════");
     }
 
     private static void classifyIosSessionFailure(String udid, URL hub,
@@ -822,10 +830,26 @@ public class DriverFactory {
             category = IOSDeviceSynchronizationManager.SyncCategory.COREDEVICE_DESYNC;
             detail   = "CoreDevice ve el dispositivo pero xctrace no.\n"
                      + "  → sudo killall -9 remotedeviced → desconecta/reconecta el cable USB.";
-        } else if (msg.contains("codesign") || msg.contains("signing")
-                || msg.contains("team id") || msg.contains("provision")) {
+        } else if (msg.contains("unknown device or simulator udid")) {
+            // Device IS visible (xctrace = true) but Appium rejected the UDID
+            category = IOSDeviceSynchronizationManager.SyncCategory.DEVICE_NOT_FOUND_BY_APPIUM;
+            detail   = "Appium rechazó el UDID aunque el dispositivo es visible en xctrace.\n"
+                     + "  Causas posibles:\n"
+                     + "  - UDID físico incorrecto (verifica con: xcrun xctrace list devices)\n"
+                     + "  - Se usó CoreDevice UUID (8-4-4-4-12) en lugar del UDID físico (hex 25+ chars)\n"
+                     + "  - webDriverAgentUrl no configurado cuando WDA ya está corriendo";
+        } else if (msg.contains("xcuitest") || msg.contains("driver not found")
+                || msg.contains("no driver") || msg.contains("cannot find module")) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.XCUITEST_DRIVER_NOT_INSTALLED;
+            detail   = "XCUITest driver no instalado o versión incompatible.\n"
+                     + "  → Instala con: appium driver install xcuitest";
+        } else if ((msg.contains("codesign") || msg.contains("signing")
+                || msg.contains("team id") || msg.contains("provision"))
+                && (msg.contains("error") || msg.contains("failed") || msg.contains("code 1"))) {
+            // Only classify as WDA_SIGNING_FAILED when there is explicit evidence of a
+            // code-signing error — not for any message that merely mentions "signing" context.
             category = IOSDeviceSynchronizationManager.SyncCategory.WDA_SIGNING_FAILED;
-            detail   = "WDA no pudo firmarse.\n"
+            detail   = "WDA no pudo firmarse — error de code-signing real detectado.\n"
                      + "  → Verifica xcodeOrgId y xcodeSigningId.\n"
                      + "  → Xcode → Settings → Accounts — asegúrate de que tu Apple ID esté activo.";
         } else if (msg.contains("build failed") || msg.contains("xcodebuild")
@@ -834,11 +858,6 @@ public class DriverFactory {
             detail   = "xcodebuild falló al compilar WDA.\n"
                      + "  → Verifica updatedWDABundleId, xcodeOrgId y perfil de provisioning.\n"
                      + "  → Revisa el log con: tail -f ~/.appium/logs/appium.log";
-        } else if (msg.contains("xcuitest") || msg.contains("driver not found")
-                || msg.contains("no driver") || msg.contains("cannot find module")) {
-            category = IOSDeviceSynchronizationManager.SyncCategory.APPIUM_DRIVER_NOT_FOUND;
-            detail   = "XCUITest driver no instalado o versión incompatible.\n"
-                     + "  → Instala con: appium driver install xcuitest";
         } else {
             category = IOSDeviceSynchronizationManager.SyncCategory.SESSION_CREATION_FAILED;
             detail   = "Sesión rechazada con dispositivo visible. Verifica:\n"
@@ -900,12 +919,14 @@ public class DriverFactory {
     }
 
     /**
-     * Verifies the XCUITest driver is installed in Appium.
+     * Validates the XCUITest driver is installed in Appium.
+     * Throws SyncException(XCUITEST_DRIVER_NOT_INSTALLED) if missing — fast-failed
+     * in createDriverWithRetries() without retry.
      *
      * Uses the runtime Appium binary (AGENT_DATA_DIR/runtime/appium) when available,
      * with fallback to known paths and PATH. Never assumes "appium" is on the system PATH.
      */
-    private static void checkXcuitestDriverInstalled() {
+    private static void validateXcuitestDriverInstalled() {
         String[] cmd = resolveAppiumCmd("driver", "list", "--installed");
         log.debug("[DriverFactory][iOS] Appium entry: {}", java.util.Arrays.toString(cmd));
         try {
@@ -915,13 +936,54 @@ public class DriverFactory {
             boolean found = out.toLowerCase().contains("xcuitest");
             if (found) {
                 Matcher m = Pattern.compile("xcuitest[^\\n]*").matcher(out.toLowerCase());
-                log.info("[DriverFactory][iOS] XCUITest driver: ✅ instalado — {}",
+                log.info("[DriverFactory][iOS] ✅ XCUITest driver instalado — {}",
                         m.find() ? m.group(0).trim() : "versión desconocida");
             } else {
-                log.warn("[DriverFactory][iOS] ⚠️  XCUITest driver NO encontrado — instala con: appium driver install xcuitest");
+                log.error("[DriverFactory][iOS] ❌ XCUITest driver NO instalado. Output:");
+                for (String line : out.lines().toArray(String[]::new)) {
+                    if (!line.isBlank()) log.error("[DriverFactory][iOS]   {}", line);
+                }
+                throw new IOSDeviceSynchronizationManager.SyncException(
+                    IOSDeviceSynchronizationManager.SyncCategory.XCUITEST_DRIVER_NOT_INSTALLED,
+                    "[DriverFactory][iOS] XCUITest driver no está instalado en Appium."
+                    + " La sesión iOS no puede crearse sin él.",
+                    "Instala el driver con: appium driver install xcuitest\n"
+                    + "  Verifica con: appium driver list --installed"
+                );
             }
+        } catch (IOSDeviceSynchronizationManager.SyncException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("[DriverFactory][iOS] ⚠️  No se pudo verificar drivers Appium: {}", e.getMessage());
+            // Don't block if the CLI is unavailable — Appium itself will report the error
+        }
+    }
+
+    /**
+     * Bypasses Selenium's Platform enum conversion for the "platformName" capability.
+     *
+     * Selenium 4.23's SharedCapabilitiesMethods.setCapability() intercepts any
+     * setCapability("platformName", String) call and converts the value through
+     * Platform.fromString() → Platform.IOS enum. Platform.IOS.toString() uses
+     * Enum.name() (no override) → returns "IOS", not "iOS".
+     *
+     * This method uses reflection to write the raw string directly into the
+     * underlying MutableCapabilities.caps map, so the W3C capability payload
+     * serializes as "platformName":"iOS" instead of "platformName":"IOS".
+     */
+    private static void forceStringCapability(org.openqa.selenium.MutableCapabilities opts,
+                                               String name, String value) {
+        try {
+            java.lang.reflect.Field f = org.openqa.selenium.MutableCapabilities.class
+                    .getDeclaredField("caps");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> caps = (java.util.Map<String, Object>) f.get(opts);
+            caps.put(name, value);
+            log.debug("[DriverFactory][iOS] capability '{}' forzado como String='{}'", name, value);
+        } catch (Exception ex) {
+            log.warn("[DriverFactory][iOS] forceStringCapability('{}') falló — Appium recibirá '{}' en su lugar: {}",
+                    name, opts.getCapability(name), ex.getMessage());
         }
     }
 

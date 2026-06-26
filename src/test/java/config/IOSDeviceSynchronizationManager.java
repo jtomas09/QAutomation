@@ -39,15 +39,18 @@ public final class IOSDeviceSynchronizationManager {
     // ── Failure categories ────────────────────────────────────────────────────
 
     public enum SyncCategory {
-        DEVICE_NOT_PAIRED,       // device not trusted by this Mac
-        DEVICE_LOCKED,           // screen locked (warn-only, non-blocking)
-        COREDEVICE_DESYNC,       // CoreDevice sees it, xctrace does not
-        XCTRACE_NOT_VISIBLE,     // neither tool can see the device
-        TUNNEL_DISCONNECTED,     // CoreDevice tunnel disconnected + xctrace invisible
-        WDA_BUILD_FAILED,        // xcodebuild failed to compile WebDriverAgent
-        WDA_SIGNING_FAILED,      // code-signing error during WDA build
-        APPIUM_DRIVER_NOT_FOUND, // XCUITest driver not installed
-        SESSION_CREATION_FAILED  // device visible but Appium rejected the session
+        DEVICE_NOT_PAIRED,            // device not trusted by this Mac
+        DEVICE_LOCKED,                // screen locked (warn-only, non-blocking)
+        COREDEVICE_DESYNC,            // CoreDevice sees it, xctrace does not
+        XCTRACE_NOT_VISIBLE,          // neither tool can see the device
+        TUNNEL_DISCONNECTED,          // CoreDevice tunnel disconnected + xctrace invisible
+        WDA_BUILD_FAILED,             // xcodebuild failed to compile WebDriverAgent
+        WDA_SIGNING_FAILED,           // code-signing error during WDA build
+        APPIUM_DRIVER_NOT_FOUND,      // XCUITest driver not installed (generic)
+        XCUITEST_DRIVER_NOT_INSTALLED,// XCUITest driver missing from 'appium driver list'
+        INVALID_PLATFORM_NAME,        // platformName was not exactly "iOS"
+        DEVICE_NOT_FOUND_BY_APPIUM,   // device visible in xctrace but Appium rejected UDID
+        SESSION_CREATION_FAILED       // device visible but Appium rejected the session
     }
 
     public static class SyncException extends IllegalStateException {
