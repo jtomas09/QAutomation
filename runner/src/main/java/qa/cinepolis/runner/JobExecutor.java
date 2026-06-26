@@ -24,6 +24,8 @@ import java.util.Comparator;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class JobExecutor {
 
@@ -790,13 +792,20 @@ public class JobExecutor {
                         passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
             } catch (Exception ignored) {}
         } finally {
-            // IosVideoRecorder.stop() is idempotent — safe no-op if already stopped in try/catch.
-            // Ensures recording stops even when an unexpected exception bypasses the normal path.
-            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
-            // Always clean up iOS resources: kill xcodebuild + terminate WDA on device.
-            // This removes the "Automation Running" overlay regardless of execution outcome.
-            if (isPlatformIos && !iosUdid.isBlank()) {
-                WdaManager.cleanup(client, job.executionId, iosUdid);
+            if (isPlatformIos) {
+                // 1. Stop video recording — idempotent; logs "Finalizando grabación..." + "✓ Video guardado"
+                //    only when the recording process is still live.
+                if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+                // 2. Close Appium session via HTTP — graceful path: Appium shuts down WDA itself.
+                //    Logs "Finalizando sesión Appium..." / "✓ Sesión Appium cerrada" only when a session
+                //    is found (i.e., driver.quit() was not reached in the test JVM).
+                if (!iosUdid.isBlank()) closeAppiumSessionForDevice(job.executionId, iosUdid);
+                // 3. Force-terminate WDA on device + kill Mac-side xcodebuild — safety net in case
+                //    the Appium session close above was skipped or partial.
+                if (!iosUdid.isBlank()) WdaManager.cleanup(client, job.executionId, iosUdid);
+                client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+            } else {
+                if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
             }
         }
     }
@@ -1044,6 +1053,69 @@ public class JobExecutor {
                 "Error de instalación: no se pudo instalar el driver XCUITest. "
                 + "Ejecuta manualmente: appium driver install xcuitest");
         return false;
+    }
+
+    // ── iOS cleanup helpers ────────────────────────────────────────────────────
+
+    /**
+     * Attempts to close any active Appium session for the given iOS device via
+     * HTTP DELETE to the Appium hub. This is the graceful path: Appium receives the
+     * delete request, tears down the XCUITest driver, and stops WDA on the device —
+     * clearing the "Automation Running" banner without needing force-kill.
+     *
+     * Only logs and acts when a session matching the UDID is found. No-ops silently
+     * when the session was already closed by driver.quit() in the test JVM.
+     * Never throws.
+     */
+    private void closeAppiumSessionForDevice(String executionId, String udid) {
+        try {
+            String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
+            HttpClient http = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(3))
+                    .build();
+
+            // GET /sessions — list all active Appium sessions
+            HttpResponse<String> resp;
+            try {
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(hubBase + "/sessions"))
+                        .timeout(Duration.ofSeconds(5))
+                        .GET().build();
+                resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            } catch (Exception e) {
+                return; // Appium not reachable — WdaManager force-terminate is the backstop
+            }
+            if (resp.statusCode() != 200) return;
+
+            String body = resp.body();
+            if (!body.contains(udid)) return; // no open session for this device
+
+            // Find the session ID whose capabilities contain our UDID.
+            // Appium JSON: {"value": [{"id": "SESSION", "capabilities": {..., "udid": "..."}}]}
+            // "id" appears BEFORE the capabilities block, so search backward from the UDID match.
+            int udidPos = body.indexOf(udid);
+            if (udidPos < 0) return;
+            String prefix = body.substring(Math.max(0, udidPos - 3000), udidPos);
+            Matcher m = Pattern.compile("\"id\"\\s*:\\s*\"([^\"]+)\"").matcher(prefix);
+            String sessionId = null;
+            while (m.find()) sessionId = m.group(1); // last "id" occurrence before the UDID
+            if (sessionId == null) return;
+
+            // Delete the session — Appium handles WDA shutdown gracefully
+            client.sendLog(executionId, "INFO", "Finalizando sesión Appium...");
+            try {
+                HttpRequest del = HttpRequest.newBuilder()
+                        .uri(URI.create(hubBase + "/session/" + sessionId))
+                        .timeout(Duration.ofSeconds(20))
+                        .DELETE().build();
+                http.send(del, HttpResponse.BodyHandlers.discarding());
+                client.sendLog(executionId, "INFO", "✓ Sesión Appium cerrada");
+                // Brief pause so Appium has time to stop WDA before we force-terminate
+                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+            } catch (Exception e) {
+                // Session delete failed — WdaManager terminateWdaOnDevice will cover it
+            }
+        } catch (Exception ignored) {}
     }
 
     // ── Pre-flight: Appium ─────────────────────────────────────────────────────

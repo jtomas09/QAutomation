@@ -251,23 +251,26 @@ public final class WdaManager {
         stop(); // kill Mac-side xcodebuild
 
         if (physicalUdid != null && !physicalUdid.isBlank()) {
+            if (client != null && executionId != null)
+                client.sendLog(executionId, "INFO", "Finalizando WebDriverAgent...");
             terminateWdaOnDevice(physicalUdid);
+            if (client != null && executionId != null)
+                client.sendLog(executionId, "INFO", "✓ WebDriverAgent detenido");
         }
 
         detectedWdaUrl = null;
-
-        if (client != null && executionId != null) {
-            client.sendTechLog(executionId,
-                    "🧹 [WDA] Cleanup completo — xcodebuild detenido, dispositivo liberado.");
-        }
     }
 
     /**
      * Finds WebDriverAgentRunner / XCTRunner processes on the physical device via
-     * `xcrun devicectl device process list` (Xcode 16+) and terminates each one.
+     * `xcrun devicectl device process list` (Xcode 16+/26) and terminates each one.
+     * Falls back to bundle-ID termination when PID extraction yields no results.
      * This immediately stops the "Automation Running" overlay on the device.
      */
     private static void terminateWdaOnDevice(String physicalUdid) {
+        boolean killedByPid = false;
+
+        // --- Step 1: terminate by PID (most reliable when device is responsive) ---
         try {
             Process list = new ProcessBuilder(
                     "xcrun", "devicectl", "device", "process", "list",
@@ -275,48 +278,72 @@ public final class WdaManager {
                     .redirectErrorStream(false).start();
             String json = new String(list.getInputStream().readAllBytes());
             boolean done = list.waitFor(12, TimeUnit.SECONDS);
-            if (!done) { list.destroyForcibly(); return; }
-
-            Set<String> pids = extractWdaPids(json);
-            if (pids.isEmpty()) {
-                System.out.println("[WdaManager] Sin procesos WDA activos en dispositivo.");
-                return;
-            }
-
-            for (String pid : pids) {
-                try {
-                    Process kill = new ProcessBuilder(
-                            "xcrun", "devicectl", "device", "process", "terminate",
-                            "--device", physicalUdid, "--pid", pid)
-                            .redirectErrorStream(true).start();
-                    kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
-                    kill.waitFor(8, TimeUnit.SECONDS);
-                    System.out.println("[WdaManager] ✅ WDA proceso PID=" + pid + " terminado en dispositivo.");
-                } catch (Exception ex) {
-                    System.err.println("[WdaManager] No se pudo terminar PID=" + pid + ": " + ex.getMessage());
+            if (!done) { list.destroyForcibly(); }
+            else {
+                Set<String> pids = extractWdaPids(json);
+                if (pids.isEmpty()) {
+                    System.out.println("[WdaManager] Sin procesos WDA en lista — intentando por bundle-id.");
+                }
+                for (String pid : pids) {
+                    try {
+                        Process kill = new ProcessBuilder(
+                                "xcrun", "devicectl", "device", "process", "terminate",
+                                "--device", physicalUdid, "--pid", pid)
+                                .redirectErrorStream(true).start();
+                        kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                        kill.waitFor(8, TimeUnit.SECONDS);
+                        System.out.println("[WdaManager] ✅ WDA PID=" + pid + " terminado.");
+                        killedByPid = true;
+                    } catch (Exception ex) {
+                        System.err.println("[WdaManager] No se pudo terminar PID=" + pid + ": " + ex.getMessage());
+                    }
                 }
             }
         } catch (Exception e) {
-            System.err.println("[WdaManager] terminateWdaOnDevice error: " + e.getMessage());
+            System.err.println("[WdaManager] process list error: " + e.getMessage());
+        }
+
+        // --- Step 2: fallback — terminate by bundle-id (covers Xcode 26 JSON format changes) ---
+        if (!killedByPid) {
+            for (String bundleId : new String[]{
+                    "com.facebook.WebDriverAgentRunner.xctrunner",
+                    "com.facebook.WebDriverAgentRunner"}) {
+                try {
+                    Process kill = new ProcessBuilder(
+                            "xcrun", "devicectl", "device", "process", "terminate",
+                            "--device", physicalUdid, "--bundle-id", bundleId)
+                            .redirectErrorStream(true).start();
+                    kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                    boolean fin = kill.waitFor(8, TimeUnit.SECONDS);
+                    if (fin && kill.exitValue() == 0) {
+                        System.out.println("[WdaManager] ✅ WDA terminado por bundle-id: " + bundleId);
+                        break;
+                    }
+                } catch (Exception ex) {
+                    // bundle-id not found or devicectl doesn't support --bundle-id — acceptable
+                }
+            }
         }
     }
 
     /**
      * Extracts process identifiers for WebDriverAgentRunner / XCTRunner entries from
      * a `xcrun devicectl device process list --json-output -` response.
+     * Searches ±1000 chars around each WDA marker for processIdentifier or pid fields.
      */
     private static Set<String> extractWdaPids(String json) {
         Set<String> pids = new LinkedHashSet<>();
-        String[] markers = {"WebDriverAgentRunner", "xctrunner"};
+        String[] markers = {"WebDriverAgentRunner", "xctrunner", "webdriveragent"};
         String jsonLower = json.toLowerCase();
-        Pattern pidPat = Pattern.compile("\"processIdentifier\"\\s*:\\s*(\\d+)");
+        // Accept both "processIdentifier" (Xcode 16) and "pid" (possible Xcode 26 alias)
+        Pattern pidPat = Pattern.compile("\"(?:processIdentifier|pid)\"\\s*:\\s*(\\d+)");
 
         for (String marker : markers) {
             int pos = 0;
             while ((pos = jsonLower.indexOf(marker.toLowerCase(), pos)) >= 0) {
-                // Scan ±600 chars around this match for processIdentifier
-                int lo = Math.max(0, pos - 600);
-                int hi = Math.min(json.length(), pos + 600);
+                // Scan ±1000 chars around this match for a processIdentifier/pid field
+                int lo = Math.max(0, pos - 1000);
+                int hi = Math.min(json.length(), pos + 1000);
                 Matcher m = pidPat.matcher(json.substring(lo, hi));
                 if (m.find()) pids.add(m.group(1));
                 pos++;

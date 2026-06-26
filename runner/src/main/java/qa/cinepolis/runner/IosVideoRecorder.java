@@ -122,6 +122,8 @@ public final class IosVideoRecorder {
 
         if (p == null) return;
 
+        client.sendLog(executionId, "INFO", "Finalizando grabación...");
+
         try {
             if (!p.isAlive()) {
                 // Process died before stop() was called
@@ -150,8 +152,7 @@ public final class IosVideoRecorder {
 
             if (f != null && f.exists() && f.length() > 0) {
                 client.sendLog(executionId, "INFO",
-                        "📹 [Video] Grabación iOS detenida → "
-                        + f.getName() + " (" + f.length() / 1024 + " KB)");
+                        "✓ Video guardado (" + f.length() / 1024 + " KB)");
             } else {
                 String output = processOutput != null ? processOutput.trim() : "";
                 String cause  = output.isBlank() ? ""

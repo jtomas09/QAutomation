@@ -43,6 +43,20 @@ public class DriverFactory {
     private static volatile AppiumDriver driver;
     private static volatile Properties   props;
 
+    // Shutdown hook — guarantees driver.quit() even on Gradle JVM crash (OOM, etc.)
+    // where @AfterEach / @AfterAll may never run.
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            AppiumDriver d = driver;
+            driver = null; // clear first so quitDriver() re-entry is a no-op
+            if (d != null) {
+                log.info("[DriverFactory] Finalizando sesión Appium...");
+                try { d.quit(); } catch (Exception ignored) {}
+                log.info("[DriverFactory] ✓ Sesión Appium cerrada");
+            }
+        }, "appium-driver-shutdown-hook"));
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Public API
     // ──────────────────────────────────────────────────────────────────────────
@@ -74,11 +88,12 @@ public class DriverFactory {
     /** Closes the current Appium session and clears the singleton. */
     public static void quitDriver() {
         AppiumDriver d = driver;
+        driver = null; // clear first to prevent shutdown hook re-entry
         if (d != null) {
+            log.info("[DriverFactory] Finalizando sesión Appium...");
             try { d.quit(); }
             catch (Exception e) { log.warn("[DriverFactory] quit() error: {}", e.getMessage()); }
-            driver = null;
-            log.info("[DriverFactory] AppiumDriver session closed.");
+            log.info("[DriverFactory] ✓ Sesión Appium cerrada");
         }
     }
 
