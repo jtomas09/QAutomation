@@ -895,6 +895,13 @@ public class JobExecutor {
 
         if (job.videoEnabled) cmd.add("-Dvideo.enabled=true");
         if (job.sendMail)     cmd.add("-DsendMail=true");
+
+        // Pass AGENT_DATA_DIR so DriverFactory can find the runtime Appium binary
+        // (AGENT_DATA_DIR/runtime/appium/node_modules/appium/index.js) without relying
+        // on the system PATH — which may not include the enterprise-installed Appium.
+        if (config.agentDataDir != null && !config.agentDataDir.isBlank()) {
+            cmd.add("-DAGENT_DATA_DIR=" + config.agentDataDir);
+        }
     }
 
     private static String resolveTestFilter(String suiteName, String testClass) {

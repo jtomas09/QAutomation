@@ -165,6 +165,18 @@ public class DriverFactory {
                 return d;
             } catch (Exception e) {
                 lastException = e;
+
+                // SyncException = device not ready; retrying won't help — fail fast
+                if (e instanceof IOSDeviceSynchronizationManager.SyncException) {
+                    IOSDeviceSynchronizationManager.SyncException se =
+                            (IOSDeviceSynchronizationManager.SyncException) e;
+                    log.error("[DriverFactory] ❌ Sincronización iOS fallida — abortando sin reintentar.");
+                    log.error("[DriverFactory]    Categoría  : {}", se.category);
+                    log.error("[DriverFactory]    Problema   : {}", se.getMessage());
+                    log.error("[DriverFactory]    Acción     : {}", se.actionSuggested);
+                    throw new RuntimeException(se.getMessage(), se);
+                }
+
                 log.error("[DriverFactory] Intento {} FALLIDO: {}", attempt, e.getMessage());
                 log.error("[DriverFactory] Causa raiz: {}", rootCause(e).getMessage());
                 e.printStackTrace();
@@ -409,6 +421,15 @@ public class DriverFactory {
         String bundleId = prop("bundleId",       "");
         String ipaPath  = prop("ipaPath",        "");
         String wdaUrl   = prop("webDriverAgentUrl", ""); // declared early: used in platformVersion detection
+
+        // Normalize platformName — Backend may send "IOS" (all-caps); Appium requires exactly "iOS".
+        // o.setPlatformName("iOS") is hardcoded below, but we fix the JVM property too so
+        // other reads (e.g. isIOS()) and log lines stay consistent.
+        String rawPlatform = prop("platformName", "iOS");
+        if (!rawPlatform.equals("iOS") && rawPlatform.equalsIgnoreCase("ios")) {
+            System.setProperty("platformName", "iOS");
+            log.info("[DriverFactory][iOS] platformName normalizado: '{}' → 'iOS'", rawPlatform);
+        }
 
         if (!udid.isBlank()) validateIosDevice(udid);
         validateAppiumServer(hubUrl);
@@ -736,11 +757,29 @@ public class DriverFactory {
     // iOS — Pre-session diagnostics
     // ──────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Pre-session diagnostic gate — runs right before new IOSDriver().
+     *
+     * Step 1: IOSDeviceSynchronizationManager.ensureReady() — the blocking gate.
+     *   Verifies xctrace visibility with auto-recovery for COREDEVICE_DESYNC.
+     *   Throws SyncException (fast-failed in createDriverWithRetries) if unrecoverable.
+     *
+     * Steps 2-3: Appium server + XCUITest driver checks (advisory only — don't block).
+     * Step 4: platformName validation + capability log.
+     */
     private static void runIosPreSessionDiagnostic(URL hub, String udid, XCUITestOptions options) {
         log.info("[DriverFactory][iOS] ══ Pre-Session Diagnostic ══");
+
+        // 1. Device synchronization — throws SyncException if device not ready for Appium
+        IOSDeviceSynchronizationManager.ensureReady(udid, log);
+
+        // 2. Appium server health
         checkAppiumExtendedStatus(hub);
+
+        // 3. XCUITest driver presence
         checkXcuitestDriverInstalled();
-        validateAppiumIOSDevice(udid);
+
+        // 4. platformName guard + capability snapshot
         Object pName = options.getCapability("platformName");
         if (pName != null && !"iOS".equals(pName.toString())) {
             log.warn("[DriverFactory][iOS] ⚠️  platformName='{}' — debe ser exactamente 'iOS'", pName);
@@ -753,73 +792,71 @@ public class DriverFactory {
         log.info("[DriverFactory][iOS] ════════════════════════════");
     }
 
-    private static void validateAppiumIOSDevice(String udid) {
-        if (udid == null || udid.isBlank()) {
-            log.warn("[DriverFactory][iOS] validateAppiumIOSDevice: UDID vacío — omitiendo validación");
-            return;
-        }
-        boolean coreDevice = isUdidInDevicectlJson(udid);
-        boolean xctrace    = isUdidInXctrace(udid);
-        String  idevice    = getIdeviceIdOutput();
-        boolean ideviceOk  = idevice.contains(udid);
-
-        log.info("[DriverFactory][iOS] ─ UDID Visibility Check ─────────────────");
-        log.info("[DriverFactory][iOS]   Backend UDID  : {}", udid);
-        log.info("[DriverFactory][iOS]   CoreDevice    : {}", coreDevice  ? "✅ visible" : "⚠️  NO visible");
-        log.info("[DriverFactory][iOS]   xctrace       : {}", xctrace     ? "✅ visible" : "⚠️  NO visible");
-        log.info("[DriverFactory][iOS]   idevice_id    : {}", ideviceOk   ? "✅ visible" : "⚠️  NO visible (o herramienta ausente)");
-        log.info("[DriverFactory][iOS] ────────────────────────────────────────");
-
-        if (!coreDevice && !xctrace) {
-            throw new IllegalStateException(
-                    "[DriverFactory][iOS] Dispositivo " + udid
-                    + " NO visible en CoreDevice ni xctrace — desconectado o no emparejado. "
-                    + "Conecta el cable USB y acepta «Confiar en este Mac».");
-        }
-        if (coreDevice && !xctrace) {
-            log.warn("[DriverFactory][iOS] ⚠️  Dispositivo en CoreDevice pero NO en xctrace — posible desincronización. "
-                    + "Appium puede rechazar el UDID. Se intentará igualmente.");
-        }
-    }
-
     private static void classifyIosSessionFailure(String udid, URL hub,
                                                    XCUITestOptions options, Exception e) {
-        boolean coreDevice = isUdidInDevicectlJson(udid);
-        boolean xctrace    = isUdidInXctrace(udid);
+        // Re-read live state post-failure
+        IOSDeviceSynchronizationManager.SyncState state =
+                IOSDeviceSynchronizationManager.readState(udid);
+        boolean coreDevice = state.coreDeviceVisible;
+        boolean xctrace    = state.xctraceVisible;
         boolean ideviceOk  = getIdeviceIdOutput().contains(udid);
+        String  msg        = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
 
-        String category;
+        IOSDeviceSynchronizationManager.SyncCategory category;
         String detail;
-        if (!coreDevice && !xctrace) {
-            category = "HARDWARE/CONNECTIVITY";
-            detail   = "El dispositivo no aparece en CoreDevice ni xctrace. "
-                     + "Desconecta y vuelve a conectar el cable USB, desbloquea el iPhone y acepta «Confiar en este Mac».";
+
+        if ("unpaired".equalsIgnoreCase(state.pairingState)) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.DEVICE_NOT_PAIRED;
+            detail   = "El dispositivo no confía en este Mac.\n"
+                     + "  → Desbloquea el iPhone y acepta «Confiar en este Mac».";
+        } else if (!coreDevice && !xctrace) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.XCTRACE_NOT_VISIBLE;
+            detail   = "El dispositivo no aparece en ninguna herramienta.\n"
+                     + "  → Desconecta/reconecta el USB, desbloquea el iPhone.";
+        } else if (coreDevice && !xctrace
+                && "disconnected".equalsIgnoreCase(state.tunnelState)) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.TUNNEL_DISCONNECTED;
+            detail   = "Tunnel CoreDevice desconectado y xctrace no ve el dispositivo.\n"
+                     + "  → sudo killall -9 remotedeviced → reconecta el cable USB.";
         } else if (coreDevice && !xctrace) {
-            category = "COREDEVICE_DESYNC";
-            detail   = "CoreDevice ve el dispositivo pero xctrace no. "
-                     + "Reinicia el daemon: 'sudo killall -9 remotedeviced' o reconecta el cable USB.";
+            category = IOSDeviceSynchronizationManager.SyncCategory.COREDEVICE_DESYNC;
+            detail   = "CoreDevice ve el dispositivo pero xctrace no.\n"
+                     + "  → sudo killall -9 remotedeviced → desconecta/reconecta el cable USB.";
+        } else if (msg.contains("codesign") || msg.contains("signing")
+                || msg.contains("team id") || msg.contains("provision")) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.WDA_SIGNING_FAILED;
+            detail   = "WDA no pudo firmarse.\n"
+                     + "  → Verifica xcodeOrgId y xcodeSigningId.\n"
+                     + "  → Xcode → Settings → Accounts — asegúrate de que tu Apple ID esté activo.";
+        } else if (msg.contains("build failed") || msg.contains("xcodebuild")
+                || msg.contains("exit code 65") || msg.contains("compilation")) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.WDA_BUILD_FAILED;
+            detail   = "xcodebuild falló al compilar WDA.\n"
+                     + "  → Verifica updatedWDABundleId, xcodeOrgId y perfil de provisioning.\n"
+                     + "  → Revisa el log con: tail -f ~/.appium/logs/appium.log";
+        } else if (msg.contains("xcuitest") || msg.contains("driver not found")
+                || msg.contains("no driver") || msg.contains("cannot find module")) {
+            category = IOSDeviceSynchronizationManager.SyncCategory.APPIUM_DRIVER_NOT_FOUND;
+            detail   = "XCUITest driver no instalado o versión incompatible.\n"
+                     + "  → Instala con: appium driver install xcuitest";
         } else {
-            Object wdaUrl = options.getCapability("appium:webDriverAgentUrl");
-            if (wdaUrl == null || wdaUrl.toString().isBlank()) {
-                category = "XCUITEST_DRIVER";
-                detail   = "El dispositivo es visible pero Appium no lo acepta. "
-                         + "Verifica que webDriverAgentUrl esté configurado y que WDA esté activo en el dispositivo.";
-            } else {
-                category = "CAPABILITIES";
-                detail   = "Dispositivo visible y webDriverAgentUrl configurado pero sesión rechazada. "
-                         + "Verifica platformName='iOS', udid exacto, bundleId correcto y xcodeOrgId/xcodeSigningId.";
-            }
+            category = IOSDeviceSynchronizationManager.SyncCategory.SESSION_CREATION_FAILED;
+            detail   = "Sesión rechazada con dispositivo visible. Verifica:\n"
+                     + "  platformName='iOS' (no 'IOS'), udid exacto, bundleId correcto,\n"
+                     + "  xcodeOrgId/xcodeSigningId, webDriverAgentUrl si WDA está precompilado.";
         }
 
-        log.error("[DriverFactory][iOS] ══ FAILURE CLASSIFICATION ══════════════════");
-        log.error("[DriverFactory][iOS]   Categoría     : {}", category);
-        log.error("[DriverFactory][iOS]   CoreDevice    : {}", coreDevice ? "visible" : "NO visible");
-        log.error("[DriverFactory][iOS]   xctrace       : {}", xctrace    ? "visible" : "NO visible");
-        log.error("[DriverFactory][iOS]   idevice_id    : {}", ideviceOk  ? "visible" : "NO visible");
-        log.error("[DriverFactory][iOS]   UDID          : {}", udid);
-        log.error("[DriverFactory][iOS]   Hub           : {}", hub);
+        log.error("[DriverFactory][iOS] ══ FAILURE CLASSIFICATION ══════════════════════");
+        log.error("[DriverFactory][iOS]   Categoría      : {}", category);
+        log.error("[DriverFactory][iOS]   CoreDevice     : {}", coreDevice ? "visible" : "NO visible");
+        log.error("[DriverFactory][iOS]   xctrace        : {}", xctrace    ? "visible" : "NO visible");
+        log.error("[DriverFactory][iOS]   idevice_id     : {}", ideviceOk  ? "visible" : "NO visible");
+        log.error("[DriverFactory][iOS]   Tunnel         : {}", state.tunnelState);
+        log.error("[DriverFactory][iOS]   Pairing        : {}", state.pairingState);
+        log.error("[DriverFactory][iOS]   UDID           : {}", udid);
+        log.error("[DriverFactory][iOS]   Hub            : {}", hub);
         log.error("[DriverFactory][iOS]   Acción sugerida: {}", detail);
-        log.error("[DriverFactory][iOS] ═══════════════════════════════════════════");
+        log.error("[DriverFactory][iOS] ═══════════════════════════════════════════════");
     }
 
     private static String queryWdaPlatformVersion(String wdaUrl) {
@@ -862,10 +899,17 @@ public class DriverFactory {
         }
     }
 
+    /**
+     * Verifies the XCUITest driver is installed in Appium.
+     *
+     * Uses the runtime Appium binary (AGENT_DATA_DIR/runtime/appium) when available,
+     * with fallback to known paths and PATH. Never assumes "appium" is on the system PATH.
+     */
     private static void checkXcuitestDriverInstalled() {
+        String[] cmd = resolveAppiumCmd("driver", "list", "--installed");
+        log.debug("[DriverFactory][iOS] Appium entry: {}", java.util.Arrays.toString(cmd));
         try {
-            Process p = new ProcessBuilder("appium", "driver", "list", "--installed")
-                    .redirectErrorStream(true).start();
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
             boolean found = out.toLowerCase().contains("xcuitest");
@@ -874,11 +918,71 @@ public class DriverFactory {
                 log.info("[DriverFactory][iOS] XCUITest driver: ✅ instalado — {}",
                         m.find() ? m.group(0).trim() : "versión desconocida");
             } else {
-                log.warn("[DriverFactory][iOS] ⚠️  XCUITest driver NO encontrado. Instala con: appium driver install xcuitest");
+                log.warn("[DriverFactory][iOS] ⚠️  XCUITest driver NO encontrado — instala con: appium driver install xcuitest");
             }
         } catch (Exception e) {
             log.warn("[DriverFactory][iOS] ⚠️  No se pudo verificar drivers Appium: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Builds a command array to invoke an Appium subcommand.
+     *
+     * Resolution order (mirrors AppiumManager.buildCandidates):
+     *   1. AGENT_DATA_DIR/runtime/node + AGENT_DATA_DIR/runtime/appium/node_modules/appium/index.js
+     *   2. APPIUM_BIN system/env property
+     *   3. /opt/homebrew/bin/appium  (Homebrew, macOS)
+     *   4. /usr/local/bin/appium     (npm global, macOS)
+     *   5. "appium" via PATH         (fallback — may fail in enterprise environment)
+     */
+    private static String[] resolveAppiumCmd(String... appiumArgs) {
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR", "");
+        if (agentDataDir.isBlank()) agentDataDir = System.getenv("AGENT_DATA_DIR") != null
+                ? System.getenv("AGENT_DATA_DIR") : "";
+
+        // Priority 1: embedded enterprise runtime (node + appium index.js)
+        if (!agentDataDir.isBlank()) {
+            java.nio.file.Path nodeBin   = java.nio.file.Path.of(agentDataDir, "runtime", "node", "bin", "node");
+            java.nio.file.Path appiumIdx = java.nio.file.Path.of(agentDataDir, "runtime", "appium",
+                                               "node_modules", "appium", "index.js");
+            if (java.nio.file.Files.isExecutable(nodeBin) && java.nio.file.Files.exists(appiumIdx)) {
+                return buildCmdArray(nodeBin.toString(), appiumIdx.toString(), appiumArgs);
+            }
+        }
+
+        // Priority 2: APPIUM_BIN property (may be an index.js or a shell wrapper)
+        String appiumBin = System.getProperty("APPIUM_BIN", "");
+        if (appiumBin.isBlank() && System.getenv("APPIUM_BIN") != null) {
+            appiumBin = System.getenv("APPIUM_BIN");
+        }
+        if (!appiumBin.isBlank() && java.nio.file.Files.exists(java.nio.file.Path.of(appiumBin))) {
+            boolean isJs = appiumBin.endsWith(".js");
+            if (isJs) {
+                String nodeBin = agentDataDir.isBlank() ? "node"
+                        : java.nio.file.Path.of(agentDataDir, "runtime", "node", "bin", "node").toString();
+                return buildCmdArray(nodeBin, appiumBin, appiumArgs);
+            }
+            return buildCmdArray(null, appiumBin, appiumArgs);
+        }
+
+        // Priority 3-4: known macOS install paths
+        for (String path : new String[]{"/opt/homebrew/bin/appium", "/usr/local/bin/appium"}) {
+            if (java.nio.file.Files.isExecutable(java.nio.file.Path.of(path))) {
+                return buildCmdArray(null, path, appiumArgs);
+            }
+        }
+
+        // Priority 5: PATH fallback
+        return buildCmdArray(null, "appium", appiumArgs);
+    }
+
+    private static String[] buildCmdArray(String nodeBin, String appiumEntry, String[] appiumArgs) {
+        int off = nodeBin != null ? 2 : 1;
+        String[] cmd = new String[off + appiumArgs.length];
+        if (nodeBin != null) cmd[0] = nodeBin;
+        cmd[off - 1] = appiumEntry;
+        System.arraycopy(appiumArgs, 0, cmd, off, appiumArgs.length);
+        return cmd;
     }
 
     private static boolean isUdidInXctrace(String udid) {
