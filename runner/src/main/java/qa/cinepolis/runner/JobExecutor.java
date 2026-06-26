@@ -628,6 +628,23 @@ public class JobExecutor {
                             + " | prebuilt: " + wdaPrebuilt
                             + (iosResult.wdaReady ? " | ✅ WDA activo en "
                                     + (wdaUrl != null ? wdaUrl : "localhost:8100") : ""));
+
+                    // ── Pass confirmed device sync state to Gradle subprocess ──────────
+                    // IOSDeviceStateService (test JVM) reads these properties and returns
+                    // the Runner-confirmed state without running any new subprocess — which
+                    // prevents IOSDeviceSynchronizationManager from querying xctrace again
+                    // and getting a stale "not visible" result seconds after Runner confirmed ready.
+                    cmd.add("-DiosState.xctraceVisible="    + iosResult.xctraceConfirmed);
+                    cmd.add("-DiosState.coreDeviceVisible=true");
+                    cmd.add("-DiosState.tunnelState="       + iosResult.tunnelState);
+                    cmd.add("-DiosState.pairingState="      + iosResult.pairingState);
+                    if (!iosResult.coreDeviceId.isBlank())
+                        cmd.add("-DiosState.coreDeviceId="  + iosResult.coreDeviceId);
+                    cmd.add("-DiosState.confirmedAtMs="     + iosResult.confirmedAtMs);
+                    client.sendLog(job.executionId, "INFO",
+                            "[JobExecutor] 🔗 Estado dispositivo → Gradle: xctrace="
+                            + iosResult.xctraceConfirmed + " tunnel=" + iosResult.tunnelState
+                            + " pairing=" + iosResult.pairingState);
                 }
             }
 

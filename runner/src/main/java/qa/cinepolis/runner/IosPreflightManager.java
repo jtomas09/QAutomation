@@ -39,13 +39,32 @@ public class IosPreflightManager {
         /** True if WDA was confirmed running on localhost:8100 during preflight. */
         public final boolean wdaReady;
 
+        // ── Confirmed device sync state (passed to DriverFactory via -DiosState.*) ──
+        /** True when xctrace confirmed the device visible at end of preflight. */
+        public final boolean xctraceConfirmed;
+        /** tunnelState observed at end of preflight (informational). */
+        public final String  tunnelState;
+        /** pairingState observed at end of preflight. */
+        public final String  pairingState;
+        /** CoreDevice identifier UUID, or empty string if not detected. */
+        public final String  coreDeviceId;
+        /** System.currentTimeMillis() at the moment this result was created. */
+        public final long    confirmedAtMs;
+
         IosPreflightResult(String teamId, String iosVersion,
-                           String wdaBundleId, boolean wdaCached, boolean wdaReady) {
-            this.teamId      = teamId;
-            this.iosVersion  = iosVersion;
-            this.wdaBundleId = wdaBundleId;
-            this.wdaCached   = wdaCached;
-            this.wdaReady    = wdaReady;
+                           String wdaBundleId, boolean wdaCached, boolean wdaReady,
+                           boolean xctraceConfirmed, String tunnelState,
+                           String pairingState, String coreDeviceId) {
+            this.teamId           = teamId;
+            this.iosVersion       = iosVersion;
+            this.wdaBundleId      = wdaBundleId;
+            this.wdaCached        = wdaCached;
+            this.wdaReady         = wdaReady;
+            this.xctraceConfirmed = xctraceConfirmed;
+            this.tunnelState      = tunnelState  != null ? tunnelState  : "unknown";
+            this.pairingState     = pairingState != null ? pairingState : "unknown";
+            this.coreDeviceId     = coreDeviceId != null ? coreDeviceId : "";
+            this.confirmedAtMs    = System.currentTimeMillis();
         }
     }
 
@@ -127,7 +146,13 @@ public class IosPreflightManager {
                 + "   WDA caché  : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
                 + "   WDA activo : " + (wdaReady  ? "sí ✅" : "iniciará con Appium"));
 
-        return new IosPreflightResult(teamId, iosVersion, wdaBundleId, wdaCached, wdaReady);
+        return new IosPreflightResult(
+            teamId, iosVersion, wdaBundleId, wdaCached, wdaReady,
+            tunnel.xctraceVisible,
+            tunnel.tunnelState,
+            tunnel.pairingState,
+            tunnel.coreDeviceId
+        );
     }
 
     // ── 1. Xcode ──────────────────────────────────────────────────────────────

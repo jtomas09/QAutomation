@@ -636,60 +636,31 @@ public class DriverFactory {
     }
 
     private static void validateIosDevice(String udid) {
-        final int maxWaitMs = 30_000;
-        final int pollMs    =  3_000;
-        try {
-            for (int attempt = 0; attempt <= maxWaitMs / pollMs; attempt++) {
-                // Primary: xcrun xctrace — works for traditional UDIDs (8-16 hex format)
-                Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
-                    .redirectErrorStream(true).start();
-                String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                p.waitFor();
-                if (out.contains(udid)) {
-                    if (attempt > 0)
-                        log.info("[Preflight] iOS device {} visible después de ~{}s de espera CoreDevice.",
-                                udid, attempt * pollMs / 1000);
-                    else
-                        log.info("[Preflight] iOS device OK: {} (visible via xctrace)", udid);
-                    return;
-                }
-
-                // Xcode 26+ fallback: devicectl --json-output contains physical UDID in
-                // hardwareProperties.udid. The text output of devicectl shows CoreDevice UUIDs
-                // (8-4-4-4-12 format) — NOT physical UDIDs — so JSON output is required here.
-                try {
-                    Process p2 = new ProcessBuilder("xcrun", "devicectl", "list", "devices",
-                            "--json-output", "-")
-                        .redirectErrorStream(false).start();
-                    String json = new String(p2.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                    p2.waitFor();
-                    if (json.contains(udid)) {
-                        log.info("[Preflight] iOS device OK: {} (visible via devicectl JSON — hardwareProperties.udid)", udid);
-                        return;
-                    }
-                } catch (Exception ignored) {}
-
-                // Device not visible yet — wait and retry (CoreDevice sync may take a few seconds)
-                if (attempt == 0) {
-                    log.warn("[Preflight] ⏳ iOS device {} no sincronizado — esperando CoreDevice ({} s máx.)...",
-                            udid, maxWaitMs / 1000);
-                }
-                if (attempt < maxWaitMs / pollMs) {
-                    Thread.sleep(pollMs);
-                }
-            }
-
-            throw new IllegalStateException(
-                "[Preflight] iOS device " + udid + " no encontrado via 'xcrun xctrace list devices' "
-                + "ni 'xcrun devicectl --json-output' después de " + (maxWaitMs / 1000) + "s.\n"
-                + "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n"
-                + "  Diagnóstico: xcrun devicectl list devices --json-output -"
-            );
-        } catch (IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("[Preflight] xcrun check skipped ({}) — verifica que Xcode esté instalado.", e.getMessage());
+        // Delegate to IOSDeviceStateService — which returns Runner-confirmed state
+        // (no subprocess) or a fresh query, but always the same result within this JVM run.
+        IOSDeviceStateService.DeviceState state = IOSDeviceStateService.getState(udid, log);
+        if (state.xctraceVisible) {
+            log.info("[Preflight] iOS device OK: {} — xctrace ✅ CoreDevice {} (fuente: {})",
+                    udid,
+                    state.coreDeviceVisible ? "✅" : "N/A",
+                    state.fromRunner ? "Runner" : "consulta directa");
+            return;
         }
+        if (state.coreDeviceVisible) {
+            // Device exists in CoreDevice but not in xctrace yet. Rather than polling here
+            // (which would duplicate the recovery logic in IOSDeviceSynchronizationManager),
+            // log a warning and continue — IOSDeviceSynchronizationManager.ensureReady()
+            // will handle recovery and throw SyncException if it cannot synchronize.
+            log.warn("[Preflight] ⚠️  iOS device {} en CoreDevice ✅ pero xctrace ❌ — "
+                    + "IOSDeviceSynchronizationManager ejecutará recuperación automática.", udid);
+            return;
+        }
+        // Device not visible anywhere
+        throw new IllegalStateException(
+            "[Preflight] iOS device " + udid + " NO visible en xctrace ni CoreDevice.\n"
+            + "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n"
+            + "  Diagnóstico: xcrun xctrace list devices"
+        );
     }
 
     /**
@@ -802,7 +773,8 @@ public class DriverFactory {
 
     private static void classifyIosSessionFailure(String udid, URL hub,
                                                    XCUITestOptions options, Exception e) {
-        // Re-read live state post-failure
+        // Post-failure: refresh forces a new subprocess query so classification reflects
+        // actual state at the moment the session was rejected, not the pre-session cache.
         IOSDeviceSynchronizationManager.SyncState state =
                 IOSDeviceSynchronizationManager.readState(udid);
         boolean coreDevice = state.coreDeviceVisible;
@@ -1045,41 +1017,6 @@ public class DriverFactory {
         cmd[off - 1] = appiumEntry;
         System.arraycopy(appiumArgs, 0, cmd, off, appiumArgs.length);
         return cmd;
-    }
-
-    private static boolean isUdidInXctrace(String udid) {
-        if (udid == null || udid.isBlank()) return false;
-        try {
-            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
-                    .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS);
-            boolean inDevices = false;
-            for (String line : out.split("\n")) {
-                String t = line.trim();
-                if (t.startsWith("== Devices =="))  { inDevices = true;  continue; }
-                if (t.startsWith("=="))              { inDevices = false; continue; }
-                if (inDevices && t.contains(udid))  return true;
-            }
-        } catch (Exception e) {
-            log.debug("[DriverFactory][iOS] xctrace check error: {}", e.getMessage());
-        }
-        return false;
-    }
-
-    private static boolean isUdidInDevicectlJson(String udid) {
-        if (udid == null || udid.isBlank()) return false;
-        try {
-            Process p = new ProcessBuilder(
-                    "xcrun", "devicectl", "list", "devices", "--json-output", "-")
-                    .redirectErrorStream(false).start();
-            String json = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS);
-            return json.contains(udid);
-        } catch (Exception e) {
-            log.debug("[DriverFactory][iOS] devicectl check error: {}", e.getMessage());
-        }
-        return false;
     }
 
     private static String getIdeviceIdOutput() {
