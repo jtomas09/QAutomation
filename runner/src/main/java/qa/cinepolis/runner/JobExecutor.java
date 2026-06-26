@@ -541,6 +541,10 @@ public class JobExecutor {
             if (isAndroid) {
                 checkAdbDevices(job.executionId);
             } else {
+                if (!checkIosXcuitestDriver(job.executionId)) {
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    return;
+                }
                 iosResult = IosPreflightManager.runPreflight(
                         client, job.executionId, receivedUdid);
             }
@@ -1010,6 +1014,32 @@ public class JobExecutor {
             System.err.println("[JobExecutor] resolveLauncherActivity error: " + e.getMessage());
         }
         return null;
+    }
+
+    // ── Pre-flight: XCUITest driver ────────────────────────────────────────────
+
+    private boolean checkIosXcuitestDriver(String executionId) {
+        client.sendLog(executionId, "INFO", "Verificando drivers Appium");
+        if (appiumMgr == null) {
+            client.sendLog(executionId, "WARN",
+                    "Error de instalación: AppiumManager no disponible para verificar drivers.");
+            return false;
+        }
+        String installed = appiumMgr.getInstalledDriverList();
+        if (installed.toLowerCase().contains("xcuitest")) {
+            client.sendLog(executionId, "INFO", "Driver XCUITest encontrado");
+            return true;
+        }
+        client.sendLog(executionId, "INFO", "Instalando XCUITest");
+        boolean ok = appiumMgr.ensureXcuitestInstalled();
+        if (ok) {
+            client.sendLog(executionId, "INFO", "Instalación completada");
+            return true;
+        }
+        client.sendLog(executionId, "ERROR",
+                "Error de instalación: no se pudo instalar el driver XCUITest. "
+                + "Ejecuta manualmente: appium driver install xcuitest");
+        return false;
     }
 
     // ── Pre-flight: Appium ─────────────────────────────────────────────────────

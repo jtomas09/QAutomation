@@ -21,10 +21,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class AppiumManager {
 
-    private static final String APPIUM_URL    = "http://127.0.0.1:4723/status";
-    private static final int    PORT          = 4723;
-    private static final int    STARTUP_WAIT  = 30; // seconds
-    private static final int    RESTART_DELAY = 5;  // seconds
+    private static final String APPIUM_URL                  = "http://127.0.0.1:4723/status";
+    private static final int    PORT                        = 4723;
+    private static final int    STARTUP_WAIT                = 30; // seconds
+    private static final int    RESTART_DELAY               = 5;  // seconds
+    private static final int    DRIVER_INSTALL_TIMEOUT_MIN  = 5;  // minutes
 
     private final String os;
     private volatile Process       appiumProcess = null;
@@ -105,6 +106,34 @@ public class AppiumManager {
 
         System.out.println("[AppiumValidator] Reiniciando Appium post-reparacion...");
         ensureRunning();
+    }
+
+    /**
+     * Ensures the xcuitest Appium driver is installed.
+     * Checks 'appium driver list --installed'; installs if missing.
+     *
+     * @return true if xcuitest is installed (pre-existing or just installed), false on failure
+     */
+    public boolean ensureXcuitestInstalled() {
+        String entryPoint = findAppiumEntryPoint();
+        if (entryPoint == null) return false;
+
+        if (getInstalledDriverList().toLowerCase().contains("xcuitest")) return true;
+
+        String appiumVersion = getAppiumVersion();
+        String spec          = buildDriverSpec("xcuitest", appiumVersion);
+        try {
+            Process p = withAppiumHome(
+                    new ProcessBuilder(nodeCmd(entryPoint, "driver", "install", spec))
+                            .redirectErrorStream(true))
+                    .start();
+            p.getInputStream().transferTo(OutputStream.nullOutputStream());
+            boolean done = p.waitFor(DRIVER_INSTALL_TIMEOUT_MIN, TimeUnit.MINUTES);
+            if (!done) { p.destroyForcibly(); return false; }
+            if (p.exitValue() != 0) return false;
+        } catch (Exception e) { return false; }
+
+        return getInstalledDriverList().toLowerCase().contains("xcuitest");
     }
 
     /**

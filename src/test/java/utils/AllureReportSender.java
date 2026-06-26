@@ -620,7 +620,10 @@ public class AllureReportSender {
             try {
                 log.info("[AllureReportSender] Running gradlew allureReport --clean in: {}", projectDir);
 
-                ProcessBuilder pbAllure = new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport", "--clean", "--no-daemon");
+                boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+                ProcessBuilder pbAllure = isWindows
+                        ? new ProcessBuilder("cmd", "/c", "gradlew.bat", "allureReport", "--clean", "--no-daemon")
+                        : new ProcessBuilder("./gradlew", "allureReport", "--clean", "--no-daemon");
                 pbAllure.directory(new File(projectDir));
                 pbAllure.redirectErrorStream(true);
 
