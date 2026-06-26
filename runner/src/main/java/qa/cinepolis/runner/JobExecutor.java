@@ -584,6 +584,9 @@ public class JobExecutor {
 
             // iOS: inject bundleId (per-device config first, then appPackage fallback)
             if (!isAndroid) {
+                // Propagate Runner-confirmed xcuitest state to Gradle subprocess so DriverFactory
+                // trusts this result instead of running its own redundant subprocess check.
+                cmd.add("-DappiumXcuitestInstalled=true");
                 String iosBundleId = !effectiveBundleId.isBlank() ? effectiveBundleId
                         : !effectivePackage.isBlank()             ? effectivePackage
                         : "";
@@ -666,16 +669,12 @@ public class JobExecutor {
             System.out.println("[Executor] Comando: " + String.join(" ", cmd));
 
             // ── iOS video recording (physical device only) ─────────────────────
-            // Require wdaReady: WDA must be confirmed running before recording starts so we
-            // don't record empty initialization time if Appium needs to build WDA from scratch.
-            if (!isAndroid && job.videoEnabled && iosResult != null && iosResult.wdaReady) {
+            // Uses xcrun devicectl device recordVideo — independent of WDA status.
+            // Recording starts before the Appium session and stops after test execution.
+            if (!isAndroid && job.videoEnabled && iosResult != null) {
                 File videosDir = Paths.get(workDir, "build", "videos").toFile();
                 iosRecordingActive = IosVideoRecorder.start(
                         client, job.executionId, receivedUdid, videosDir) != null;
-            } else if (!isAndroid && job.videoEnabled && iosResult != null && !iosResult.wdaReady) {
-                client.sendLog(job.executionId, "INFO",
-                        "📹 [Video] Grabación iOS omitida — WDA no está activo previo a la sesión. "
-                        + "Se grabará a partir de la segunda ejecución (cuando WDA esté precompilado).");
             }
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -1025,8 +1024,10 @@ public class JobExecutor {
                     "Error de instalación: AppiumManager no disponible para verificar drivers.");
             return false;
         }
+        // Use strict detection: require xcuitest@X.Y.Z (version present) to avoid false
+        // positives from Appium versions that list all available drivers in --installed output.
         String installed = appiumMgr.getInstalledDriverList();
-        if (installed.toLowerCase().contains("xcuitest")) {
+        if (AppiumManager.xcuitestIsInstalled(installed)) {
             client.sendLog(executionId, "INFO", "Driver XCUITest encontrado");
             return true;
         }

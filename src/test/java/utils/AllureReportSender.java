@@ -96,10 +96,46 @@ public class AllureReportSender {
         }
     }
 
-    private static final String CHROME_PATH = System.getenv().getOrDefault(
-            "CHROME_PATH",
-            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-    );
+    private static final String CHROME_PATH = resolveChromeExecutable();
+
+    private static String resolveChromeExecutable() {
+        String env = System.getenv("CHROME_PATH");
+        if (env != null && !env.isBlank()) return env;
+
+        String os = System.getProperty("os.name", "").toLowerCase();
+
+        if (os.contains("mac")) {
+            for (String path : new String[]{
+                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    "/Applications/Chromium.app/Contents/MacOS/Chromium"}) {
+                if (new File(path).canExecute()) return path;
+            }
+            return "google-chrome"; // PATH fallback
+        }
+
+        if (!os.contains("win")) {
+            // Linux: search PATH for common Chrome/Chromium executables
+            for (String name : new String[]{
+                    "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"}) {
+                try {
+                    Process p = new ProcessBuilder("which", name)
+                            .redirectErrorStream(true).start();
+                    String found = new String(p.getInputStream().readAllBytes()).trim();
+                    p.waitFor(3, TimeUnit.SECONDS);
+                    if (p.exitValue() == 0 && !found.isBlank()) return found;
+                } catch (Exception ignored) {}
+            }
+            return "google-chrome";
+        }
+
+        // Windows
+        for (String path : new String[]{
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"}) {
+            if (new File(path).exists()) return path;
+        }
+        return "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+    }
 
     /**
      * Sends a single final suite report email with the Allure PDF attached.

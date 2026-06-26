@@ -109,6 +109,27 @@ public class AppiumManager {
     }
 
     /**
+     * Returns true if the xcuitest driver is present in {@code driverListOutput}.
+     *
+     * Appium 2.x sometimes emits ALL available drivers (installed + not-installed) even
+     * with --installed, so a plain .contains("xcuitest") produces false positives.
+     * This method requires xcuitest to appear with a version number (xcuitest@X) — the
+     * only form Appium uses for a genuinely installed driver — and rejects explicit
+     * "not installed" markers.
+     */
+    static boolean xcuitestIsInstalled(String driverListOutput) {
+        if (driverListOutput == null) return false;
+        String lower = driverListOutput.toLowerCase();
+        if (!lower.contains("xcuitest")) return false;
+        // Reject explicit "not installed" entries
+        if (java.util.regex.Pattern.compile("xcuitest[^\\n]*not installed")
+                .matcher(lower).find()) return false;
+        // Accept only when a version number follows (xcuitest@7.19.6 or xcuitest 7.19.6)
+        return java.util.regex.Pattern.compile("xcuitest[@\\s]\\d")
+                .matcher(lower).find();
+    }
+
+    /**
      * Ensures the xcuitest Appium driver is installed.
      * Checks 'appium driver list --installed'; installs if missing.
      *
@@ -118,7 +139,7 @@ public class AppiumManager {
         String entryPoint = findAppiumEntryPoint();
         if (entryPoint == null) return false;
 
-        if (getInstalledDriverList().toLowerCase().contains("xcuitest")) return true;
+        if (xcuitestIsInstalled(getInstalledDriverList())) return true;
 
         String appiumVersion = getAppiumVersion();
         String spec          = buildDriverSpec("xcuitest", appiumVersion);
@@ -133,7 +154,7 @@ public class AppiumManager {
             if (p.exitValue() != 0) return false;
         } catch (Exception e) { return false; }
 
-        return getInstalledDriverList().toLowerCase().contains("xcuitest");
+        return xcuitestIsInstalled(getInstalledDriverList());
     }
 
     /**

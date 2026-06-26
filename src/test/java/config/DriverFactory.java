@@ -899,6 +899,13 @@ public class DriverFactory {
      * with fallback to known paths and PATH. Never assumes "appium" is on the system PATH.
      */
     private static void validateXcuitestDriverInstalled() {
+        // Runner (JobExecutor) checks xcuitest before launching Gradle and passes this property.
+        // Trusting it avoids a redundant subprocess call and eliminates env-difference false positives.
+        if ("true".equalsIgnoreCase(System.getProperty("appiumXcuitestInstalled"))) {
+            log.info("[DriverFactory][iOS] ✅ Driver XCUITest confirmado por Runner — "
+                    + "omitiendo validación redundante.");
+            return;
+        }
         String[] cmd = resolveAppiumCmd("driver", "list", "--installed");
         log.debug("[DriverFactory][iOS] Appium entry: {}", java.util.Arrays.toString(cmd));
         try {
