@@ -21,6 +21,8 @@ import java.time.LocalDate;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Cross-platform AppiumDriver factory (Android + iOS).
@@ -228,6 +230,9 @@ public class DriverFactory {
             }
             log.info("[DriverFactory] Hub URL : {}", hub);
             log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
+            if ("local".equals(mode)) {
+                runIosPreSessionDiagnostic(hub, prop("udid", ""), options);
+            }
             try {
                 IOSDriver d = new IOSDriver(hub, options);
                 d.manage().timeouts().implicitlyWait(Duration.ZERO);
@@ -263,6 +268,11 @@ public class DriverFactory {
                 }
                 log.error("[DriverFactory][iOS] Full stacktrace:", iosEx);
                 log.error("[DriverFactory][iOS] ══════════════════════════════════════════════════");
+                if ("local".equals(mode)
+                        && iosEx.getMessage() != null
+                        && iosEx.getMessage().contains("Unknown device or simulator UDID")) {
+                    classifyIosSessionFailure(prop("udid", ""), hub, options, iosEx);
+                }
                 throw iosEx;
             }
         } else {
@@ -398,6 +408,7 @@ public class DriverFactory {
         String udid     = prop("udid",           "");
         String bundleId = prop("bundleId",       "");
         String ipaPath  = prop("ipaPath",        "");
+        String wdaUrl   = prop("webDriverAgentUrl", ""); // declared early: used in platformVersion detection
 
         if (!udid.isBlank()) validateIosDevice(udid);
         validateAppiumServer(hubUrl);
@@ -406,6 +417,17 @@ public class DriverFactory {
         o.setDeviceName(prop("deviceName", "iPhone"));
 
         String platformVersion = prop("platformVersion", "");
+        // If platformVersion unknown but WDA is running at a known URL, query WDA /status
+        // for the iOS version. This prevents Appium from resolving the version via UDID
+        // lookup — which is the root cause of "Unknown device or simulator UDID" when
+        // Appium's internal device-info tools don't handle the new UDID format (8-16 hex).
+        if (!isValidPlatformVersion(platformVersion) && !wdaUrl.isBlank()) {
+            String wdaVersion = queryWdaPlatformVersion(wdaUrl);
+            if (isValidPlatformVersion(wdaVersion)) {
+                platformVersion = wdaVersion;
+                log.info("[DriverFactory][iOS] platformVersion    : {} (desde WDA /status — previene UDID lookup)", platformVersion);
+            }
+        }
         if (isValidPlatformVersion(platformVersion)) {
             o.setPlatformVersion(platformVersion);
             log.info("[DriverFactory][iOS] platformVersion    : {} (enviada a Appium)", platformVersion);
@@ -461,11 +483,6 @@ public class DriverFactory {
 
         // useNewWDA=false — reuse WDA if already running on device (don't restart it).
         o.setCapability("useNewWDA", false);
-
-        // webDriverAgentUrl — URL where WDA is already running, announced by the Runner via
-        // "ServerURLHere->URL<-ServerURLHere" from xcodebuild stdout (WdaManager).
-        // In Xcode 16+/26 with CoreDevice, this may be a device-specific IP instead of localhost.
-        String wdaUrl = prop("webDriverAgentUrl", "");
 
         // skipServerInstallation — skip xcodebuild if WDA is already installed (prebuilt)
         // or already running (webDriverAgentUrl set). When WDA URL is provided, Appium must
@@ -712,6 +729,203 @@ public class DriverFactory {
             }
         } catch (Exception e) {
             log.warn("[Preflight] Package check skipped: {}", e.getMessage());
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // iOS — Pre-session diagnostics
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static void runIosPreSessionDiagnostic(URL hub, String udid, XCUITestOptions options) {
+        log.info("[DriverFactory][iOS] ══ Pre-Session Diagnostic ══");
+        checkAppiumExtendedStatus(hub);
+        checkXcuitestDriverInstalled();
+        validateAppiumIOSDevice(udid);
+        Object pName = options.getCapability("platformName");
+        if (pName != null && !"iOS".equals(pName.toString())) {
+            log.warn("[DriverFactory][iOS] ⚠️  platformName='{}' — debe ser exactamente 'iOS'", pName);
+        }
+        log.info("[DriverFactory][iOS] Key caps → udid={} | platformName={} | automationName={} | platformVersion={}",
+                options.getCapability("appium:udid"),
+                options.getCapability("platformName"),
+                options.getCapability("appium:automationName"),
+                options.getCapability("appium:platformVersion"));
+        log.info("[DriverFactory][iOS] ════════════════════════════");
+    }
+
+    private static void validateAppiumIOSDevice(String udid) {
+        if (udid == null || udid.isBlank()) {
+            log.warn("[DriverFactory][iOS] validateAppiumIOSDevice: UDID vacío — omitiendo validación");
+            return;
+        }
+        boolean coreDevice = isUdidInDevicectlJson(udid);
+        boolean xctrace    = isUdidInXctrace(udid);
+        String  idevice    = getIdeviceIdOutput();
+        boolean ideviceOk  = idevice.contains(udid);
+
+        log.info("[DriverFactory][iOS] ─ UDID Visibility Check ─────────────────");
+        log.info("[DriverFactory][iOS]   Backend UDID  : {}", udid);
+        log.info("[DriverFactory][iOS]   CoreDevice    : {}", coreDevice  ? "✅ visible" : "⚠️  NO visible");
+        log.info("[DriverFactory][iOS]   xctrace       : {}", xctrace     ? "✅ visible" : "⚠️  NO visible");
+        log.info("[DriverFactory][iOS]   idevice_id    : {}", ideviceOk   ? "✅ visible" : "⚠️  NO visible (o herramienta ausente)");
+        log.info("[DriverFactory][iOS] ────────────────────────────────────────");
+
+        if (!coreDevice && !xctrace) {
+            throw new IllegalStateException(
+                    "[DriverFactory][iOS] Dispositivo " + udid
+                    + " NO visible en CoreDevice ni xctrace — desconectado o no emparejado. "
+                    + "Conecta el cable USB y acepta «Confiar en este Mac».");
+        }
+        if (coreDevice && !xctrace) {
+            log.warn("[DriverFactory][iOS] ⚠️  Dispositivo en CoreDevice pero NO en xctrace — posible desincronización. "
+                    + "Appium puede rechazar el UDID. Se intentará igualmente.");
+        }
+    }
+
+    private static void classifyIosSessionFailure(String udid, URL hub,
+                                                   XCUITestOptions options, Exception e) {
+        boolean coreDevice = isUdidInDevicectlJson(udid);
+        boolean xctrace    = isUdidInXctrace(udid);
+        boolean ideviceOk  = getIdeviceIdOutput().contains(udid);
+
+        String category;
+        String detail;
+        if (!coreDevice && !xctrace) {
+            category = "HARDWARE/CONNECTIVITY";
+            detail   = "El dispositivo no aparece en CoreDevice ni xctrace. "
+                     + "Desconecta y vuelve a conectar el cable USB, desbloquea el iPhone y acepta «Confiar en este Mac».";
+        } else if (coreDevice && !xctrace) {
+            category = "COREDEVICE_DESYNC";
+            detail   = "CoreDevice ve el dispositivo pero xctrace no. "
+                     + "Reinicia el daemon: 'sudo killall -9 remotedeviced' o reconecta el cable USB.";
+        } else {
+            Object wdaUrl = options.getCapability("appium:webDriverAgentUrl");
+            if (wdaUrl == null || wdaUrl.toString().isBlank()) {
+                category = "XCUITEST_DRIVER";
+                detail   = "El dispositivo es visible pero Appium no lo acepta. "
+                         + "Verifica que webDriverAgentUrl esté configurado y que WDA esté activo en el dispositivo.";
+            } else {
+                category = "CAPABILITIES";
+                detail   = "Dispositivo visible y webDriverAgentUrl configurado pero sesión rechazada. "
+                         + "Verifica platformName='iOS', udid exacto, bundleId correcto y xcodeOrgId/xcodeSigningId.";
+            }
+        }
+
+        log.error("[DriverFactory][iOS] ══ FAILURE CLASSIFICATION ══════════════════");
+        log.error("[DriverFactory][iOS]   Categoría     : {}", category);
+        log.error("[DriverFactory][iOS]   CoreDevice    : {}", coreDevice ? "visible" : "NO visible");
+        log.error("[DriverFactory][iOS]   xctrace       : {}", xctrace    ? "visible" : "NO visible");
+        log.error("[DriverFactory][iOS]   idevice_id    : {}", ideviceOk  ? "visible" : "NO visible");
+        log.error("[DriverFactory][iOS]   UDID          : {}", udid);
+        log.error("[DriverFactory][iOS]   Hub           : {}", hub);
+        log.error("[DriverFactory][iOS]   Acción sugerida: {}", detail);
+        log.error("[DriverFactory][iOS] ═══════════════════════════════════════════");
+    }
+
+    private static String queryWdaPlatformVersion(String wdaUrl) {
+        try {
+            String statusUrl = wdaUrl.replaceAll("/+$", "") + "/status";
+            java.net.HttpURLConnection conn =
+                    (java.net.HttpURLConnection) new java.net.URL(statusUrl).openConnection();
+            conn.setConnectTimeout(5_000);
+            conn.setReadTimeout(5_000);
+            conn.setRequestMethod("GET");
+            int code = conn.getResponseCode();
+            if (code != 200) return "";
+            String body = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            // {"value":{"os":{"version":"18.5"},...}}
+            Matcher m = Pattern.compile("\"version\"\\s*:\\s*\"(\\d+\\.\\d+(?:\\.\\d+)?)\"").matcher(body);
+            return m.find() ? m.group(1) : "";
+        } catch (Exception e) {
+            log.debug("[DriverFactory][iOS] WDA /status error: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    private static void checkAppiumExtendedStatus(URL hub) {
+        try {
+            String statusUrl = hub.toString().replaceAll("/wd/hub$", "") + "/status";
+            java.net.HttpURLConnection conn =
+                    (java.net.HttpURLConnection) new java.net.URL(statusUrl).openConnection();
+            conn.setConnectTimeout(4_000);
+            conn.setReadTimeout(4_000);
+            conn.setRequestMethod("GET");
+            if (conn.getResponseCode() == 200) {
+                String body = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                Matcher m = Pattern.compile("\"version\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+                log.info("[DriverFactory][iOS] Appium status OK — versión: {}", m.find() ? m.group(1) : "desconocida");
+            } else {
+                log.warn("[DriverFactory][iOS] ⚠️  Appium /status → HTTP {}", conn.getResponseCode());
+            }
+        } catch (Exception e) {
+            log.warn("[DriverFactory][iOS] ⚠️  No se pudo contactar Appium /status: {}", e.getMessage());
+        }
+    }
+
+    private static void checkXcuitestDriverInstalled() {
+        try {
+            Process p = new ProcessBuilder("appium", "driver", "list", "--installed")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+            boolean found = out.toLowerCase().contains("xcuitest");
+            if (found) {
+                Matcher m = Pattern.compile("xcuitest[^\\n]*").matcher(out.toLowerCase());
+                log.info("[DriverFactory][iOS] XCUITest driver: ✅ instalado — {}",
+                        m.find() ? m.group(0).trim() : "versión desconocida");
+            } else {
+                log.warn("[DriverFactory][iOS] ⚠️  XCUITest driver NO encontrado. Instala con: appium driver install xcuitest");
+            }
+        } catch (Exception e) {
+            log.warn("[DriverFactory][iOS] ⚠️  No se pudo verificar drivers Appium: {}", e.getMessage());
+        }
+    }
+
+    private static boolean isUdidInXctrace(String udid) {
+        if (udid == null || udid.isBlank()) return false;
+        try {
+            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS);
+            boolean inDevices = false;
+            for (String line : out.split("\n")) {
+                String t = line.trim();
+                if (t.startsWith("== Devices =="))  { inDevices = true;  continue; }
+                if (t.startsWith("=="))              { inDevices = false; continue; }
+                if (inDevices && t.contains(udid))  return true;
+            }
+        } catch (Exception e) {
+            log.debug("[DriverFactory][iOS] xctrace check error: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    private static boolean isUdidInDevicectlJson(String udid) {
+        if (udid == null || udid.isBlank()) return false;
+        try {
+            Process p = new ProcessBuilder(
+                    "xcrun", "devicectl", "list", "devices", "--json-output", "-")
+                    .redirectErrorStream(false).start();
+            String json = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor(12, java.util.concurrent.TimeUnit.SECONDS);
+            return json.contains(udid);
+        } catch (Exception e) {
+            log.debug("[DriverFactory][iOS] devicectl check error: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    private static String getIdeviceIdOutput() {
+        try {
+            Process p = new ProcessBuilder("idevice_id", "-l")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor(8, java.util.concurrent.TimeUnit.SECONDS);
+            return out;
+        } catch (Exception e) {
+            log.debug("[DriverFactory][iOS] idevice_id not available: {}", e.getMessage());
+            return "";
         }
     }
 
