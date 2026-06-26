@@ -28,6 +28,12 @@ public class IOSDeviceScanner {
     private static final Pattern IPHONE_UDID = Pattern.compile(
             "\\b([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16})\\b");
 
+    // CoreDevice UUID (Xcode 26+): RFC 4122 8-4-4-4-12 format.
+    // Xcode 26 changed 'xcrun devicectl' to return this format for physical iOS devices.
+    // Must be paired with an iPhone/iPad/iPod line check — Macs and Simulators share this format.
+    private static final Pattern COREDEVICE_UUID = Pattern.compile(
+            "\\b([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\\b");
+
     // xctrace fixed-format: "Name (version) (UDID)"
     // Parentheses around UDID — previous code incorrectly used square brackets.
     private static final Pattern XCTRACE_DEVICE = Pattern.compile(
@@ -105,7 +111,14 @@ public class IOSDeviceScanner {
             if (EXCLUDE_TOKENS.stream().anyMatch(lower::contains)) continue;
 
             Matcher udidM = IPHONE_UDID.matcher(line);
-            if (!udidM.find()) continue;
+            if (!udidM.find()) {
+                // Xcode 26+: devicectl returns CoreDevice UUIDs (8-4-4-4-12).
+                // Require "iphone"/"ipad"/"ipod" to exclude Mac/Simulator entries.
+                boolean isIosLine = lower.contains("iphone") || lower.contains("ipad") || lower.contains("ipod");
+                if (!isIosLine) continue;
+                udidM = COREDEVICE_UUID.matcher(line);
+                if (!udidM.find()) continue;
+            }
 
             String udid = udidM.group(1);
             String before = line.substring(0, udidM.start()).trim();

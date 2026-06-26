@@ -475,6 +475,16 @@ public class DriverFactory {
         log.info("[DriverFactory] 📡 Appium endpoint: {} | device={} udid={} bundleId={} teamId={}",
             finalHub, prop("deviceName","?"), udid, bundleId, teamId.isBlank() ? "?" : teamId);
 
+        log.info("[DriverFactory][iOS] ══════ Capabilities → IOSDriver ══════");
+        log.info("[DriverFactory][iOS] deviceName        : {}", prop("deviceName", "?"));
+        log.info("[DriverFactory][iOS] udid              : {}", udid.isBlank()        ? "(no configurado)" : udid);
+        log.info("[DriverFactory][iOS] platformVersion   : {}", prop("platformVersion", "(auto)"));
+        log.info("[DriverFactory][iOS] xcodeOrgId        : {}", teamId.isBlank()      ? "(no configurado)" : teamId);
+        log.info("[DriverFactory][iOS] bundleId          : {}", bundleId.isBlank()    ? "(no configurado)" : bundleId);
+        log.info("[DriverFactory][iOS] updatedWDABundleId: {}", wdaBundleId.isBlank() ? "(auto)"           : wdaBundleId);
+        log.info("[DriverFactory][iOS] wdaPrebuilt       : {}", wdaPrebuilt);
+        log.info("[DriverFactory][iOS] ════════════════════════════════════════");
+
         return URI.create(finalHub).toURL();
     }
 
@@ -548,19 +558,34 @@ public class DriverFactory {
 
     private static void validateIosDevice(String udid) {
         try {
+            // Primary: xcrun xctrace — works for traditional UDIDs (8-16 hex format)
             Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
                 .redirectErrorStream(true).start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             p.waitFor();
             if (out.contains(udid)) {
-                log.info("[Preflight] iOS device OK: {} (visible via xcrun)", udid);
-            } else {
-                throw new IllegalStateException(
-                    "[Preflight] iOS device " + udid + " NOT found via 'xcrun xctrace list devices'.\n" +
-                    "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n" +
-                    "  Alternativa: xcrun devicectl list devices"
-                );
+                log.info("[Preflight] iOS device OK: {} (visible via xctrace)", udid);
+                return;
             }
+
+            // Xcode 26+ fallback: xcrun devicectl — CoreDevice UUIDs (8-4-4-4-12 RFC 4122 format)
+            // Physical devices on Xcode 26 get new CoreDevice UUIDs not shown by xctrace.
+            try {
+                Process p2 = new ProcessBuilder("xcrun", "devicectl", "list", "devices")
+                    .redirectErrorStream(true).start();
+                String out2 = new String(p2.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                p2.waitFor();
+                if (out2.contains(udid)) {
+                    log.info("[Preflight] iOS device OK: {} (visible via devicectl — Xcode 26 CoreDevice)", udid);
+                    return;
+                }
+            } catch (Exception ignored) {}
+
+            throw new IllegalStateException(
+                "[Preflight] iOS device " + udid + " no encontrado via 'xcrun xctrace list devices' ni 'xcrun devicectl list devices'.\n" +
+                "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n" +
+                "  Diagnóstico: xcrun devicectl list devices"
+            );
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
