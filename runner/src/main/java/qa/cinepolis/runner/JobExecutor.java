@@ -609,10 +609,21 @@ public class JobExecutor {
                     boolean wdaPrebuilt = iosResult.wdaCached || iosResult.wdaReady;
                     cmd.add("-DwdaPrebuilt=" + wdaPrebuilt);
 
+                    // webDriverAgentUrl: URL where WDA is already running (may be a CoreDevice IP
+                    // rather than localhost when using Xcode 16+/26). When set, Appium connects
+                    // directly to this URL instead of trying to start its own WDA instance.
+                    String wdaUrl = WdaManager.getDetectedWdaUrl();
+                    if (wdaUrl != null && !wdaUrl.isBlank()) {
+                        cmd.add("-DwebDriverAgentUrl=" + wdaUrl);
+                        client.sendLog(job.executionId, "INFO",
+                                "[JobExecutor] 🌐 WebDriverAgent URL: " + wdaUrl);
+                    }
+
                     client.sendLog(job.executionId, "INFO",
                             "[JobExecutor] 📦 WDA bundle: " + iosResult.wdaBundleId
                             + " | prebuilt: " + wdaPrebuilt
-                            + (iosResult.wdaReady ? " | ✅ WDA activo en localhost:8100" : ""));
+                            + (iosResult.wdaReady ? " | ✅ WDA activo en "
+                                    + (wdaUrl != null ? wdaUrl : "localhost:8100") : ""));
                 }
             }
 

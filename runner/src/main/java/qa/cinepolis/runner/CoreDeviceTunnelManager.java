@@ -52,13 +52,21 @@ public final class CoreDeviceTunnelManager {
         }
 
         /**
-         * True when all three conditions required by Appium XCUITest are met:
-         * tunnelState=connected, pairingState=paired, device visible in xctrace.
+         * True when the device is accessible to Appium's XCUITest driver.
+         *
+         * xctraceVisible is the definitive gate: a device in 'xcrun xctrace list devices
+         * == Devices ==' is reachable for testing regardless of what devicectl reports.
+         *
+         * tunnelState is intentionally NOT a gate. In Xcode 16+/Xcode 26, devicectl may
+         * report tunnelState=disconnected even when the device is physically connected via
+         * USB and WDA can start and respond. This was confirmed: WDA emitted
+         * ServerURLHere->http://192.168.x.x:8100 while tunnelState showed "disconnected".
+         *
+         * "unpaired" is an explicit failure — device has not trusted the Mac.
          */
         public boolean isReadyForAppium() {
-            return "connected".equalsIgnoreCase(tunnelState)
-                    && "paired".equalsIgnoreCase(pairingState)
-                    && xctraceVisible;
+            if (!xctraceVisible) return false;
+            return !"unpaired".equalsIgnoreCase(pairingState);
         }
     }
 
@@ -78,6 +86,18 @@ public final class CoreDeviceTunnelManager {
      */
     public static DeviceConnectionState ensureTunnelConnected(
             BackendClient client, String executionId, String physicalUdid) {
+
+        // Fast path: if WDA is already responding, the device is definitely usable —
+        // skip the tunnel check entirely. This avoids a 60s wait when WDA was kept
+        // alive from a previous run.
+        if (WdaManager.isWdaRunning()) {
+            client.sendLog(executionId, "INFO",
+                    "✅ [CoreDevice] WebDriverAgent ya activo — omitiendo verificación de tunnel.");
+            DeviceConnectionState s = readConnectionState(physicalUdid);
+            if (s != null) logState(client, executionId, s);
+            return s != null ? s
+                    : new DeviceConnectionState("", physicalUdid, "active/wda-running", "paired", true);
+        }
 
         client.sendLog(executionId, "INFO",
                 "🔌 [CoreDevice] Verificando estado de conexión del dispositivo...");
@@ -181,8 +201,7 @@ public final class CoreDeviceTunnelManager {
             if (attempt % 5 == 0) {
                 long remaining = (deadline - System.currentTimeMillis()) / 1_000;
                 client.sendLog(executionId, "INFO",
-                        "   ⏳ [CoreDevice] Esperando conexión... (" + remaining + "s restantes)"
-                        + "  tunnelState=" + last.tunnelState
+                        "   ⏳ [CoreDevice] Esperando que dispositivo aparezca en xctrace... (" + remaining + "s restantes)"
                         + "  pairingState=" + last.pairingState
                         + "  xctrace=" + (last.xctraceVisible ? "visible" : "no visible"));
                 if (!last.coreDeviceId.isBlank()) tryTriggerConnection(last.coreDeviceId);
@@ -192,14 +211,14 @@ public final class CoreDeviceTunnelManager {
         // Timeout — log actionable error and return last known state so preflight can continue
         client.sendLog(executionId, "WARN",
                 "⚠️  [CoreDevice] Tiempo agotado (" + TUNNEL_TIMEOUT_SECONDS + "s). "
-                + "Appium podría rechazar el UDID si el tunnel sigue desconectado."
+                + "El dispositivo no aparece en xcrun xctrace list devices."
                 + stateDetail(last)
                 + "\n   Solución:"
                 + "\n   1. Desbloquea el iPhone → acepta «Confiar en este Mac»"
                 + "\n   2. Ajustes → Privacidad y seguridad → Modo desarrollador → activar"
                 + "\n   3. Desconecta y vuelve a conectar el cable USB"
                 + "\n   4. Abre Xcode → Window → Devices and Simulators "
-                + "— el dispositivo debe aparecer sin warning");
+                + "— el dispositivo debe aparecer sin advertencia");
         return last;
     }
 

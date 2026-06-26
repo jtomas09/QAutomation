@@ -474,6 +474,17 @@ public class DriverFactory {
             log.info("[DriverFactory] 🔨 Primera ejecución — Appium compilará e instalará WDA automáticamente");
         }
 
+        // webDriverAgentUrl — URL where WDA is already running, passed by the Runner when
+        // WDA was pre-started and emitted "ServerURLHere->URL<-ServerURLHere".
+        // In Xcode 16+/26 with CoreDevice, this may be a device-specific IP
+        // (e.g. http://192.168.1.13:8100) rather than localhost:8100.
+        // When set, Appium connects directly to this WDA without starting its own instance.
+        String wdaUrl = prop("webDriverAgentUrl", "");
+        if (!wdaUrl.isBlank()) {
+            o.setCapability("appium:webDriverAgentUrl", wdaUrl);
+            log.info("[DriverFactory] 🌐 webDriverAgentUrl={} — Appium conectará a WDA existente", wdaUrl);
+        }
+
         String envHub = System.getenv("APPIUM_SERVER_URL");
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
         finalHub = finalHub.replaceAll("/wd/hub$", "");  // Appium 2.x/3.x uses bare base URL
@@ -502,6 +513,7 @@ public class DriverFactory {
         log.info("[DriverFactory][iOS] bundleId          : {}", bundleId.isBlank()    ? "(no configurado)" : bundleId);
         log.info("[DriverFactory][iOS] updatedWDABundleId: {}", wdaBundleId.isBlank() ? "(auto)"           : wdaBundleId);
         log.info("[DriverFactory][iOS] wdaPrebuilt       : {}", wdaPrebuilt);
+        log.info("[DriverFactory][iOS] webDriverAgentUrl : {}", wdaUrl.isBlank() ? "(Appium administra WDA)" : wdaUrl);
         log.info("[DriverFactory][iOS] ════════════════════════════════════════");
 
         return URI.create(finalHub).toURL();

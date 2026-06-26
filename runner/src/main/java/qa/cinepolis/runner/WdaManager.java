@@ -11,23 +11,27 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * WDA (WebDriverAgent) lifecycle manager for iOS testing.
  *
  * WDA is the iOS test automation bridge used by Appium's XCUITest driver.
- * It runs as a native XCTest process ON the iPhone, exposed via USB tunnel on
- * localhost:8100. Without WDA the Appium session cannot be created.
+ * In Xcode 16+/Xcode 26 with CoreDevice, WDA may bind to a device-specific IP
+ * (e.g. http://192.168.1.13:8100) rather than localhost:8100. The URL is announced
+ * in xcodebuild stdout as "ServerURLHere->URL<-ServerURLHere".
+ *
+ * This class detects that URL in real time, stores it, and probes it to confirm
+ * WDA is truly ready before signalling the rest of the preflight chain.
  *
  * Responsibilities:
  *  1. Detect if WDA is already running   → isWdaRunning()
  *  2. Pre-start WDA before tests begin   → ensureWdaRunning()
- *  3. Wait for WDA to become ready       → waitForWdaReady()
- *  4. Produce actionable failure reports → diagnoseWdaFailure()
- *
- * Start strategy (in order of speed):
- *  a) test-without-building from DerivedData xctestrun  (~15-30s, cached build)
- *  b) xcodebuild test from project                      (~5-10 min, full build)
+ *  3. Stream xcodebuild output, detect URL pattern in real time
+ *  4. Wait for WDA /status to respond    → waitForWdaReady()
+ *  5. Expose detected URL to JobExecutor → getDetectedWdaUrl()
+ *  6. Produce actionable failure reports → diagnoseWdaFailure()
  *
  * Android logic is NOT touched anywhere in this class.
  */
@@ -35,6 +39,15 @@ public final class WdaManager {
 
     static final String WDA_STATUS_URL = "http://localhost:8100/status";
     static final int    WDA_PORT       = 8100;
+
+    // Pattern for the URL line that WDA/xcodebuild emits when the HTTP server starts.
+    // Format: ServerURLHere->http://192.168.1.13:8100<-ServerURLHere
+    private static final Pattern SERVER_URL_PAT = Pattern.compile(
+            "ServerURLHere->(.+?)<-ServerURLHere");
+
+    // The URL detected from xcodebuild stdout (may differ from localhost when using CoreDevice).
+    // Volatile because it is written by the drain thread and read by the polling thread.
+    private static volatile String detectedWdaUrl = null;
 
     // The xcodebuild controller process (Mac side). WDA itself runs on the device.
     private static volatile Process wdaProcess = null;
@@ -48,20 +61,30 @@ public final class WdaManager {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
-     * Returns true if WDA is responding on localhost:8100/status.
+     * Returns true if WDA is responding on /status.
+     *
+     * Probes both localhost:8100 (legacy USB forwarding) and the URL detected
+     * from xcodebuild stdout (CoreDevice IP in Xcode 16+/26).
      */
     public static boolean isWdaRunning() {
-        try {
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(WDA_STATUS_URL))
-                    .GET()
-                    .timeout(Duration.ofSeconds(3))
-                    .build();
-            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
-            return resp.statusCode() >= 200 && resp.statusCode() < 300;
-        } catch (Exception e) {
-            return false;
+        if (probeStatus(WDA_STATUS_URL)) return true;
+        String url = detectedWdaUrl;
+        if (url != null && !url.isBlank()) {
+            String statusUrl = url.endsWith("/") ? url + "status" : url + "/status";
+            if (probeStatus(statusUrl)) return true;
         }
+        return false;
+    }
+
+    /**
+     * Returns the WDA URL detected from xcodebuild stdout during this session,
+     * or null if no URL was detected yet.
+     *
+     * JobExecutor passes this as -DwebDriverAgentUrl so Appium connects to the
+     * correct address instead of assuming localhost:8100.
+     */
+    public static String getDetectedWdaUrl() {
+        return detectedWdaUrl;
     }
 
     /**
@@ -71,28 +94,31 @@ public final class WdaManager {
      *                       A fast start (~15-30 s) via test-without-building is attempted.
      *                       Falls back to full xcodebuild test if DerivedData is stale.
      *
-     * If wdaCached=false → WDA needs full compilation. This class does not attempt compilation;
+     * If wdaCached=false → WDA needs full compilation. This class does not attempt it;
      *                       Appium XCUITest driver handles it when the session is created.
-     *                       An informational log is emitted about expected wait time.
      *
-     * @return true if WDA is confirmed ready on localhost:8100, false if Appium must handle it
+     * @return true if WDA is confirmed ready, false if Appium must handle it
      */
     public static boolean ensureWdaRunning(BackendClient client, String executionId,
                                             String udid, String teamId,
                                             String wdaBundleId, boolean wdaCached) {
 
+        // Reset any URL detected in a prior session so stale data isn't forwarded.
+        detectedWdaUrl = null;
+
         client.sendLog(executionId, "INFO",
                 "🔍 [WDA] Verificando WebDriverAgent en localhost:" + WDA_PORT + "...");
 
-        // Fast path: WDA is already running (e.g. kept alive from previous test run)
+        // Fast path: WDA is already running (kept alive from a previous run)
         if (isWdaRunning()) {
+            String active = detectedWdaUrl != null ? detectedWdaUrl : "http://localhost:" + WDA_PORT;
             client.sendLog(executionId, "INFO",
-                    "✅ [WDA] WebDriverAgent ya está activo — sesión Appium será instantánea.");
+                    "✅ [WDA] WebDriverAgent ya está activo en " + active
+                    + " — sesión Appium será instantánea.");
             return true;
         }
 
         if (!wdaCached) {
-            // First execution: WDA needs compilation by Appium/xcodebuild
             client.sendLog(executionId, "INFO",
                     "ℹ️  [WDA] Primera ejecución en este dispositivo.\n"
                     + "   🔨 WDA será compilado e instalado automáticamente por Appium.\n"
@@ -128,22 +154,30 @@ public final class WdaManager {
             return false;
         }
 
-        // Wait for WDA to respond on localhost:8100
+        client.sendLog(executionId, "INFO",
+                "✅ [WDA] Proceso WebDriverAgent iniciado."
+                + "\n   Esperando que el servidor HTTP arranque en el dispositivo...");
+
+        // Wait for WDA to respond on /status (probes both localhost and detected URL)
         boolean ready = waitForWdaReady(client, executionId, 180);
 
         if (!ready) {
-            String diagnosis = diagnoseWdaFailure(udid, teamId);
-            client.sendLog(executionId, "ERROR",
-                    "❌ [WDA] Tiempo de espera agotado (180s).\n"
-                    + "   WebDriverAgent no respondió en localhost:" + WDA_PORT + ".\n"
-                    + diagnosis);
+            String detectedUrl = detectedWdaUrl;
+            String cause = (detectedUrl == null || detectedUrl.isBlank())
+                    ? "❌ [WDA] No apareció ServerURLHere en 180s — WDA nunca inició."
+                    + "\n   Causa: error al compilar WDA, firma incorrecta, o dispositivo no responde."
+                    : "❌ [WDA] WDA inició (URL: " + detectedUrl + ") pero /status no respondió en 180s."
+                    + "\n   Causa: WDA compiló pero falló al arrancar el servidor HTTP en el dispositivo.";
+            client.sendLog(executionId, "ERROR", cause
+                    + "\n" + diagnoseWdaFailure(udid, teamId));
         }
 
         return ready;
     }
 
     /**
-     * Polls localhost:8100/status every 3 seconds until WDA responds or timeout elapses.
+     * Polls WDA /status every 3 s until it responds or the timeout elapses.
+     * Probes both localhost:8100 and the URL detected from xcodebuild stdout.
      *
      * @param timeoutSeconds maximum wait in seconds
      * @return true if WDA became ready within the timeout
@@ -154,23 +188,27 @@ public final class WdaManager {
         int  attempt  = 0;
 
         client.sendLog(executionId, "INFO",
-                "   ⏳ [WDA] Esperando respuesta en localhost:" + WDA_PORT
-                + " (máx. " + timeoutSeconds + "s)...");
+                "   ⏳ [WDA] Validando endpoint /status (máx. " + timeoutSeconds + "s)...");
 
         while (System.currentTimeMillis() < deadline) {
             attempt++;
             if (isWdaRunning()) {
+                String activeUrl = (detectedWdaUrl != null && !detectedWdaUrl.isBlank())
+                        ? detectedWdaUrl : "http://localhost:" + WDA_PORT;
                 client.sendLog(executionId, "INFO",
-                        "✅ [WDA] Listo en localhost:" + WDA_PORT
-                        + " después de ~" + (attempt * 3) + "s");
+                        "✅ [WDA] WebDriverAgent listo (~" + (attempt * 3) + "s)"
+                        + "\n   URL detectada: " + activeUrl);
                 return true;
             }
 
-            // Progress ping every 15 seconds (every 5 attempts × 3s)
+            // Progress update every ~15 s
             if (attempt % 5 == 0) {
                 long remaining = (deadline - System.currentTimeMillis()) / 1_000;
+                String status = (detectedWdaUrl != null && !detectedWdaUrl.isBlank())
+                        ? "URL " + detectedWdaUrl + " detectada — esperando respuesta /status"
+                        : "Esperando ServerURLHere en stdout de xcodebuild";
                 client.sendLog(executionId, "INFO",
-                        "   ⏳ [WDA] Aún iniciando... (" + remaining + "s restantes)");
+                        "   ⏳ [WDA] " + status + " (" + remaining + "s restantes)");
             }
 
             try {
@@ -236,7 +274,7 @@ public final class WdaManager {
                             .redirectErrorStream(true)
                             .start();
                     wdaProcess = p;
-                    drainProcessOutput(p, "[WDA-fast]");
+                    drainProcessOutput(p, "[WDA-fast]", client, executionId);
                     return true;
                 } catch (Exception e) {
                     client.sendLog(executionId, "WARN",
@@ -278,7 +316,7 @@ public final class WdaManager {
                     .redirectErrorStream(true)
                     .start();
             wdaProcess = p;
-            drainProcessOutput(p, "[WDA-build]");
+            drainProcessOutput(p, "[WDA-build]", client, executionId);
             return true;
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
@@ -319,13 +357,11 @@ public final class WdaManager {
 
     /**
      * Returns a multi-line actionable diagnostic when WDA fails to start.
-     * Checks the most common failure causes and provides specific fix steps.
      */
     public static String diagnoseWdaFailure(String udid, String teamId) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n   ──────── Diagnóstico y solución ────────\n");
 
-        // Team ID
         if (teamId == null || teamId.isBlank()) {
             sb.append("   ⚠️  Apple Developer Team ID no detectado.\n");
             sb.append("       → Abre Xcode → Settings → Accounts → agrega tu Apple ID.\n");
@@ -334,14 +370,12 @@ public final class WdaManager {
             sb.append("   ✅ Team ID: ").append(teamId).append("\n");
         }
 
-        // WDA project existence
         String projectPath = findWdaProjectPath();
         if (projectPath == null) {
             sb.append("   ⚠️  WebDriverAgent.xcodeproj no encontrado.\n");
             sb.append("       → Reinstala el driver: appium driver install xcuitest\n");
         }
 
-        // Common steps
         sb.append("   📋 Pasos adicionales:\n");
         sb.append("   1. Verifica que el iPhone esté desbloqueado y confíe en este Mac\n");
         sb.append("      (Ajustes → General → VPN y gestión de dispositivos → Confiar).\n");
@@ -359,20 +393,72 @@ public final class WdaManager {
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /**
-     * Starts a daemon thread that drains and prints the process stdout/stderr.
-     * Prevents the process from blocking when its output buffer fills.
+     * Starts a daemon thread that streams xcodebuild stdout line by line.
+     *
+     * Detects key events in real time:
+     *  - "ServerURLHere->URL<-ServerURLHere" → stores URL in detectedWdaUrl, logs it
+     *  - "BUILD SUCCEEDED" → logs "WebDriverAgent compilado"
+     *  - "BUILD FAILED"    → logs the failure signal
+     *
+     * This prevents the process from blocking when its output buffer fills.
      */
-    private static void drainProcessOutput(Process p, String prefix) {
-        Thread drainThread = new Thread(() -> {
+    private static void drainProcessOutput(Process p, String prefix,
+                                            BackendClient client, String executionId) {
+        Thread t = new Thread(() -> {
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(p.getInputStream()))) {
                 String line;
                 while ((line = br.readLine()) != null) {
                     System.out.println(prefix + " " + line);
+
+                    // Detect WDA server URL announcement
+                    Matcher urlMatcher = SERVER_URL_PAT.matcher(line);
+                    if (urlMatcher.find()) {
+                        String url = urlMatcher.group(1).trim();
+                        detectedWdaUrl = url;
+                        System.out.println("[WDA] ✅ URL detectada: " + url);
+                        if (client != null && executionId != null) {
+                            client.sendLog(executionId, "INFO",
+                                    "✅ [WDA] URL detectada: " + url
+                                    + "\n   Validando endpoint /status...");
+                        }
+                    }
+
+                    // Detect build completion
+                    String upper = line.toUpperCase();
+                    if (upper.contains("BUILD SUCCEEDED")) {
+                        if (client != null && executionId != null) {
+                            client.sendLog(executionId, "INFO",
+                                    "✅ [WDA] WebDriverAgent compilado correctamente.");
+                        }
+                    } else if (upper.contains("BUILD FAILED")) {
+                        if (client != null && executionId != null) {
+                            client.sendLog(executionId, "ERROR",
+                                    "❌ [WDA] Error compilando WDA — BUILD FAILED."
+                                    + "\n   Revisa el log de xcodebuild para el error específico.");
+                        }
+                    }
                 }
             } catch (Exception ignored) {}
         }, "wda-drain");
-        drainThread.setDaemon(true);
-        drainThread.start();
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * Probes a single /status URL and returns true when it responds 2xx.
+     */
+    private static boolean probeStatus(String url) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .timeout(Duration.ofSeconds(3))
+                    .build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            return resp.statusCode() >= 200 && resp.statusCode() < 300;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }
