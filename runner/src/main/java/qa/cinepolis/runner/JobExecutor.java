@@ -480,6 +480,7 @@ public class JobExecutor {
         AtomicInteger failed  = new AtomicInteger(0);
         AtomicInteger skipped = new AtomicInteger(0);
         List<TestCaseResult> testCases = new ArrayList<>();
+        boolean iosRecordingActive = false;
 
         try {
             client.sendLog(job.executionId, "INFO",
@@ -640,6 +641,13 @@ public class JobExecutor {
                     "🔧 Comando: " + String.join(" ", cmd));
             System.out.println("[Executor] Comando: " + String.join(" ", cmd));
 
+            // ── iOS video recording (physical device only) ─────────────────────
+            if (!isAndroid && job.videoEnabled && iosResult != null) {
+                File videosDir = Paths.get(workDir, "build", "videos").toFile();
+                iosRecordingActive = IosVideoRecorder.start(
+                        client, job.executionId, receivedUdid, videosDir) != null;
+            }
+
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(projectDir);
             pb.redirectErrorStream(true);
@@ -707,6 +715,7 @@ public class JobExecutor {
             int exitCode = process.waitFor();
             activeProcess = null;
             abortWatcher.interrupt();
+            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
 
             if (wasAborted.get()) {
                 client.sendLog(job.executionId, "WARN", "Ejecución abortada por el usuario");
@@ -739,6 +748,7 @@ public class JobExecutor {
             System.out.println("[Executor] ✓ Finalizado: " + job.executionId);
 
         } catch (Exception e) {
+            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
             System.err.println("[Executor] Error fatal: " + e.getMessage());
             e.printStackTrace();
             client.sendLog(job.executionId, "ERROR",
@@ -1017,6 +1027,7 @@ public class JobExecutor {
             long[] count = {0};
             Files.walk(videosDir)
                     .filter(p -> p.toString().endsWith(".mp4"))
+                    .filter(p -> p.toFile().length() > 0)
                     .forEach(p -> {
                         count[0]++;
                         String className = p.getParent().getFileName().toString();
@@ -1193,14 +1204,42 @@ public class JobExecutor {
             if (upper.endsWith(" SKIPPED")) return "SKIP";
         }
 
-        // Build-level status (shown in logs but NOT counted as tests)
+        // Build-level status (shown in functional view — not counted as tests)
         if (upper.contains("BUILD SUCCESSFUL") || upper.contains("BUILD FAILED")) return "INFO";
 
         // Errors and warnings in Gradle output
         if (upper.contains("[ERROR]") || upper.startsWith("E: ")) return "FAIL";
-        if (upper.contains("[WARNING]") || upper.startsWith("W: "))  return "WARN";
+        if (upper.contains("[WARNING]") || upper.startsWith("W: ")) return "WARN";
+
+        // Technical lines go to DEBUG so they appear only in the Logs Técnicos tab
+        if (isTechnicalLine(trim)) return "DEBUG";
 
         return "INFO";
+    }
+
+    // Returns true for lines that belong only in the technical log, not the functional activity view.
+    // Covers: DriverFactory internals, Appium HTTP traffic, Gradle task headers, stack frames,
+    // Allure/JUnit platform/PDF/Mail listener output, and classpath dumps.
+    private static boolean isTechnicalLine(String trim) {
+        if (trim.startsWith("[DriverFactory]"))        return true;
+        if (trim.startsWith("[HTTP]"))                 return true;
+        if (trim.startsWith("> Task :"))               return true;
+        if (trim.startsWith("at "))                    return true; // Java stack frame
+        if (trim.startsWith("\t"))                     return true; // tab-indented technical detail
+
+        String upper = trim.toUpperCase();
+        if (upper.contains("ALLURE"))                  return true;
+        if (upper.contains("JUNIT PLATFORM"))          return true;
+        if (upper.contains("JUNIT JUPITER"))           return true;
+        if (upper.contains("JUNIT VINTAGE"))           return true;
+        if (upper.contains("BASETEST"))                return true;
+        if (upper.contains("CLASSPATH"))               return true;
+        if (upper.contains("SECURITY FIND-IDENTITY"))  return true;
+        if (upper.contains("PDFGENERATOR"))            return true;
+        if (upper.contains("MAILSENDER"))              return true;
+        if (upper.contains("CODESIGN"))                return true;
+
+        return false;
     }
 
     // Parses "MenuCoffeTree > comprarAmericano() PASSED" → "comprarAmericano"

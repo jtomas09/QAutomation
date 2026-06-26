@@ -67,6 +67,10 @@ public class BackendClient {
         }
     }
 
+    public void sendTechLog(String executionId, String message) {
+        sendLog(executionId, "DEBUG", message);
+    }
+
     public boolean isJobAborted(String executionId) {
         try {
             HttpRequest req = HttpRequest.newBuilder()

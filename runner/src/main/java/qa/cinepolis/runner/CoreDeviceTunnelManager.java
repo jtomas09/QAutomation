@@ -268,8 +268,14 @@ public final class CoreDeviceTunnelManager {
 
     private static void logState(BackendClient client, String executionId,
                                   DeviceConnectionState s) {
-        client.sendLog(executionId, "INFO",
+        // Technical detail (tunnel/pairing/xctrace state) goes to the Logs Técnicos tab only
+        client.sendTechLog(executionId,
                 "🔌 [CoreDevice] Estado del dispositivo:" + stateDetail(s));
+        // Functional summary visible in Actividad en Tiempo Real only when device is ready
+        if (s.isReadyForAppium()) {
+            client.sendLog(executionId, "INFO",
+                    "✅ [CoreDevice] Dispositivo conectado y listo para Appium.");
+        }
     }
 
     private static String stateDetail(DeviceConnectionState s) {
