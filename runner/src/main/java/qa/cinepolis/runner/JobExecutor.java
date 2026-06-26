@@ -481,6 +481,9 @@ public class JobExecutor {
         AtomicInteger skipped = new AtomicInteger(0);
         List<TestCaseResult> testCases = new ArrayList<>();
         boolean iosRecordingActive = false;
+        // Hoisted outside try so finally can access them for cleanup
+        final boolean isPlatformIos = "ios".equalsIgnoreCase(nvl(job.platform, ""));
+        final String  iosUdid       = nvl(job.udid, "");
 
         try {
             client.sendLog(job.executionId, "INFO",
@@ -642,10 +645,16 @@ public class JobExecutor {
             System.out.println("[Executor] Comando: " + String.join(" ", cmd));
 
             // ── iOS video recording (physical device only) ─────────────────────
-            if (!isAndroid && job.videoEnabled && iosResult != null) {
+            // Require wdaReady: WDA must be confirmed running before recording starts so we
+            // don't record empty initialization time if Appium needs to build WDA from scratch.
+            if (!isAndroid && job.videoEnabled && iosResult != null && iosResult.wdaReady) {
                 File videosDir = Paths.get(workDir, "build", "videos").toFile();
                 iosRecordingActive = IosVideoRecorder.start(
                         client, job.executionId, receivedUdid, videosDir) != null;
+            } else if (!isAndroid && job.videoEnabled && iosResult != null && !iosResult.wdaReady) {
+                client.sendLog(job.executionId, "INFO",
+                        "📹 [Video] Grabación iOS omitida — WDA no está activo previo a la sesión. "
+                        + "Se grabará a partir de la segunda ejecución (cuando WDA esté precompilado).");
             }
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -757,6 +766,15 @@ public class JobExecutor {
                 client.sendResult(job.executionId,
                         passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
             } catch (Exception ignored) {}
+        } finally {
+            // IosVideoRecorder.stop() is idempotent — safe no-op if already stopped in try/catch.
+            // Ensures recording stops even when an unexpected exception bypasses the normal path.
+            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            // Always clean up iOS resources: kill xcodebuild + terminate WDA on device.
+            // This removes the "Automation Running" overlay regardless of execution outcome.
+            if (isPlatformIos && !iosUdid.isBlank()) {
+                WdaManager.cleanup(client, job.executionId, iosUdid);
+            }
         }
     }
 

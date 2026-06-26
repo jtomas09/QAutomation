@@ -9,7 +9,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -232,6 +234,95 @@ public final class WdaManager {
             wdaProcess = null;
             System.out.println("[WdaManager] xcodebuild controller detenido.");
         }
+    }
+
+    /**
+     * Full iOS resource cleanup after a test execution.
+     *
+     * 1. Kills the Mac-side xcodebuild / WDA controller (stop()).
+     * 2. Terminates WebDriverAgentRunner / XCTRunner on the physical device via
+     *    `xcrun devicectl device process terminate` so the device stops showing
+     *    "Automation Running" immediately after the suite ends.
+     * 3. Resets detectedWdaUrl for the next run.
+     *
+     * Safe to call multiple times (idempotent). Never throws.
+     */
+    public static void cleanup(BackendClient client, String executionId, String physicalUdid) {
+        stop(); // kill Mac-side xcodebuild
+
+        if (physicalUdid != null && !physicalUdid.isBlank()) {
+            terminateWdaOnDevice(physicalUdid);
+        }
+
+        detectedWdaUrl = null;
+
+        if (client != null && executionId != null) {
+            client.sendTechLog(executionId,
+                    "🧹 [WDA] Cleanup completo — xcodebuild detenido, dispositivo liberado.");
+        }
+    }
+
+    /**
+     * Finds WebDriverAgentRunner / XCTRunner processes on the physical device via
+     * `xcrun devicectl device process list` (Xcode 16+) and terminates each one.
+     * This immediately stops the "Automation Running" overlay on the device.
+     */
+    private static void terminateWdaOnDevice(String physicalUdid) {
+        try {
+            Process list = new ProcessBuilder(
+                    "xcrun", "devicectl", "device", "process", "list",
+                    "--device", physicalUdid, "--json-output", "-")
+                    .redirectErrorStream(false).start();
+            String json = new String(list.getInputStream().readAllBytes());
+            boolean done = list.waitFor(12, TimeUnit.SECONDS);
+            if (!done) { list.destroyForcibly(); return; }
+
+            Set<String> pids = extractWdaPids(json);
+            if (pids.isEmpty()) {
+                System.out.println("[WdaManager] Sin procesos WDA activos en dispositivo.");
+                return;
+            }
+
+            for (String pid : pids) {
+                try {
+                    Process kill = new ProcessBuilder(
+                            "xcrun", "devicectl", "device", "process", "terminate",
+                            "--device", physicalUdid, "--pid", pid)
+                            .redirectErrorStream(true).start();
+                    kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                    kill.waitFor(8, TimeUnit.SECONDS);
+                    System.out.println("[WdaManager] ✅ WDA proceso PID=" + pid + " terminado en dispositivo.");
+                } catch (Exception ex) {
+                    System.err.println("[WdaManager] No se pudo terminar PID=" + pid + ": " + ex.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[WdaManager] terminateWdaOnDevice error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts process identifiers for WebDriverAgentRunner / XCTRunner entries from
+     * a `xcrun devicectl device process list --json-output -` response.
+     */
+    private static Set<String> extractWdaPids(String json) {
+        Set<String> pids = new LinkedHashSet<>();
+        String[] markers = {"WebDriverAgentRunner", "xctrunner"};
+        String jsonLower = json.toLowerCase();
+        Pattern pidPat = Pattern.compile("\"processIdentifier\"\\s*:\\s*(\\d+)");
+
+        for (String marker : markers) {
+            int pos = 0;
+            while ((pos = jsonLower.indexOf(marker.toLowerCase(), pos)) >= 0) {
+                // Scan ±600 chars around this match for processIdentifier
+                int lo = Math.max(0, pos - 600);
+                int hi = Math.min(json.length(), pos + 600);
+                Matcher m = pidPat.matcher(json.substring(lo, hi));
+                if (m.find()) pids.add(m.group(1));
+                pos++;
+            }
+        }
+        return pids;
     }
 
     // ── Start attempt A: test-without-building ────────────────────────────────

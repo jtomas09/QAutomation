@@ -462,27 +462,34 @@ public class DriverFactory {
         // useNewWDA=false — reuse WDA if already running on device (don't restart it).
         o.setCapability("useNewWDA", false);
 
-        // skipServerInstallation — if Runner confirms WDA was already built and
-        // installed on this device, skip xcodebuild entirely on this run.
-        boolean wdaPrebuilt = Boolean.parseBoolean(prop("wdaPrebuilt", "false"));
-        if (wdaPrebuilt) {
-            o.setCapability("skipServerInstallation",      true);
-            o.setCapability("shouldUseSingletonTestManager", true);
-            log.info("[DriverFactory] ⚡ WDA precompilado — skipServerInstallation=true (sin recompilación)");
+        // webDriverAgentUrl — URL where WDA is already running, announced by the Runner via
+        // "ServerURLHere->URL<-ServerURLHere" from xcodebuild stdout (WdaManager).
+        // In Xcode 16+/26 with CoreDevice, this may be a device-specific IP instead of localhost.
+        String wdaUrl = prop("webDriverAgentUrl", "");
+
+        // skipServerInstallation — skip xcodebuild if WDA is already installed (prebuilt)
+        // or already running (webDriverAgentUrl set). When WDA URL is provided, Appium must
+        // connect to the existing WDA directly and not attempt UDID-based device lookup.
+        boolean wdaPrebuilt  = Boolean.parseBoolean(prop("wdaPrebuilt", "false"));
+        boolean skipInstall  = wdaPrebuilt || !wdaUrl.isBlank();
+        if (skipInstall) {
+            o.setCapability("skipServerInstallation", true);
+            if (wdaPrebuilt) {
+                o.setCapability("shouldUseSingletonTestManager", true);
+                log.info("[DriverFactory] ⚡ WDA precompilado — skipServerInstallation=true (sin recompilación)");
+            }
         } else {
-            o.setCapability("skipServerInstallation",      false);
+            o.setCapability("skipServerInstallation", false);
             log.info("[DriverFactory] 🔨 Primera ejecución — Appium compilará e instalará WDA automáticamente");
         }
 
-        // webDriverAgentUrl — URL where WDA is already running, passed by the Runner when
-        // WDA was pre-started and emitted "ServerURLHere->URL<-ServerURLHere".
-        // In Xcode 16+/26 with CoreDevice, this may be a device-specific IP
-        // (e.g. http://192.168.1.13:8100) rather than localhost:8100.
-        // When set, Appium connects directly to this WDA without starting its own instance.
-        String wdaUrl = prop("webDriverAgentUrl", "");
         if (!wdaUrl.isBlank()) {
             o.setCapability("appium:webDriverAgentUrl", wdaUrl);
-            log.info("[DriverFactory] 🌐 webDriverAgentUrl={} — Appium conectará a WDA existente", wdaUrl);
+            // usePrebuiltWDA=true: WDA is confirmed running — Appium must connect directly
+            // without performing any UDID-based device validation or WDA install attempt.
+            // This is the key fix for "Unknown device or simulator UDID" when using CoreDevice.
+            o.setCapability("appium:usePrebuiltWDA",    true);
+            log.info("[DriverFactory] 🌐 webDriverAgentUrl={} — usePrebuiltWDA=true, skipInstall=true", wdaUrl);
         }
 
         String envHub = System.getenv("APPIUM_SERVER_URL");
@@ -588,35 +595,52 @@ public class DriverFactory {
     }
 
     private static void validateIosDevice(String udid) {
+        final int maxWaitMs = 30_000;
+        final int pollMs    =  3_000;
         try {
-            // Primary: xcrun xctrace — works for traditional UDIDs (8-16 hex format)
-            Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
-                .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            p.waitFor();
-            if (out.contains(udid)) {
-                log.info("[Preflight] iOS device OK: {} (visible via xctrace)", udid);
-                return;
-            }
-
-            // Xcode 26+ fallback: devicectl --json-output contains physical UDID in
-            // hardwareProperties.udid. The text output of devicectl shows CoreDevice UUIDs
-            // (8-4-4-4-12 format) — NOT physical UDIDs — so JSON output is required here.
-            try {
-                Process p2 = new ProcessBuilder("xcrun", "devicectl", "list", "devices",
-                        "--json-output", "-")
-                    .redirectErrorStream(false).start();
-                String json = new String(p2.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                p2.waitFor();
-                if (json.contains(udid)) {
-                    log.info("[Preflight] iOS device OK: {} (visible via devicectl JSON — hardwareProperties.udid)", udid);
+            for (int attempt = 0; attempt <= maxWaitMs / pollMs; attempt++) {
+                // Primary: xcrun xctrace — works for traditional UDIDs (8-16 hex format)
+                Process p = new ProcessBuilder("xcrun", "xctrace", "list", "devices")
+                    .redirectErrorStream(true).start();
+                String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                p.waitFor();
+                if (out.contains(udid)) {
+                    if (attempt > 0)
+                        log.info("[Preflight] iOS device {} visible después de ~{}s de espera CoreDevice.",
+                                udid, attempt * pollMs / 1000);
+                    else
+                        log.info("[Preflight] iOS device OK: {} (visible via xctrace)", udid);
                     return;
                 }
-            } catch (Exception ignored) {}
+
+                // Xcode 26+ fallback: devicectl --json-output contains physical UDID in
+                // hardwareProperties.udid. The text output of devicectl shows CoreDevice UUIDs
+                // (8-4-4-4-12 format) — NOT physical UDIDs — so JSON output is required here.
+                try {
+                    Process p2 = new ProcessBuilder("xcrun", "devicectl", "list", "devices",
+                            "--json-output", "-")
+                        .redirectErrorStream(false).start();
+                    String json = new String(p2.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    p2.waitFor();
+                    if (json.contains(udid)) {
+                        log.info("[Preflight] iOS device OK: {} (visible via devicectl JSON — hardwareProperties.udid)", udid);
+                        return;
+                    }
+                } catch (Exception ignored) {}
+
+                // Device not visible yet — wait and retry (CoreDevice sync may take a few seconds)
+                if (attempt == 0) {
+                    log.warn("[Preflight] ⏳ iOS device {} no sincronizado — esperando CoreDevice ({} s máx.)...",
+                            udid, maxWaitMs / 1000);
+                }
+                if (attempt < maxWaitMs / pollMs) {
+                    Thread.sleep(pollMs);
+                }
+            }
 
             throw new IllegalStateException(
                 "[Preflight] iOS device " + udid + " no encontrado via 'xcrun xctrace list devices' "
-                + "ni 'xcrun devicectl --json-output'.\n"
+                + "ni 'xcrun devicectl --json-output' después de " + (maxWaitMs / 1000) + "s.\n"
                 + "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n"
                 + "  Diagnóstico: xcrun devicectl list devices --json-output -"
             );
