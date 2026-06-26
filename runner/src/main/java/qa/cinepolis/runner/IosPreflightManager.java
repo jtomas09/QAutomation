@@ -63,13 +63,19 @@ public class IosPreflightManager {
         // 2. Apple Developer Team
         String teamId = detectAppleTeamId(client, executionId);
 
-        // 3. iOS version (from device, not from Xcode)
+        // 3. CoreDevice tunnel — must be connected before Appium session creation.
+        //    tunnelState=disconnected causes Appium XCUITest to reject the UDID with
+        //    "Unknown device or simulator UDID" even when the device is physically connected.
+        CoreDeviceTunnelManager.DeviceConnectionState tunnel =
+                CoreDeviceTunnelManager.ensureTunnelConnected(client, executionId, udid);
+
+        // 4. iOS version (from device, not from Xcode)
         String iosVersion = detectIosVersion(client, executionId, udid);
 
-        // 4. Developer Mode (warn only, non-blocking)
+        // 5. Developer Mode (warn only, non-blocking)
         checkDeveloperMode(client, executionId, udid);
 
-        // 5. WDA cache — invalidated if iOS version changed
+        // 6. WDA cache — invalidated if iOS version changed
         Properties cache  = loadWdaCache(udid, iosVersion, client, executionId);
         String  wdaBundleId;
         boolean wdaCached;
@@ -91,7 +97,7 @@ public class IosPreflightManager {
                     + (teamId.isBlank() ? "⚠️  no detectado" : teamId));
         }
 
-        // 6. WDA verification and pre-start
+        // 7. WDA verification and pre-start
         // If WDA is cached (previously installed on device), attempt a fast warm start so
         // that Appium's session creation is instantaneous (no build wait during tests).
         // If WDA is not cached, Appium handles the full compilation during first session.
@@ -107,10 +113,16 @@ public class IosPreflightManager {
             wdaCached = false;
         }
 
+        String tunnelSummary = "connected".equalsIgnoreCase(tunnel.tunnelState)
+                ? tunnel.tunnelState + " ✅"
+                : tunnel.tunnelState + " ⚠️";
         client.sendLog(executionId, "INFO",
                 "🍎 ════════════ iOS Pre-flight completo ════════════\n"
                 + "   Team ID    : " + (teamId.isBlank()    ? "no detectado ⚠️" : teamId + " ✅") + "\n"
                 + "   iOS        : " + (iosVersion.isBlank() ? "desconocida"     : iosVersion) + "\n"
+                + "   Tunnel     : " + tunnelSummary
+                + (tunnel.coreDeviceId.isBlank() ? "" : "  (" + tunnel.coreDeviceId + ")") + "\n"
+                + "   UDID       : " + udid + "  ← appium:udid\n"
                 + "   WDA bundle : " + wdaBundleId + "\n"
                 + "   WDA caché  : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
                 + "   WDA activo : " + (wdaReady  ? "sí ✅" : "iniciará con Appium"));
