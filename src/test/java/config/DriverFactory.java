@@ -483,8 +483,21 @@ public class DriverFactory {
 
         log.info("[DriverFactory][iOS] ══════ Capabilities → IOSDriver ══════");
         log.info("[DriverFactory][iOS] deviceName        : {}", prop("deviceName", "?"));
-        log.info("[DriverFactory][iOS] udid              : {}", udid.isBlank()        ? "(no configurado)" : udid);
-        log.info("[DriverFactory][iOS] platformVersion   : {}", prop("platformVersion", "(auto)"));
+        // Physical UDID (8-16 hex) is what Appium's XCUITest driver looks up in
+        // hardwareProperties.udid — CoreDevice UUIDs (8-4-4-4-12) are resolved upstream
+        // in IOSDeviceScanner.resolvePhysicalUdids() before this point.
+        if (!udid.isBlank()) {
+            boolean isCoreDevice = udid.length() == 36 && !udid.matches("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}");
+            if (isCoreDevice) {
+                log.warn("[DriverFactory][iOS] udid (CoreDevice) : {} ⚠  Este es un CoreDevice UUID, no un UDID físico."
+                        + " Appium puede rechazarlo.", udid);
+            } else {
+                log.info("[DriverFactory][iOS] udid (físico)     : {}", udid);
+            }
+        } else {
+            log.info("[DriverFactory][iOS] udid              : (no configurado)");
+        }
+        log.info("[DriverFactory][iOS] platformVersion   : {}", prop("platformVersion", "(auto-detectada por Appium)"));
         log.info("[DriverFactory][iOS] xcodeOrgId        : {}", teamId.isBlank()      ? "(no configurado)" : teamId);
         log.info("[DriverFactory][iOS] bundleId          : {}", bundleId.isBlank()    ? "(no configurado)" : bundleId);
         log.info("[DriverFactory][iOS] updatedWDABundleId: {}", wdaBundleId.isBlank() ? "(auto)"           : wdaBundleId);
@@ -574,23 +587,26 @@ public class DriverFactory {
                 return;
             }
 
-            // Xcode 26+ fallback: xcrun devicectl — CoreDevice UUIDs (8-4-4-4-12 RFC 4122 format)
-            // Physical devices on Xcode 26 get new CoreDevice UUIDs not shown by xctrace.
+            // Xcode 26+ fallback: devicectl --json-output contains physical UDID in
+            // hardwareProperties.udid. The text output of devicectl shows CoreDevice UUIDs
+            // (8-4-4-4-12 format) — NOT physical UDIDs — so JSON output is required here.
             try {
-                Process p2 = new ProcessBuilder("xcrun", "devicectl", "list", "devices")
-                    .redirectErrorStream(true).start();
-                String out2 = new String(p2.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                Process p2 = new ProcessBuilder("xcrun", "devicectl", "list", "devices",
+                        "--json-output", "-")
+                    .redirectErrorStream(false).start();
+                String json = new String(p2.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
                 p2.waitFor();
-                if (out2.contains(udid)) {
-                    log.info("[Preflight] iOS device OK: {} (visible via devicectl — Xcode 26 CoreDevice)", udid);
+                if (json.contains(udid)) {
+                    log.info("[Preflight] iOS device OK: {} (visible via devicectl JSON — hardwareProperties.udid)", udid);
                     return;
                 }
             } catch (Exception ignored) {}
 
             throw new IllegalStateException(
-                "[Preflight] iOS device " + udid + " no encontrado via 'xcrun xctrace list devices' ni 'xcrun devicectl list devices'.\n" +
-                "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n" +
-                "  Diagnóstico: xcrun devicectl list devices"
+                "[Preflight] iOS device " + udid + " no encontrado via 'xcrun xctrace list devices' "
+                + "ni 'xcrun devicectl --json-output'.\n"
+                + "  Asegúrate de que el iPhone esté conectado, desbloqueado y confíe en este Mac.\n"
+                + "  Diagnóstico: xcrun devicectl list devices --json-output -"
             );
         } catch (IllegalStateException e) {
             throw e;
