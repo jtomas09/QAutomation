@@ -602,10 +602,17 @@ public class JobExecutor {
                         cmd.add("-DplatformVersion=" + iosResult.iosVersion);
                     }
                     cmd.add("-DupdatedWDABundleId=" + iosResult.wdaBundleId);
-                    cmd.add("-DwdaPrebuilt=" + iosResult.wdaCached);
+
+                    // wdaPrebuilt=true when: cache existed OR WDA was confirmed running during preflight.
+                    // This tells Appium XCUITest driver to reuse the existing WDA process
+                    // instead of rebuilding from scratch.
+                    boolean wdaPrebuilt = iosResult.wdaCached || iosResult.wdaReady;
+                    cmd.add("-DwdaPrebuilt=" + wdaPrebuilt);
+
                     client.sendLog(job.executionId, "INFO",
                             "[JobExecutor] 📦 WDA bundle: " + iosResult.wdaBundleId
-                            + " | prebuilt: " + iosResult.wdaCached);
+                            + " | prebuilt: " + wdaPrebuilt
+                            + (iosResult.wdaReady ? " | ✅ WDA activo en localhost:8100" : ""));
                 }
             }
 

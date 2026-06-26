@@ -36,13 +36,16 @@ public class IosPreflightManager {
         public final String  iosVersion;
         public final String  wdaBundleId;
         public final boolean wdaCached;
+        /** True if WDA was confirmed running on localhost:8100 during preflight. */
+        public final boolean wdaReady;
 
         IosPreflightResult(String teamId, String iosVersion,
-                           String wdaBundleId, boolean wdaCached) {
+                           String wdaBundleId, boolean wdaCached, boolean wdaReady) {
             this.teamId      = teamId;
             this.iosVersion  = iosVersion;
             this.wdaBundleId = wdaBundleId;
             this.wdaCached   = wdaCached;
+            this.wdaReady    = wdaReady;
         }
     }
 
@@ -88,10 +91,31 @@ public class IosPreflightManager {
                     + (teamId.isBlank() ? "⚠️  no detectado" : teamId));
         }
 
-        client.sendLog(executionId, "INFO",
-                "🍎 ════════════ iOS Pre-flight completo ════════════");
+        // 6. WDA verification and pre-start
+        // If WDA is cached (previously installed on device), attempt a fast warm start so
+        // that Appium's session creation is instantaneous (no build wait during tests).
+        // If WDA is not cached, Appium handles the full compilation during first session.
+        boolean wdaReady = WdaManager.ensureWdaRunning(
+                client, executionId, udid, teamId, wdaBundleId, wdaCached);
 
-        return new IosPreflightResult(teamId, iosVersion, wdaBundleId, wdaCached);
+        // If cache said WDA exists but it didn't start, invalidate so next run recompiles
+        if (wdaCached && !wdaReady && !WdaManager.isWdaRunning()) {
+            client.sendLog(executionId, "WARN",
+                    "♻️  [WDA] El caché existe pero WDA no respondió.\n"
+                    + "   Invalidando caché — la próxima ejecución recompilará WDA.");
+            invalidateWdaCache(udid);
+            wdaCached = false;
+        }
+
+        client.sendLog(executionId, "INFO",
+                "🍎 ════════════ iOS Pre-flight completo ════════════\n"
+                + "   Team ID    : " + (teamId.isBlank()    ? "no detectado ⚠️" : teamId + " ✅") + "\n"
+                + "   iOS        : " + (iosVersion.isBlank() ? "desconocida"     : iosVersion) + "\n"
+                + "   WDA bundle : " + wdaBundleId + "\n"
+                + "   WDA caché  : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
+                + "   WDA activo : " + (wdaReady  ? "sí ✅" : "iniciará con Appium"));
+
+        return new IosPreflightResult(teamId, iosVersion, wdaBundleId, wdaCached, wdaReady);
     }
 
     // ── 1. Xcode ──────────────────────────────────────────────────────────────
@@ -523,6 +547,19 @@ public class IosPreflightManager {
             }
         } catch (Exception e) {
             System.err.println("[WdaCache] Save failed for " + udid + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Deletes the WDA cache for a device, forcing recompilation on the next run.
+     * Called when WDA was cached but failed to start (corrupted state).
+     */
+    public static void invalidateWdaCache(String udid) {
+        if (udid == null || udid.isBlank()) return;
+        File f = cacheFile(udid);
+        if (f.exists()) {
+            f.delete();
+            System.out.println("[WdaCache] Cache invalidated for " + udid);
         }
     }
 

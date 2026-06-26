@@ -4,10 +4,19 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.concurrent.*;
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 
 /**
  * Device Stream Service — Live Preview Engine (Phase 10)
@@ -27,6 +36,7 @@ import java.util.concurrent.*;
 public class DeviceStreamServer {
 
     private static final String PATH_PREFIX       = "/api/device-stream/";
+    private static final String PATH_MIRROR       = "/api/device-mirror/";
     private static final int    CAPTURE_TIMEOUT_S = 5;
     private static final int    MIN_PNG_BYTES      = 1_024;
 
@@ -48,6 +58,50 @@ public class DeviceStreamServer {
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 32);
         server.createContext(PATH_PREFIX, new StreamHandler());
+        server.createContext(PATH_MIRROR, new MirrorHandler());
+
+        // Health check — frontend uses this to detect Runner reachability
+        server.createContext("/health", ex -> {
+            addCorsHeaders(ex);
+            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+                ex.sendResponseHeaders(204, -1);
+                return;
+            }
+            byte[] body = "{\"status\":\"ok\",\"service\":\"device-stream\"}".getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().set("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream out = ex.getResponseBody()) { out.write(body); }
+        });
+
+        // Device mirror status — GET /api/device/status?udid={udid}
+        server.createContext("/api/device/status", ex -> {
+            addCorsHeaders(ex);
+            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+                ex.sendResponseHeaders(204, -1);
+                return;
+            }
+            String query = ex.getRequestURI().getQuery();
+            String udid = "";
+            if (query != null) {
+                for (String param : query.split("&")) {
+                    if (param.startsWith("udid=")) {
+                        udid = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                        break;
+                    }
+                }
+            }
+            boolean connected = !udid.isBlank() && isDeviceConnected(udid);
+            MirrorService.DeviceMirrorState state = MirrorService.getState(udid, connected);
+            String json = String.format(
+                "{\"connected\":%b,\"deviceId\":\"%s\",\"isStreaming\":%b,\"resolution\":\"auto\",\"fps\":%d}",
+                state.connected(), state.deviceId(), state.isStreaming(), state.fps()
+            );
+            byte[] body = json.getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().set("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream out = ex.getResponseBody()) { out.write(body); }
+        });
+
         server.setExecutor(Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "device-stream-worker");
             t.setDaemon(true);
@@ -55,6 +109,7 @@ public class DeviceStreamServer {
         }));
         server.start();
         System.out.println("[DeviceStream] Server started → http://localhost:" + port + PATH_PREFIX + "{udid}");
+        System.out.println("[DeviceMirror] MJPEG endpoint  → http://localhost:" + port + PATH_MIRROR + "{udid}");
     }
 
     public void stop() {
@@ -203,6 +258,135 @@ public class DeviceStreamServer {
             return null;
         } finally {
             lock.release();
+        }
+    }
+
+    // ── MJPEG mirror handler ──────────────────────────────────────────────────
+
+    private class MirrorHandler implements HttpHandler {
+
+        private static final String BOUNDARY  = "frameBound";
+        private static final int    TARGET_FPS = 20;
+        private static final long   FRAME_MS   = 1000L / TARGET_FPS; // 50 ms per frame
+
+        @Override
+        public void handle(HttpExchange ex) throws IOException {
+            try {
+                addCorsHeaders(ex);
+                if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+                    ex.sendResponseHeaders(204, -1);
+                    return;
+                }
+                if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+                    sendText(ex, 405, "Method Not Allowed");
+                    return;
+                }
+
+                String path = ex.getRequestURI().getPath();
+                if (!path.startsWith(PATH_MIRROR)) {
+                    sendText(ex, 404, "Not Found");
+                    return;
+                }
+
+                String udid = path.substring(PATH_MIRROR.length()).trim();
+                if (udid.isEmpty() || udid.contains("/") || udid.contains("..") ||
+                        !udid.matches("[a-zA-Z0-9\\-_.]+")) {
+                    sendText(ex, 400, "Invalid device identifier");
+                    return;
+                }
+
+                System.out.println("[DeviceMirror] Stream opened: " + udid
+                        + " | client: " + ex.getRemoteAddress());
+
+                ex.getResponseHeaders().set("Content-Type",       "multipart/x-mixed-replace; boundary=" + BOUNDARY);
+                ex.getResponseHeaders().set("Cache-Control",      "no-cache, no-store, must-revalidate");
+                ex.getResponseHeaders().set("Pragma",             "no-cache");
+                ex.getResponseHeaders().set("Connection",         "keep-alive");
+                ex.getResponseHeaders().set("X-Accel-Buffering", "no"); // disable nginx buffering
+                ex.sendResponseHeaders(200, 0);                         // 0 = streaming / unknown length
+
+                MirrorService.registerStream(udid);
+                try (OutputStream out = ex.getResponseBody()) {
+                    final byte[] crLf = "\r\n".getBytes(StandardCharsets.UTF_8);
+                    int missCount = 0;
+
+                    while (!Thread.currentThread().isInterrupted()) {
+                        long t0 = System.currentTimeMillis();
+
+                        if (!isDeviceConnected(udid)) {
+                            if (++missCount > 12) break; // device gone for ~6 s
+                            Thread.sleep(500);
+                            continue;
+                        }
+                        missCount = 0;
+
+                        byte[] png = captureScreenshot(udid);
+                        if (png == null) { Thread.sleep(80); continue; }
+
+                        byte[] jpeg = pngToJpeg(png, 0.78f);
+                        if (jpeg == null) continue;
+
+                        byte[] header = ("--" + BOUNDARY + "\r\n" +
+                            "Content-Type: image/jpeg\r\n" +
+                            "Content-Length: " + jpeg.length + "\r\n\r\n"
+                        ).getBytes(StandardCharsets.UTF_8);
+
+                        out.write(header);
+                        out.write(jpeg);
+                        out.write(crLf);
+                        out.flush();
+
+                        long elapsed = System.currentTimeMillis() - t0;
+                        long sleep   = FRAME_MS - elapsed;
+                        if (sleep > 0) Thread.sleep(sleep);
+                    }
+                } catch (Exception ignored) {
+                    // Normal: client closed connection or device disconnected
+                } finally {
+                    MirrorService.deregisterStream(udid);
+                    System.out.println("[DeviceMirror] Stream closed: " + udid);
+                }
+            } catch (Exception e) {
+                System.err.println("[DeviceMirror] Handler error: " + e.getMessage());
+                try { sendText(ex, 500, "Internal error"); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    // ── PNG → JPEG conversion ─────────────────────────────────────────────────
+
+    private static byte[] pngToJpeg(byte[] png, float quality) {
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
+            if (img == null) return null;
+
+            // JPEG does not support alpha — convert to RGB
+            if (img.getColorModel().hasAlpha()) {
+                BufferedImage rgb = new BufferedImage(
+                        img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+                Graphics2D g = rgb.createGraphics();
+                g.setColor(Color.BLACK);
+                g.fillRect(0, 0, img.getWidth(), img.getHeight());
+                g.drawImage(img, 0, 0, null);
+                g.dispose();
+                img = rgb;
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(png.length / 3);
+            Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+            if (!writers.hasNext()) return null;
+            ImageWriter writer = writers.next();
+            ImageWriteParam params = writer.getDefaultWriteParam();
+            params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            params.setCompressionQuality(quality);
+            try (ImageOutputStream ios = ImageIO.createImageOutputStream(baos)) {
+                writer.setOutput(ios);
+                writer.write(null, new IIOImage(img, null, null), params);
+            }
+            writer.dispose();
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
         }
     }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useDeviceStream, type DeviceStreamData } from '../hooks/useDeviceStream'
+import { useMirrorStream } from '../hooks/useMirrorStream'
 import type { StreamState } from '../services/deviceStream'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -4366,8 +4366,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // ── Inspector state ───────────────────────────────────────────────────────
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [inspectedElId, setInspectedElId] = useState<string | null>(null)
-  // ── Live device preview (Phase 10 — DeviceStreamProvider) ─────────────────
-  const { url: previewUrl, state: previewState } = useDeviceStream(selectedDevice?.udid ?? null)
+  // ── Live device mirror — direct MJPEG from Runner (port 8082) ────────────
+  const { url: previewUrl, state: previewState } = useMirrorStream(selectedDevice?.udid ?? null)
   // ── Device viewer state ────────────────────────────────────────────────────
   const [isLandscape, setIsLandscape] = useState(false)
   const [isVideoRecording, setIsVideoRecording] = useState(false)
