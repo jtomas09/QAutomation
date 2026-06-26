@@ -587,6 +587,9 @@ public class JobExecutor {
                 // Propagate Runner-confirmed xcuitest state to Gradle subprocess so DriverFactory
                 // trusts this result instead of running its own redundant subprocess check.
                 cmd.add("-DappiumXcuitestInstalled=true");
+                // Signal physical iOS device: BaseTest must skip driver.startRecordingScreen()
+                // (which depends on ffmpeg) and defer to xcrun devicectl device recordVideo.
+                cmd.add("-DiosPhysicalDevice=true");
                 String iosBundleId = !effectiveBundleId.isBlank() ? effectiveBundleId
                         : !effectivePackage.isBlank()             ? effectivePackage
                         : "";

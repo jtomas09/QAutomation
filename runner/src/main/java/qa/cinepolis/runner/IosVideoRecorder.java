@@ -1,6 +1,6 @@
 package qa.cinepolis.runner;
 
-import java.io.File;
+import java.io.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -9,11 +9,16 @@ import java.util.concurrent.TimeUnit;
  *
  * Available on Xcode 16+ / Xcode 26. Errors are logged as WARN and never
  * stop test execution. Only one recording can be active at a time.
+ *
+ * Process output is captured (not discarded) so that startup failures and
+ * runtime errors are visible in the log when the video file is missing or empty.
  */
 public final class IosVideoRecorder {
 
     private static volatile Process recordingProcess = null;
     private static volatile File    outputFile       = null;
+    private static volatile String  processOutput    = null;
+    private static volatile Thread  captureThread    = null;
 
     private IosVideoRecorder() {}
 
@@ -21,10 +26,10 @@ public final class IosVideoRecorder {
      * Starts recording the given physical iOS device. Returns the output File
      * on success, or null if recording could not be started.
      *
-     * @param client      for sending status logs to the backend
-     * @param executionId current execution identifier
+     * @param client       for sending status logs to the backend
+     * @param executionId  current execution identifier
      * @param physicalUdid 00008110-... format physical UDID
-     * @param videosDir   directory where the MP4 will be written (created if absent)
+     * @param videosDir    directory where the MP4 will be written (created if absent)
      * @return output File, or null on failure
      */
     public static File start(BackendClient client, String executionId,
@@ -38,7 +43,9 @@ public final class IosVideoRecorder {
         try {
             videosDir.mkdirs();
             File out = new File(videosDir, "ios-" + executionId + ".mp4");
-            outputFile = out;
+            outputFile    = out;
+            processOutput = null;
+            captureThread = null;
 
             ProcessBuilder pb = new ProcessBuilder(
                     "xcrun", "devicectl", "device", "recordVideo",
@@ -48,13 +55,41 @@ public final class IosVideoRecorder {
             Process p = pb.start();
             recordingProcess = p;
 
-            // Drain stdout to prevent OS pipe buffer from blocking the recording process
-            Thread drain = new Thread(() -> {
-                try { p.getInputStream().transferTo(java.io.OutputStream.nullOutputStream()); }
-                catch (Exception ignored) {}
-            }, "ios-video-drain");
-            drain.setDaemon(true);
-            drain.start();
+            // Capture process output for error diagnosis — replaces drain-to-null so we
+            // can report the exact reason if the process exits or the file ends up empty.
+            Thread ct = new Thread(() -> {
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader r = new BufferedReader(
+                        new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        sb.append(line).append("\n");
+                    }
+                } catch (Exception ignored) {}
+                processOutput = sb.toString();
+            }, "ios-video-capture");
+            ct.setDaemon(true);
+            ct.start();
+            captureThread = ct;
+
+            // 500 ms health-check — detect immediate startup failures
+            // (wrong UDID, device not reachable, command not found, etc.)
+            try { Thread.sleep(500); } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
+
+            if (!p.isAlive()) {
+                try { ct.join(1500); } catch (InterruptedException ignored) {}
+                String out2  = processOutput != null ? processOutput.trim() : "";
+                String cause = out2.isBlank() ? "sin detalles"
+                        : out2.lines().findFirst().orElse(out2);
+                client.sendLog(executionId, "WARN",
+                        "⚠️ [Video] xcrun devicectl recordVideo terminó de inmediato. Causa: " + cause);
+                recordingProcess = null;
+                outputFile       = null;
+                captureThread    = null;
+                return null;
+            }
 
             client.sendLog(executionId, "INFO",
                     "📹 [Video] Grabación iOS iniciada → " + out.getName());
@@ -64,37 +99,66 @@ public final class IosVideoRecorder {
             client.sendLog(executionId, "WARN",
                     "⚠️ [Video] No se pudo iniciar grabación iOS: " + e.getMessage());
             recordingProcess = null;
-            outputFile = null;
+            outputFile       = null;
+            captureThread    = null;
             return null;
         }
     }
 
     /**
-     * Stops an active recording. Sends SIGTERM and waits up to 15 s for the
-     * process to flush and finalize the MP4 container. Force-kills if needed.
+     * Stops an active recording. Sends SIGTERM and waits up to 30 s for devicectl
+     * to flush and finalize the MP4 container. Force-kills if needed.
+     * Validates that the output file exists and has non-zero size.
+     * Logs the captured process output when the file is empty.
      * Never throws.
      */
     public static void stop(BackendClient client, String executionId) {
-        Process p = recordingProcess;
-        File    f = outputFile;
+        Process p  = recordingProcess;
+        File    f  = outputFile;
+        Thread  ct = captureThread;
         recordingProcess = null;
         outputFile       = null;
+        captureThread    = null;
 
         if (p == null) return;
 
         try {
-            p.destroy(); // SIGTERM → devicectl finalizes the MP4 container
-            boolean done = p.waitFor(15, TimeUnit.SECONDS);
-            if (!done) p.destroyForcibly();
+            if (!p.isAlive()) {
+                // Process died before stop() was called
+                if (ct != null) try { ct.join(2000); } catch (InterruptedException ignored) {}
+                String output = processOutput != null ? processOutput.trim() : "";
+                String cause  = output.isBlank() ? ""
+                        : " Causa: " + output.lines().findFirst().orElse(output);
+                client.sendLog(executionId, "WARN",
+                        "⚠️ [Video] El proceso de grabación terminó prematuramente." + cause);
+            } else {
+                // SIGTERM — devicectl finalizes the MP4 container before exiting
+                p.destroy();
+                boolean done = p.waitFor(30, TimeUnit.SECONDS);
+                if (!done) {
+                    client.sendLog(executionId, "WARN",
+                            "⚠️ [Video] Timeout (30 s) esperando finalización de grabación — forzando término.");
+                    p.destroyForcibly();
+                    p.waitFor(5, TimeUnit.SECONDS);
+                }
+                // Let the capture thread finish reading remaining output
+                if (ct != null) try { ct.join(2000); } catch (InterruptedException ignored) {}
+            }
+
+            // Brief settle to allow the FS to complete the final write
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
 
             if (f != null && f.exists() && f.length() > 0) {
                 client.sendLog(executionId, "INFO",
                         "📹 [Video] Grabación iOS detenida → "
                         + f.getName() + " (" + f.length() / 1024 + " KB)");
             } else {
+                String output = processOutput != null ? processOutput.trim() : "";
+                String cause  = output.isBlank() ? ""
+                        : " Causa: " + output.lines().findFirst().orElse(output);
                 client.sendLog(executionId, "WARN",
                         "⚠️ [Video] Archivo de video vacío o no generado"
-                        + (f != null ? ": " + f.getName() : ""));
+                        + (f != null ? ": " + f.getName() : "") + cause);
             }
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",

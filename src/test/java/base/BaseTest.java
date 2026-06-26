@@ -481,8 +481,18 @@ public class BaseTest {
                 System.getenv().getOrDefault("VIDEO_ENABLED", "false")));
     }
 
+    // True when the Runner started xcrun devicectl device recordVideo for this run.
+    // The Runner passes -DiosPhysicalDevice=true to the Gradle subprocess to signal this.
+    private static boolean isIosPhysicalDeviceRecording() {
+        return DriverFactory.isIOS()
+                && "true".equalsIgnoreCase(System.getProperty("iosPhysicalDevice"));
+    }
+
     private void startVideoRecording() {
         if (!isVideoEnabled() || driver == null) return;
+        // Physical iOS: recording is managed by the Runner via xcrun devicectl device recordVideo.
+        // driver.startRecordingScreen() requires ffmpeg which is not available — skip entirely.
+        if (isIosPhysicalDeviceRecording()) return;
         try {
             if (DriverFactory.isIOS()) {
                 ((io.appium.java_client.ios.IOSDriver) driver).startRecordingScreen(
@@ -505,6 +515,8 @@ public class BaseTest {
 
     private void stopVideoRecording(TestInfo testInfo) {
         if (!isVideoEnabled() || driver == null) return;
+        // Physical iOS: the Runner handles stop + file upload — nothing to do here.
+        if (isIosPhysicalDeviceRecording()) return;
         try {
             String base64;
             if (DriverFactory.isIOS()) {
