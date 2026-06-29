@@ -100,6 +100,17 @@ public final class CoreDeviceTunnelManager {
 
         logState(client, executionId, state);
 
+        // Log DevicectlParser findings to main activity log for validation evidence.
+        // This confirms the parser found the device via hardwareProperties.udid (not potentialHostnames).
+        client.sendLog(executionId, "INFO",
+                "🔍 [DevicectlParser] Dispositivo identificado:\n"
+                + "   Physical UDID   : " + state.physicalUdid + "  ← appium:udid\n"
+                + "   CoreDevice UUID : " + (state.coreDeviceId.isBlank()
+                                             ? "(no detectado)" : state.coreDeviceId) + "\n"
+                + "   Transport Type  : " + state.transportType + "\n"
+                + "   Tunnel State    : " + state.tunnelState + "\n"
+                + "   Pairing State   : " + state.pairingState);
+
         if (state.isReadyForAppium()) {
             client.sendLog(executionId, "INFO",
                     "✅ [CoreDevice] Tunnel activo — dispositivo listo para Appium.");
@@ -172,10 +183,28 @@ public final class CoreDeviceTunnelManager {
                     "   Recovery Strategy: LOCAL_NETWORK → devicectl connection connect\n"
                     + "   (remotedeviced NO reiniciado — destruiría la sesión Bonjour/WiFi)");
             if (!initial.coreDeviceId.isBlank()) {
-                tryTriggerConnection(initial.coreDeviceId);
+                // Capture stdout/stderr/exitCode for diagnostic evidence
+                String[] cr = runCapture("xcrun", "devicectl", "device", "connection", "connect",
+                        "--device", initial.coreDeviceId);
+                client.sendLog(executionId, "INFO",
+                        "   Comando ejecutado:\n"
+                        + "   $ xcrun devicectl device connection connect --device "
+                        + initial.coreDeviceId + "\n"
+                        + "   Exit code : " + cr[0] + "\n"
+                        + "   Stdout    : " + (cr[1].isEmpty() ? "(vacío)" : cr[1]) + "\n"
+                        + "   Stderr    : " + (cr[2].isEmpty() ? "(vacío)" : cr[2]));
+                runSilent("xcrun", "devicectl", "device", "info", "--device", initial.coreDeviceId);
                 sleep(3_000);
                 DeviceConnectionState afterConnect = readConnectionState(physicalUdid);
                 if (afterConnect != null) last = afterConnect;
+                // Log explicit after-state regardless of outcome
+                client.sendLog(executionId, "INFO",
+                        "   Estado después de connection connect:\n"
+                        + "   CoreDevice UUID : " + (last.coreDeviceId.isBlank()
+                                                      ? "(no detectado)" : last.coreDeviceId) + "\n"
+                        + "   xctrace         : " + (last.xctraceVisible ? "visible ✅" : "NO visible ❌") + "\n"
+                        + "   tunnelState     : " + last.tunnelState + "\n"
+                        + "   pairingState    : " + last.pairingState);
                 if (last.isReadyForAppium()) {
                     client.sendLog(executionId, "INFO",
                             "   Resultado: CONNECTED ✅ (connection connect, 3s)\n"
@@ -184,7 +213,7 @@ public final class CoreDeviceTunnelManager {
                     return last;
                 }
                 client.sendLog(executionId, "INFO",
-                        "   connection connect enviado — dispositivo aún offline. Iniciando polling...");
+                        "   Dispositivo aún offline después de connection connect. Iniciando polling...");
             } else {
                 client.sendLog(executionId, "WARN",
                         "   CoreDevice UUID no disponible — no se puede enviar connection connect.\n"
@@ -336,6 +365,20 @@ public final class CoreDeviceTunnelManager {
         } catch (Exception e) {
             System.err.println("[CoreDevice] devicectl --json-output error: " + e.getMessage());
             return null;
+        }
+    }
+
+    /** Runs a command and returns [exitCode, stdout, stderr] as strings. */
+    private static String[] runCapture(String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(false).start();
+            String stdout = new String(p.getInputStream().readAllBytes()).trim();
+            String stderr = new String(p.getErrorStream().readAllBytes()).trim();
+            boolean done = p.waitFor(12, TimeUnit.SECONDS);
+            if (!done) { p.destroyForcibly(); return new String[]{"-1", "", "timeout (12s)"}; }
+            return new String[]{String.valueOf(p.exitValue()), stdout, stderr};
+        } catch (Exception e) {
+            return new String[]{"-1", "", e.getMessage() != null ? e.getMessage() : "exception"};
         }
     }
 
