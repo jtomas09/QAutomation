@@ -1076,69 +1076,6 @@ public class JobExecutor {
         return false;
     }
 
-    // ── iOS cleanup helpers ────────────────────────────────────────────────────
-
-    /**
-     * Attempts to close any active Appium session for the given iOS device via
-     * HTTP DELETE to the Appium hub. This is the graceful path: Appium receives the
-     * delete request, tears down the XCUITest driver, and stops WDA on the device —
-     * clearing the "Automation Running" banner without needing force-kill.
-     *
-     * Only logs and acts when a session matching the UDID is found. No-ops silently
-     * when the session was already closed by driver.quit() in the test JVM.
-     * Never throws.
-     */
-    private void closeAppiumSessionForDevice(String executionId, String udid) {
-        try {
-            String hubBase = config.appiumHub.replaceAll("/wd/hub$", "");
-            HttpClient http = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(3))
-                    .build();
-
-            // GET /sessions — list all active Appium sessions
-            HttpResponse<String> resp;
-            try {
-                HttpRequest req = HttpRequest.newBuilder()
-                        .uri(URI.create(hubBase + "/sessions"))
-                        .timeout(Duration.ofSeconds(5))
-                        .GET().build();
-                resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            } catch (Exception e) {
-                return; // Appium not reachable — WdaManager force-terminate is the backstop
-            }
-            if (resp.statusCode() != 200) return;
-
-            String body = resp.body();
-            if (!body.contains(udid)) return; // no open session for this device
-
-            // Find the session ID whose capabilities contain our UDID.
-            // Appium JSON: {"value": [{"id": "SESSION", "capabilities": {..., "udid": "..."}}]}
-            // "id" appears BEFORE the capabilities block, so search backward from the UDID match.
-            int udidPos = body.indexOf(udid);
-            if (udidPos < 0) return;
-            String prefix = body.substring(Math.max(0, udidPos - 3000), udidPos);
-            Matcher m = Pattern.compile("\"id\"\\s*:\\s*\"([^\"]+)\"").matcher(prefix);
-            String sessionId = null;
-            while (m.find()) sessionId = m.group(1); // last "id" occurrence before the UDID
-            if (sessionId == null) return;
-
-            // Delete the session — Appium handles WDA shutdown gracefully
-            client.sendLog(executionId, "INFO", "Finalizando sesión Appium...");
-            try {
-                HttpRequest del = HttpRequest.newBuilder()
-                        .uri(URI.create(hubBase + "/session/" + sessionId))
-                        .timeout(Duration.ofSeconds(20))
-                        .DELETE().build();
-                http.send(del, HttpResponse.BodyHandlers.discarding());
-                client.sendLog(executionId, "INFO", "✓ Sesión Appium cerrada");
-                // Brief pause so Appium has time to stop WDA before we force-terminate
-                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-            } catch (Exception e) {
-                // Session delete failed — WdaManager terminateWdaOnDevice will cover it
-            }
-        } catch (Exception ignored) {}
-    }
-
     // ── Pre-flight: Appium ─────────────────────────────────────────────────────
 
     private void checkAppiumServer(String executionId) {

@@ -566,9 +566,6 @@ public class DriverFactory {
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
         finalHub = finalHub.replaceAll("/wd/hub$", "");  // Appium 2.x/3.x uses bare base URL
 
-        log.info("[DriverFactory] 📡 Appium endpoint: {} | device={} udid={} bundleId={} teamId={}",
-            finalHub, prop("deviceName","?"), udid, bundleId, teamId.isBlank() ? "?" : teamId);
-
         log.info("[DriverFactory][iOS] ══════ Capabilities → IOSDriver ══════");
         log.info("[DriverFactory][iOS] deviceName        : {}", prop("deviceName", "?"));
         // Physical UDID (8-16 hex) is what Appium's XCUITest driver looks up in
