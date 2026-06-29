@@ -171,15 +171,39 @@ public final class CoreDeviceTunnelManager {
             String physicalUdid, DeviceConnectionState initial) {
 
         client.sendLog(executionId, "INFO",
-                "⏳ [CoreDevice] Intentando establecer conexión CoreDevice..."
-                + "\n   Si el dispositivo está bloqueado: desbloquea el iPhone y acepta confiar en este Mac."
-                + "\n   Tiempo máximo de espera: " + TUNNEL_TIMEOUT_SECONDS + "s");
+                "🔄 [CoreDevice] Tunnel desconectado — ejecutando recuperación automática...\n"
+                + "   Tiempo máximo de espera: " + TUNNEL_TIMEOUT_SECONDS + "s");
 
-        if (!initial.coreDeviceId.isBlank()) tryTriggerConnection(initial.coreDeviceId);
+        DeviceConnectionState last = initial;
+
+        // ── Paso 1: reiniciar daemon remotedeviced ─────────────────────────────
+        // El daemon puede quedar bloqueado sin sincronizarse con xctrace. killall -9
+        // lo reinicia sin requerir sudo cuando el proceso Runner corre como el mismo UID
+        // que inició remotedeviced (instalación estándar de desarrollador).
+        client.sendLog(executionId, "INFO",
+                "   [CoreDevice] Reiniciando daemon remotedeviced (killall -9)...");
+        runSilent("killall", "-9", "remotedeviced");
+        try { Thread.sleep(4_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+
+        DeviceConnectionState afterRestart = readConnectionState(physicalUdid);
+        if (afterRestart != null) {
+            last = afterRestart;
+            if (last.isReadyForAppium()) {
+                client.sendLog(executionId, "INFO",
+                        "✅ [CoreDevice] Dispositivo disponible tras reinicio del daemon (4s).");
+                logState(client, executionId, last);
+                return last;
+            }
+        }
+        client.sendLog(executionId, "INFO",
+                "   [CoreDevice] Daemon reiniciado — dispositivo aún no visible en xctrace. Iniciando polling...");
+
+        // ── Paso 2: trigger de reconexión + polling ────────────────────────────
+        String coreDeviceId = last.coreDeviceId.isBlank() ? initial.coreDeviceId : last.coreDeviceId;
+        if (!coreDeviceId.isBlank()) tryTriggerConnection(coreDeviceId);
 
         long deadline = System.currentTimeMillis() + (TUNNEL_TIMEOUT_SECONDS * 1_000L);
         int  attempt  = 0;
-        DeviceConnectionState last = initial;
 
         while (System.currentTimeMillis() < deadline) {
             attempt++;
@@ -201,25 +225,61 @@ public final class CoreDeviceTunnelManager {
             if (attempt % 5 == 0) {
                 long remaining = (deadline - System.currentTimeMillis()) / 1_000;
                 client.sendLog(executionId, "INFO",
-                        "   ⏳ [CoreDevice] Esperando que dispositivo aparezca en xctrace... (" + remaining + "s restantes)"
+                        "   ⏳ [CoreDevice] Esperando que dispositivo aparezca en xctrace... ("
+                        + remaining + "s restantes)"
                         + "  pairingState=" + last.pairingState
                         + "  xctrace=" + (last.xctraceVisible ? "visible" : "no visible"));
-                if (!last.coreDeviceId.isBlank()) tryTriggerConnection(last.coreDeviceId);
+                coreDeviceId = last.coreDeviceId.isBlank() ? coreDeviceId : last.coreDeviceId;
+                if (!coreDeviceId.isBlank()) tryTriggerConnection(coreDeviceId);
             }
         }
 
-        // Timeout — log actionable error and return last known state so preflight can continue
+        // ── Timeout: diagnóstico de causa raíz preciso ─────────────────────────
+        String rootCause = diagnoseFinalState(last, physicalUdid);
         client.sendLog(executionId, "WARN",
-                "⚠️  [CoreDevice] Tiempo agotado (" + TUNNEL_TIMEOUT_SECONDS + "s). "
-                + "El dispositivo no aparece en xcrun xctrace list devices."
+                "⚠️  [CoreDevice] Tiempo agotado (" + TUNNEL_TIMEOUT_SECONDS + "s).\n"
+                + "   Causa raíz diagnosticada: " + rootCause
                 + stateDetail(last)
-                + "\n   Solución:"
+                + "\n   Acciones manuales si el problema persiste:"
                 + "\n   1. Desbloquea el iPhone → acepta «Confiar en este Mac»"
                 + "\n   2. Ajustes → Privacidad y seguridad → Modo desarrollador → activar"
                 + "\n   3. Desconecta y vuelve a conectar el cable USB"
-                + "\n   4. Abre Xcode → Window → Devices and Simulators "
-                + "— el dispositivo debe aparecer sin advertencia");
+                + "\n   4. Abre Xcode → Window → Devices and Simulators");
         return last;
+    }
+
+    /**
+     * Diagnoses the likely root cause when the device fails to become visible in xctrace.
+     * Returns a human-readable string suitable for a WARN log line.
+     */
+    private static String diagnoseFinalState(DeviceConnectionState s, String physicalUdid) {
+        if ("unpaired".equalsIgnoreCase(s.pairingState)) {
+            return "dispositivo no ha aceptado confianza en este Mac "
+                 + "(pairingState=unpaired) — desbloquea el iPhone y acepta «Confiar en este Mac»";
+        }
+        if (s.coreDeviceId.isBlank()) {
+            return "CoreDevice no detecta el dispositivo UDID=" + physicalUdid
+                 + " — posible cable USB no reconocido, daemon aún iniciándose "
+                 + "o UDID incorrecto en la configuración";
+        }
+        if (s.xctraceVisible) {
+            // isReadyForAppium() returned false but xctraceVisible=true — only other cause is unpaired
+            return "pairingState=" + s.pairingState
+                 + " — dispositivo no emparejado con este Mac";
+        }
+        if ("connected".equalsIgnoreCase(s.tunnelState)) {
+            return "tunnelState=connected pero xctrace aún no ve el dispositivo — "
+                 + "desync persistente entre CoreDevice y xctrace; "
+                 + "intenta desconectar y reconectar el cable USB";
+        }
+        if ("disconnected".equalsIgnoreCase(s.tunnelState)) {
+            return "tunnelState=disconnected tras reiniciar daemon remotedeviced — "
+                 + "el daemon no logró establecer el túnel CoreDevice; "
+                 + "posible problema USB, pantalla del iPhone bloqueada o confianza pendiente";
+        }
+        return "tunnelState=" + s.tunnelState + " xctraceVisible=false "
+             + "coreDeviceId=" + (s.coreDeviceId.isBlank() ? "(no detectado)" : s.coreDeviceId)
+             + " — dispositivo encontrado en CoreDevice pero no visible para Appium/xctrace";
     }
 
     // ── Tunnel trigger ─────────────────────────────────────────────────────────
