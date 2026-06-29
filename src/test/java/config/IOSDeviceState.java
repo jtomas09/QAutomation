@@ -171,18 +171,45 @@ public final class IOSDeviceState {
      * True when the minimum conditions for attempting an Appium/XCUITest session
      * are met, even if {@code xctraceVisible} or {@code tunnelState} are not confirmed.
      *
-     * CoreDevice visibility + pairing + XCUITest driver installed is enough for
-     * Appium to attempt WDA startup via USB. xctraceVisible and tunnelState can be
-     * false/disconnected while WDA still succeeds — confirmed in Xcode 16+/26 where
-     * devicectl reports tunnelState=disconnected yet WDA responds on 192.168.x.x:8100.
+     * Conditions required:
+     *   coreDeviceVisible — device present in CoreDevice (USB acknowledged by macOS)
+     *   paired            — device has trusted this Mac (accepted "Trust" prompt)
+     *   xcuitestInstalled — Appium's XCUITest driver is installed and usable
+     *   teamId            — non-empty: WDA cannot be code-signed without a Team ID
+     *   bundleId          — non-empty: Appium needs the app bundle to launch it
+     *   physicalUdid      — non-empty: Appium needs a UDID to target the device
+     *
+     * Intentionally excluded:
+     *   xctraceVisible — non-fatal: WDA can operate via USB even when absent
+     *   tunnelState    — non-fatal: Xcode 16+/26 may report disconnected while WDA works
+     *   appiumAvailable — guaranteed by buildLocalIOS() via validateAppiumServer()
      *
      * Decision matrix in DriverFactory:
-     *   ready=true              → fast path, no diagnostics
-     *   canAttemptSession=true  → soft diagnostic (non-blocking), proceed to IOSDriver
-     *   canAttemptSession=false → hard diagnostic (may abort on truly fatal conditions)
+     *   ready=true              -> fast path, no diagnostics
+     *   canAttemptSession=true  -> soft diagnostic (non-blocking), proceed to IOSDriver
+     *   canAttemptSession=false -> hard abort on truly fatal missing conditions
      */
     public boolean canAttemptSession() {
-        return coreDeviceVisible && paired && xcuitestInstalled;
+        return coreDeviceVisible
+            && paired
+            && xcuitestInstalled
+            && !teamId.isBlank()
+            && !bundleId.isBlank()
+            && !physicalUdid.isBlank();
+    }
+
+    /**
+     * Returns the first condition that prevents {@link #canAttemptSession()} from
+     * being true. Returns "todas las condiciones de intento cumplidas" when it is true.
+     */
+    public String canAttemptSessionReason() {
+        if (!coreDeviceVisible)     return "CoreDevice no detecta el dispositivo (coreDeviceVisible=false)";
+        if (!paired)                return "dispositivo no emparejado (pairingState != paired)";
+        if (!xcuitestInstalled)     return "XCUITest driver no instalado en Appium";
+        if (teamId.isBlank())       return "Team ID ausente — WDA no puede firmarse sin xcodeOrgId";
+        if (bundleId.isBlank())     return "Bundle ID ausente — Appium no puede identificar la app";
+        if (physicalUdid.isBlank()) return "UDID fisico no configurado — Appium no puede apuntar al dispositivo";
+        return "todas las condiciones de intento cumplidas";
     }
 
     /**

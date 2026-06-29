@@ -257,23 +257,48 @@ public class DriverFactory {
             }
             log.info("[DriverFactory] Hub URL : {}", hub);
             log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
+            // Build IOSDeviceState once — scope elevated so catch block can log it on failure
+            IOSDeviceState iosState = "local".equals(mode)
+                    ? IOSDeviceState.fromRunnerProps()
+                    : IOSDeviceState.empty();
+
             if ("local".equals(mode)) {
-                IOSDeviceState ios2 = IOSDeviceState.fromRunnerProps();
-                if (ios2.ready) {
-                    log.info("[DriverFactory][iOS] ✅ Estado Runner confirmado — creando IOSDriver directamente: {}",
-                            ios2);
-                } else if (ios2.canAttemptSession()) {
-                    // CoreDevice ve el dispositivo y está emparejado: xctraceVisible/tunnel no son
-                    // bloqueantes aquí — Appium puede iniciar WDA por USB aunque xctrace no confirme.
-                    log.info("[DriverFactory][iOS] ⚠️  Condiciones parciales ({}) — "
-                            + "diagnóstico no bloqueante, Appium intentará establecer la sesión.",
-                            ios2.notReadyReason());
-                    runIosPreSessionDiagnosticSoft(hub, prop("udid", ""), options, ios2);
+                if (iosState.ready) {
+                    log.info("[DriverFactory][iOS] ✅ Estado Runner — fast path:\n"
+                            + "   ready=true — todas las condiciones confirmadas por el Runner\n"
+                            + "   → Creando IOSDriver directamente sin diagnosticos previos.\n"
+                            + "   Estado: {}", iosState);
+                } else if (iosState.canAttemptSession()) {
+                    log.info("[DriverFactory][iOS] ⚠️  Estado Runner — intento tolerado:\n"
+                            + "   ready=false  |  canAttemptSession=true\n"
+                            + "   CoreDevice   : {}\n"
+                            + "   Pairing      : {}\n"
+                            + "   XCUITest     : {}\n"
+                            + "   Team ID      : {}\n"
+                            + "   Bundle ID    : {}\n"
+                            + "   UDID fisico  : {}\n"
+                            + "   xctrace      : {} (informativo — no condicion de intento)\n"
+                            + "   Tunnel       : {} (informativo — Appium puede operar sin tunel)\n"
+                            + "   Motivo no-ready: {}\n"
+                            + "   → Diagnostico no bloqueante → new IOSDriver() → Appium decide.",
+                            iosState.coreDeviceVisible ? "✅" : "❌",
+                            iosState.paired            ? "✅" : "❌",
+                            iosState.xcuitestInstalled ? "✅" : "❌",
+                            iosState.teamId.isBlank()       ? "❌ ausente" : "✅",
+                            iosState.bundleId.isBlank()     ? "❌ ausente" : "✅",
+                            iosState.physicalUdid.isBlank() ? "❌ no configurado" : "✅",
+                            iosState.xctraceVisible  ? "visible" : "no visible",
+                            iosState.tunnelConnected ? "connected" : "disconnected",
+                            iosState.notReadyReason());
+                    runIosPreSessionDiagnosticSoft(hub, prop("udid", ""), options, iosState);
                 } else {
-                    // Condiciones críticas ausentes (sin pairing, sin XCUITest, sin CoreDevice)
-                    log.info("[DriverFactory][iOS] ❌ Condiciones críticas ausentes ({}) — diagnóstico completo.",
-                            ios2.notReadyReason());
-                    runIosPreSessionDiagnostic(hub, prop("udid", ""), options, ios2);
+                    log.info("[DriverFactory][iOS] ❌ Estado Runner — condiciones criticas ausentes:\n"
+                            + "   ready=false  |  canAttemptSession=false\n"
+                            + "   Motivo: {}\n"
+                            + "   → Abortando antes de crear IOSDriver.\n"
+                            + "   Appium no puede crear sesion sin estas condiciones.",
+                            iosState.canAttemptSessionReason());
+                    runIosPreSessionDiagnostic(hub, prop("udid", ""), options, iosState);
                 }
             }
             try {
@@ -290,6 +315,7 @@ public class DriverFactory {
                 return d;
             } catch (Exception iosEx) {
                 log.error("[DriverFactory][iOS] ══════════ APPIUM SESSION CREATION FAILED ══════════");
+                log.error("[DriverFactory][iOS] IOSDeviceState : {}", iosState);
                 log.error("[DriverFactory][iOS] Hub            : {}", hub);
                 log.error("[DriverFactory][iOS] Capabilities   :\n{}", options.toJson());
                 log.error("[DriverFactory][iOS] Exception class: {}", iosEx.getClass().getName());
