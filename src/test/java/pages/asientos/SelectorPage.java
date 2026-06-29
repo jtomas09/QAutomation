@@ -90,7 +90,7 @@ public class SelectorPage extends BasePage {
     }
 
     public String abrirPrimerPeliculaDesdeVerSinopsis() {
-        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(3));
+        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(isIOS() ? 8 : 3));
 
         List<WebElement> peliculas = obtenerPeliculasVisibles();
 
@@ -177,14 +177,25 @@ public class SelectorPage extends BasePage {
     }
     private WebElement encontrarVerSinopsisDeTarjeta(WebElement titulo) {
         try {
-            List<WebElement> candidatos = driver.findElements(
-                    By.xpath("//android.widget.TextView[@text='Ver sinopsis']")
-            );
-
-            if (candidatos.isEmpty()) {
+            List<WebElement> candidatos;
+            if (isIOS()) {
                 candidatos = driver.findElements(
-                        By.xpath("//*[contains(@text,'Ver sinopsis')]")
+                        By.xpath("//*[@name='Ver sinopsis' or @value='Ver sinopsis']")
                 );
+                if (candidatos.isEmpty()) {
+                    candidatos = driver.findElements(
+                            By.xpath("//*[contains(@name,'Ver sinopsis') or contains(@value,'Ver sinopsis')]")
+                    );
+                }
+            } else {
+                candidatos = driver.findElements(
+                        By.xpath("//android.widget.TextView[@text='Ver sinopsis']")
+                );
+                if (candidatos.isEmpty()) {
+                    candidatos = driver.findElements(
+                            By.xpath("//*[contains(@text,'Ver sinopsis')]")
+                    );
+                }
             }
 
             WebElement mejor = null;
@@ -220,11 +231,13 @@ public class SelectorPage extends BasePage {
     }
     private void manejarPopupsIniciales() {
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(800));
-        // Intentar cerrar popups comunes de Cinépolis
         String[] botonesCerrar = {"PERMITIR", "Permitir", "ENTENDIDO", "ACEPTAR", "Cerrar", "Saltar"};
+        boolean ios = isIOS();
         for (String txt : botonesCerrar) {
             try {
-                List<WebElement> btn = driver.findElements(By.xpath("//*[@text='" + txt + "']"));
+                List<WebElement> btn = ios
+                        ? driver.findElements(By.xpath("//*[@name='" + txt + "' or @value='" + txt + "']"))
+                        : driver.findElements(By.xpath("//*[@text='" + txt + "']"));
                 if (!btn.isEmpty()) btn.get(0).click();
             } catch (Exception ignored) {}
         }
@@ -245,21 +258,26 @@ public class SelectorPage extends BasePage {
     }
 
     private void esperarCargaCartelera() {
-        long end = System.currentTimeMillis() + 10000; // 10 segundos de espera máxima
+        String detectXpath = isIOS()
+                ? "//XCUIElementTypeStaticText[string-length(@value) > 8]"
+                : "//android.widget.TextView[string-length(@text) > 8]";
+        long end = System.currentTimeMillis() + 10000;
         while (System.currentTimeMillis() < end) {
-            // Si aparece algún elemento que parece título, salimos de la espera
-            if (!driver.findElements(By.xpath("//android.widget.TextView[string-length(@text) > 8]")).isEmpty()) {
+            if (!driver.findElements(By.xpath(detectXpath)).isEmpty()) {
                 return;
             }
-            // Si hay un botón de "Permitir" o "Entendido" de ubicación, podrías agregar el clic aquí
             manejarPopupsPosibles();
             sleep(500);
         }
     }
     private void manejarPopupsPosibles() {
         try {
-            // Intenta cerrar el popup de ubicación si aparece
-            List<WebElement> popups = driver.findElements(By.xpath("//*[@text='PERMITIR' or @text='Permitir' or @text='ENTENDIDO']"));
+            List<WebElement> popups = isIOS()
+                    ? driver.findElements(By.xpath(
+                            "//*[@name='PERMITIR' or @name='Permitir' or @name='ENTENDIDO'"
+                            + " or @value='PERMITIR' or @value='Permitir' or @value='ENTENDIDO']"))
+                    : driver.findElements(By.xpath(
+                            "//*[@text='PERMITIR' or @text='Permitir' or @text='ENTENDIDO']"));
             if (!popups.isEmpty()) popups.get(0).click();
         } catch (Exception ignored) {}
     }
@@ -407,37 +425,26 @@ public class SelectorPage extends BasePage {
         return false;
     }
     private WebElement reubicarTituloPelicula(String nombre) {
-        try {
-            List<WebElement> candidatos = driver.findElements(
-                    By.xpath("//android.widget.TextView[@text=\"" + nombre + "\"]")
-            );
-
-            for (WebElement el : candidatos) {
-                try {
-                    if (el.isDisplayed()) {
-                        return el;
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-        } catch (Exception ignored) {
-        }
+        String primaryXpath = isIOS()
+                ? "//XCUIElementTypeStaticText[@value=\"" + nombre + "\"]"
+                : "//android.widget.TextView[@text=\"" + nombre + "\"]";
+        String fallbackXpath = isIOS()
+                ? "//*[contains(@value,\"" + nombre + "\") or contains(@name,\"" + nombre + "\")]"
+                : "//*[contains(@text,\"" + nombre + "\")]";
 
         try {
-            List<WebElement> candidatos = driver.findElements(
-                    By.xpath("//*[contains(@text,\"" + nombre + "\")]")
-            );
-
+            List<WebElement> candidatos = driver.findElements(By.xpath(primaryXpath));
             for (WebElement el : candidatos) {
-                try {
-                    if (el.isDisplayed()) {
-                        return el;
-                    }
-                } catch (Exception ignored) {
-                }
+                try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
+
+        try {
+            List<WebElement> candidatos = driver.findElements(By.xpath(fallbackXpath));
+            for (WebElement el : candidatos) {
+                try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
 
         return null;
     }
@@ -491,13 +498,18 @@ public class SelectorPage extends BasePage {
     }
     private boolean estaEnDetalleDePelicula() {
         try {
-            // Una sola llamada al driver en lugar de 9 separadas
-            String xpath =
-                    "//*[contains(@text,'Sinopsis') or contains(@text,'Director') or " +
-                    "contains(@text,'Reparto') or contains(@text,'Clasificaci\u00f3n') or " +
-                    "contains(@text,'Ver horarios') or contains(@text,'VER HORARIOS') or " +
-                    "contains(@text,'Ver tr\u00e1iler') or contains(@text,'Ver trailer') or " +
-                    "contains(@text,'Ver m\u00e1s')]";
+            String xpath = isIOS()
+                    ? "//*[contains(@value,'Sinopsis') or contains(@value,'Director') or "
+                        + "contains(@value,'Reparto') or contains(@value,'Clasificaci\u00f3n') or "
+                        + "contains(@value,'Ver horarios') or contains(@value,'VER HORARIOS') or "
+                        + "contains(@value,'Ver tr\u00e1iler') or contains(@value,'Ver trailer') or "
+                        + "contains(@name,'Ver horarios') or contains(@name,'Sinopsis') or "
+                        + "contains(@value,'Ver m\u00e1s')]"
+                    : "//*[contains(@text,'Sinopsis') or contains(@text,'Director') or "
+                        + "contains(@text,'Reparto') or contains(@text,'Clasificaci\u00f3n') or "
+                        + "contains(@text,'Ver horarios') or contains(@text,'VER HORARIOS') or "
+                        + "contains(@text,'Ver tr\u00e1iler') or contains(@text,'Ver trailer') or "
+                        + "contains(@text,'Ver m\u00e1s')]";
             for (WebElement el : driver.findElements(By.xpath(xpath))) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
             }
@@ -826,7 +838,10 @@ public class SelectorPage extends BasePage {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
-        List<By> candidatos = List.of(
+        List<By> candidatos = isIOS() ? List.of(
+                By.xpath("//XCUIElementTypeStaticText[@value and normalize-space(@value)!='']"),
+                By.xpath("//XCUIElementTypeOther[@value and normalize-space(@value)!='']")
+        ) : List.of(
                 By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"),
                 By.xpath("//android.view.View[@text and normalize-space(@text)!='']")
         );
@@ -2086,6 +2101,11 @@ public class SelectorPage extends BasePage {
     private String obtenerTextoSeguro(WebElement el) {
         try {
             String txt = el.getText();
+            if (txt != null && !txt.isBlank()) return txt.trim();
+            if (isIOS()) {
+                String val = el.getAttribute("value");
+                if (val != null && !val.isBlank()) return val.trim();
+            }
             return txt == null ? "" : txt.trim();
         } catch (Exception e) {
             return "";

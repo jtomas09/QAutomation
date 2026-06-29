@@ -102,18 +102,19 @@ public class IosPreflightManager {
             wdaBundleId = cache.getProperty("bundleId", generateWdaBundleId(udid));
             wdaCached   = true;
             client.sendLog(executionId, "INFO",
-                    "✅ WebDriverAgent precompilado detectado — saltando compilación."
-                    + "\n   bundle: " + wdaBundleId
-                    + "\n   iOS:    " + cache.getProperty("iosVersion", "?")
-                    + "\n   built:  " + cache.getProperty("builtAt", "?"));
+                    "✅ WebDriverAgent precompilado detectado — saltando compilación.");
+            client.sendTechLog(executionId,
+                    "[WDA caché] bundle: " + wdaBundleId
+                    + " | iOS: " + cache.getProperty("iosVersion", "?")
+                    + " | built: " + cache.getProperty("builtAt", "?"));
         } else {
             wdaBundleId = generateWdaBundleId(udid);
             wdaCached   = false;
             client.sendLog(executionId, "INFO",
-                    "🔨 WebDriverAgent se compilará e instalará automáticamente."
-                    + "\n   bundle: " + wdaBundleId
-                    + "\n   Appium firmará con Team ID: "
-                    + (teamId.isBlank() ? "⚠️  no detectado" : teamId));
+                    "🔨 WebDriverAgent se compilará e instalará automáticamente.");
+            client.sendTechLog(executionId,
+                    "[WDA build] bundle: " + wdaBundleId
+                    + " | teamId: " + (teamId.isBlank() ? "no detectado" : teamId));
         }
 
         // 7. WDA verification and pre-start
@@ -196,52 +197,37 @@ public class IosPreflightManager {
     private static final Pattern TEAM_ID = Pattern.compile("[A-Z0-9]{10}");
 
     public static String detectAppleTeamId(BackendClient client, String executionId) {
-        client.sendLog(executionId, "INFO",
-                "🔍 Buscando Apple Developer Team ID...");
+        client.sendTechLog(executionId, "[TeamID] Buscando Apple Developer Team ID...");
 
         String id;
 
         // ── Estrategia 1: security find-identity -v -p codesigning ────────────
-        // Most common but fails when the certificate exists but isn't trusted for codesigning.
-        client.sendLog(executionId, "INFO",
-                "   [1/6] security find-identity -v -p codesigning");
+        client.sendTechLog(executionId, "[TeamID] [1/6] security find-identity -v -p codesigning");
         id = strategy1FindIdentity(client, executionId);
         if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 1");
 
         // ── Estrategia 2: security find-certificate -c "Apple Development" -Z ──
-        // Finds the certificate by its common-name label, even when not in codesigning policy.
-        client.sendLog(executionId, "INFO",
-                "   [2/6] security find-certificate -c \"Apple Development\" -Z");
+        client.sendTechLog(executionId, "[TeamID] [2/6] security find-certificate -c \"Apple Development\" -Z");
         id = strategy2FindCertByLabel(client, executionId, "Apple Development");
         if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 2");
 
         // ── Estrategia 3: X.509 OU field vía openssl ──────────────────────────
-        // The certificate's Organizational Unit (OU) field IS the Team ID.
-        // Works even when the label format is unusual or localized.
-        client.sendLog(executionId, "INFO",
-                "   [3/6] security find-certificate -p | openssl x509 -subject (OU/UID)");
+        client.sendTechLog(executionId, "[TeamID] [3/6] security find-certificate -p | openssl x509 -subject");
         id = strategy3OpensslSubject(client, executionId, "Apple Development");
         if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 3");
 
         // ── Estrategia 4: legacy "iPhone Developer" certificate name ─────────
-        // Older Xcode versions issue certs labeled "iPhone Developer" instead of "Apple Development".
-        client.sendLog(executionId, "INFO",
-                "   [4/6] security find-certificate -c \"iPhone Developer\" -Z (legacy)");
+        client.sendTechLog(executionId, "[TeamID] [4/6] security find-certificate -c \"iPhone Developer\" -Z");
         id = strategy2FindCertByLabel(client, executionId, "iPhone Developer");
         if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 4 (iPhone Developer)");
 
         // ── Estrategia 5: perfiles de provisioning instalados ─────────────────
-        // Provisioning profiles in ~/Library/MobileDevice/Provisioning Profiles/ always
-        // embed the Team ID explicitly in their TeamIdentifier plist key.
-        client.sendLog(executionId, "INFO",
-                "   [5/6] ~/Library/MobileDevice/Provisioning Profiles/*.mobileprovision");
+        client.sendTechLog(executionId, "[TeamID] [5/6] ~/Library/MobileDevice/Provisioning Profiles/*.mobileprovision");
         id = strategy5ProvisioningProfiles(client, executionId);
         if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 5 (provisioning profile)");
 
         // ── Estrategia 6: security find-certificate -a (todos los certificados) ─
-        // Last resort: scan every certificate in every keychain for any Apple Development entry.
-        client.sendLog(executionId, "INFO",
-                "   [6/6] security find-certificate -a (keychain completo)");
+        client.sendTechLog(executionId, "[TeamID] [6/6] security find-certificate -a (keychain completo)");
         id = strategy6AllCertificates(client, executionId);
         if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 6 (keychain scan)");
 
@@ -283,11 +269,11 @@ public class IosPreflightManager {
             if (ml.find()) return ml.group(1);
 
             if (!out.isBlank())
-                client.sendLog(executionId, "INFO",
-                        "      Sin coincidencia (output: "
-                        + out.substring(0, Math.min(120, out.length())).replace("\n", " | ") + ")");
+                client.sendTechLog(executionId,
+                        "[TeamID] Sin coincidencia: "
+                        + out.substring(0, Math.min(120, out.length())).replace("\n", " | "));
         } catch (Exception e) {
-            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] Error estrategia 1: " + e.getMessage());
         }
         return "";
     }
@@ -304,7 +290,7 @@ public class IosPreflightManager {
             p.waitFor(10, TimeUnit.SECONDS);
 
             if (out.isBlank()) {
-                client.sendLog(executionId, "INFO", "      Certificado \"" + certName + "\" no encontrado.");
+                client.sendTechLog(executionId, "[TeamID] Certificado \"" + certName + "\" no encontrado.");
                 return "";
             }
 
@@ -319,11 +305,11 @@ public class IosPreflightManager {
             Matcher mp = paren.matcher(out);
             if (mp.find()) return mp.group(1);
 
-            client.sendLog(executionId, "INFO",
-                    "      Certificado encontrado pero sin Team ID extraíble: "
+            client.sendTechLog(executionId,
+                    "[TeamID] Certificado encontrado pero sin Team ID extraíble: "
                     + out.substring(0, Math.min(120, out.length())).replace("\n", " | "));
         } catch (Exception e) {
-            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] Error estrategia 2: " + e.getMessage());
         }
         return "";
     }
@@ -341,7 +327,7 @@ public class IosPreflightManager {
             p.waitFor(10, TimeUnit.SECONDS);
 
             if (out.isBlank()) {
-                client.sendLog(executionId, "INFO", "      Sin output de openssl.");
+                client.sendTechLog(executionId, "[TeamID] Sin output de openssl.");
                 return "";
             }
 
@@ -355,10 +341,10 @@ public class IosPreflightManager {
             Matcher ms = slash.matcher(out);
             if (ms.find()) return ms.group(1);
 
-            client.sendLog(executionId, "INFO",
-                    "      Subject sin OU/UID de 10 chars: " + out.substring(0, Math.min(120, out.length())));
+            client.sendTechLog(executionId,
+                    "[TeamID] Subject sin OU/UID de 10 chars: " + out.substring(0, Math.min(120, out.length())));
         } catch (Exception e) {
-            client.sendLog(executionId, "INFO", "      openssl no disponible: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] openssl no disponible: " + e.getMessage());
         }
         return "";
     }
@@ -370,17 +356,16 @@ public class IosPreflightManager {
             File dir = new File(System.getProperty("user.home")
                     + "/Library/MobileDevice/Provisioning Profiles");
             if (!dir.exists()) {
-                client.sendLog(executionId, "INFO", "      Directorio de perfiles no existe.");
+                client.sendTechLog(executionId, "[TeamID] Directorio de perfiles no existe.");
                 return "";
             }
             File[] profiles = dir.listFiles((d, n) -> n.endsWith(".mobileprovision"));
             if (profiles == null || profiles.length == 0) {
-                client.sendLog(executionId, "INFO", "      Sin perfiles instalados.");
+                client.sendTechLog(executionId, "[TeamID] Sin perfiles de provisioning instalados.");
                 return "";
             }
 
-            client.sendLog(executionId, "INFO",
-                    "      Analizando " + profiles.length + " perfil(es)...");
+            client.sendTechLog(executionId, "[TeamID] Analizando " + profiles.length + " perfil(es)...");
 
             for (File f : profiles) {
                 try {
@@ -398,16 +383,14 @@ public class IosPreflightManager {
                     Pattern sp = Pattern.compile("<string>([A-Z0-9]{10})</string>");
                     Matcher sm = sp.matcher(region);
                     if (sm.find()) {
-                        client.sendLog(executionId, "INFO",
-                                "      Encontrado en: " + f.getName());
+                        client.sendTechLog(executionId, "[TeamID] Encontrado en perfil: " + f.getName());
                         return sm.group(1);
                     }
                 } catch (Exception ignored) {}
             }
-            client.sendLog(executionId, "INFO",
-                    "      Team ID no encontrado en ningún perfil.");
+            client.sendTechLog(executionId, "[TeamID] Team ID no encontrado en ningún perfil.");
         } catch (Exception e) {
-            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] Error estrategia 5: " + e.getMessage());
         }
         return "";
     }
@@ -434,10 +417,9 @@ public class IosPreflightManager {
             Matcher mn = nearDev.matcher(out);
             if (mn.find()) return mn.group(1);
 
-            client.sendLog(executionId, "INFO",
-                    "      Sin certificados Apple Development en ningún keychain.");
+            client.sendTechLog(executionId, "[TeamID] Sin certificados Apple Development en ningún keychain.");
         } catch (Exception e) {
-            client.sendLog(executionId, "INFO", "      Error: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] Error estrategia 6: " + e.getMessage());
         }
         return "";
     }
@@ -472,7 +454,8 @@ public class IosPreflightManager {
                             "\"" + field + "\"\\s*:\\s*\"([\\d]+\\.[\\d.]+)\"").matcher(region);
                     if (vm.find()) {
                         String v = vm.group(1);
-                        client.sendLog(executionId, "INFO", "📱 iOS " + v + " (vía devicectl JSON, campo: " + field + ")");
+                        client.sendLog(executionId, "INFO", "📱 iOS " + v);
+                        client.sendTechLog(executionId, "[iOS version] campo: " + field + " (devicectl JSON)");
                         return v;
                     }
                 }

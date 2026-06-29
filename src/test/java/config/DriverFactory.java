@@ -766,8 +766,10 @@ public class DriverFactory {
         //    session creation MUST NOT proceed without it
         validateXcuitestDriverInstalled();
 
-        // 3. Appium server health (advisory — ensureReady already confirmed xctrace visibility)
-        checkAppiumExtendedStatus(hub);
+        // 3. Appium server health (advisory) — skipped when Runner already confirmed xctrace visibility
+        if (!"true".equalsIgnoreCase(System.getProperty("iosState.xctraceVisible"))) {
+            checkAppiumExtendedStatus(hub);
+        }
 
         // 4. Log all 9 capabilities exactly as Appium will receive them in POST /session
         Object pName = options.getCapability("platformName");

@@ -679,7 +679,7 @@ public class JobExecutor {
             // Recording starts before the Appium session and stops after test execution.
             if (!isAndroid && job.videoEnabled && iosResult != null) {
                 File videosDir = Paths.get(workDir, "build", "videos").toFile();
-                iosRecordingActive = IosVideoRecorder.start(
+                iosRecordingActive = IOSVideoRecordingManager.start(
                         client, job.executionId, receivedUdid, videosDir) != null;
             }
 
@@ -752,14 +752,13 @@ public class JobExecutor {
             abortWatcher.interrupt();
 
             // Stop recording before any other work (must precede uploadVideos to finalize MP4)
-            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
 
             if (wasAborted.get()) {
                 // On abort: still clean up the device so banner disappears
                 if (isPlatformIos && !iosUdid.isBlank()) {
-                    closeAppiumSessionForDevice(job.executionId, iosUdid);
-                    WdaManager.cleanup(client, job.executionId, iosUdid);
-                    client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+                    IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
+                            config.appiumHub.replaceAll("/wd/hub$", ""));
                     iosCleanupDone = true;
                 }
                 client.sendLog(job.executionId, "WARN", "Ejecución abortada por el usuario");
@@ -784,11 +783,11 @@ public class JobExecutor {
                         : "❌ Suite terminó con errores (exit " + exitCode + ") — " + summary);
 
             // iOS device cleanup happens HERE — before sendResult() — so that messages
-            // "Finalizando WebDriverAgent..." / "Dispositivo liberado" are visible to the user.
+            // are visible to the user. IOSExecutionCleanupManager verifies WDA is truly
+            // stopped before logging "✓ Dispositivo liberado correctamente".
             if (isPlatformIos && !iosUdid.isBlank()) {
-                closeAppiumSessionForDevice(job.executionId, iosUdid);
-                WdaManager.cleanup(client, job.executionId, iosUdid);
-                client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+                IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
+                        config.appiumHub.replaceAll("/wd/hub$", ""));
                 iosCleanupDone = true;
             }
 
@@ -804,13 +803,12 @@ public class JobExecutor {
             System.out.println("[Executor] ✓ Finalizado: " + job.executionId);
 
         } catch (Exception e) {
-            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
             // iOS cleanup in the catch path — runs before sendResult so messages are visible
             if (isPlatformIos && !iosUdid.isBlank() && !iosCleanupDone) {
                 try {
-                    closeAppiumSessionForDevice(job.executionId, iosUdid);
-                    WdaManager.cleanup(client, job.executionId, iosUdid);
-                    client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+                    IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
+                            config.appiumHub.replaceAll("/wd/hub$", ""));
                     iosCleanupDone = true;
                 } catch (Exception ignored) {}
             }
@@ -824,10 +822,11 @@ public class JobExecutor {
             } catch (Exception ignored) {}
         } finally {
             // Safety net: only fires when an exception bypassed the normal cleanup paths.
-            // IosVideoRecorder.stop() is idempotent — no-op if already called above.
-            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            // IOSVideoRecordingManager.stop() is idempotent — no-op if already called above.
+            if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
             if (!iosCleanupDone && isPlatformIos && !iosUdid.isBlank()) {
-                WdaManager.cleanup(client, job.executionId, iosUdid);
+                IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
+                        config.appiumHub.replaceAll("/wd/hub$", ""));
             }
         }
     }
@@ -1393,9 +1392,19 @@ public class JobExecutor {
     private static boolean isTechnicalLine(String trim) {
         if (trim.startsWith("[DriverFactory]"))        return true;
         if (trim.startsWith("[HTTP]"))                 return true;
+        if (trim.startsWith("[DeviceSync]"))           return true;
+        if (trim.startsWith("[WDA]"))                  return true;
+        if (trim.startsWith("[Video]"))                return true;
+        if (trim.startsWith("[Cleanup]"))              return true;
+        if (trim.startsWith("[Preflight]"))            return true;
+        if (trim.startsWith("[AllureReportSender]"))   return true;
         if (trim.startsWith("> Task :"))               return true;
         if (trim.startsWith("at "))                    return true; // Java stack frame
         if (trim.startsWith("\t"))                     return true; // tab-indented technical detail
+        if (trim.startsWith("org.openqa.selenium"))    return true;
+        if (trim.startsWith("io.appium.java_client"))  return true;
+        if (trim.startsWith("io.netty"))               return true;
+        if (trim.startsWith("com.google.guava"))       return true;
 
         String upper = trim.toUpperCase();
         if (upper.contains("ALLURE"))                  return true;
@@ -1408,6 +1417,20 @@ public class JobExecutor {
         if (upper.contains("PDFGENERATOR"))            return true;
         if (upper.contains("MAILSENDER"))              return true;
         if (upper.contains("CODESIGN"))                return true;
+        if (upper.contains("CAPABILITIES"))            return true;
+        if (upper.contains("APPIUMDRIVER"))            return true;
+        if (upper.contains("DESIRED CAPABILITIES"))    return true;
+        if (upper.contains("PLATFORMNAME"))            return true;
+        if (upper.contains("DEVICENAME"))              return true;
+        if (upper.contains("AUTOMATIONNAME"))          return true;
+        if (upper.contains("DEVICESYNC"))              return true;
+        if (upper.contains("COREDEVICE"))              return true;
+        if (upper.contains("CHROMEDRIVER"))            return true;
+        if (upper.contains("WEBDRIVERMANAGER"))        return true;
+        if (upper.contains("SELENIUM"))                return true;
+        if (upper.contains("XCUITEST"))                return true;
+        if (upper.contains("BUNDLEID"))                return true;
+        if (upper.contains("WDABUNDLEID"))             return true;
 
         return false;
     }

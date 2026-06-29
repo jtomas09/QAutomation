@@ -124,8 +124,8 @@ public final class WdaManager {
         detectedWdaUrl = null;
         lastLaunchWasAttempted = false;
 
-        client.sendLog(executionId, "INFO",
-                "🔍 [WDA] Verificando WebDriverAgent en localhost:" + WDA_PORT + "...");
+        client.sendTechLog(executionId,
+                "[WDA] Verificando WebDriverAgent en localhost:" + WDA_PORT + "...");
 
         // Fast path: WDA is already running (kept alive from a previous run)
         if (isWdaRunning()) {
@@ -146,8 +146,8 @@ public final class WdaManager {
         }
 
         // WDA was compiled before — attempt fast start
-        client.sendLog(executionId, "INFO",
-                "🚀 [WDA] WDA precompilado detectado. Iniciando en dispositivo " + udid + "...");
+        client.sendTechLog(executionId,
+                "[WDA] WDA precompilado detectado. Iniciando en dispositivo " + udid + "...");
 
         // Attempt A: test-without-building (uses existing DerivedData, fastest)
         boolean launchAttempted = tryStartFromDerivedData(client, executionId, udid);
@@ -176,9 +176,8 @@ public final class WdaManager {
 
         lastLaunchWasAttempted = true;
 
-        client.sendLog(executionId, "INFO",
-                "✅ [WDA] Proceso WebDriverAgent iniciado."
-                + "\n   Esperando que el servidor HTTP arranque en el dispositivo...");
+        client.sendTechLog(executionId,
+                "[WDA] Proceso WebDriverAgent iniciado. Esperando que el servidor HTTP arranque...");
 
         // Wait for WDA to respond on /status (probes both localhost and detected URL)
         boolean ready = waitForWdaReady(client, executionId, 180);
@@ -209,8 +208,8 @@ public final class WdaManager {
         long deadline = System.currentTimeMillis() + (timeoutSeconds * 1_000L);
         int  attempt  = 0;
 
-        client.sendLog(executionId, "INFO",
-                "   ⏳ [WDA] Validando endpoint /status (máx. " + timeoutSeconds + "s)...");
+        client.sendTechLog(executionId,
+                "[WDA] Validando endpoint /status (máx. " + timeoutSeconds + "s)...");
 
         while (System.currentTimeMillis() < deadline) {
             attempt++;
@@ -229,8 +228,8 @@ public final class WdaManager {
                 String status = (detectedWdaUrl != null && !detectedWdaUrl.isBlank())
                         ? "URL " + detectedWdaUrl + " detectada — esperando respuesta /status"
                         : "Esperando ServerURLHere en stdout de xcodebuild";
-                client.sendLog(executionId, "INFO",
-                        "   ⏳ [WDA] " + status + " (" + remaining + "s restantes)");
+                client.sendTechLog(executionId,
+                        "[WDA] " + status + " (" + remaining + "s restantes)");
             }
 
             try {
@@ -273,9 +272,32 @@ public final class WdaManager {
         if (physicalUdid != null && !physicalUdid.isBlank()) {
             if (client != null && executionId != null)
                 client.sendLog(executionId, "INFO", "Finalizando WebDriverAgent...");
-            terminateWdaOnDevice(physicalUdid);
-            if (client != null && executionId != null)
-                client.sendLog(executionId, "INFO", "✓ WebDriverAgent detenido");
+
+            terminateWdaOnDevice(physicalUdid); // SIGTERM
+
+            // Verify termination — immediate check first, then wait if process needs time
+            boolean stopped = !isWdaRunning();
+            if (!stopped) {
+                try { Thread.sleep(2_500); } catch (InterruptedException ignored) {}
+                stopped = !isWdaRunning();
+            }
+            if (!stopped) {
+                // SIGTERM was not enough — escalate to SIGKILL
+                if (client != null && executionId != null)
+                    client.sendTechLog(executionId, "[WDA] SIGTERM sin efecto — enviando SIGKILL...");
+                terminateWdaOnDevice(physicalUdid, 9);
+                try { Thread.sleep(1_500); } catch (InterruptedException ignored) {}
+                stopped = !isWdaRunning();
+            }
+
+            // Log honest result — ONLY "✓ WebDriverAgent detenido" when truly verified
+            if (client != null && executionId != null) {
+                if (stopped)
+                    client.sendLog(executionId, "INFO", "✓ WebDriverAgent detenido");
+                else
+                    client.sendLog(executionId, "WARN",
+                            "⚠ WebDriverAgent aún activo en el dispositivo");
+            }
         }
 
         detectedWdaUrl = null;
@@ -292,6 +314,10 @@ public final class WdaManager {
      *   - Kill:      process signal --signal 15  (was: process terminate)
      */
     private static void terminateWdaOnDevice(String physicalUdid) {
+        terminateWdaOnDevice(physicalUdid, 15);
+    }
+
+    private static void terminateWdaOnDevice(String physicalUdid, int signal) {
         File tmpJson = null;
         try {
             tmpJson = File.createTempFile("wda_procs_", ".json");
@@ -327,11 +353,11 @@ public final class WdaManager {
                 try {
                     Process kill = new ProcessBuilder(
                             "xcrun", "devicectl", "device", "process", "signal",
-                            "--device", physicalUdid, "--pid", pid, "--signal", "15")
+                            "--device", physicalUdid, "--pid", pid, "--signal", String.valueOf(signal))
                             .redirectErrorStream(true).start();
                     kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
                     kill.waitFor(8, TimeUnit.SECONDS);
-                    System.out.println("[WdaManager] ✅ WDA PID=" + pid + " terminado (SIGTERM).");
+                    System.out.println("[WdaManager] ✅ WDA PID=" + pid + " señal=" + signal + " enviada.");
                 } catch (Exception ex) {
                     System.err.println("[WdaManager] No se pudo terminar PID=" + pid + ": " + ex.getMessage());
                 }

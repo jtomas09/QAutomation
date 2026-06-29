@@ -64,6 +64,9 @@ public class AllureReportSender {
     private static final Path FINAL_MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
     private static final Path MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
 
+    private static final Object PDF_GENERATION_LOCK = new Object();
+    private static volatile Path cachedAllurePdf = null;
+
     private static boolean isFinalMailAlreadySent() {
         return Files.exists(FINAL_MAIL_LOCK);
     }
@@ -617,6 +620,18 @@ public class AllureReportSender {
     }
 
     public static Path generateAllureOverviewPdf() {
+        synchronized (PDF_GENERATION_LOCK) {
+            if (cachedAllurePdf != null && Files.exists(cachedAllurePdf)) {
+                log.info("[AllureReportSender] PDF ya generado — reutilizando: {}", cachedAllurePdf.getFileName());
+                return cachedAllurePdf;
+            }
+            Path result = generateAllureOverviewPdfInternal();
+            cachedAllurePdf = result;
+            return result;
+        }
+    }
+
+    private static Path generateAllureOverviewPdfInternal() {
         HttpServer server = null;
         try {
             // Discover project root — the EXE may run from build/launch4j/, not the project root
