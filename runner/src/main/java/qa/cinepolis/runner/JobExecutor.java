@@ -483,6 +483,7 @@ public class JobExecutor {
         AtomicInteger skipped = new AtomicInteger(0);
         List<TestCaseResult> testCases = new ArrayList<>();
         boolean iosRecordingActive = false;
+        boolean iosCleanupDone     = false; // prevents double-cleanup in finally safety net
         // Hoisted outside try so finally can access them for cleanup
         final boolean isPlatformIos = "ios".equalsIgnoreCase(nvl(job.platform, ""));
         final String  iosUdid       = nvl(job.udid, "");
@@ -749,9 +750,18 @@ public class JobExecutor {
             int exitCode = process.waitFor();
             activeProcess = null;
             abortWatcher.interrupt();
+
+            // Stop recording before any other work (must precede uploadVideos to finalize MP4)
             if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
 
             if (wasAborted.get()) {
+                // On abort: still clean up the device so banner disappears
+                if (isPlatformIos && !iosUdid.isBlank()) {
+                    closeAppiumSessionForDevice(job.executionId, iosUdid);
+                    WdaManager.cleanup(client, job.executionId, iosUdid);
+                    client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+                    iosCleanupDone = true;
+                }
                 client.sendLog(job.executionId, "WARN", "Ejecución abortada por el usuario");
                 System.out.println("[Executor] Job abortado: " + job.executionId);
                 return;
@@ -768,14 +778,26 @@ public class JobExecutor {
                            + skipped.get() + " SKIPPED";
 
             // INFO level: this is a runner summary, NOT an individual test result.
-            // Using PASS/FAIL here inflates the frontend counter by +1.
-            // The frontend generates its own "Suite finalizada" from the real PASS/FAIL/SKIP counts.
             client.sendLog(job.executionId, "INFO",
                     exitCode == 0
                         ? "✅ Suite completada — " + summary
                         : "❌ Suite terminó con errores (exit " + exitCode + ") — " + summary);
 
-            uploadVideos(job.executionId, job.suite, workDir);
+            // iOS device cleanup happens HERE — before sendResult() — so that messages
+            // "Finalizando WebDriverAgent..." / "Dispositivo liberado" are visible to the user.
+            if (isPlatformIos && !iosUdid.isBlank()) {
+                closeAppiumSessionForDevice(job.executionId, iosUdid);
+                WdaManager.cleanup(client, job.executionId, iosUdid);
+                client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+                iosCleanupDone = true;
+            }
+
+            // Only upload videos when recording was expected to produce output.
+            // Skipping avoids "No se encontraron videos" when recording was disabled
+            // (e.g. devicectl recordVideo removed in Xcode 26).
+            if (iosRecordingActive || !isPlatformIos) {
+                uploadVideos(job.executionId, job.suite, workDir);
+            }
             String allureUrl = generateAllureReport(job.executionId, workDir);
             client.sendResult(job.executionId,
                     passed.get(), failed.get(), skipped.get(), allureUrl, testCases);
@@ -783,6 +805,15 @@ public class JobExecutor {
 
         } catch (Exception e) {
             if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            // iOS cleanup in the catch path — runs before sendResult so messages are visible
+            if (isPlatformIos && !iosUdid.isBlank() && !iosCleanupDone) {
+                try {
+                    closeAppiumSessionForDevice(job.executionId, iosUdid);
+                    WdaManager.cleanup(client, job.executionId, iosUdid);
+                    client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
+                    iosCleanupDone = true;
+                } catch (Exception ignored) {}
+            }
             System.err.println("[Executor] Error fatal: " + e.getMessage());
             e.printStackTrace();
             client.sendLog(job.executionId, "ERROR",
@@ -792,20 +823,11 @@ public class JobExecutor {
                         passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
             } catch (Exception ignored) {}
         } finally {
-            if (isPlatformIos) {
-                // 1. Stop video recording — idempotent; logs "Finalizando grabación..." + "✓ Video guardado"
-                //    only when the recording process is still live.
-                if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
-                // 2. Close Appium session via HTTP — graceful path: Appium shuts down WDA itself.
-                //    Logs "Finalizando sesión Appium..." / "✓ Sesión Appium cerrada" only when a session
-                //    is found (i.e., driver.quit() was not reached in the test JVM).
-                if (!iosUdid.isBlank()) closeAppiumSessionForDevice(job.executionId, iosUdid);
-                // 3. Force-terminate WDA on device + kill Mac-side xcodebuild — safety net in case
-                //    the Appium session close above was skipped or partial.
-                if (!iosUdid.isBlank()) WdaManager.cleanup(client, job.executionId, iosUdid);
-                client.sendLog(job.executionId, "INFO", "Dispositivo liberado correctamente.");
-            } else {
-                if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            // Safety net: only fires when an exception bypassed the normal cleanup paths.
+            // IosVideoRecorder.stop() is idempotent — no-op if already called above.
+            if (iosRecordingActive) IosVideoRecorder.stop(client, job.executionId);
+            if (!iosCleanupDone && isPlatformIos && !iosUdid.isBlank()) {
+                WdaManager.cleanup(client, job.executionId, iosUdid);
             }
         }
     }

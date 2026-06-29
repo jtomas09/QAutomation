@@ -123,10 +123,18 @@ public class IosPreflightManager {
         boolean wdaReady = WdaManager.ensureWdaRunning(
                 client, executionId, udid, teamId, wdaBundleId, wdaCached);
 
-        // If cache said WDA exists but it didn't start, invalidate so next run recompiles
-        if (wdaCached && !wdaReady && !WdaManager.isWdaRunning()) {
+        // Invalidate cache only when a real WDA launch failure occurred:
+        //   wdaCached      = true  → cache said WDA was installed
+        //   !wdaReady      = true  → WDA didn't respond
+        //   wasAttempted   = true  → xcodebuild was actually started (not just "no xcodeproj")
+        //   !isWdaRunning  = true  → not already alive on the port
+        //
+        // Do NOT invalidate when launchAttempted=false ("no xcodeproj" path): Appium will
+        // handle WDA startup using its own xcodeproj, and the device binary stays valid.
+        boolean wasAttempted = WdaManager.wasLastLaunchAttempted();
+        if (wdaCached && !wdaReady && wasAttempted && !WdaManager.isWdaRunning()) {
             client.sendLog(executionId, "WARN",
-                    "♻️  [WDA] El caché existe pero WDA no respondió.\n"
+                    "♻️  [WDA] El caché existe pero WDA no respondió tras intentar iniciarlo.\n"
                     + "   Invalidando caché — la próxima ejecución recompilará WDA.");
             invalidateWdaCache(udid);
             wdaCached = false;

@@ -20,7 +20,28 @@ public final class IosVideoRecorder {
     private static volatile String  processOutput    = null;
     private static volatile Thread  captureThread    = null;
 
+    // Cached result of the recordVideo availability check (null = not yet checked).
+    private static volatile Boolean recordVideoAvailable = null;
+
     private IosVideoRecorder() {}
+
+    /**
+     * Returns true if `xcrun devicectl device recordVideo` exists on this system.
+     * The subcommand was removed in Xcode 26 (devicectl 518+). Result is cached.
+     */
+    private static boolean isRecordVideoAvailable() {
+        if (recordVideoAvailable != null) return recordVideoAvailable;
+        try {
+            Process p = new ProcessBuilder("xcrun", "devicectl", "device", "--help")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes()).toLowerCase();
+            p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            recordVideoAvailable = out.contains("recordvideo");
+        } catch (Exception e) {
+            recordVideoAvailable = false;
+        }
+        return recordVideoAvailable;
+    }
 
     /**
      * Starts recording the given physical iOS device. Returns the output File
@@ -37,6 +58,16 @@ public final class IosVideoRecorder {
         if (physicalUdid == null || physicalUdid.isBlank()) {
             client.sendLog(executionId, "WARN",
                     "⚠️ [Video] No se puede grabar: UDID de dispositivo vacío");
+            return null;
+        }
+
+        // xcrun devicectl device recordVideo was removed in Xcode 26 (devicectl 518+).
+        // Detect this before creating the output directory so uploadVideos() stays quiet.
+        if (!isRecordVideoAvailable()) {
+            client.sendLog(executionId, "WARN",
+                    "⚠️ [Video] Grabación de video iOS no disponible: "
+                    + "xcrun devicectl device recordVideo fue eliminado en Xcode 26.\n"
+                    + "   Para habilitar grabación instala ffmpeg: brew install ffmpeg");
             return null;
         }
 
