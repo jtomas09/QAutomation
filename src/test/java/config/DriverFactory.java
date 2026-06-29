@@ -260,10 +260,12 @@ public class DriverFactory {
             if ("local".equals(mode)) {
                 IOSDeviceState ios2 = IOSDeviceState.fromRunnerProps();
                 if (ios2.ready) {
-                    log.info("[DriverFactory][iOS] ✅ Estado Runner confirmado — omitiendo diagnóstico pre-sesión: {}",
+                    log.info("[DriverFactory][iOS] ✅ Estado Runner confirmado — creando IOSDriver directamente: {}",
                             ios2);
                 } else {
-                    runIosPreSessionDiagnostic(hub, prop("udid", ""), options);
+                    log.info("[DriverFactory][iOS] Estado Runner incompleto — ejecutando diagnóstico. Motivo: {}",
+                            ios2.notReadyReason());
+                    runIosPreSessionDiagnostic(hub, prop("udid", ""), options, ios2);
                 }
             }
             try {
@@ -435,8 +437,12 @@ public class DriverFactory {
     // ──────────────────────────────────────────────────────────────────────────
 
     private static URL buildLocalIOS(XCUITestOptions o) throws Exception {
+        // Single construction point — all iOS state consumed from this object.
+        // Never read System.getProperty("iosState.*") below this line.
+        IOSDeviceState iosState = IOSDeviceState.fromRunnerProps();
+
         String hubUrl   = prop("appium.hub",     "http://127.0.0.1:4723");
-        String udid     = prop("udid",           "");
+        String udid     = iosState.physicalUdid.isEmpty() ? prop("udid", "") : iosState.physicalUdid;
         String bundleId = prop("bundleId",       "");
         String ipaPath  = prop("ipaPath",        "");
         String wdaUrl   = prop("webDriverAgentUrl", ""); // declared early: used in platformVersion detection
@@ -450,7 +456,9 @@ public class DriverFactory {
             log.info("[DriverFactory][iOS] platformName normalizado: '{}' → 'iOS'", rawPlatform);
         }
 
-        if (!udid.isBlank()) validateIosDevice(udid);
+        // Skip validateIosDevice when Runner already confirmed ready — IOSDeviceStateService
+        // already cached the state; calling it again would be a no-op but adds log noise.
+        if (!iosState.ready && !udid.isBlank()) validateIosDevice(udid);
         validateAppiumServer(hubUrl);
 
         o.setPlatformName("iOS");
@@ -567,10 +575,13 @@ public class DriverFactory {
         // hardwareProperties.udid — CoreDevice UUIDs (8-4-4-4-12) are resolved upstream
         // in IOSDeviceScanner.resolvePhysicalUdids() before this point.
         if (!udid.isBlank()) {
-            boolean isCoreDevice = udid.length() == 36 && !udid.matches("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}");
+            // CoreDevice UUIDs follow standard RFC-4122 format: 8-4-4-4-12 hex digits.
+            // Physical UDIDs are either 40 hex chars (legacy) or 8-16 hex (Xcode 15+ format).
+            boolean isCoreDevice = udid.matches(
+                    "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
             if (isCoreDevice) {
-                log.warn("[DriverFactory][iOS] udid (CoreDevice) : {} ⚠  Este es un CoreDevice UUID, no un UDID físico."
-                        + " Appium puede rechazarlo.", udid);
+                log.warn("[DriverFactory][iOS] udid (CoreDevice) : {} ⚠  Este es un CoreDevice UUID,"
+                        + " no el UDID físico del dispositivo. Appium puede rechazarlo.", udid);
             } else {
                 log.info("[DriverFactory][iOS] udid (físico)     : {}", udid);
             }
@@ -762,22 +773,23 @@ public class DriverFactory {
      * Steps 2-3: Appium server + XCUITest driver checks (advisory only — don't block).
      * Step 4: platformName validation + capability log.
      */
-    private static void runIosPreSessionDiagnostic(URL hub, String udid, XCUITestOptions options) {
+    private static void runIosPreSessionDiagnostic(URL hub, String udid,
+                                                    XCUITestOptions options, IOSDeviceState ios) {
         log.info("[DriverFactory][iOS] ══ Pre-Session Diagnostic ══");
+        log.info("[DriverFactory][iOS] Estado Runner: {}", ios);
 
         // 1. Device synchronization — throws SyncException if device not ready for Appium
         IOSDeviceSynchronizationManager.ensureReady(udid, log);
 
-        // 2. XCUITest driver — throws SyncException(XCUITEST_DRIVER_NOT_INSTALLED) if missing;
-        //    session creation MUST NOT proceed without it
-        validateXcuitestDriverInstalled();
+        // 2. XCUITest driver — throws SyncException(XCUITEST_DRIVER_NOT_INSTALLED) if missing
+        validateXcuitestDriverInstalled(ios);
 
-        // 3. Appium server health (advisory) — skipped when Runner already confirmed xctrace visibility
-        if (!"true".equalsIgnoreCase(System.getProperty("iosState.xctraceVisible"))) {
+        // 3. Appium server health (advisory) — skipped when Runner confirmed xctrace visible
+        if (!ios.xctraceVisible) {
             checkAppiumExtendedStatus(hub);
         }
 
-        // 4. Log all 9 capabilities exactly as Appium will receive them in POST /session
+        // 4. Log capabilities
         Object pName = options.getCapability("platformName");
         String pNameStr = pName != null ? pName.toString() : "(null)";
         log.info("[DriverFactory][iOS] ══ Capabilities → POST /session ══════");
@@ -921,10 +933,11 @@ public class DriverFactory {
      * Uses the runtime Appium binary (AGENT_DATA_DIR/runtime/appium) when available,
      * with fallback to known paths and PATH. Never assumes "appium" is on the system PATH.
      */
-    private static void validateXcuitestDriverInstalled() {
-        // Runner (JobExecutor) checks xcuitest before launching Gradle and passes this property.
-        // Trusting it avoids a redundant subprocess call and eliminates env-difference false positives.
-        if ("true".equalsIgnoreCase(System.getProperty("appiumXcuitestInstalled"))) {
+    private static void validateXcuitestDriverInstalled(IOSDeviceState ios) {
+        // IOSDeviceState is the single source of truth for xcuitest availability.
+        // xcuitestInstalled comes from -DappiumXcuitestInstalled set by the Runner after
+        // JobExecutor confirmed the driver is installed before launching Gradle.
+        if (ios.xcuitestInstalled) {
             log.info("[DriverFactory][iOS] ✅ Driver XCUITest confirmado por Runner — "
                     + "omitiendo validación redundante.");
             return;

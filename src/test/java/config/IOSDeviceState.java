@@ -87,7 +87,13 @@ public final class IOSDeviceState {
         this.webDriverAgentUrl  = safe(webDriverAgentUrl);
         this.xcuitestInstalled  = xcuitestInstalled;
         this.wdaPrebuilt        = wdaPrebuilt;
-        this.ready              = xctraceVisible && paired && xcuitestInstalled;
+        // All critical conditions must hold. notReadyReason() explains the first failure.
+        this.ready              = xctraceVisible
+                               && coreDeviceVisible
+                               && paired
+                               && xcuitestInstalled
+                               && !safe(teamId).isEmpty()
+                               && !safe(bundleId).isEmpty();
         this.confirmedAt        = confirmedAt;
     }
 
@@ -153,7 +159,7 @@ public final class IOSDeviceState {
 
     /** True when this state was populated from Runner properties (not the empty default). */
     public boolean fromRunner() {
-        return !"".equals(System.getProperty("iosState.xctraceVisible", ""));
+        return System.getProperty("iosState.xctraceVisible") != null;
     }
 
     /** Age of this state in whole seconds since the Runner confirmed it. */
@@ -161,19 +167,37 @@ public final class IOSDeviceState {
         return (System.currentTimeMillis() - confirmedAt) / 1000L;
     }
 
+    /**
+     * Returns a human-readable explanation of why {@link #ready} is false.
+     * Returns "todas las condiciones cumplidas" when ready is true.
+     * Use this to log a clear reason when fast-pathing is not possible.
+     */
+    public String notReadyReason() {
+        if (!xctraceVisible)      return "xctrace no detecta el dispositivo";
+        if (!coreDeviceVisible)   return "CoreDevice no detecta el dispositivo";
+        if (!paired)              return "dispositivo no emparejado (pairingState != paired)";
+        if (!xcuitestInstalled)   return "XCUITest driver no instalado en Appium";
+        if (teamId.isEmpty())     return "xcodeOrgId (Team ID) no configurado — WDA no puede firmarse";
+        if (bundleId.isEmpty())   return "bundleId de la aplicación no configurado";
+        return "todas las condiciones cumplidas";
+    }
+
     @Override
     public String toString() {
+        String readyStr = ready ? "✅" : ("❌ (" + notReadyReason() + ")");
         return String.format(
                 "[IOSDeviceState udid=%s xctrace=%s coreDevice=%s tunnel=%s paired=%s " +
-                "xcuitest=%s wdaPrebuilt=%s ready=%s age=%ds]",
+                "xcuitest=%s teamId=%s bundleId=%s wdaPrebuilt=%s ready=%s age=%ds]",
                 physicalUdid.isEmpty() ? "(none)" : physicalUdid,
                 xctraceVisible    ? "✅" : "❌",
                 coreDeviceVisible ? "✅" : "❌",
                 tunnelConnected   ? "connected ✅" : "disconnected ⚠️",
                 paired            ? "✅" : "❌",
                 xcuitestInstalled ? "✅" : "❌",
+                teamId.isEmpty()  ? "❌" : "✅",
+                bundleId.isEmpty() ? "❌" : "✅",
                 wdaPrebuilt       ? "✅" : "❌",
-                ready             ? "✅" : "❌",
+                readyStr,
                 ageSeconds()
         );
     }
