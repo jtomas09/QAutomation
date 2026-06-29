@@ -30,19 +30,21 @@ function accentFor(device: PhysicalDevice) {
   return { color: '#3DDC84', glow: 'rgba(61,220,132,0.35)' }
 }
 
-type CardStatus = 'available' | 'inuse' | 'offline'
+type CardStatus = 'available' | 'inuse' | 'offline' | 'discovered'
 
 function mapStatus(raw: string): CardStatus {
   const u = (raw ?? '').toUpperCase()
-  if (u === 'AVAILABLE')               return 'available'
-  if (u === 'BUSY' || u === 'INUSE')  return 'inuse'
+  if (u === 'AVAILABLE')              return 'available'
+  if (u === 'BUSY' || u === 'INUSE') return 'inuse'
+  if (u === 'DISCOVERED')            return 'discovered'
   return 'offline'
 }
 
 const STATUS: Record<CardStatus, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
-  available: { label: 'Disponible', color: '#10b981', bg: 'rgba(16,185,129,0.12)',  Icon: Wifi     },
-  inuse:     { label: 'En uso',     color: '#6366f1', bg: 'rgba(99,102,241,0.12)',  Icon: Activity },
-  offline:   { label: 'Offline',    color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   Icon: WifiOff  },
+  available:  { label: 'Disponible',  color: '#10b981', bg: 'rgba(16,185,129,0.12)',  Icon: Wifi     },
+  inuse:      { label: 'En uso',      color: '#6366f1', bg: 'rgba(99,102,241,0.12)',  Icon: Activity },
+  offline:    { label: 'Offline',     color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   Icon: WifiOff  },
+  discovered: { label: 'Descubierto', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', Icon: Wifi     },
 }
 
 // ─── Notification banner ──────────────────────────────────────────────────────
@@ -182,6 +184,7 @@ export default function ConnectedDevices({
   const configuredSet = new Set(configured.map(d => d.udid))
   const available     = onlineDevices.filter(d => mapStatus(d.status) === 'available').length
   const inuse         = onlineDevices.filter(d => mapStatus(d.status) === 'inuse').length
+  const discovered    = onlineDevices.filter(d => mapStatus(d.status) === 'discovered').length
 
   return (
     <motion.div
@@ -218,6 +221,12 @@ export default function ConnectedDevices({
                 <span style={{ color: '#10b981' }}>{available} disponible{available !== 1 ? 's' : ''}</span>
                 <span className="mx-1.5 opacity-30">·</span>
                 <span style={{ color: '#6366f1' }}>{inuse} en uso</span>
+                {discovered > 0 && (
+                  <>
+                    <span className="mx-1.5 opacity-30">·</span>
+                    <span style={{ color: '#f59e0b' }}>{discovered} descubierto{discovered !== 1 ? 's' : ''}</span>
+                  </>
+                )}
                 {configured.length > 0 && (
                   <>
                     <span className="mx-1.5 opacity-30">·</span>
@@ -286,8 +295,9 @@ function DeviceCard({
   onToggle:  () => void
   appConfig?: DeviceAppConfig
 }) {
-  const statusKey = mapStatus(device.status)
-  const s         = STATUS[statusKey]
+  const statusKey    = mapStatus(device.status)
+  const s            = STATUS[statusKey]
+  const isSelectable = statusKey !== 'discovered'
   const { color, glow } = accentFor(device)
   const img       = pickImage(device)
   const name      = device.deviceName || device.model || 'Dispositivo'
@@ -424,19 +434,25 @@ function DeviceCard({
 
       {/* Toggle button */}
       <button
-        onClick={onToggle}
+        onClick={isSelectable ? onToggle : undefined}
+        disabled={!isSelectable}
+        title={!isSelectable ? 'Detectado por Wi-Fi — sin túnel activo, no puede iniciar sesión Appium' : undefined}
         className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[9px] font-bold transition-all mt-0.5"
         style={{
           background:   selected ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
           border:       selected ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.08)',
           color:        selected ? '#818cf8' : '#64748b',
+          opacity:      isSelectable ? 1 : 0.45,
+          cursor:       isSelectable ? 'pointer' : 'default',
           transition:   'all .2s',
         }}
         onMouseEnter={e => {
+          if (!isSelectable) return
           const el = e.currentTarget as HTMLButtonElement
           el.style.background = selected ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.08)'
         }}
         onMouseLeave={e => {
+          if (!isSelectable) return
           const el = e.currentTarget as HTMLButtonElement
           el.style.background = selected ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)'
         }}
@@ -452,7 +468,7 @@ function DeviceCard({
         >
           {selected && <Check size={8} color="white" />}
         </div>
-        Usar dispositivo
+        {isSelectable ? 'Usar dispositivo' : 'Wi-Fi sin túnel'}
       </button>
     </motion.div>
   )

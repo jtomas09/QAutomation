@@ -77,7 +77,7 @@ export interface TestCaseResult {
 
 // ─── Device Farm ──────────────────────────────────────────────────────────────
 
-export type DeviceStatus = 'AVAILABLE' | 'BUSY' | 'OFFLINE' | 'MAINTENANCE'
+export type DeviceStatus = 'AVAILABLE' | 'BUSY' | 'OFFLINE' | 'MAINTENANCE' | 'DISCOVERED'
 
 export interface PhysicalDevice {
   udid:            string

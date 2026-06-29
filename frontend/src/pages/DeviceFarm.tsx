@@ -41,13 +41,14 @@ interface PlatformPackage {
 const BACKEND_BASE = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? 'https://qautomation-production.up.railway.app'
 
 const STATUS_CFG: Record<DeviceStatus, { label: string; color: string; bg: string }> = {
-  AVAILABLE:   { label: 'Disponible',       color: '#10b981', bg: 'rgba(16,185,129,0.15)' },
-  BUSY:        { label: 'En uso',           color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  AVAILABLE:   { label: 'Disponible',       color: '#10b981', bg: 'rgba(16,185,129,0.15)'  },
+  BUSY:        { label: 'En uso',           color: '#3b82f6', bg: 'rgba(59,130,246,0.15)'  },
   OFFLINE:     { label: 'Offline',          color: '#6b7280', bg: 'rgba(107,114,128,0.15)' },
-  MAINTENANCE: { label: 'En mantenimiento', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  MAINTENANCE: { label: 'En mantenimiento', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)'  },
+  DISCOVERED:  { label: 'Descubierto',      color: '#fbbf24', bg: 'rgba(251,191,36,0.15)'  },
 }
 
-const DONUT_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444']
+const DONUT_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#fbbf24']
 
 const UNAVAILABLE_PKG: PlatformPackage = { available: false, type: 'unavailable', filename: '', label: 'No disponible' }
 
@@ -696,6 +697,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
   const devBusy        = devices.filter(d => d.status === 'BUSY').length
   const devMaintenance = devices.filter(d => d.status === 'MAINTENANCE').length
   const devOffline     = devices.filter(d => d.status === 'OFFLINE').length
+  const devDiscovered  = devices.filter(d => d.status === 'DISCOVERED').length
   const totalDevices   = devices.length
 
   const devInUsePct    = totalDevices === 0 ? 0 : Math.round((devBusy / totalDevices) * 100)
@@ -755,7 +757,8 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
     { name: 'En uso',           value: devBusy         || 0 },
     { name: 'En mantenimiento', value: devMaintenance  || 0 },
     { name: 'Offline',          value: devOffline      || 0 },
-  ].filter(d => d.value > 0), [devAvailable, devBusy, devMaintenance, devOffline])
+    { name: 'Descubiertos',     value: devDiscovered   || 0 },
+  ].filter(d => d.value > 0), [devAvailable, devBusy, devMaintenance, devOffline, devDiscovered])
 
   const donutFallback = donutData.length === 0 ? [{ name: 'Sin datos', value: 1 }] : donutData
   const donutColors   = donutData.length === 0 ? ['rgba(255,255,255,0.08)'] : DONUT_COLORS
@@ -1409,6 +1412,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                 { label: 'En uso',           count: devBusy,         color: '#3b82f6' },
                 { label: 'En mantenimiento', count: devMaintenance,  color: '#f59e0b' },
                 { label: 'Offline',          count: devOffline,      color: '#ef4444' },
+                { label: 'Descubiertos',     count: devDiscovered,   color: '#fbbf24' },
               ].map(row => {
                 const pct = totalDevices === 0 ? 0 : Math.round((row.count / totalDevices) * 100)
                 return (
