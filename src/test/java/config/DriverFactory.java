@@ -258,7 +258,13 @@ public class DriverFactory {
             log.info("[DriverFactory] Hub URL : {}", hub);
             log.info("[DriverFactory] Capabilities:\n{}", options.toJson());
             if ("local".equals(mode)) {
-                runIosPreSessionDiagnostic(hub, prop("udid", ""), options);
+                IOSDeviceState ios2 = IOSDeviceState.fromRunnerProps();
+                if (ios2.ready) {
+                    log.info("[DriverFactory][iOS] ✅ Estado Runner confirmado — omitiendo diagnóstico pre-sesión: {}",
+                            ios2);
+                } else {
+                    runIosPreSessionDiagnostic(hub, prop("udid", ""), options);
+                }
             }
             try {
                 IOSDriver d = new IOSDriver(hub, options);

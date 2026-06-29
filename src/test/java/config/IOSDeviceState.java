@@ -1,0 +1,189 @@
+package config;
+
+/**
+ * Immutable snapshot of all iOS device and app-signing state confirmed by the Runner
+ * (JobExecutor / IosPreflightManager) before the Gradle test process started.
+ *
+ * All fields are populated from -D JVM flags injected by the Runner.
+ * This class NEVER executes subprocesses.
+ *
+ * Design intent:
+ *   The Runner is the single source of truth for iOS device state.
+ *   DriverFactory and IOSDeviceSynchronizationManager consume this object
+ *   and skip redundant subprocess calls when {@link #ready} is true.
+ *
+ * Transport mechanism:
+ *   Runner → Gradle subprocess via -D flags → IOSDeviceState.fromRunnerProps()
+ *
+ * Android: not referenced.
+ */
+public final class IOSDeviceState {
+
+    // ── Hardware / sync state (from -DiosState.* flags) ──────────────────────
+
+    /** True when xctrace confirmed this UDID in the Runner JVM. */
+    public final boolean xctraceVisible;
+    /** True when CoreDevice (devicectl) confirmed this UDID in the Runner JVM. */
+    public final boolean coreDeviceVisible;
+    /** True when the CoreDevice tunnel was 'connected' at preflight time. */
+    public final boolean tunnelConnected;
+    /** True when the device pairing state was 'paired' at preflight time. */
+    public final boolean paired;
+
+    // ── Device identity ───────────────────────────────────────────────────────
+
+    public final String physicalUdid;
+    public final String coreDeviceId;
+    public final String platformVersion;
+
+    // ── App / signing config (from regular -D flags) ──────────────────────────
+
+    public final String teamId;
+    public final String bundleId;
+    public final String updatedWDABundleId;
+    public final String webDriverAgentUrl;
+
+    // ── Driver / WDA state ────────────────────────────────────────────────────
+
+    /** True when the Runner confirmed Appium's XCUITest driver is installed. */
+    public final boolean xcuitestInstalled;
+    /** True when the Runner confirmed a pre-built WDA exists in the cache. */
+    public final boolean wdaPrebuilt;
+
+    // ── Composite readiness ───────────────────────────────────────────────────
+
+    /**
+     * True when the Runner confirmed this device is fully ready for an Appium session:
+     * xctrace visible + device paired + XCUITest driver available.
+     *
+     * When true, DriverFactory skips all redundant pre-session validation.
+     */
+    public final boolean ready;
+
+    /** Epoch-ms timestamp when the Runner confirmed the device state. */
+    public final long confirmedAt;
+
+    // ── Private constructor ───────────────────────────────────────────────────
+
+    private IOSDeviceState(
+            boolean xctraceVisible,    boolean coreDeviceVisible,
+            boolean tunnelConnected,   boolean paired,
+            String  physicalUdid,      String coreDeviceId,    String platformVersion,
+            String  teamId,            String bundleId,
+            String  updatedWDABundleId, String webDriverAgentUrl,
+            boolean xcuitestInstalled, boolean wdaPrebuilt,
+            long    confirmedAt) {
+
+        this.xctraceVisible     = xctraceVisible;
+        this.coreDeviceVisible  = coreDeviceVisible;
+        this.tunnelConnected    = tunnelConnected;
+        this.paired             = paired;
+        this.physicalUdid       = safe(physicalUdid);
+        this.coreDeviceId       = safe(coreDeviceId);
+        this.platformVersion    = safe(platformVersion);
+        this.teamId             = safe(teamId);
+        this.bundleId           = safe(bundleId);
+        this.updatedWDABundleId = safe(updatedWDABundleId);
+        this.webDriverAgentUrl  = safe(webDriverAgentUrl);
+        this.xcuitestInstalled  = xcuitestInstalled;
+        this.wdaPrebuilt        = wdaPrebuilt;
+        this.ready              = xctraceVisible && paired && xcuitestInstalled;
+        this.confirmedAt        = confirmedAt;
+    }
+
+    // ── Factory ───────────────────────────────────────────────────────────────
+
+    /**
+     * Creates an IOSDeviceState from Runner-injected JVM system properties.
+     * Never executes subprocesses.
+     *
+     * Returns an instance with {@code ready=false} if the Runner did not inject
+     * the required {@code -DiosState.xctraceVisible} property.
+     */
+    public static IOSDeviceState fromRunnerProps() {
+        String xctraceStr = System.getProperty("iosState.xctraceVisible");
+        if (xctraceStr == null) {
+            return empty();
+        }
+
+        long confirmedAt = parseLong(System.getProperty("iosState.confirmedAtMs"), 0L);
+        if (confirmedAt == 0L) confirmedAt = System.currentTimeMillis();
+
+        boolean xctraceVisible    = "true".equalsIgnoreCase(xctraceStr.trim());
+        boolean coreDeviceVisible = "true".equalsIgnoreCase(
+                System.getProperty("iosState.coreDeviceVisible", "true").trim());
+        boolean tunnelConnected   = "connected".equalsIgnoreCase(
+                System.getProperty("iosState.tunnelState", "unknown").trim());
+        boolean paired            = !"unpaired".equalsIgnoreCase(
+                System.getProperty("iosState.pairingState", "paired").trim());
+        boolean xcuitestInstalled = "true".equalsIgnoreCase(
+                System.getProperty("appiumXcuitestInstalled", "false").trim());
+        boolean wdaPrebuilt       = "true".equalsIgnoreCase(
+                System.getProperty("wdaPrebuilt", "false").trim());
+
+        return new IOSDeviceState(
+                xctraceVisible,    coreDeviceVisible,
+                tunnelConnected,   paired,
+                System.getProperty("udid",                ""),
+                System.getProperty("iosState.coreDeviceId", ""),
+                System.getProperty("platformVersion",     ""),
+                System.getProperty("xcodeOrgId",          ""),
+                System.getProperty("bundleId",            ""),
+                System.getProperty("updatedWDABundleId",  ""),
+                System.getProperty("webDriverAgentUrl",   ""),
+                xcuitestInstalled, wdaPrebuilt,
+                confirmedAt
+        );
+    }
+
+    /**
+     * Returns an empty (not-ready) state for use when Runner properties are absent.
+     * {@code ready} is always false; all String fields are empty.
+     */
+    public static IOSDeviceState empty() {
+        return new IOSDeviceState(
+                false, false, false, false,
+                "", "", "", "", "", "", "",
+                false, false,
+                System.currentTimeMillis()
+        );
+    }
+
+    // ── Accessors ─────────────────────────────────────────────────────────────
+
+    /** True when this state was populated from Runner properties (not the empty default). */
+    public boolean fromRunner() {
+        return !"".equals(System.getProperty("iosState.xctraceVisible", ""));
+    }
+
+    /** Age of this state in whole seconds since the Runner confirmed it. */
+    public long ageSeconds() {
+        return (System.currentTimeMillis() - confirmedAt) / 1000L;
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "[IOSDeviceState udid=%s xctrace=%s coreDevice=%s tunnel=%s paired=%s " +
+                "xcuitest=%s wdaPrebuilt=%s ready=%s age=%ds]",
+                physicalUdid.isEmpty() ? "(none)" : physicalUdid,
+                xctraceVisible    ? "✅" : "❌",
+                coreDeviceVisible ? "✅" : "❌",
+                tunnelConnected   ? "connected ✅" : "disconnected ⚠️",
+                paired            ? "✅" : "❌",
+                xcuitestInstalled ? "✅" : "❌",
+                wdaPrebuilt       ? "✅" : "❌",
+                ready             ? "✅" : "❌",
+                ageSeconds()
+        );
+    }
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
+
+    private static String safe(String s) { return s != null ? s : ""; }
+
+    private static long parseLong(String s, long def) {
+        try   { return s != null ? Long.parseLong(s.trim()) : def; }
+        catch (NumberFormatException e) { return def; }
+    }
+}

@@ -40,8 +40,10 @@ public final class IOSDeviceStateService {
     static final String PROP_PREFIX = "iosState.";
 
     /**
-     * Runner-confirmed state is considered fresh for 2 minutes.
-     * Gradle startup + optional WDA warm-up typically takes 30–90 s.
+     * Maximum age for Runner-confirmed state when no explicit Runner property is present.
+     * Not used when {@code -DiosState.xctraceVisible} is explicitly set — in that case
+     * the Runner state is trusted unconditionally (see {@link #loadOrQuery}).
+     * Kept for backwards-compatibility with any code that reads this constant.
      */
     static final long STATE_MAX_AGE_MS = 120_000L;
 
@@ -160,30 +162,30 @@ public final class IOSDeviceStateService {
     // ── Load from JVM props or run fresh query ────────────────────────────────
 
     private static DeviceState loadOrQuery(String udid, Logger logger) {
-        String xctraceStr     = System.getProperty(PROP_PREFIX + "xctraceVisible");
-        String confirmedAtStr = System.getProperty(PROP_PREFIX + "confirmedAtMs");
+        String xctraceStr = System.getProperty(PROP_PREFIX + "xctraceVisible");
 
+        // When the Runner explicitly injected -DiosState.xctraceVisible, trust it
+        // unconditionally — no age check, no subprocess. The Runner is the authority:
+        // it ran every validation (xctrace, devicectl, pairing) before Gradle started.
+        // If the device went offline after the Runner confirmed, Appium reports it
+        // clearly during session creation — no silent false-negative here.
         if (xctraceStr != null) {
+            String confirmedAtStr = System.getProperty(PROP_PREFIX + "confirmedAtMs");
             long confirmedAt = parseLong(confirmedAtStr, 0L);
             long ageMs = System.currentTimeMillis() - confirmedAt;
-            if (ageMs < STATE_MAX_AGE_MS) {
-                DeviceState fromProps = new DeviceState(
-                    "true".equalsIgnoreCase(xctraceStr.trim()),
-                    "true".equalsIgnoreCase(
-                            System.getProperty(PROP_PREFIX + "coreDeviceVisible", "true").trim()),
-                    System.getProperty(PROP_PREFIX + "tunnelState",  "unknown"),
-                    System.getProperty(PROP_PREFIX + "pairingState", "unknown"),
-                    System.getProperty(PROP_PREFIX + "coreDeviceId", ""),
-                    true,
-                    confirmedAt > 0 ? confirmedAt : System.currentTimeMillis()
-                );
-                CACHE.put(udid, fromProps);
-                logger.info("[DeviceState] ✅ Estado confirmado por Runner ({} s atrás) — sin consulta: {}",
-                        ageMs / 1000, fromProps);
-                return fromProps;
-            }
-            logger.info("[DeviceState] Estado Runner caducado ({} s > {} s máx) — consultando fresh.",
-                    ageMs / 1000, STATE_MAX_AGE_MS / 1000);
+            DeviceState fromProps = new DeviceState(
+                "true".equalsIgnoreCase(xctraceStr.trim()),
+                "true".equalsIgnoreCase(
+                        System.getProperty(PROP_PREFIX + "coreDeviceVisible", "true").trim()),
+                System.getProperty(PROP_PREFIX + "tunnelState",  "unknown"),
+                System.getProperty(PROP_PREFIX + "pairingState", "unknown"),
+                System.getProperty(PROP_PREFIX + "coreDeviceId", ""),
+                true,
+                confirmedAt > 0 ? confirmedAt : System.currentTimeMillis()
+            );
+            CACHE.put(udid, fromProps);
+            logger.info("[DeviceState] ✅ Estado Runner ({} s) — sin consulta: {}", ageMs / 1000, fromProps);
+            return fromProps;
         }
 
         DeviceState fresh = queryFresh(udid, logger);

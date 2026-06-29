@@ -30,14 +30,14 @@ import java.util.concurrent.TimeUnit;
  */
 public final class IOSDeviceSynchronizationManager {
 
-    static final int  MAX_RECOVERY_ATTEMPTS       = 6;
-    static final int  RECOVERY_POLL_SECONDS        = 5;
+    static final int  MAX_RECOVERY_ATTEMPTS       = 2;
+    static final int  RECOVERY_POLL_SECONDS        = 4;
     /**
      * Hard wall-clock limit for the entire recovery cycle.
-     * Each attempt: triggerConnection (~8 s) + poll sleep (5 s) + fresh query (~3–27 s)
-     * → ~16–40 s per attempt. 90 s allows 2–5 attempts before the deadline fires.
+     * Recovery runs at most twice (daemon restart + one fresh query per attempt).
+     * Fast-fail keeps the total under 30 s even on slow hardware.
      */
-    static final int  MAX_RECOVERY_TOTAL_SECONDS   = 90;
+    static final int  MAX_RECOVERY_TOTAL_SECONDS   = 30;
 
     private IOSDeviceSynchronizationManager() {}
 
@@ -116,11 +116,27 @@ public final class IOSDeviceSynchronizationManager {
         }
 
         long startMs = System.currentTimeMillis();
+
+        // Single authoritative state query — cached in IOSDeviceStateService for this Gradle run.
+        // When the Runner passed -DiosState.xctraceVisible, this returns instantly (no subprocess).
+        IOSDeviceStateService.DeviceState state = IOSDeviceStateService.getState(udid, log);
+
+        // ── Happy path FIRST — no subprocess calls when Runner already confirmed ready ──
+        if (state.xctraceVisible) {
+            if (state.fromRunner) {
+                log.info("[DeviceSync] ✅ Estado Runner confirmado — xctrace ✅ CoreDevice {} (edad: {} s)",
+                        state.coreDeviceVisible ? "✅" : "N/A", state.ageSeconds());
+            } else {
+                log.info("[DeviceSync] ✅ Dispositivo sincronizado — xctrace ✅ CoreDevice {} ({} ms)",
+                        state.coreDeviceVisible ? "✅" : "N/A",
+                        System.currentTimeMillis() - startMs);
+            }
+            return;
+        }
+
+        // ── Device not visible in xctrace — run full diagnostic ──
         log.info("[DeviceSync] ══ Validando sincronización del dispositivo ══");
         log.info("[DeviceSync] UDID: {}", udid);
-
-        // Single authoritative state query — cached in IOSDeviceStateService for this Gradle run
-        IOSDeviceStateService.DeviceState state = IOSDeviceStateService.getState(udid, log);
         logState(log, state, 0, 0);
 
         // Hard fail: device not paired
@@ -132,18 +148,10 @@ public final class IOSDeviceSynchronizationManager {
                 + "  Luego: Ajustes → Privacidad y seguridad → Modo desarrollador → ON");
         }
 
-        // Advisory: screen may be locked (WDA can still connect — don't block)
+        // Advisory: screen may be locked — only check when there is already a problem
+        // (avoids a devicectl subprocess on the happy path)
         if (state.coreDeviceVisible && isDeviceLocked(udid)) {
             log.warn("[DeviceSync] ⚠️  El iPhone puede estar bloqueado — desbloquéalo si la sesión falla.");
-        }
-
-        // Happy path: xctrace sees the device
-        if (state.xctraceVisible) {
-            long ms = System.currentTimeMillis() - startMs;
-            log.info("[DeviceSync] ✅ Dispositivo sincronizado — xctrace ✅ CoreDevice {} ({} ms, fuente: {})",
-                    state.coreDeviceVisible ? "✅" : "N/A", ms,
-                    state.fromRunner ? "Runner (sin consulta adicional)" : "consulta directa");
-            return;
         }
 
         // CoreDevice visible, xctrace not → desync → attempt auto-recovery
@@ -172,14 +180,31 @@ public final class IOSDeviceSynchronizationManager {
         String coreDeviceId = initial.coreDeviceId;
         long   deadline     = startMs + (MAX_RECOVERY_TOTAL_SECONDS * 1_000L);
 
-        log.info("[DeviceSync] Límite de tiempo: {} s ({}× {} s poll + overhead de consulta)",
-                MAX_RECOVERY_TOTAL_SECONDS, MAX_RECOVERY_ATTEMPTS, RECOVERY_POLL_SECONDS);
+        // ── When tunnel is explicitly disconnected, restart the CoreDevice daemon first ──
+        // This is the only real repair action available without sudo. 'killall' works when
+        // the test runner and remotedeviced share the same UID (standard developer setup).
+        if ("disconnected".equalsIgnoreCase(initial.tunnelState)) {
+            log.info("[DeviceSync] Tunnel desconectado — reiniciando daemon remotedeviced...");
+            runSilent("killall", "-9", "remotedeviced");
+            try { Thread.sleep(3_000); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+
+            IOSDeviceStateService.DeviceState after = IOSDeviceStateService.refresh(udid, log);
+            long elapsed = (System.currentTimeMillis() - startMs) / 1000L;
+            if (after.xctraceVisible) {
+                log.info("[DeviceSync] ✅ Daemon reiniciado — xctrace visible ({} s)", elapsed);
+                return;
+            }
+            log.warn("[DeviceSync] Daemon reiniciado pero xctrace aún no ve el dispositivo ({} s)", elapsed);
+            // Fall through to limited polling loop for any remaining time
+        }
+
+        log.info("[DeviceSync] Límite de tiempo: {} s", MAX_RECOVERY_TOTAL_SECONDS);
 
         int attempt = 0;
         IOSDeviceStateService.DeviceState last = initial;
 
         for (int i = 1; i <= MAX_RECOVERY_ATTEMPTS; i++) {
-            // Check wall-clock before starting another attempt
             if (System.currentTimeMillis() >= deadline) {
                 log.warn("[DeviceSync] Tiempo máximo de recuperación agotado antes del intento {}.", i);
                 break;
@@ -201,7 +226,6 @@ public final class IOSDeviceSynchronizationManager {
                 break;
             }
 
-            // Fresh query via service — clears in-process cache for this UDID
             last = IOSDeviceStateService.refresh(udid, log);
             if (!last.coreDeviceId.isBlank()) coreDeviceId = last.coreDeviceId;
 
@@ -223,9 +247,6 @@ public final class IOSDeviceSynchronizationManager {
 
         long elapsed = (System.currentTimeMillis() - startMs) / 1000L;
 
-        // TUNNEL_DISCONNECTED only when tunnel is genuinely confirmed disconnected.
-        // XCTRACE_DEVICE_NOT_VISIBLE when CoreDevice sees the device but xctrace never does,
-        // regardless of tunnel state — avoids blaming the tunnel without real evidence.
         SyncCategory finalCategory = "disconnected".equalsIgnoreCase(last.tunnelState)
                 ? SyncCategory.TUNNEL_DISCONNECTED
                 : SyncCategory.XCTRACE_DEVICE_NOT_VISIBLE;
@@ -235,7 +256,7 @@ public final class IOSDeviceSynchronizationManager {
             "[DeviceSync] No se pudo sincronizar " + udid + " tras "
             + attempt + " intentos (" + elapsed + " s). Categoría: " + finalCategory,
             finalCategory == SyncCategory.TUNNEL_DISCONNECTED
-                ? "Tunnel CoreDevice confirmado como desconectado:\n"
+                ? "Tunnel CoreDevice desconectado — pasos manuales:\n"
                   + "  1. sudo killall -9 remotedeviced\n"
                   + "  2. Desconecta y reconecta el cable USB\n"
                   + "  3. Abre Xcode → Window → Devices and Simulators"
@@ -248,10 +269,8 @@ public final class IOSDeviceSynchronizationManager {
     }
 
     private static void triggerConnection(String coreDeviceId) {
-        // Explicit connect (Xcode 15+; silently ignored on older Xcode)
         runSilent("xcrun", "devicectl", "device", "connection", "connect",
                   "--device", coreDeviceId);
-        // Info probe refreshes daemon awareness of the device
         runSilent("xcrun", "devicectl", "device", "info", "--device", coreDeviceId);
     }
 
