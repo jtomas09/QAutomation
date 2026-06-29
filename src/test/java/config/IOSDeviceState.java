@@ -168,6 +168,24 @@ public final class IOSDeviceState {
     }
 
     /**
+     * True when the minimum conditions for attempting an Appium/XCUITest session
+     * are met, even if {@code xctraceVisible} or {@code tunnelState} are not confirmed.
+     *
+     * CoreDevice visibility + pairing + XCUITest driver installed is enough for
+     * Appium to attempt WDA startup via USB. xctraceVisible and tunnelState can be
+     * false/disconnected while WDA still succeeds — confirmed in Xcode 16+/26 where
+     * devicectl reports tunnelState=disconnected yet WDA responds on 192.168.x.x:8100.
+     *
+     * Decision matrix in DriverFactory:
+     *   ready=true              → fast path, no diagnostics
+     *   canAttemptSession=true  → soft diagnostic (non-blocking), proceed to IOSDriver
+     *   canAttemptSession=false → hard diagnostic (may abort on truly fatal conditions)
+     */
+    public boolean canAttemptSession() {
+        return coreDeviceVisible && paired && xcuitestInstalled;
+    }
+
+    /**
      * Returns a human-readable explanation of why {@link #ready} is false.
      * Returns "todas las condiciones cumplidas" when ready is true.
      * Use this to log a clear reason when fast-pathing is not possible.

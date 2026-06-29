@@ -262,8 +262,16 @@ public class DriverFactory {
                 if (ios2.ready) {
                     log.info("[DriverFactory][iOS] ✅ Estado Runner confirmado — creando IOSDriver directamente: {}",
                             ios2);
+                } else if (ios2.canAttemptSession()) {
+                    // CoreDevice ve el dispositivo y está emparejado: xctraceVisible/tunnel no son
+                    // bloqueantes aquí — Appium puede iniciar WDA por USB aunque xctrace no confirme.
+                    log.info("[DriverFactory][iOS] ⚠️  Condiciones parciales ({}) — "
+                            + "diagnóstico no bloqueante, Appium intentará establecer la sesión.",
+                            ios2.notReadyReason());
+                    runIosPreSessionDiagnosticSoft(hub, prop("udid", ""), options, ios2);
                 } else {
-                    log.info("[DriverFactory][iOS] Estado Runner incompleto — ejecutando diagnóstico. Motivo: {}",
+                    // Condiciones críticas ausentes (sin pairing, sin XCUITest, sin CoreDevice)
+                    log.info("[DriverFactory][iOS] ❌ Condiciones críticas ausentes ({}) — diagnóstico completo.",
                             ios2.notReadyReason());
                     runIosPreSessionDiagnostic(hub, prop("udid", ""), options, ios2);
                 }
@@ -801,6 +809,28 @@ public class DriverFactory {
         log.info("[DriverFactory][iOS]   xcodeOrgId        : {}", prop("xcodeOrgId",      "(no configurado)"));
         log.info("[DriverFactory][iOS]   xcodeSigningId    : {}", prop("xcodeSigningId",  "Apple Development"));
         log.info("[DriverFactory][iOS] ═══════════════════════════════════════════");
+    }
+
+    /**
+     * Non-blocking variant of runIosPreSessionDiagnostic().
+     *
+     * Runs the full diagnostic (device sync + XCUITest validation + Appium health)
+     * but catches SyncException instead of propagating it. The session creation
+     * proceeds regardless — Appium is the final arbiter of whether WDA can start.
+     *
+     * Used when canAttemptSession()=true but ready=false:
+     * CoreDevice sees the device and it is paired, so Appium has a reasonable
+     * chance of establishing a WDA session even without xctrace confirmation.
+     */
+    private static void runIosPreSessionDiagnosticSoft(URL hub, String udid,
+                                                        XCUITestOptions options, IOSDeviceState ios) {
+        try {
+            runIosPreSessionDiagnostic(hub, udid, options, ios);
+        } catch (IOSDeviceSynchronizationManager.SyncException e) {
+            log.warn("[DriverFactory][iOS] ⚠️  Sincronización incompleta (categoría={}): {} — "
+                    + "CoreDevice y pairing confirmados; Appium intentará iniciar WDA de todos modos.",
+                    e.category, e.getMessage());
+        }
     }
 
     private static void classifyIosSessionFailure(String udid, URL hub,
