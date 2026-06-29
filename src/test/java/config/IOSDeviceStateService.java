@@ -5,8 +5,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Single source of truth for iOS device hardware/sync state within the test (Gradle) JVM.
@@ -50,10 +48,6 @@ public final class IOSDeviceStateService {
     /** Per-command timeouts — bounds each individual subprocess call. */
     static final int XCTRACE_TIMEOUT_SEC   = 15;
     static final int DEVICECTL_TIMEOUT_SEC = 12;
-
-    private static final Pattern COREDEVICE_ID_PAT = Pattern.compile(
-            "\"identifier\"\\s*:\\s*\"" +
-            "([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\"");
 
     private IOSDeviceStateService() {}
 
@@ -254,6 +248,8 @@ public final class IOSDeviceStateService {
      * Queries {@code xcrun devicectl list devices --json-output -} and returns a 4-element array:
      * <pre>[tunnelState, pairingState, coreDeviceId, coreDeviceVisible]</pre>
      * where {@code coreDeviceVisible} is the string {@code "true"} when the UDID was found.
+     *
+     * Uses {@link DevicectlParser#findByUdid} for all JSON extraction — no indexOf/substring/regex.
      */
     static String[] devicectlDetails(String udid) {
         String[] none = {"unknown", "unknown", "", "false"};
@@ -269,26 +265,12 @@ public final class IOSDeviceStateService {
                 log.warn("[DeviceState] xcrun devicectl timeout ({}s) — device state unknown", DEVICECTL_TIMEOUT_SEC);
                 return none;
             }
-            if (!json.contains(udid)) return none;
-
-            int    idx    = json.indexOf(udid);
-            String region = json.substring(
-                    Math.max(0, idx - 3000), Math.min(json.length(), idx + 1000));
-
-            String tunnel  = extractJson(region, "tunnelState");
-            String pairing = extractJson(region, "pairingState");
-            if (pairing == null) {
-                // Xcode 26 uses localHostEnrollmentState instead of pairingState
-                String enrolled = extractJson(region, "localHostEnrollmentState");
-                if ("enrolled".equalsIgnoreCase(enrolled)) pairing = "paired";
-            }
-            Matcher m = COREDEVICE_ID_PAT.matcher(region);
-            String coreId = m.find() ? m.group(1) : "";
-
+            DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
+            if (info == null) return none;
             return new String[]{
-                tunnel  != null ? tunnel  : "unknown",
-                pairing != null ? pairing : "unknown",
-                coreId,
+                info.tunnelState,
+                info.pairingState,
+                info.coreDeviceId,
                 "true"
             };
         } catch (Exception e) {
@@ -312,9 +294,4 @@ public final class IOSDeviceStateService {
         catch (NumberFormatException e) { return def; }
     }
 
-    static String extractJson(String region, String key) {
-        Matcher m = Pattern.compile(
-                "\"" + Pattern.quote(key) + "\"\\s*:\\s*\"([^\"]+)\"").matcher(region);
-        return m.find() ? m.group(1) : null;
-    }
 }

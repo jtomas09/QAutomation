@@ -426,39 +426,24 @@ public class IosPreflightManager {
 
     // ── 3. iOS Version ────────────────────────────────────────────────────────
 
-    // Version field names used across Xcode/macOS versions in devicectl --json-output
-    private static final String[] DEVICECTL_VERSION_FIELDS = {
-        "osVersionNumber", "operatingSystemVersion", "softwareVersion", "osVersion"
-    };
-
     public static String detectIosVersion(
             BackendClient client, String executionId, String udid) {
         if (udid == null || udid.isBlank()) return "";
 
         // Strategy 1: xcrun devicectl --json-output (Xcode 14+, CoreDevice-aware)
-        // Xcode 26: "identifier" field holds CoreDevice UUID; "osVersionNumber" may be
-        // hundreds of chars before "identifier" inside the same device JSON object —
-        // so we use a 2000-char window before the UUID position to cover that gap.
+        // Uses DevicectlParser to locate deviceProperties.osVersionNumber via structural
+        // JSON traversal — never uses indexOf or substring on the JSON string.
         try {
             Process p = new ProcessBuilder(
                     "xcrun", "devicectl", "list", "devices", "--json-output", "-")
                     .redirectErrorStream(false).start();
             String json = new String(p.getInputStream().readAllBytes());
             p.waitFor(10, TimeUnit.SECONDS);
-            if (json.contains(udid)) {
-                int idx = json.indexOf(udid);
-                String region = json.substring(
-                        Math.max(0, idx - 2000), Math.min(json.length(), idx + 500));
-                for (String field : DEVICECTL_VERSION_FIELDS) {
-                    Matcher vm = Pattern.compile(
-                            "\"" + field + "\"\\s*:\\s*\"([\\d]+\\.[\\d.]+)\"").matcher(region);
-                    if (vm.find()) {
-                        String v = vm.group(1);
-                        client.sendLog(executionId, "INFO", "📱 iOS " + v);
-                        client.sendTechLog(executionId, "[iOS version] campo: " + field + " (devicectl JSON)");
-                        return v;
-                    }
-                }
+            DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
+            if (info != null && !info.osVersion.isBlank()) {
+                client.sendLog(executionId, "INFO", "📱 iOS " + info.osVersion);
+                client.sendTechLog(executionId, "[iOS version] fuente: devicectl JSON (DevicectlParser)");
+                return info.osVersion;
             }
         } catch (Exception ignored) {}
 
@@ -520,20 +505,14 @@ public class IosPreflightManager {
             Process p = new ProcessBuilder(
                     "xcrun", "devicectl", "list", "devices", "--json-output", "-")
                     .redirectErrorStream(false).start();
-            String out = new String(p.getInputStream().readAllBytes());
+            String json = new String(p.getInputStream().readAllBytes());
             p.waitFor(10, TimeUnit.SECONDS);
-            if (!out.contains(udid)) return;
-
-            int idx = out.indexOf(udid);
-            String region = out.substring(
-                    Math.max(0, idx - 600), Math.min(out.length(), idx + 600));
-
-            if (region.contains("\"developerModeEnabled\":true")
-                    || region.contains("\"developerModeEnabled\": true")) {
+            DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
+            if (info == null) return;
+            if (info.developerModeEnabled) {
                 client.sendLog(executionId, "INFO",
                         "✅ Developer Mode activo en el dispositivo");
-            } else if (region.contains("\"developerModeEnabled\":false")
-                    || region.contains("\"developerModeEnabled\": false")) {
+            } else {
                 client.sendLog(executionId, "WARN",
                         "⚠️  Developer Mode INACTIVO.\n"
                         + "   Actívalo: Ajustes → Privacidad y seguridad → Modo desarrollador\n"

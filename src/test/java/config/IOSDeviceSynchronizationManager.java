@@ -327,12 +327,8 @@ public final class IOSDeviceSynchronizationManager {
                     .redirectErrorStream(false).start();
             String json = new String(p.getInputStream().readAllBytes());
             p.waitFor(IOSDeviceStateService.DEVICECTL_TIMEOUT_SEC, TimeUnit.SECONDS);
-            if (!json.contains(udid)) return false;
-            int idx = json.indexOf(udid);
-            String region = json.substring(Math.max(0, idx - 800), Math.min(json.length(), idx + 800));
-            return region.contains("\"screenViewingRequiresPasscode\":true")
-                || region.contains("\"isPasscodeLocked\":true")
-                || region.contains("\"screenLocked\":true");
+            DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
+            return info != null && info.screenLocked;
         } catch (Exception ignored) {}
         return false;
     }
