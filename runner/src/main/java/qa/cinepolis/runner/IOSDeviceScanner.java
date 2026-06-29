@@ -87,8 +87,10 @@ public class IOSDeviceScanner {
         // All devices have physical UDIDs (CoreDevice UUIDs were resolved) — preferred path
         if (!devicectlResult.isEmpty()
                 && devicectlResult.stream().noneMatch(d -> isCoreDeviceUuid(d.getOrDefault("udid", "")))) {
-            System.out.printf("[IOS] %d dispositivo(s) via devicectl (UDID físico resuelto).%n",
-                    devicectlResult.size());
+            long avail = devicectlResult.stream().filter(d -> "AVAILABLE".equals(d.get("status"))).count();
+            long disc  = devicectlResult.stream().filter(d -> "DISCOVERED".equals(d.get("status"))).count();
+            System.out.printf("[IOS] %d dispositivo(s) via devicectl — AVAILABLE: %d, DISCOVERED: %d%n",
+                    devicectlResult.size(), avail, disc);
             return devicectlResult;
         }
 
@@ -207,13 +209,10 @@ public class IOSDeviceScanner {
 
             device.put("coreDeviceId", coreDeviceId);
             device.put("udid",         info.physicalUdid);
-            System.out.printf("[IOS] 🔗 CoreDevice UUID : %s%n",         coreDeviceId);
-            System.out.printf("[IOS] 🔗 Physical UDID   : %s  ← enviado a Appium%n", info.physicalUdid);
-
             if (device.getOrDefault("platformVersion", "").isBlank() && !info.osVersion.isBlank()) {
                 device.put("platformVersion", info.osVersion);
-                System.out.printf("[IOS] 🔗 iOS version      : %s (vía devicectl JSON)%n", info.osVersion);
             }
+            applyDeviceInfo(device, info, coreDeviceId);
         }
     }
 
@@ -357,7 +356,63 @@ public class IOSDeviceScanner {
         d.put("platform",        "IOS");
         d.put("platformVersion", version);
         d.put("status",          "AVAILABLE");
+        d.put("source",          source);
         result.add(d);
-        System.out.printf("[IOS] ✓ %s | iOS %s | %s%n", name, version, udid);
+        System.out.printf("[IOS] ✓ %s | iOS %s | %s | fuente: %s%n", name, version, udid, source);
+    }
+
+    /**
+     * Classifies device status and logs the origin/reason for each assignment.
+     *
+     * Status rules:
+     *   WIRED                              → AVAILABLE  (USB cable — can create Appium session)
+     *   LOCAL_NETWORK + tunnel=connected   → AVAILABLE  (WiFi tunnel active)
+     *   LOCAL_NETWORK + tunnel!=connected  → DISCOVERED (WiFi paired but no active tunnel)
+     *   UNKNOWN transport                  → DISCOVERED (cannot confirm Appium readiness)
+     *
+     * DISCOVERED devices are registered on the backend so the dashboard reflects they exist,
+     * but they are never marked AVAILABLE so the scheduler will not dispatch test jobs to them.
+     */
+    private static void applyDeviceInfo(Map<String, String> device,
+                                         DevicectlParser.DeviceInfo info,
+                                         String coreDeviceId) {
+        String transport = info.transportType.name();
+        String tunnel    = info.tunnelState;
+
+        String status, source, reason;
+
+        if (info.transportType == DevicectlParser.TransportType.WIRED) {
+            status = "AVAILABLE";
+            source = "devicectl-wired";
+            reason = "USB cable detectado";
+        } else if (info.transportType == DevicectlParser.TransportType.LOCAL_NETWORK) {
+            if ("connected".equalsIgnoreCase(tunnel)) {
+                status = "AVAILABLE";
+                source = "devicectl-wifi";
+                reason = "WiFi / Bonjour — túnel activo (tunnelState=connected)";
+            } else {
+                status = "DISCOVERED";
+                source = "devicectl-wifi-offline";
+                reason = "WiFi emparejado pero túnel desconectado (tunnelState=" + tunnel
+                       + ") — no puede iniciar sesión Appium";
+            }
+        } else {
+            status = "DISCOVERED";
+            source = "devicectl-unknown-transport";
+            reason = "transportType=" + transport + " desconocido — disponibilidad no confirmada";
+        }
+
+        device.put("status",        status);
+        device.put("source",        source);
+        device.put("transportType", transport);
+        device.put("tunnelState",   tunnel);
+
+        String physUdid = device.get("udid");
+        String icon     = "AVAILABLE".equals(status) ? "✅" : "⚠️ ";
+        String coreStr  = coreDeviceId != null ? " | CoreDevice: " + coreDeviceId : "";
+
+        System.out.printf("[IOS] %s %-26s | transport=%-14s | tunnel=%-12s | → %s%s%n",
+                icon, physUdid, transport, tunnel, status, coreStr);
+        System.out.printf("[IOS]    Origen: %s — %s%n", source, reason);
     }
 }
