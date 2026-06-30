@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMirrorStream } from '../hooks/useMirrorStream'
+import { useRecordingSession } from '../hooks/useRecordingSession'
+import type { RecordingAction } from '../services/recordingService'
 import type { StreamState } from '../services/deviceStream'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -1468,6 +1470,77 @@ const CinepolisLoginScreen = React.memo(function CinepolisLoginScreen({
 
 // ─── Phone Frame ──────────────────────────────────────────────────────────────
 
+// ─── Recording Overlay ────────────────────────────────────────────────────────
+
+interface RecordingOverlayProps {
+  onInteract: (
+    nx: number, ny: number,
+    gesture: 'tap' | 'swipe' | 'long_press',
+    nx2?: number, ny2?: number,
+  ) => void
+}
+
+function RecordingOverlay({ onInteract }: RecordingOverlayProps) {
+  const dragRef = useRef<{
+    startNx:   number
+    startNy:   number
+    timer:     ReturnType<typeof setTimeout> | null
+    fired:     boolean
+  } | null>(null)
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 25,
+        cursor: 'crosshair',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+      } as React.CSSProperties}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const startNx = Math.max(0, Math.min(1, (e.clientX - rect.left)  / rect.width))
+        const startNy = Math.max(0, Math.min(1, (e.clientY - rect.top)   / rect.height))
+        const timer = setTimeout(() => {
+          if (dragRef.current && !dragRef.current.fired) {
+            dragRef.current.fired = true
+            onInteract(startNx, startNy, 'long_press')
+          }
+        }, 600)
+        dragRef.current = { startNx, startNy, timer, fired: false }
+      }}
+      onMouseUp={(e) => {
+        const drag = dragRef.current
+        if (!drag) return
+        if (drag.timer) clearTimeout(drag.timer)
+        if (drag.fired) { dragRef.current = null; return }
+        dragRef.current = null
+
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const endNx = Math.max(0, Math.min(1, (e.clientX - rect.left)  / rect.width))
+        const endNy = Math.max(0, Math.min(1, (e.clientY - rect.top)   / rect.height))
+        const dx = endNx - drag.startNx
+        const dy = endNy - drag.startNy
+        const dist = Math.sqrt(dx * dx + dy * dy)
+
+        if (dist < 0.03) {
+          onInteract(drag.startNx, drag.startNy, 'tap')
+        } else {
+          onInteract(drag.startNx, drag.startNy, 'swipe', endNx, endNy)
+        }
+      }}
+      onMouseLeave={() => {
+        if (dragRef.current?.timer) clearTimeout(dragRef.current.timer)
+        dragRef.current = null
+      }}
+    />
+  )
+}
+
+// ─── Phone Frame ──────────────────────────────────────────────────────────────
+
 interface PhoneFrameProps {
   recording: boolean
   screen: AppScreen
@@ -1477,6 +1550,12 @@ interface PhoneFrameProps {
   inspectedElId?: string
   previewUrl?: string | null
   previewState?: StreamState
+  /** When set and recording with a live preview, renders an interactive overlay. */
+  onScreenInteract?: (
+    nx: number, ny: number,
+    gesture: 'tap' | 'swipe' | 'long_press',
+    nx2?: number, ny2?: number,
+  ) => void
 }
 
 const PhoneFrame = React.memo(function PhoneFrame({
@@ -1488,6 +1567,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
   inspectedElId,
   previewUrl,
   previewState,
+  onScreenInteract,
 }: PhoneFrameProps) {
   const PHONE_W = 296
   const SCREEN_W = 262
@@ -1608,6 +1688,10 @@ const PhoneFrame = React.memo(function PhoneFrame({
                   zIndex: 10,
                 }}
               />
+            )}
+            {/* Interactive recording overlay — captures taps/swipes on the live mirror */}
+            {recording && onScreenInteract && (
+              <RecordingOverlay onInteract={onScreenInteract} />
             )}
           </>
         ) : (
@@ -4368,6 +4452,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [inspectedElId, setInspectedElId] = useState<string | null>(null)
   // ── Live device mirror — direct MJPEG from Runner (port 8082) ────────────
   const { url: previewUrl, state: previewState } = useMirrorStream(selectedDevice?.udid ?? null)
+  // ── Recording session (Runner recording engine on port 8082) ──────────────
+  const { sessionId, deviceWidth, deviceHeight, start: startSession, stop: stopSession, send: sendStep, onPhysicalStep } = useRecordingSession()
   // ── Device viewer state ────────────────────────────────────────────────────
   const [isLandscape, setIsLandscape] = useState(false)
   const [isVideoRecording, setIsVideoRecording] = useState(false)
@@ -4437,15 +4523,94 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   }, [])
 
   // ── Recording ──────────────────────────────────────────────────────────────
-  const handleToggleRecording = useCallback(() => {
+
+  /** Convert a raw step object from the Runner API into a RecStep. */
+  const mapApiStep = useCallback((raw: unknown): RecStep => {
+    const s = raw as {
+      id: string; n: number; type: string
+      el: AppEl | null; inputVal?: string
+      dir?: string; timeStr: string
+    }
+    _stepCounter = Math.max(_stepCounter, s.n)
+    return {
+      id:       s.id,
+      n:        s.n,
+      type:     s.type as StepType,
+      el:       s.el ?? null,
+      inputVal: s.inputVal,
+      dir:      s.dir as RecStep['dir'],
+      timeStr:  s.timeStr,
+    }
+  }, [])
+
+  // Wire SSE physical-device events → steps panel
+  useEffect(() => {
+    onPhysicalStep((raw) => {
+      setSteps(prev => [...prev, mapApiStep(raw)])
+    })
+  }, [onPhysicalStep, mapApiStep])
+
+  const handleToggleRecording = useCallback(async () => {
     if (recState === 'idle') {
       setRecState('recording')
       setSessionStart(new Date())
       setElapsed(0)
+      if (selectedDevice?.udid) {
+        try {
+          await startSession(selectedDevice.udid)
+        } catch (e) {
+          // Runner not reachable — recording works in local-only mode (manual steps)
+          console.warn('[RecordStudio] Runner recording session unavailable:', e)
+        }
+      }
     } else {
+      stopSession()
       setRecState('idle')
     }
-  }, [recState])
+  }, [recState, selectedDevice, startSession, stopSession])
+
+  /**
+   * Handles taps/swipes from the interactive overlay on the live device mirror.
+   * Converts normalized container coords → device pixel coords using the
+   * objectFit:cover mapping (scale to width for portrait devices).
+   */
+  const handleScreenInteract = useCallback(
+    async (
+      nx: number, ny: number,
+      gesture: 'tap' | 'swipe' | 'long_press',
+      nx2?: number, ny2?: number,
+    ) => {
+      if (!sessionId || recState !== 'recording') return
+
+      const CONTAINER_W = 262, CONTAINER_H = 452
+      const scaleX = CONTAINER_W / deviceWidth
+      const scaleY = CONTAINER_H / deviceHeight
+      const scale  = Math.max(scaleX, scaleY)                    // objectFit: cover
+      const offsetX = (CONTAINER_W - deviceWidth  * scale) / 2  // 0 for portrait
+      const offsetY = (CONTAINER_H - deviceHeight * scale) / 2  // negative for tall phones
+
+      const toDevice = (normX: number, normY: number) => ({
+        x: Math.round(Math.max(0, Math.min(deviceWidth,  (normX * CONTAINER_W - offsetX) / scale))),
+        y: Math.round(Math.max(0, Math.min(deviceHeight, (normY * CONTAINER_H - offsetY) / scale))),
+      })
+
+      const { x, y } = toDevice(nx, ny)
+
+      let action: RecordingAction
+      if (gesture === 'swipe' && nx2 !== undefined && ny2 !== undefined) {
+        const end = toDevice(nx2, ny2)
+        action = { action: 'swipe', x1: x, y1: y, x2: end.x, y2: end.y }
+      } else if (gesture === 'long_press') {
+        action = { action: 'long_press', x, y }
+      } else {
+        action = { action: 'tap', x, y }
+      }
+
+      const raw = await sendStep(action)
+      if (raw) setSteps(prev => [...prev, mapApiStep(raw)])
+    },
+    [sessionId, recState, deviceWidth, deviceHeight, sendStep, mapApiStep],
+  )
 
   const handleRecordEl = useCallback(
     (el: AppEl) => {
@@ -5178,6 +5343,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                 inspectedElId={inspectedElId ?? undefined}
                 previewUrl={previewUrl}
                 previewState={previewState}
+                onScreenInteract={sessionId ? handleScreenInteract : undefined}
               />
             </motion.div>
           </div>

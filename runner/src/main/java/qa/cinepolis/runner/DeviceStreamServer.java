@@ -1,5 +1,7 @@
 package qa.cinepolis.runner;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -40,8 +42,11 @@ public class DeviceStreamServer {
     private static final int    CAPTURE_TIMEOUT_S = 5;
     private static final int    MIN_PNG_BYTES      = 1_024;
 
-    private final int    port;
-    private final String adbPath;
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private final int             port;
+    private final String          adbPath;
+    private final RecordingEngine recordingEngine;
 
     private HttpServer server;
 
@@ -49,8 +54,9 @@ public class DeviceStreamServer {
     private final ConcurrentHashMap<String, Semaphore> locks = new ConcurrentHashMap<>();
 
     public DeviceStreamServer(int port, String adbPath) {
-        this.port    = port;
-        this.adbPath = adbPath;
+        this.port            = port;
+        this.adbPath         = adbPath;
+        this.recordingEngine = new RecordingEngine(adbPath);
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -102,6 +108,12 @@ public class DeviceStreamServer {
             try (OutputStream out = ex.getResponseBody()) { out.write(body); }
         });
 
+        // Recording engine endpoints
+        server.createContext("/api/recording/start",   new RecordingStartHandler());
+        server.createContext("/api/recording/stop/",   new RecordingStopHandler());
+        server.createContext("/api/recording/action/", new RecordingActionHandler());
+        server.createContext("/api/recording/events/", new RecordingEventsHandler());
+
         server.setExecutor(Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "device-stream-worker");
             t.setDaemon(true);
@@ -110,6 +122,7 @@ public class DeviceStreamServer {
         server.start();
         System.out.println("[DeviceStream] Server started → http://localhost:" + port + PATH_PREFIX + "{udid}");
         System.out.println("[DeviceMirror] MJPEG endpoint  → http://localhost:" + port + PATH_MIRROR + "{udid}");
+        System.out.println("[Recording]   Engine endpoint  → http://localhost:" + port + "/api/recording/{start|stop|action|events}");
     }
 
     public void stop() {
@@ -394,7 +407,7 @@ public class DeviceStreamServer {
 
     private static void addCorsHeaders(HttpExchange ex) {
         ex.getResponseHeaders().set("Access-Control-Allow-Origin",  "*");
-        ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, OPTIONS");
+        ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
     }
 
@@ -403,5 +416,172 @@ public class DeviceStreamServer {
         ex.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
         ex.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = ex.getResponseBody()) { out.write(bytes); }
+    }
+
+    private static void sendJson(HttpExchange ex, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream out = ex.getResponseBody()) { out.write(bytes); }
+    }
+
+    // ── Recording handlers ────────────────────────────────────────────────────
+
+    /** POST /api/recording/start  body: {"udid":"xxx"}  → {"sessionId","deviceWidth","deviceHeight"} */
+    private class RecordingStartHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange ex) throws IOException {
+            try {
+                addCorsHeaders(ex);
+                if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) { ex.sendResponseHeaders(204, -1); return; }
+                if (!"POST".equalsIgnoreCase(ex.getRequestMethod()))   { sendJson(ex, 405, "{\"error\":\"Method Not Allowed\"}"); return; }
+
+                String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                JsonNode json = MAPPER.readTree(body);
+                String udid = json.path("udid").asText("").trim();
+                if (udid.isEmpty() || !udid.matches("[a-zA-Z0-9\\-_.]+")) {
+                    sendJson(ex, 400, "{\"error\":\"Invalid or missing udid\"}"); return;
+                }
+
+                RecordingEngine.StartResult result = recordingEngine.start(udid);
+                String resp = String.format(
+                    "{\"sessionId\":\"%s\",\"deviceWidth\":%d,\"deviceHeight\":%d}",
+                    result.sessionId, result.deviceWidth, result.deviceHeight);
+                sendJson(ex, 200, resp);
+            } catch (Exception e) {
+                System.err.println("[RecordingStart] " + e.getMessage());
+                try { sendJson(ex, 500, "{\"error\":\"Internal error\"}"); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /** POST /api/recording/stop/{sessionId} */
+    private class RecordingStopHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange ex) throws IOException {
+            try {
+                addCorsHeaders(ex);
+                if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) { ex.sendResponseHeaders(204, -1); return; }
+                if (!"POST".equalsIgnoreCase(ex.getRequestMethod()))   { sendJson(ex, 405, "{\"error\":\"Method Not Allowed\"}"); return; }
+
+                String path      = ex.getRequestURI().getPath();
+                String sessionId = path.substring("/api/recording/stop/".length()).trim();
+                if (sessionId.isEmpty()) { sendJson(ex, 400, "{\"error\":\"sessionId required\"}"); return; }
+
+                boolean stopped = recordingEngine.stop(sessionId);
+                sendJson(ex, 200, "{\"stopped\":" + stopped + "}");
+            } catch (Exception e) {
+                System.err.println("[RecordingStop] " + e.getMessage());
+                try { sendJson(ex, 500, "{\"error\":\"Internal error\"}"); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * POST /api/recording/action/{sessionId}
+     * body: {"action":"tap","x":500,"y":800} | {"action":"swipe","x1":..,"y1":..,"x2":..,"y2":..}
+     *       {"action":"double_tap","x":..,"y":..} | {"action":"long_press","x":..,"y":..}
+     *       {"action":"input","text":"..."} | {"action":"key","key":"back"}
+     * Returns: step JSON or 404/400.
+     */
+    private class RecordingActionHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange ex) throws IOException {
+            try {
+                addCorsHeaders(ex);
+                if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) { ex.sendResponseHeaders(204, -1); return; }
+                if (!"POST".equalsIgnoreCase(ex.getRequestMethod()))   { sendJson(ex, 405, "{\"error\":\"Method Not Allowed\"}"); return; }
+
+                String path      = ex.getRequestURI().getPath();
+                String sessionId = path.substring("/api/recording/action/".length()).trim();
+                if (sessionId.isEmpty()) { sendJson(ex, 400, "{\"error\":\"sessionId required\"}"); return; }
+                if (!recordingEngine.sessionExists(sessionId)) { sendJson(ex, 404, "{\"error\":\"session not found\"}"); return; }
+
+                String  body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                JsonNode req = MAPPER.readTree(body);
+                String action = req.path("action").asText("").toLowerCase();
+
+                String result = null;
+                switch (action) {
+                    case "tap":
+                        result = recordingEngine.executeTap(sessionId, req.path("x").asInt(), req.path("y").asInt());
+                        break;
+                    case "double_tap":
+                        result = recordingEngine.executeDoubleTap(sessionId, req.path("x").asInt(), req.path("y").asInt());
+                        break;
+                    case "long_press":
+                        result = recordingEngine.executeLongPress(sessionId, req.path("x").asInt(), req.path("y").asInt());
+                        break;
+                    case "swipe":
+                        result = recordingEngine.executeSwipe(sessionId,
+                                req.path("x1").asInt(), req.path("y1").asInt(),
+                                req.path("x2").asInt(), req.path("y2").asInt());
+                        break;
+                    case "input":
+                        result = recordingEngine.executeInput(sessionId, req.path("text").asText(""));
+                        break;
+                    case "key":
+                        result = recordingEngine.executeKey(sessionId, req.path("key").asText("back"));
+                        break;
+                    default:
+                        sendJson(ex, 400, "{\"error\":\"Unknown action: " + action + "\"}");
+                        return;
+                }
+
+                if (result == null) {
+                    sendJson(ex, 500, "{\"error\":\"Action failed\"}");
+                } else {
+                    sendJson(ex, 200, result);
+                }
+            } catch (Exception e) {
+                System.err.println("[RecordingAction] " + e.getMessage());
+                try { sendJson(ex, 500, "{\"error\":\"Internal error\"}"); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /** GET /api/recording/events/{sessionId} — SSE stream for physical device events */
+    private class RecordingEventsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange ex) throws IOException {
+            try {
+                addCorsHeaders(ex);
+                if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) { ex.sendResponseHeaders(204, -1); return; }
+                if (!"GET".equalsIgnoreCase(ex.getRequestMethod()))    { sendJson(ex, 405, "{\"error\":\"Method Not Allowed\"}"); return; }
+
+                String path      = ex.getRequestURI().getPath();
+                String sessionId = path.substring("/api/recording/events/".length()).trim();
+                if (sessionId.isEmpty()) { sendJson(ex, 400, "{\"error\":\"sessionId required\"}"); return; }
+                if (!recordingEngine.sessionExists(sessionId)) { sendJson(ex, 404, "{\"error\":\"session not found\"}"); return; }
+
+                ex.getResponseHeaders().set("Content-Type",       "text/event-stream; charset=utf-8");
+                ex.getResponseHeaders().set("Cache-Control",      "no-cache");
+                ex.getResponseHeaders().set("Connection",         "keep-alive");
+                ex.getResponseHeaders().set("X-Accel-Buffering", "no");
+                ex.sendResponseHeaders(200, 0); // streaming / unknown length
+
+                OutputStream out = ex.getResponseBody();
+                recordingEngine.registerSseClient(sessionId, out);
+                try {
+                    // Initial connected event
+                    out.write("data: {\"type\":\"connected\"}\n\n".getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    // Keep-alive loop until session ends or client disconnects
+                    while (!Thread.currentThread().isInterrupted() && recordingEngine.sessionExists(sessionId)) {
+                        Thread.sleep(20_000);
+                        out.write(": keepalive\n\n".getBytes(StandardCharsets.UTF_8));
+                        out.flush();
+                    }
+                } catch (Exception ignored) {
+                    // Client closed connection or session ended
+                } finally {
+                    recordingEngine.unregisterSseClient(sessionId, out);
+                    try { out.close(); } catch (Exception ignored2) {}
+                }
+            } catch (Exception e) {
+                System.err.println("[RecordingEvents] " + e.getMessage());
+                try { sendJson(ex, 500, "{\"error\":\"Internal error\"}"); } catch (Exception ignored) {}
+            }
+        }
     }
 }
