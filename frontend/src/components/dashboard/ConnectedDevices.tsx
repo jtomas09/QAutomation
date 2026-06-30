@@ -383,9 +383,15 @@ function DeviceCard({
       {/* Device info */}
       <div className="text-center w-full px-1">
         <div className="text-[10px] font-bold text-slate-200 leading-tight line-clamp-2">{name}</div>
-        <div className="text-[9px] text-slate-600 mt-0.5 flex items-center justify-center gap-1">
+        <div className="text-[9px] text-slate-600 mt-0.5 flex items-center justify-center gap-1 flex-wrap">
           <PlatformIcon platform={device.platform} size={9} />
           {device.platform?.toUpperCase() === 'IOS' ? 'iOS' : 'Android'} {device.platformVersion ?? '—'}
+          {device.presence === 'USB' && (
+            <span className="px-1 rounded text-[8px] font-bold" style={{ color: '#60a5fa', background: 'rgba(96,165,250,0.12)' }}>USB</span>
+          )}
+          {device.presence === 'LOCAL_NETWORK' && (
+            <span className="px-1 rounded text-[8px] font-bold" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.12)' }}>Wi-Fi</span>
+          )}
         </div>
       </div>
 
@@ -397,6 +403,17 @@ function DeviceCard({
         <s.Icon size={8} />
         {s.label}
       </span>
+
+      {/* Readiness warning — shown when device is AVAILABLE but Runner says not ready */}
+      {statusKey === 'available' && device.readyForExecution === false && (
+        <span
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold"
+          style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}
+          title={device.notReadyReason ?? 'No listo para ejecución'}
+        >
+          ⚠ No Ready
+        </span>
+      )}
 
       {/* App config badge */}
       {appConfig && (

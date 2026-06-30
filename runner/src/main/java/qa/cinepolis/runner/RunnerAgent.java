@@ -350,17 +350,23 @@ public class RunnerAgent {
         long iosCount     = devices.stream().filter(d -> "IOS".equals(d.get("platform"))).count();
         long androidCount = devices.stream().filter(d -> "ANDROID".equals(d.get("platform"))).count();
         long available    = devices.stream().filter(d -> "AVAILABLE".equals(d.get("status"))).count();
+        long ready        = devices.stream().filter(d -> "true".equals(d.get("readyForExecution"))).count();
 
-        System.out.printf("[Runner] Dispositivos: total=%d  iOS=%d  Android=%d  disponibles=%d%n",
-                devices.size(), iosCount, androidCount, available);
+        System.out.printf("[Runner] Dispositivos: total=%d  iOS=%d  Android=%d  disponibles=%d  listos=%d%n",
+                devices.size(), iosCount, androidCount, available, ready);
 
         if (!devices.isEmpty()) {
             System.out.println("[Runner] Lista de dispositivos:");
             for (Map<String, String> d : devices) {
-                System.out.printf("[Runner]   %-30s %-8s %s%n",
+                String readyFlag = d.containsKey("readyForExecution")
+                        ? ("true".equals(d.get("readyForExecution")) ? " ✓ready" : " ✗not-ready")
+                        : "";
+                System.out.printf("[Runner]   %-30s %-10s %-12s %s%s%n",
                         d.getOrDefault("deviceName", "?"),
                         d.getOrDefault("platform", "?"),
-                        d.getOrDefault("udid", "?"));
+                        d.getOrDefault("status", "?"),
+                        d.getOrDefault("udid", "?"),
+                        readyFlag);
             }
         }
         return devices;

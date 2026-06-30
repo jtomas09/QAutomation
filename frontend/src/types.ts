@@ -91,6 +91,11 @@ export interface PhysicalDevice {
   activeExecutionId: string | null
   lastSeen:        string | null
   registeredAt:    string | null
+  // DeviceAvailability model — computed by Runner
+  presence?:          'USB' | 'LOCAL_NETWORK' | 'UNKNOWN' | null
+  tunnel?:            'CONNECTED' | 'DISCONNECTED' | 'UNKNOWN' | null
+  readyForExecution?: boolean | null
+  notReadyReason?:    string | null
 }
 
 // ─── Runner Manager ──────────────────────────────────────────────────────────

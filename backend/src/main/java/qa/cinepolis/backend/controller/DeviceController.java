@@ -243,6 +243,10 @@ public class DeviceController {
         String statusStr = (String) raw.getOrDefault("status", "AVAILABLE");
         try { d.setStatus(DeviceStatus.valueOf(statusStr.toUpperCase())); }
         catch (Exception e) { d.setStatus(DeviceStatus.AVAILABLE); }
+        d.setPresence((String) raw.get("presence"));
+        d.setTunnel((String) raw.get("tunnel"));
+        d.setReadyForExecution("true".equals(raw.get("readyForExecution")));
+        d.setNotReadyReason((String) raw.get("notReadyReason"));
         return d;
     }
 }

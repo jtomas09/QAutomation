@@ -1183,6 +1183,27 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                                 {device.deviceName ?? device.model ?? 'Desconocido'}
                               </div>
                               <div className="text-[10px] font-mono text-slate-600 mt-0.5 max-w-[110px] truncate">{device.udid}</div>
+                              {device.presence && (
+                                <div className="text-[9px] mt-0.5 flex items-center gap-1">
+                                  <span
+                                    className="px-1 py-px rounded text-[8px] font-bold"
+                                    style={
+                                      device.presence === 'USB'
+                                        ? { color: '#60a5fa', background: 'rgba(96,165,250,0.12)' }
+                                        : device.presence === 'LOCAL_NETWORK'
+                                        ? { color: '#f59e0b', background: 'rgba(245,158,11,0.12)' }
+                                        : { color: '#6b7280', background: 'rgba(107,114,128,0.12)' }
+                                    }
+                                  >
+                                    {device.presence === 'USB' ? 'USB' : device.presence === 'LOCAL_NETWORK' ? 'Wi-Fi' : 'Desconocido'}
+                                  </span>
+                                  {device.tunnel && device.tunnel !== 'UNKNOWN' && (
+                                    <span className="text-slate-600">
+                                      túnel {device.tunnel === 'CONNECTED' ? '✓' : '✗'}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               {appConfigs[device.udid] && (
                                 <div className="text-[9px] text-slate-500 mt-0.5 flex items-center gap-1">
                                   <span>{appConfigs[device.udid].appName || 'App'}</span>
@@ -1209,7 +1230,28 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                         </td>
 
                         {/* ESTADO */}
-                        <td className="px-4 py-3"><StatusBadge status={device.status} /></td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-1">
+                            <StatusBadge status={device.status} />
+                            {device.readyForExecution === false && (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[8px] font-bold w-fit"
+                                style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}
+                                title={device.notReadyReason ?? 'No listo para ejecución'}
+                              >
+                                ⚠ No Ready
+                              </span>
+                            )}
+                            {device.readyForExecution === true && device.status === 'AVAILABLE' && (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[8px] font-bold w-fit"
+                                style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)' }}
+                              >
+                                ✓ Ready
+                              </span>
+                            )}
+                          </div>
+                        </td>
 
                         {/* BATERIA */}
                         <td className="px-4 py-3"><BatteryChip pct={bat} /></td>

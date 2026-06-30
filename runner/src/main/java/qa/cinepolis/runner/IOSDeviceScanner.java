@@ -357,6 +357,14 @@ public class IOSDeviceScanner {
         d.put("platformVersion", version);
         d.put("status",          "AVAILABLE");
         d.put("source",          source);
+        // xctrace-discovered devices: no DeviceInfo available — evaluate system health only
+        if ("xctrace".equals(source)) {
+            DeviceReadinessEvaluator.Readiness r = DeviceReadinessEvaluator.evaluateXctrace();
+            d.put("presence",          r.presence.name());
+            d.put("tunnel",            r.tunnel.name());
+            d.put("readyForExecution", String.valueOf(r.readyForExecution));
+            if (r.notReadyReason != null) d.put("notReadyReason", r.notReadyReason);
+        }
         result.add(d);
         System.out.printf("[IOS] ✓ %s | iOS %s | %s | fuente: %s%n", name, version, udid, source);
     }
@@ -407,12 +415,24 @@ public class IOSDeviceScanner {
         device.put("transportType", transport);
         device.put("tunnelState",   tunnel);
 
-        String physUdid = device.get("udid");
-        String icon     = "AVAILABLE".equals(status) ? "✅" : "⚠️ ";
-        String coreStr  = coreDeviceId != null ? " | CoreDevice: " + coreDeviceId : "";
+        // DeviceAvailability model: Presence, TunnelStatus, ReadyForExecution
+        DeviceReadinessEvaluator.Readiness r = DeviceReadinessEvaluator.evaluate(info);
+        device.put("presence",          r.presence.name());
+        device.put("tunnel",            r.tunnel.name());
+        device.put("readyForExecution", String.valueOf(r.readyForExecution));
+        if (r.notReadyReason != null) device.put("notReadyReason", r.notReadyReason);
+        else                          device.remove("notReadyReason");
 
-        System.out.printf("[IOS] %s %-26s | transport=%-14s | tunnel=%-12s | → %s%s%n",
-                icon, physUdid, transport, tunnel, status, coreStr);
+        String physUdid  = device.get("udid");
+        String icon      = "AVAILABLE".equals(status) ? "✅" : "⚠️ ";
+        String coreStr   = coreDeviceId != null ? " | CoreDevice: " + coreDeviceId : "";
+        String readyStr  = r.readyForExecution ? "ready" : "not-ready";
+
+        System.out.printf("[IOS] %s %-26s | transport=%-14s | tunnel=%-12s | → %-10s | %s%s%n",
+                icon, physUdid, transport, tunnel, status, readyStr, coreStr);
         System.out.printf("[IOS]    Origen: %s — %s%n", source, reason);
+        if (!r.readyForExecution && r.notReadyReason != null) {
+            System.out.printf("[IOS]    No listo: %s%n", r.notReadyReason);
+        }
     }
 }

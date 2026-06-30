@@ -19,6 +19,12 @@ public class Device {
     private Instant      lastSeen;
     private Instant      registeredAt;
 
+    // DeviceAvailability model — computed by Runner, consumed read-only by Backend/Frontend
+    private String  presence;          // USB | LOCAL_NETWORK | UNKNOWN
+    private String  tunnel;            // CONNECTED | DISCONNECTED | UNKNOWN
+    private boolean readyForExecution;
+    private String  notReadyReason;    // null when ready
+
     public String       getUdid()                    { return udid; }
     public void         setUdid(String v)            { this.udid = v; }
     public String       getDeviceName()              { return deviceName; }
@@ -41,4 +47,12 @@ public class Device {
     public void         setLastSeen(Instant v)       { this.lastSeen = v; }
     public Instant      getRegisteredAt()            { return registeredAt; }
     public void         setRegisteredAt(Instant v)   { this.registeredAt = v; }
+    public String       getPresence()                { return presence; }
+    public void         setPresence(String v)        { this.presence = v; }
+    public String       getTunnel()                  { return tunnel; }
+    public void         setTunnel(String v)          { this.tunnel = v; }
+    public boolean      isReadyForExecution()        { return readyForExecution; }
+    public void         setReadyForExecution(boolean v) { this.readyForExecution = v; }
+    public String       getNotReadyReason()          { return notReadyReason; }
+    public void         setNotReadyReason(String v)  { this.notReadyReason = v; }
 }
