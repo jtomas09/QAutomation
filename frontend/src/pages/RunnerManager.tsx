@@ -542,7 +542,7 @@ export default function RunnerManager() {
 
   useEffect(() => {
     refresh()
-    const id = setInterval(refresh, 15_000)
+    const id = setInterval(refresh, 5_000)
     return () => clearInterval(id)
   }, [refresh])
 
@@ -689,7 +689,7 @@ export default function RunnerManager() {
       {/* ── Footer ────────────────────────────────────────── */}
       <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
         <Clock size={10} />
-        Actualizado: {new Date(lastRefresh).toLocaleTimeString('es-MX')} · Refresco automático cada 15s
+        Actualizado: {new Date(lastRefresh).toLocaleTimeString('es-MX')} · Refresco automático cada 5s
       </div>
     </div>
   )

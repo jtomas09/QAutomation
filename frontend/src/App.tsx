@@ -134,6 +134,28 @@ export default function App() {
             const allKnownCards = [...(COUNTRY_SUITES['mexico'] ?? []), ...ALIMENTOS_TESTS,
                                    ...(COUNTRY_SUITES['argentina'] ?? []), ...(COUNTRY_SUITES['chile'] ?? [])]
 
+            // Runner stopped — block executions
+            if (!runnerOnline) {
+              return (
+                <div className="flex flex-col items-center justify-center h-64 gap-4">
+                  <div className="text-4xl opacity-20">⏹</div>
+                  <div className="text-center">
+                    <div className="text-sm font-bold text-slate-400">Runner detenido</div>
+                    <div className="text-xs text-slate-600 mt-1">
+                      No es posible ejecutar pruebas porque el Runner está detenido.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setPage('runner-manager' as import('./components/Sidebar').Page)}
+                    className="text-xs font-semibold px-4 py-2 rounded-xl"
+                    style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}
+                  >
+                    Ir a Runner Manager
+                  </button>
+                </div>
+              )
+            }
+
             // Drill-down: show individual tests for a suite
             if (drillSuite) {
               const suite = allKnownCards.find(s => s.id === drillSuite)!

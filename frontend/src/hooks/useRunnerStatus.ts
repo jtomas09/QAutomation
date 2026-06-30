@@ -1,28 +1,31 @@
-import { useState, useEffect } from 'react'
-import { getStatus } from '../api'
-
 /**
- * Polls GET /api/status every 10 s.
- * Returns true if the backend reports the runner pinged within the last 15 s.
+ * useRunnerStatus — backwards-compatible hook.
+ *
+ * Delegates to RunnerLifecycleService so all consumers share a single
+ * 5-second polling cycle instead of each making individual API calls.
+ * Returns true when the runner is actively responding (ONLINE / BUSY / DEGRADED).
  */
+
+import { useState, useEffect } from 'react'
+import {
+  runnerLifecycleService,
+  RunnerStatusEvent,
+} from '../services/RunnerLifecycleService'
+
 export function useRunnerStatus(): boolean {
-  const [online, setOnline] = useState(false)
+  const [online, setOnline] = useState(() => runnerLifecycleService.isOnline())
 
   useEffect(() => {
-    let mounted = true
-
-    const check = async () => {
-      try {
-        const { runnerOnline } = await getStatus()
-        if (mounted) setOnline(runnerOnline)
-      } catch {
-        if (mounted) setOnline(false)
-      }
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<RunnerStatusEvent>
+      setOnline(
+        ce.detail.status === 'ONLINE'  ||
+        ce.detail.status === 'BUSY'    ||
+        ce.detail.status === 'DEGRADED'
+      )
     }
-
-    check()
-    const id = setInterval(check, 10_000)
-    return () => { mounted = false; clearInterval(id) }
+    window.addEventListener('qa:runner:status', handler)
+    return () => window.removeEventListener('qa:runner:status', handler)
   }, [])
 
   return online

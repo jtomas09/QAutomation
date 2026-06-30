@@ -16,6 +16,7 @@ import {
 import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
 import { RecordStudioHeader } from '../components/record-studio/RecordStudioHeader'
+import { useRunnerLifecycle } from '../hooks/useRunnerLifecycle'
 import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
 import { suiteService } from '../services/SuiteService'
 import type { SuiteStep } from '../services/SuiteService'
@@ -4680,6 +4681,9 @@ function clearDraft(): void {
 }
 
 export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps = {}) {
+  // ── Runner lifecycle ────────────────────────────────────────────────────────
+  const { isOnline: runnerOnline, initialized: runnerInitialized, startRunner } = useRunnerLifecycle()
+
   // ── State ──────────────────────────────────────────────────────────────────
   const [recState, setRecState] = useState<RecState>('idle')
   const [elapsed, setElapsed] = useState(0)
@@ -4830,6 +4834,11 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   }, [onPhysicalStep, mapApiStep, debugMode])
 
   const handleToggleRecording = useCallback(async () => {
+    // Prevent starting a new recording when the runner is stopped
+    if (!runnerOnline && recState === 'idle') {
+      console.warn('[RecordStudio] Runner detenido — no se puede iniciar grabación')
+      return
+    }
     if (recState === 'idle') {
       setRecState('recording')
       setSessionStart(new Date())
@@ -4846,7 +4855,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       stopSession()
       setRecState('idle')
     }
-  }, [recState, selectedDevice, startSession, stopSession])
+  }, [recState, selectedDevice, startSession, stopSession, runnerOnline])
 
   /**
    * Handles taps/swipes from the interactive overlay on the live device mirror.
@@ -5176,6 +5185,54 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         elapsed={elapsed}
         onToggleRecording={handleToggleRecording}
       />
+
+      {/* ── Runner stopped banner ── */}
+      <AnimatePresence>
+        {runnerInitialized && !runnerOnline && (
+          <motion.div
+            key="runner-stopped-banner"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            style={{ overflow: 'hidden', flexShrink: 0, zIndex: 10 }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0 20px',
+                height: 46,
+                gap: 12,
+                background: 'linear-gradient(90deg, rgba(99,102,241,0.12) 0%, rgba(13,17,23,0.95) 60%)',
+                borderBottom: '1px solid rgba(99,102,241,0.25)',
+                borderLeft: '3px solid #6366f1',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={14} color="#818cf8" />
+                <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
+                  El Runner está detenido. Actívalo para iniciar una sesión, ver el mirror y grabar pasos.
+                </span>
+              </div>
+              <button
+                onClick={() => startRunner()}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '5px 12px', borderRadius: 7,
+                  background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)',
+                  color: '#818cf8', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <PlayCircle size={11} />
+                Activar Runner
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Recording Bar ── */}
       <AnimatePresence>

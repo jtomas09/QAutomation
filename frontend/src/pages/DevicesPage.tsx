@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Wifi, WifiOff, Activity, Zap,
-  RefreshCw, Smartphone, AlertTriangle,
+  RefreshCw, Smartphone, AlertTriangle, PowerOff,
 } from 'lucide-react'
 import { getDevices } from '../api'
 import type { PhysicalDevice } from '../types'
 import { OsAvatar, PlatformBadge } from '../components/PlatformIcon'
+import { useRunnerLifecycle } from '../hooks/useRunnerLifecycle'
 
 import ip15  from '../assets/devices/iphone-15.svg'
 import p8pro from '../assets/devices/pixel-8-pro.svg'
@@ -154,6 +155,8 @@ interface Props {
 }
 
 export default function DevicesPage({ onSelectDevice }: Props) {
+  const { isOnline: runnerOnline, initialized: runnerInitialized, startRunner } = useRunnerLifecycle()
+
   const [devices,    setDevices]    = useState<PhysicalDevice[]>([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState(false)
@@ -161,6 +164,7 @@ export default function DevicesPage({ onSelectDevice }: Props) {
   const [activeId,   setActiveId]   = useState<string | null>(null)
   const [testing,    setTesting]    = useState<string | null>(null)
   const [testResult, setTestResult] = useState<Record<string, 'ok' | 'fail'>>({})
+  const [activating, setActivating] = useState(false)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true)
@@ -201,6 +205,47 @@ export default function DevicesPage({ onSelectDevice }: Props) {
   }
 
   if (loading) return <SkeletonGrid />
+
+  // Runner explicitly stopped — skip ADB / device queries, show stopped state
+  if (runnerInitialized && !runnerOnline) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col items-center justify-center py-28 gap-5"
+      >
+        <div
+          className="w-20 h-20 rounded-2xl flex items-center justify-center"
+          style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)' }}
+        >
+          <PowerOff size={34} style={{ color: 'rgba(99,102,241,0.5)' }} />
+        </div>
+        <div className="text-center">
+          <div className="text-base font-bold text-slate-300">Runner detenido</div>
+          <div className="text-xs text-slate-500 mt-1.5 max-w-xs leading-relaxed">
+            Activa el Runner para que el sistema detecte dispositivos<br />
+            Android e iOS conectados por USB.
+          </div>
+        </div>
+        <button
+          onClick={async () => {
+            setActivating(true)
+            try { await startRunner() } catch { /* handled by service */ }
+            finally { setActivating(false) }
+          }}
+          disabled={activating}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-60"
+          style={{
+            background:  'linear-gradient(135deg, #4f46e5, #6366f1)',
+            boxShadow:   '0 4px 14px rgba(99,102,241,0.35)',
+          }}
+        >
+          <RefreshCw size={13} className={activating ? 'animate-spin' : ''} />
+          {activating ? 'Activando…' : 'Activar Runner'}
+        </button>
+      </motion.div>
+    )
+  }
 
   return (
     <div className="p-6 pb-10">
