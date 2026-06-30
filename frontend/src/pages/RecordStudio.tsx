@@ -5002,7 +5002,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     `}</style>
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: '#0d1117',
@@ -5230,7 +5231,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             borderRight: '1px solid rgba(255,255,255,0.07)',
             display: 'flex',
             flexDirection: 'column',
-            overflowY: 'auto',
+            overflow: 'hidden',
+            minHeight: 0,
             background: 'linear-gradient(180deg, rgba(7,12,28,0) 0%, rgba(4,8,22,0.4) 100%)',
           }}
         >
@@ -5456,11 +5458,11 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           <div
             style={{
               flex: 1,
+              minHeight: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               padding: isLandscape ? '10px 16px' : '16px',
-              minHeight: isLandscape ? 220 : 360,
               overflow: 'hidden',
               position: 'relative',
             }}
