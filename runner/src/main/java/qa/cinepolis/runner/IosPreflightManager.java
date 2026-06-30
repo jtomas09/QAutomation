@@ -56,25 +56,36 @@ public class IosPreflightManager {
         public final boolean readyForExecution;
         /** Human-readable reason when readyForExecution=false; null when ready. */
         public final String  notReadyReason;
+        /** True when the device screen was confirmed unlocked at the final stability check. */
+        public final boolean deviceUnlocked;
+        /**
+         * System.currentTimeMillis() when the final unlock check passed.
+         * The Framework uses this to compute elapsed time before creating IOSDriver and
+         * warn when the gap exceeds 5 seconds (device may have auto-locked).
+         */
+        public final long    confirmedUnlockedAtMs;
 
         IosPreflightResult(String teamId, String iosVersion,
                            String wdaBundleId, boolean wdaCached, boolean wdaReady,
                            boolean xctraceConfirmed, String tunnelState,
                            String pairingState, String coreDeviceId,
-                           String transportType, boolean readyForExecution, String notReadyReason) {
-            this.teamId            = teamId;
-            this.iosVersion        = iosVersion;
-            this.wdaBundleId       = wdaBundleId;
-            this.wdaCached         = wdaCached;
-            this.wdaReady          = wdaReady;
-            this.xctraceConfirmed  = xctraceConfirmed;
-            this.tunnelState       = tunnelState   != null ? tunnelState   : "unknown";
-            this.pairingState      = pairingState  != null ? pairingState  : "unknown";
-            this.coreDeviceId      = coreDeviceId  != null ? coreDeviceId  : "";
-            this.confirmedAtMs     = System.currentTimeMillis();
-            this.transportType     = transportType != null ? transportType : "UNKNOWN";
-            this.readyForExecution = readyForExecution;
-            this.notReadyReason    = notReadyReason;
+                           String transportType, boolean readyForExecution, String notReadyReason,
+                           boolean deviceUnlocked, long confirmedUnlockedAtMs) {
+            this.teamId                = teamId;
+            this.iosVersion            = iosVersion;
+            this.wdaBundleId           = wdaBundleId;
+            this.wdaCached             = wdaCached;
+            this.wdaReady              = wdaReady;
+            this.xctraceConfirmed      = xctraceConfirmed;
+            this.tunnelState           = tunnelState   != null ? tunnelState   : "unknown";
+            this.pairingState          = pairingState  != null ? pairingState  : "unknown";
+            this.coreDeviceId          = coreDeviceId  != null ? coreDeviceId  : "";
+            this.confirmedAtMs         = System.currentTimeMillis();
+            this.transportType         = transportType != null ? transportType : "UNKNOWN";
+            this.readyForExecution     = readyForExecution;
+            this.notReadyReason        = notReadyReason;
+            this.deviceUnlocked        = deviceUnlocked;
+            this.confirmedUnlockedAtMs = confirmedUnlockedAtMs;
         }
     }
 
@@ -85,6 +96,14 @@ public class IosPreflightManager {
 
         client.sendLog(executionId, "INFO",
                 "🍎 ══════════════ iOS Pre-flight ══════════════");
+
+        // 0. Screen lock — initial check before any long operation.
+        //    A locked device at the start means the user hasn't prepared for the run.
+        DeviceScreenLockChecker.LockState initialLock = DeviceScreenLockChecker.check(udid);
+        client.sendLog(executionId, initialLock.unlocked ? "INFO" : "WARN",
+                initialLock.unlocked
+                        ? "🔓 Pantalla desbloqueada al inicio del Pre-flight. ✅"
+                        : "⚠️  Pantalla bloqueada al inicio del Pre-flight — desbloquea el iPhone para continuar.");
 
         // 1. Xcode
         checkXcode(client, executionId);
@@ -151,12 +170,28 @@ public class IosPreflightManager {
             wdaCached = false;
         }
 
+        // ── Stability check — device may have auto-locked during the preflight steps ──
+        // Wait 1.5 s to let any transient CoreDevice state settle, then re-query lock.
+        // This is the authoritative unlock timestamp passed to the Framework JVM so it
+        // can compute elapsed time before creating IOSDriver.
+        try { Thread.sleep(1_500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        DeviceScreenLockChecker.LockState stabilityLock = DeviceScreenLockChecker.check(udid);
+        boolean deviceUnlocked = stabilityLock.unlocked;
+        client.sendLog(executionId, deviceUnlocked ? "INFO" : "ERROR",
+                deviceUnlocked
+                        ? "🔓 Device unlocked: YES ✅ — pantalla desbloqueada confirmada al final del Pre-flight."
+                        : "🔒 Device unlocked: NO ❌ — pantalla bloqueada durante el Pre-flight."
+                        + "\n   Desbloquea el iPhone antes de iniciar la ejecución.");
+
         // ── Compute Runner readiness decision — mirrors DeviceReadinessEvaluator logic ──
         // This determination is final: the Framework must not attempt recovery when
         // readyForExecution=false. The Runner is the single authority.
         boolean readyForExecution;
         String  notReadyReason;
-        if (tunnel.transportType == DevicectlParser.TransportType.UNKNOWN) {
+        if (!deviceUnlocked) {
+            readyForExecution = false;
+            notReadyReason    = "Pantalla bloqueada al final del Pre-flight — desbloquea el iPhone y reintenta";
+        } else if (tunnel.transportType == DevicectlParser.TransportType.UNKNOWN) {
             readyForExecution = false;
             notReadyReason    = "Tipo de transporte no identificado (transportType=UNKNOWN)";
         } else if (tunnel.transportType == DevicectlParser.TransportType.LOCAL_NETWORK
@@ -182,6 +217,7 @@ public class IosPreflightManager {
                 + "   Transport        : " + tunnel.transportType + "\n"
                 + "   Tunnel           : " + tunnelSummary
                 + (tunnel.coreDeviceId.isBlank() ? "" : "  (" + tunnel.coreDeviceId + ")") + "\n"
+                + "   Device unlocked  : " + (deviceUnlocked ? "✅ YES" : "❌ NO — pantalla bloqueada") + "\n"
                 + "   ReadyForExecution: " + (readyForExecution ? "✅ true"
                         : "❌ false — " + notReadyReason) + "\n"
                 + "   UDID             : " + udid + "  ← appium:udid\n"
@@ -197,7 +233,9 @@ public class IosPreflightManager {
             tunnel.coreDeviceId,
             tunnel.transportType.name(),
             readyForExecution,
-            notReadyReason
+            notReadyReason,
+            deviceUnlocked,
+            stabilityLock.checkedAtMs
         );
     }
 

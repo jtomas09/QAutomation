@@ -84,6 +84,22 @@ public final class IOSDeviceState {
      */
     public final String  runnerNotReadyReason;
 
+    /**
+     * True when the Runner confirmed the device screen was unlocked immediately
+     * before launching the Gradle subprocess (pre-launch gate in JobExecutor).
+     * False if the device locked during PreFlight or the pre-launch check failed.
+     */
+    public final boolean deviceUnlocked;
+
+    /**
+     * System.currentTimeMillis() when the pre-launch unlock check passed.
+     * DriverFactory uses this to compute the elapsed time before calling new IOSDriver()
+     * and warns when the gap exceeds 5 seconds (device may have auto-locked between
+     * Gradle start and the first test class execution).
+     * Zero when not provided by the Runner.
+     */
+    public final long    confirmedUnlockedAtMs;
+
     // ── Private constructor ───────────────────────────────────────────────────
 
     private IOSDeviceState(
@@ -94,7 +110,8 @@ public final class IOSDeviceState {
             String  updatedWDABundleId, String webDriverAgentUrl,
             boolean xcuitestInstalled, boolean wdaPrebuilt,
             long    confirmedAt,
-            String  transportType,     boolean runnerReadyForExecution, String runnerNotReadyReason) {
+            String  transportType,     boolean runnerReadyForExecution, String runnerNotReadyReason,
+            boolean deviceUnlocked,    long confirmedUnlockedAtMs) {
 
         this.xctraceVisible          = xctraceVisible;
         this.coreDeviceVisible       = coreDeviceVisible;
@@ -120,6 +137,8 @@ public final class IOSDeviceState {
         this.transportType           = safe(transportType);
         this.runnerReadyForExecution = runnerReadyForExecution;
         this.runnerNotReadyReason    = safe(runnerNotReadyReason);
+        this.deviceUnlocked          = deviceUnlocked;
+        this.confirmedUnlockedAtMs   = confirmedUnlockedAtMs;
     }
 
     // ── Factory ───────────────────────────────────────────────────────────────
@@ -155,6 +174,11 @@ public final class IOSDeviceState {
         boolean runnerReadyForExecution = "true".equalsIgnoreCase(
                 System.getProperty("iosState.readyForExecution", "true").trim());
         String  runnerNotReadyReason   = System.getProperty("iosState.notReadyReason", "");
+        // Optimistic default (true) — if the Runner omits this flag the device is assumed unlocked.
+        boolean deviceUnlocked         = "true".equalsIgnoreCase(
+                System.getProperty("iosState.deviceUnlocked", "true").trim());
+        long    confirmedUnlockedAtMs  = parseLong(
+                System.getProperty("iosState.confirmedUnlockedAtMs"), 0L);
 
         return new IOSDeviceState(
                 xctraceVisible,    coreDeviceVisible,
@@ -168,7 +192,8 @@ public final class IOSDeviceState {
                 System.getProperty("webDriverAgentUrl",     ""),
                 xcuitestInstalled, wdaPrebuilt,
                 confirmedAt,
-                transportType, runnerReadyForExecution, runnerNotReadyReason
+                transportType, runnerReadyForExecution, runnerNotReadyReason,
+                deviceUnlocked, confirmedUnlockedAtMs
         );
     }
 
@@ -182,7 +207,8 @@ public final class IOSDeviceState {
                 "", "", "", "", "", "", "",
                 false, false,
                 System.currentTimeMillis(),
-                "", false, ""
+                "", false, "",
+                true, 0L
         );
     }
 
@@ -263,9 +289,12 @@ public final class IOSDeviceState {
         String readyStr        = ready ? "✅" : ("❌ (" + notReadyReason() + ")");
         String runnerReadyStr  = runnerReadyForExecution ? "✅"
                 : ("❌ (" + (runnerNotReadyReason.isEmpty() ? "?" : runnerNotReadyReason) + ")");
+        long unlockedElapsedSec = confirmedUnlockedAtMs > 0
+                ? (System.currentTimeMillis() - confirmedUnlockedAtMs) / 1000L : -1;
         return String.format(
                 "[IOSDeviceState udid=%s transport=%s xctrace=%s coreDevice=%s tunnel=%s paired=%s " +
-                "xcuitest=%s teamId=%s bundleId=%s wdaPrebuilt=%s ready=%s runnerReady=%s age=%ds]",
+                "xcuitest=%s teamId=%s bundleId=%s wdaPrebuilt=%s ready=%s runnerReady=%s " +
+                "unlocked=%s unlockedAge=%s age=%ds]",
                 physicalUdid.isEmpty() ? "(none)" : physicalUdid,
                 transportType.isEmpty() ? "?" : transportType,
                 xctraceVisible    ? "✅" : "❌",
@@ -278,6 +307,8 @@ public final class IOSDeviceState {
                 wdaPrebuilt       ? "✅" : "❌",
                 readyStr,
                 runnerReadyStr,
+                deviceUnlocked    ? "✅" : "❌",
+                unlockedElapsedSec >= 0 ? unlockedElapsedSec + "s" : "?",
                 ageSeconds()
         );
     }

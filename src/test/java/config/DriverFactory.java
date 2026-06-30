@@ -301,6 +301,39 @@ public class DriverFactory {
                     runIosPreSessionDiagnostic(hub, prop("udid", ""), options, iosState);
                 }
             }
+            // ── Pre-IOSDriver readiness gate ──────────────────────────────────
+            if ("local".equals(mode)) {
+                long now        = System.currentTimeMillis();
+                long elapsedMs  = iosState.confirmedUnlockedAtMs > 0
+                        ? now - iosState.confirmedUnlockedAtMs : -1;
+
+                log.info("[DriverFactory][iOS] ══════════ Pre-IOSDriver Readiness ══════════");
+                log.info("[DriverFactory][iOS] Device unlocked   : {}",
+                        iosState.deviceUnlocked ? "YES ✅" : "NO ❌");
+                log.info("[DriverFactory][iOS] ReadyForExecution : {}",
+                        iosState.runnerReadyForExecution ? "YES ✅" : "NO ❌");
+                if (elapsedMs >= 0) {
+                    log.info("[DriverFactory][iOS] Tiempo desde validación hasta creación de IOSDriver: {} ms",
+                            elapsedMs);
+                    if (elapsedMs > 5_000) {
+                        log.warn("[DriverFactory][iOS] ⚠️  {} ms desde la última validación de unlock "
+                                + "— el dispositivo puede haberse bloqueado antes de iniciar la sesión Appium. "
+                                + "Considera reducir el tiempo entre Pre-flight y la primera prueba.",
+                                elapsedMs);
+                    }
+                }
+                log.info("[DriverFactory][iOS] ════════════════════════════════════════════");
+
+                if (!iosState.deviceUnlocked) {
+                    throw new IOSDeviceSynchronizationManager.SyncException(
+                            IOSDeviceSynchronizationManager.SyncCategory.DEVICE_LOCKED,
+                            "[DriverFactory] Dispositivo bloqueado (deviceUnlocked=false) — "
+                                    + "no se puede crear sesión Appium. "
+                                    + "Desbloquea el iPhone.",
+                            "Desbloquea el iPhone e inicia la ejecución nuevamente desde el Dashboard.");
+                }
+            }
+
             try {
                 IOSDriver d = new IOSDriver(hub, options);
                 d.manage().timeouts().implicitlyWait(Duration.ZERO);

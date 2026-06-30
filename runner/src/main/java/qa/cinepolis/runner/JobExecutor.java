@@ -659,6 +659,8 @@ public class JobExecutor {
                     cmd.add("-DiosState.readyForExecution="  + iosResult.readyForExecution);
                     if (iosResult.notReadyReason != null && !iosResult.notReadyReason.isBlank())
                         cmd.add("-DiosState.notReadyReason=" + iosResult.notReadyReason);
+                    // deviceUnlocked + confirmedUnlockedAtMs are injected in the pre-launch check below
+                    // so the timestamp is as close to Gradle start as possible.
                     client.sendLog(job.executionId, "INFO",
                             "[JobExecutor] 🔗 Estado dispositivo → Gradle: xctrace="
                             + iosResult.xctraceConfirmed + " transport=" + iosResult.transportType
@@ -680,6 +682,44 @@ public class JobExecutor {
             client.sendLog(job.executionId, "INFO",
                     "🔧 Comando: " + String.join(" ", cmd));
             System.out.println("[Executor] Comando: " + String.join(" ", cmd));
+
+            // ── Pre-launch iOS unlock gate ─────────────────────────────────────
+            // Last chance to abort before Gradle starts. This catches devices that
+            // auto-locked during the preflight (team-id search, WDA warm-start, etc.).
+            // Runs only for iOS; Android has no equivalent lock-state concept here.
+            if (!isAndroid && iosResult != null) {
+                if (!iosResult.readyForExecution) {
+                    // Preflight already determined the device is not ready — abort immediately
+                    // rather than letting Gradle start just to fail inside IOSDeviceSynchronizationManager.
+                    client.sendLog(job.executionId, "ERROR",
+                            "❌ Dispositivo no listo para ejecución — Gradle NO será lanzado.\n"
+                            + "   Motivo: " + iosResult.notReadyReason + "\n"
+                            + "   Corrige el problema y reintenta desde el Dashboard.");
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    return;
+                }
+
+                // Re-check lock state right before Gradle start — the confirmedUnlockedAtMs
+                // timestamp injected here is what DriverFactory uses to compute elapsed time.
+                DeviceScreenLockChecker.LockState preLaunch =
+                        DeviceScreenLockChecker.check(receivedUdid);
+                if (!preLaunch.unlocked) {
+                    client.sendLog(job.executionId, "ERROR",
+                            "🔒 Dispositivo bloqueado justo antes de lanzar Gradle — ejecución cancelada.\n"
+                            + "   El dispositivo se bloqueó entre el Pre-flight y el inicio de la ejecución.\n"
+                            + "   Desbloquea el iPhone y reintenta.");
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    return;
+                }
+                client.sendLog(job.executionId, "INFO",
+                        "🔓 Device unlocked: YES ✅ — confirmado antes de lanzar Gradle.");
+                cmd.add("-DiosState.deviceUnlocked=true");
+                cmd.add("-DiosState.confirmedUnlockedAtMs=" + preLaunch.checkedAtMs);
+            } else if (!isAndroid) {
+                // No iosResult (shouldn't happen for iOS) — pass safe defaults
+                cmd.add("-DiosState.deviceUnlocked=true");
+                cmd.add("-DiosState.confirmedUnlockedAtMs=" + System.currentTimeMillis());
+            }
 
             // ── iOS video recording (physical device only) ─────────────────────
             // Uses xcrun devicectl device recordVideo — independent of WDA status.
