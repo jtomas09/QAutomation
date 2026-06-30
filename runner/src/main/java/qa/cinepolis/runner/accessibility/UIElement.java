@@ -40,6 +40,10 @@ public final class UIElement {
     public final boolean clickable;
     public final boolean visible;
 
+    // ── Resolved by ElementResolver ──────────────────────────────────────────
+    public final String  varName;              // camelCase variable name, e.g. "btnContinuar"
+    public final String  pageObjectAnnotation; // full @FindBy annotation block, e.g. "@AndroidFindBy(id=\"...\")\nprivate WebElement btnContinuar;"
+
     // ── Backward-compat fields (match UiHierarchyParser.ElementInfo) ──────────
     public final String  shortId;   // short name derived from resource-id or accessibility label
     public final String  accessId;  // content-desc (Android) | name (iOS)  ← used by code generators
@@ -48,25 +52,27 @@ public final class UIElement {
     // ─────────────────────────────────────────────────────────────────────────
 
     private UIElement(Builder b) {
-        platform           = b.platform;
-        className          = b.className;
-        locatorStrategy    = b.locatorStrategy;
-        locatorValue       = b.locatorValue;
-        text               = b.text;
-        accessibilityLabel = b.accessibilityLabel;
-        resourceId         = b.resourceId;
-        packageName        = b.packageName;
-        bundleId           = b.bundleId;
-        x                  = b.x;
-        y                  = b.y;
-        width              = b.width;
-        height             = b.height;
-        enabled            = b.enabled;
-        clickable          = b.clickable;
-        visible            = b.visible;
-        shortId            = b.shortId;
-        accessId           = b.accessId;
-        elType             = b.elType;
+        platform              = b.platform;
+        className             = b.className;
+        locatorStrategy       = b.locatorStrategy;
+        locatorValue          = b.locatorValue;
+        text                  = b.text;
+        accessibilityLabel    = b.accessibilityLabel;
+        resourceId            = b.resourceId;
+        packageName           = b.packageName;
+        bundleId              = b.bundleId;
+        x                     = b.x;
+        y                     = b.y;
+        width                 = b.width;
+        height                = b.height;
+        enabled               = b.enabled;
+        clickable             = b.clickable;
+        visible               = b.visible;
+        varName               = b.varName;
+        pageObjectAnnotation  = b.pageObjectAnnotation;
+        shortId               = b.shortId;
+        accessId              = b.accessId;
+        elType                = b.elType;
     }
 
     /** Returns "[x,y][x+w,y+h]" — same format as UiHierarchyParser.ElementInfo.bounds */
@@ -92,28 +98,32 @@ public final class UIElement {
         boolean enabled   = true;
         boolean clickable = true;
         boolean visible   = true;
-        String  shortId   = "";
-        String  accessId  = "";
-        String  elType    = "btn";
+        String  varName              = "";
+        String  pageObjectAnnotation = "";
+        String  shortId              = "";
+        String  accessId             = "";
+        String  elType               = "btn";
 
         private Builder() {}
 
-        public Builder platform(String v)           { platform           = nvl(v); return this; }
-        public Builder className(String v)          { className          = nvl(v); return this; }
-        public Builder locatorStrategy(String v)    { locatorStrategy    = nvl(v); return this; }
-        public Builder locatorValue(String v)       { locatorValue       = nvl(v); return this; }
-        public Builder text(String v)               { text               = nvl(v); return this; }
-        public Builder accessibilityLabel(String v) { accessibilityLabel = nvl(v); return this; }
-        public Builder resourceId(String v)         { resourceId         = nvl(v); return this; }
-        public Builder packageName(String v)        { packageName        = nvl(v); return this; }
-        public Builder bundleId(String v)           { bundleId           = nvl(v); return this; }
-        public Builder rect(int x, int y, int w, int h) { this.x=x; this.y=y; this.width=w; this.height=h; return this; }
-        public Builder enabled(boolean v)           { enabled   = v; return this; }
-        public Builder clickable(boolean v)         { clickable = v; return this; }
-        public Builder visible(boolean v)           { visible   = v; return this; }
-        public Builder shortId(String v)            { shortId   = nvl(v); return this; }
-        public Builder accessId(String v)           { accessId  = nvl(v); return this; }
-        public Builder elType(String v)             { elType    = nvl(v); return this; }
+        public Builder platform(String v)              { platform              = nvl(v); return this; }
+        public Builder className(String v)             { className             = nvl(v); return this; }
+        public Builder locatorStrategy(String v)       { locatorStrategy       = nvl(v); return this; }
+        public Builder locatorValue(String v)          { locatorValue          = nvl(v); return this; }
+        public Builder text(String v)                  { text                  = nvl(v); return this; }
+        public Builder accessibilityLabel(String v)    { accessibilityLabel    = nvl(v); return this; }
+        public Builder resourceId(String v)            { resourceId            = nvl(v); return this; }
+        public Builder packageName(String v)           { packageName           = nvl(v); return this; }
+        public Builder bundleId(String v)              { bundleId              = nvl(v); return this; }
+        public Builder rect(int x, int y, int w, int h){ this.x=x; this.y=y; this.width=w; this.height=h; return this; }
+        public Builder enabled(boolean v)              { enabled               = v; return this; }
+        public Builder clickable(boolean v)            { clickable             = v; return this; }
+        public Builder visible(boolean v)              { visible               = v; return this; }
+        public Builder varName(String v)               { varName               = nvl(v); return this; }
+        public Builder pageObjectAnnotation(String v)  { pageObjectAnnotation  = nvl(v); return this; }
+        public Builder shortId(String v)               { shortId               = nvl(v); return this; }
+        public Builder accessId(String v)              { accessId              = nvl(v); return this; }
+        public Builder elType(String v)                { elType                = nvl(v); return this; }
 
         public UIElement build() { return new UIElement(this); }
 

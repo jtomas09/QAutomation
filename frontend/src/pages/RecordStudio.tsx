@@ -17,6 +17,8 @@ import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
 import { RecordStudioHeader } from '../components/record-studio/RecordStudioHeader'
 import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
+import { suiteService } from '../services/SuiteService'
+import type { SuiteStep } from '../services/SuiteService'
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
@@ -54,6 +56,9 @@ interface AppEl {
   enabled?:            boolean
   clickable?:          boolean
   visible?:            boolean
+  // ElementResolver output — smart variable name + page object annotation
+  varName?:               string   // e.g. "btnContinuar"
+  pageObjectAnnotation?:  string   // e.g. "@AndroidFindBy(id = \"...\")\nprivate WebElement btnContinuar;"
 }
 
 interface RecStep {
@@ -331,6 +336,22 @@ function toMethodName(shortId: string): string {
   return shortId.replace(/^(btn|txt|rv|tab|iv|cb)_/, '').split('_').map(cap).join('')
 }
 
+/**
+ * Extracts the meaningful stem from a camelCase varName for use in method names.
+ * "btnContinuar" → "Continuar",  "txtCorreo" → "Correo"
+ * Falls back to capitalizing the whole varName when no known prefix is found.
+ */
+function stemFromVarName(varName: string): string {
+  const m = varName.match(/^(btn|txt|lbl|img|rv|lst|sw|chk|spn|cell|el)(.+)/i)
+  if (m) return m[2].charAt(0).toUpperCase() + m[2].slice(1)
+  return varName.charAt(0).toUpperCase() + varName.slice(1)
+}
+
+/** Returns the effective field/variable name for an element. */
+function elVarName(el: AppEl): string {
+  return el.varName?.trim() || toMethodName(el.shortId).charAt(0).toLowerCase() + toMethodName(el.shortId).slice(1) || el.shortId
+}
+
 function esc(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")
 }
@@ -502,19 +523,51 @@ function generateJava(
 
   // Page Objects class
   if (opts.pageObjects) {
+    // De-duplicate by varName (preferred) or shortId
     const uniqueEls = new Map<string, AppEl>()
     for (const step of steps) {
-      if (step.el) uniqueEls.set(step.el.shortId, step.el)
+      if (step.el) {
+        const key = elVarName(step.el)
+        uniqueEls.set(key, step.el)
+      }
     }
 
     lines.push(`public class CinepolisPage extends BaseMobilePage {`)
     lines.push('')
     for (const [, el] of uniqueEls) {
-      const methodName = toMethodName(el.shortId)
-      const fieldName = methodName.charAt(0).toLowerCase() + methodName.slice(1)
-      lines.push(`    @AndroidFindBy(id = "${el.resourceId}")`)
-      lines.push(`    @iOSXCUITFindBy(accessibility = "${el.accessId}")`)
-      lines.push(`    private WebElement ${fieldName};`)
+      const fieldName = elVarName(el)
+      const stem      = stemFromVarName(fieldName)
+      // Use pre-resolved annotation from ElementResolver when available
+      if (el.pageObjectAnnotation?.trim()) {
+        // The annotation already contains the field declaration; indent it
+        for (const annLine of el.pageObjectAnnotation.split('\n')) {
+          lines.push(`    ${annLine}`)
+        }
+      } else {
+        // Fallback: construct annotation from available locator info
+        const locVal = el.locatorValue?.trim() || el.resourceId?.trim() || ''
+        const locStrategy = el.locatorStrategy?.trim() || 'id'
+        if (isAndroid) {
+          if (locStrategy === 'id' && locVal) {
+            lines.push(`    @AndroidFindBy(id = "${esc(locVal)}")`)
+          } else if (locStrategy === 'accessibility_id' && locVal) {
+            lines.push(`    @AndroidFindBy(accessibility = "${esc(locVal)}")`)
+          } else if (locVal) {
+            lines.push(`    @AndroidFindBy(xpath = "${esc(locVal)}")`)
+          } else {
+            lines.push(`    // ⚠ No locator available for ${fieldName}`)
+          }
+        } else {
+          if ((locStrategy === 'accessibility_id') && (el.accessId?.trim() || locVal)) {
+            lines.push(`    @iOSXCUITFindBy(accessibility = "${esc(el.accessId?.trim() || locVal)}")`)
+          } else if (locVal) {
+            lines.push(`    @iOSXCUITFindBy(xpath = "${esc(locVal)}")`)
+          } else {
+            lines.push(`    // ⚠ No locator available for ${fieldName}`)
+          }
+        }
+        lines.push(`    private WebElement ${fieldName};`)
+      }
       lines.push('')
     }
     lines.push(`    public CinepolisPage(AppiumDriver driver) {`)
@@ -523,14 +576,14 @@ function generateJava(
     lines.push(`    }`)
     lines.push('')
     for (const [, el] of uniqueEls) {
-      const methodName = toMethodName(el.shortId)
-      const fieldName = methodName.charAt(0).toLowerCase() + methodName.slice(1)
-      lines.push(`    public void tap${methodName}() {`)
+      const fieldName = elVarName(el)
+      const stem      = stemFromVarName(fieldName)
+      lines.push(`    public void tap${stem}() {`)
       lines.push(`        ${fieldName}.click();`)
       lines.push(`    }`)
       lines.push('')
       if (el.elType === 'input') {
-        lines.push(`    public void type${methodName}(String value) {`)
+        lines.push(`    public void type${stem}(String value) {`)
         lines.push(`        ${fieldName}.clear();`)
         lines.push(`        ${fieldName}.sendKeys(value);`)
         lines.push(`    }`)
@@ -574,7 +627,7 @@ function generateJava(
     switch (step.type) {
       case 'tap':
         if (opts.pageObjects && step.el) {
-          lines.push(`        page.tap${toMethodName(step.el.shortId)}();`)
+          lines.push(`        page.tap${stemFromVarName(elVarName(step.el))}();`)
         } else {
           lines.push(`        click(${sel});`)
         }
@@ -587,7 +640,7 @@ function generateJava(
         break
       case 'input':
         if (opts.pageObjects && step.el) {
-          lines.push(`        page.type${toMethodName(step.el.shortId)}("${step.inputVal ?? ''}");`)
+          lines.push(`        page.type${stemFromVarName(elVarName(step.el))}("${step.inputVal ?? ''}");`)
         } else {
           lines.push(`        clear(${sel});`)
           lines.push(`        type(${sel}, "${step.inputVal ?? ''}");`)
@@ -2425,10 +2478,11 @@ function StepCard({ step, index, total, isSelected, onDelete, onDuplicate, onMov
         {/* Element + locator (tap/long/double) */}
         {(step.type === 'tap' || step.type === 'double_tap' || step.type === 'long_press') && step.el && (
           <>
-            <DetailRow label="Elemento" value={step.el.shortId} mono />
-            <DetailRow label="Locator" value={isAndroid ? 'resource-id' : 'accessibilityId'} />
+            {step.el.className && <DetailRow label="Tipo" value={step.el.className} mono truncate />}
+            <DetailRow label="Variable" value={elVarName(step.el)} mono color="#818cf8" />
+            {step.el.locatorStrategy && <DetailRow label="Locator" value={step.el.locatorStrategy} />}
             {locatorValue && (
-              <DetailRow label="ID" value={locatorValue} mono truncate />
+              <DetailRow label="Valor" value={locatorValue} mono truncate />
             )}
           </>
         )}
@@ -2436,7 +2490,8 @@ function StepCard({ step, index, total, isSelected, onDelete, onDuplicate, onMov
         {/* Input */}
         {step.type === 'input' && (
           <>
-            {step.el && <DetailRow label="Elemento" value={step.el.shortId} mono />}
+            {step.el?.className && <DetailRow label="Tipo" value={step.el.className} mono truncate />}
+            {step.el && <DetailRow label="Variable" value={elVarName(step.el)} mono color="#818cf8" />}
             {step.inputVal && (
               <DetailRow label="Valor" value={`"${step.inputVal}"`} color="#34d399" />
             )}
@@ -4607,6 +4662,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [copied, setCopied] = useState(false)
   const [sessionStart, setSessionStart] = useState<Date | null>(null)
   const [infoExpanded, setInfoExpanded] = useState(true)
+  const [debugMode, setDebugMode] = useState(false)
   // ── Inspector state ───────────────────────────────────────────────────────
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [inspectedElId, setInspectedElId] = useState<string | null>(null)
@@ -4706,9 +4762,24 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // Wire SSE physical-device events → steps panel
   useEffect(() => {
     onPhysicalStep((raw) => {
-      setSteps(prev => [...prev, mapApiStep(raw)])
+      const step = mapApiStep(raw)
+      if (debugMode && step.el) {
+        console.group(`[ElementResolver] Step ${step.n} — ${step.type}`)
+        console.log('Platform:    ', step.el.platform ?? '?')
+        console.log('Class:       ', step.el.className ?? '?')
+        console.log('varName:     ', step.el.varName ?? '(none)')
+        console.log('Locator:     ', `${step.el.locatorStrategy ?? '?'} = ${step.el.locatorValue ?? '?'}`)
+        if (step.el.pageObjectAnnotation) {
+          console.log('Page Object:\n' + step.el.pageObjectAnnotation)
+        }
+        if (!step.el.locatorValue?.trim()) {
+          console.warn('WARN: locatorValue is empty — element may not be identifiable')
+        }
+        console.groupEnd()
+      }
+      setSteps(prev => [...prev, step])
     })
-  }, [onPhysicalStep, mapApiStep])
+  }, [onPhysicalStep, mapApiStep, debugMode])
 
   const handleToggleRecording = useCallback(async () => {
     if (recState === 'idle') {
@@ -4923,45 +4994,75 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(
     (data: { name: string; description: string; country: string; mode: 'caso' | 'suite' }) => {
-      const sessionId = `session_${Date.now()}`
+      // Detect platform from first step that has an element with platform info
+      const detectedPlatform =
+        steps.find(s => s.el?.platform)?.el?.platform ??
+        (selectedDevice?.platform?.toLowerCase().includes('ios') ? 'ios' : 'android')
 
-      // Always save to session history
-      const sessions = JSON.parse(localStorage.getItem('qa_record_sessions') ?? '[]') as unknown[]
-      sessions.push({
-        id: sessionId,
-        name: data.name,
-        description: data.description,
-        mode: data.mode,
-        country: data.country,
-        savedAt: new Date().toISOString(),
-        stepCount: steps.length,
+      // Map RecStep[] → SuiteStep[] (strip non-serialisable fields)
+      const suiteSteps: SuiteStep[] = steps.map(s => ({
+        id:       s.id,
+        n:        s.n,
+        type:     s.type,
+        timeStr:  s.timeStr,
+        inputVal: s.inputVal,
+        dir:      s.dir,
+        el: s.el ? {
+          platform:            s.el.platform,
+          className:           s.el.className,
+          varName:             s.el.varName,
+          locatorStrategy:     s.el.locatorStrategy,
+          locatorValue:        s.el.locatorValue,
+          resourceId:          s.el.resourceId,
+          accessId:            s.el.accessId,
+          text:                s.el.text,
+          elType:              s.el.elType,
+          bounds:              s.el.bounds,
+          accessibilityLabel:  s.el.accessibilityLabel,
+          pageObjectAnnotation: s.el.pageObjectAnnotation,
+          enabled:             s.el.enabled,
+          clickable:           s.el.clickable,
+          visible:             s.el.visible,
+        } : null,
+      }))
+
+      // Extract page objects block from generated code (between first class and closing })
+      const pageObjectsMatch = generatedCode.match(
+        /public class \w+Page extends BaseMobilePage \{[\s\S]*?\n\}/
+      )
+      const pageObjects = pageObjectsMatch?.[0] ?? ''
+
+      suiteService.saveFromRecording({
+        name:          data.name,
+        description:   data.description,
+        country:       data.country,
+        mode:          data.mode,
+        platform:      detectedPlatform,
+        device:        selectedDevice?.deviceName ?? '',
+        udid:          selectedDevice?.udid ?? '',
+        appName:       appConfig?.appName ?? '',
+        appPackage:    appConfig?.appPackage ?? appConfig?.bundleId ?? '',
+        steps:         suiteSteps,
         lang,
-        code: generatedCode,
-        xml: generatedXML,
+        generatedCode,
+        generatedXML,
+        pageObjects,
       })
-      localStorage.setItem('qa_record_sessions', JSON.stringify(sessions))
 
-      // When saving as suite, also write to qa_custom_suites so it appears in Execute/Dashboard
-      if (data.mode === 'suite') {
-        const suites = JSON.parse(localStorage.getItem('qa_custom_suites') ?? '[]') as unknown[]
-        const SUITE_ICONS = ['🎬', '🎭', '🎪', '🎨', '🎯', '🎮', '🎲', '🎰', '🎳', '🎻']
-        const SUITE_ACCENTS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#14b8a6', '#f43f5e']
-        const iconIdx = (suites.length) % SUITE_ICONS.length
-        const accentIdx = (suites.length) % SUITE_ACCENTS.length
-        suites.push({
-          id: sessionId,
-          country: data.country,
-          title: data.name,
-          description: data.description || `Suite generada con ${steps.length} paso${steps.length !== 1 ? 's' : ''}`,
-          icon: SUITE_ICONS[iconIdx],
-          accent: SUITE_ACCENTS[accentIdx],
-          stepCount: steps.length,
-          savedAt: new Date().toISOString(),
+      if (debugMode) {
+        console.group('[RecordStudio] Suite saved')
+        console.log('Platform:', detectedPlatform)
+        console.log('Steps:', suiteSteps.length)
+        console.log('Lang:', lang)
+        suiteSteps.forEach(s => {
+          if (s.el?.varName) {
+            console.log(`  Step ${s.n} ${s.type}: varName=${s.el.varName} locator=${s.el.locatorStrategy}:${s.el.locatorValue}`)
+          }
         })
-        localStorage.setItem('qa_custom_suites', JSON.stringify(suites))
+        console.groupEnd()
       }
     },
-    [steps.length, generatedCode, generatedXML, lang],
+    [steps, generatedCode, generatedXML, generatedXML, lang, selectedDevice, appConfig, debugMode],
   )
 
   // ── Export ─────────────────────────────────────────────────────────────────
@@ -5451,6 +5552,29 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             >
               <Maximize2 size={13} />
               <span style={{ fontSize: 9, fontWeight: 500 }}>Pantalla completa</span>
+            </button>
+
+            {/* Debug toggle */}
+            <button
+              title={debugMode ? 'Desactivar modo debug' : 'Activar modo debug'}
+              onClick={() => setDebugMode(v => !v)}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 3,
+                padding: '6px 4px',
+                background: debugMode ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${debugMode ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.07)'}`,
+                borderRadius: 7,
+                cursor: 'pointer',
+                color: debugMode ? '#34d399' : '#64748b',
+                transition: 'all 0.15s',
+              }}
+            >
+              <Eye size={13} />
+              <span style={{ fontSize: 9, fontWeight: 500 }}>Debug</span>
             </button>
           </div>
 

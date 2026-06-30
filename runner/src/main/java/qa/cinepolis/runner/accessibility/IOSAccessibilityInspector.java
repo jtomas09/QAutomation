@@ -227,12 +227,17 @@ public final class IOSAccessibilityInspector implements AccessibilityInspector {
     // ── XML parsing ───────────────────────────────────────────────────────────
 
     private UIElement parseElementAt(String xml, int tapX, int tapY) {
+        System.out.printf("[IOSInspector] Touch: (%d,%d)%n", tapX, tapY);
         try {
-            Document doc  = parseDoc(xml);
-            if (doc == null) return null;
-            NodeList nodes = doc.getElementsByTagName("*");
-            UIElement best = null;
-            long bestArea  = Long.MAX_VALUE;
+            Document doc   = parseDoc(xml);
+            if (doc == null) {
+                System.out.println("[IOSInspector] FAIL: Hierarchy not updated — WDA source returned null");
+                return null;
+            }
+            NodeList nodes   = doc.getElementsByTagName("*");
+            UIElement best   = null;
+            int       bestDepth = -1;
+            long      bestArea  = Long.MAX_VALUE;
 
             for (int i = 0; i < nodes.getLength(); i++) {
                 Node node = nodes.item(i);
@@ -244,17 +249,36 @@ public final class IOSAccessibilityInspector implements AccessibilityInspector {
                 int ex = rect[0], ey = rect[1], ew = rect[2], eh = rect[3];
                 if (tapX < ex || tapX > ex + ew || tapY < ey || tapY > ey + eh) continue;
 
-                long area = (long) ew * eh;
-                if (area < bestArea) {
-                    bestArea = area;
-                    best     = buildElement(el, rect);
+                // Select deepest node (most specific leaf); ties broken by smaller area
+                int  depth = getNodeDepth(node);
+                long area  = (long) ew * eh;
+                if (depth > bestDepth || (depth == bestDepth && area < bestArea)) {
+                    bestDepth = depth;
+                    bestArea  = area;
+                    best      = buildElement(el, rect);
                 }
+            }
+            if (best == null) {
+                System.out.printf("[IOSInspector] No node contains (%d,%d)%n", tapX, tapY);
+            } else {
+                System.out.printf("[IOSInspector] Selected: type=%s  name=%s  locator=%s:%s%n",
+                    best.className, best.accessId, best.locatorStrategy, best.locatorValue);
             }
             return best;
         } catch (Exception e) {
             System.err.println("[IOSInspector] parseElementAt error: " + e.getMessage());
             return null;
         }
+    }
+
+    private static int getNodeDepth(Node node) {
+        int depth = 0;
+        Node parent = node.getParentNode();
+        while (parent != null && parent.getNodeType() != Node.DOCUMENT_NODE) {
+            depth++;
+            parent = parent.getParentNode();
+        }
+        return depth;
     }
 
     private UIElement parseFocusedInput(String xml) {

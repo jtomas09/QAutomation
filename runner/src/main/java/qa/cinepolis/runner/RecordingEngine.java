@@ -281,27 +281,33 @@ public final class RecordingEngine {
         }
     }
 
-    private void appendElement(ObjectNode node, UIElement el) {
-        if (el == null) { node.putNull("el"); return; }
+    private void appendElement(ObjectNode node, UIElement rawEl) {
+        if (rawEl == null) { node.putNull("el"); return; }
+        // Enrich with varName and pageObjectAnnotation before serializing
+        UIElement el = qa.cinepolis.runner.accessibility.ElementResolver.enrich(rawEl);
+        if (el == null) el = rawEl; // safety fallback
         ObjectNode e = MAPPER.createObjectNode();
-        // New fields (richer model)
-        e.put("platform",           el.platform);
-        e.put("className",          el.className);
-        e.put("locatorStrategy",    el.locatorStrategy);
-        e.put("locatorValue",       el.locatorValue);
-        e.put("accessibilityLabel", el.accessibilityLabel);
-        e.put("packageName",        el.packageName);
-        e.put("bundleId",           el.bundleId);
-        e.put("enabled",            el.enabled);
-        e.put("clickable",          el.clickable);
-        e.put("visible",            el.visible);
+        // Core fields
+        e.put("platform",              el.platform);
+        e.put("className",             el.className);
+        e.put("locatorStrategy",       el.locatorStrategy);
+        e.put("locatorValue",          el.locatorValue);
+        e.put("accessibilityLabel",    el.accessibilityLabel);
+        e.put("packageName",           el.packageName);
+        e.put("bundleId",              el.bundleId);
+        e.put("enabled",               el.enabled);
+        e.put("clickable",             el.clickable);
+        e.put("visible",               el.visible);
+        // ElementResolver output
+        e.put("varName",               el.varName);
+        e.put("pageObjectAnnotation",  el.pageObjectAnnotation);
         // Backward-compat fields (required by existing code generators)
-        e.put("shortId",   el.shortId);
-        e.put("resourceId",el.resourceId);
-        e.put("accessId",  el.accessId);
-        e.put("text",      el.text);
-        e.put("elType",    el.elType);
-        e.put("bounds",    el.getBoundsString());
+        e.put("shortId",    el.shortId);
+        e.put("resourceId", el.resourceId);
+        e.put("accessId",   el.accessId);
+        e.put("text",       el.text);
+        e.put("elType",     el.elType);
+        e.put("bounds",     el.getBoundsString());
         node.set("el", e);
     }
 
