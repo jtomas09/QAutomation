@@ -1782,9 +1782,9 @@ const PhoneFrame = React.memo(function PhoneFrame({
   previewState,
   onScreenInteract,
 }: PhoneFrameProps) {
-  const PHONE_W = 296
-  const SCREEN_W = 262
-  const SCREEN_H = 452
+  const PHONE_W = 340
+  const SCREEN_W = 304
+  const SCREEN_H = 524
   const SCALE = 1.0
 
   return (
@@ -2772,6 +2772,7 @@ function EditStepModal({ step, onClose, onSave }: EditStepModalProps) {
 interface StepsPanelProps {
   steps: RecStep[]
   recording: boolean
+  isDraft: boolean
   selectedStepId: string | null
   onDeleteStep: (id: string) => void
   onDuplicateStep: (id: string) => void
@@ -2799,6 +2800,7 @@ const FILTER_CHIPS: { label: string; value: StepFilter; color: string }[] = [
 const StepsPanel = React.memo(function StepsPanel({
   steps,
   recording,
+  isDraft,
   selectedStepId,
   onDeleteStep,
   onDuplicateStep,
@@ -2880,6 +2882,23 @@ const StepsPanel = React.memo(function StepsPanel({
                 <Layers3 size={13} color="#818cf8" />
               </div>
               <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 13 }}>Pasos Grabados</span>
+              {isDraft && steps.length > 0 && (
+                <span
+                  title="Pasos recuperados de sesión anterior — guarda para no perderlos"
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: '#f59e0b',
+                    background: 'rgba(245,158,11,0.12)',
+                    border: '1px solid rgba(245,158,11,0.3)',
+                    borderRadius: 4,
+                    padding: '1px 5px',
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  sin guardar
+                </span>
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {steps.length > 0 && (
@@ -4635,11 +4654,37 @@ interface RecordStudioProps {
   onNavigateToExecute?: () => void
 }
 
+const DRAFT_KEY = 'qa_record_draft'
+
+function loadDraftSteps(): RecStep[] {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (!raw) return []
+    const draft = JSON.parse(raw) as { steps: RecStep[] }
+    return Array.isArray(draft.steps) ? draft.steps : []
+  } catch { return [] }
+}
+
+function saveDraftSteps(steps: RecStep[]): void {
+  try {
+    if (steps.length === 0) {
+      localStorage.removeItem(DRAFT_KEY)
+    } else {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ steps, draftedAt: new Date().toISOString() }))
+    }
+  } catch { /* quota exceeded — non-critical */ }
+}
+
+function clearDraft(): void {
+  localStorage.removeItem(DRAFT_KEY)
+}
+
 export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps = {}) {
   // ── State ──────────────────────────────────────────────────────────────────
   const [recState, setRecState] = useState<RecState>('idle')
   const [elapsed, setElapsed] = useState(0)
-  const [steps, setSteps] = useState<RecStep[]>([])
+  // Initialize from draft so steps survive navigation away and back
+  const [steps, setSteps] = useState<RecStep[]>(() => loadDraftSteps())
   const [screen, setScreen] = useState<AppScreen>('home')
   const [selectedDevice, setSelectedDevice] = useState<PhysicalDevice | null>(null)
   const [appConfig, setAppConfig] = useState<DeviceAppConfig | null>(null)
@@ -4686,6 +4731,9 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       .then((c) => setAppConfigs(c))
       .catch(() => {})
   }, [])
+
+  // ── Draft persistence — survives navigation away and back ─────────────────
+  useEffect(() => { saveDraftSteps(steps) }, [steps])
 
   // ── Timer ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -5048,6 +5096,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         generatedXML,
         pageObjects,
       })
+      // Clear draft — steps are now persisted in the suite store
+      clearDraft()
 
       if (debugMode) {
         console.group('[RecordStudio] Suite saved')
@@ -5321,7 +5371,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         style={{
           flex: 1,
           display: 'grid',
-          gridTemplateColumns: '380px 1fr 460px',
+          gridTemplateColumns: '440px 1fr 460px',
           minHeight: 0,
           overflow: 'hidden',
         }}
@@ -5819,6 +5869,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           <StepsPanel
             steps={steps}
             recording={recState === 'recording'}
+            isDraft={recState === 'idle' && steps.length > 0}
             selectedStepId={selectedStepId}
             onDeleteStep={handleDeleteStep}
             onDuplicateStep={handleDuplicateStep}
