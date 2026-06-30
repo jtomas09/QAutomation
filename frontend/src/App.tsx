@@ -20,6 +20,7 @@ import MetricsPage            from './pages/MetricsPage'
 import RunnerManager          from './pages/RunnerManager'
 import DeviceFarm             from './pages/DeviceFarm'
 import RecordStudio           from './pages/RecordStudio'
+import SuitesPage            from './pages/SuitesPage'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
@@ -125,12 +126,10 @@ export default function App() {
             <RecordStudio onNavigateToExecute={() => setPage('execute')} />
           )}
 
+          {page === 'suites' && <SuitesPage />}
+
           {page === 'execute' && (() => {
-            // Merge static suites with custom suites saved from Record Studio
-            const customSuites: Array<{ id: string; country: string; title: string; description: string; icon: string; accent: string }> =
-              JSON.parse(localStorage.getItem('qa_custom_suites') ?? '[]')
-            const customForCountry = customSuites.filter((s) => s.country === country)
-            const countrySuites = [...(COUNTRY_SUITES[country] ?? []), ...customForCountry]
+            const countrySuites = COUNTRY_SUITES[country] ?? []
             // All known suite cards (needed for drill-down lookup)
             const allKnownCards = [...(COUNTRY_SUITES['mexico'] ?? []), ...ALIMENTOS_TESTS,
                                    ...(COUNTRY_SUITES['argentina'] ?? []), ...(COUNTRY_SUITES['chile'] ?? [])]
@@ -202,7 +201,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent','record-studio'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent','record-studio','suites'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>
