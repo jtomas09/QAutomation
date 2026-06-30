@@ -42,10 +42,48 @@ public final class AndroidAccessibilityInspector implements AccessibilityInspect
 
     @Override
     public UIElement findElementAt(int tapX, int tapY) {
+        System.out.printf("[AndroidInspector] Touch: (%d,%d)%n", tapX, tapY);
+
         String xml = getXml();
-        if (xml == null) return null;
+        if (xml == null) {
+            System.out.println("[AndroidInspector] FAIL: Hierarchy not updated — uiautomator dump returned null");
+            return null;
+        }
+
+        // Quick node count for debug output (count "<node" occurrences — fast, no second parse)
+        int totalNodes = countSubstring(xml, "<node");
+
         UiHierarchyParser.ElementInfo ei = UiHierarchyParser.findElementAt(xml, tapX, tapY);
-        return toUIElement(ei);
+
+        if (ei == null) {
+            System.out.printf("[AndroidInspector] Nodes parsed: %d  |  No node contains (%d,%d)%n",
+                    totalNodes, tapX, tapY);
+            return null;
+        }
+
+        UIElement uel = toUIElement(ei);
+        System.out.printf(
+            "[AndroidInspector] Nodes parsed: %d%n" +
+            "[AndroidInspector] Selected node:%n" +
+            "  resource-id=%s%n" +
+            "  class=%s%n" +
+            "  bounds=%s%n" +
+            "  text=%s%n" +
+            "  content-desc=%s%n" +
+            "  Locator: strategy=%s  value=%s%n",
+            totalNodes,
+            ei.resourceId, ei.className, ei.bounds,
+            ei.text, ei.accessId,
+            uel.locatorStrategy, uel.locatorValue
+        );
+        return uel;
+    }
+
+    /** Counts non-overlapping occurrences of {@code needle} in {@code haystack}. */
+    private static int countSubstring(String haystack, String needle) {
+        int count = 0, idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) >= 0) { count++; idx += needle.length(); }
+        return count;
     }
 
     @Override

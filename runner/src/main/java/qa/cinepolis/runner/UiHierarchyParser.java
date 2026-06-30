@@ -72,27 +72,108 @@ public final class UiHierarchyParser {
 
     // ── Hierarchy dump ────────────────────────────────────────────────────────
 
-    /** Runs uiautomator dump and returns the XML string, or null on failure. */
+    /**
+     * Dumps the UI hierarchy XML using three strategies in order:
+     *   1. uiautomator dump --compressed /dev/stdout   (fast, most devices)
+     *   2. uiautomator dump /dev/stdout                (--compressed not supported on all ROMs)
+     *   3. uiautomator dump /data/local/tmp/uidump_rec.xml  then  adb pull via cat
+     *      (fallback for devices that cannot write to /dev/stdout at all)
+     *
+     * Each strategy has a hard timeout. Leading garbage before {@code <?xml} or
+     * {@code <hierarchy} is stripped, and a UTF-8 BOM is removed when present.
+     *
+     * @return valid XML string, or null if all strategies fail
+     */
     public static String dumpHierarchy(String adbPath, String udid) {
+        // Strategy 1 — compressed stdout
+        String xml = dumpViaStdout(adbPath, udid, true);
+        if (xml != null) return xml;
+
+        System.err.println("[UiHierarchyParser] --compressed stdout failed, retrying without flag");
+
+        // Strategy 2 — plain stdout (no --compressed)
+        xml = dumpViaStdout(adbPath, udid, false);
+        if (xml != null) return xml;
+
+        System.err.println("[UiHierarchyParser] stdout strategies failed, trying file-based fallback");
+
+        // Strategy 3 — write to on-device file, then cat it back
+        return dumpViaFile(adbPath, udid);
+    }
+
+    /** Runs "uiautomator dump [--compressed] /dev/stdout" and extracts XML from stdout. */
+    private static String dumpViaStdout(String adbPath, String udid, boolean compressed) {
         try {
-            Process p = new ProcessBuilder(
-                    adbPath, "-s", udid, "shell",
-                    "uiautomator", "dump", "--compressed", "/dev/stdout")
-                    .redirectErrorStream(false).start();
+            ProcessBuilder pb;
+            if (compressed) {
+                pb = new ProcessBuilder(adbPath, "-s", udid, "shell",
+                        "uiautomator", "dump", "--compressed", "/dev/stdout");
+            } else {
+                pb = new ProcessBuilder(adbPath, "-s", udid, "shell",
+                        "uiautomator", "dump", "/dev/stdout");
+            }
+            pb.redirectErrorStream(false);
+            Process p = pb.start();
             byte[] out = p.getInputStream().readAllBytes();
             boolean done = p.waitFor(DUMP_TIMEOUT_S, TimeUnit.SECONDS);
             p.destroyForcibly();
             if (!done) return null;
-
-            String xml = new String(out, StandardCharsets.UTF_8).trim();
-            // Strip trailing status line that uiautomator sometimes appends
-            int end = xml.lastIndexOf("</hierarchy>");
-            if (end >= 0) xml = xml.substring(0, end + "</hierarchy>".length());
-            return xml.isEmpty() ? null : xml;
+            return extractXml(new String(out, StandardCharsets.UTF_8));
         } catch (Exception e) {
-            System.err.println("[UiHierarchyParser] dumpHierarchy error: " + e.getMessage());
+            System.err.println("[UiHierarchyParser] dumpViaStdout(" + compressed + ") error: " + e.getMessage());
             return null;
         }
+    }
+
+    /** Dumps hierarchy to /data/local/tmp/uidump_rec.xml on-device, then cats it back. */
+    private static String dumpViaFile(String adbPath, String udid) {
+        final String REMOTE = "/data/local/tmp/uidump_rec.xml";
+        try {
+            // Write the dump file on device
+            Process dump = new ProcessBuilder(adbPath, "-s", udid, "shell",
+                    "uiautomator", "dump", REMOTE)
+                    .redirectErrorStream(true).start();
+            dump.getInputStream().readAllBytes(); // drain
+            boolean done = dump.waitFor(DUMP_TIMEOUT_S, TimeUnit.SECONDS);
+            dump.destroyForcibly();
+            if (!done) return null;
+
+            // Cat the file back over adb
+            Process cat = new ProcessBuilder(adbPath, "-s", udid, "shell", "cat", REMOTE)
+                    .redirectErrorStream(false).start();
+            byte[] out = cat.getInputStream().readAllBytes();
+            cat.waitFor(DUMP_TIMEOUT_S, TimeUnit.SECONDS);
+            cat.destroyForcibly();
+            return extractXml(new String(out, StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            System.err.println("[UiHierarchyParser] dumpViaFile error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Strips leading non-XML garbage (status messages, BOM) from a raw dump string
+     * and trims anything after {@code </hierarchy>}.
+     * Returns null when no valid XML root element is found.
+     */
+    private static String extractXml(String raw) {
+        if (raw == null) return null;
+
+        // Remove UTF-8 BOM if present
+        if (raw.startsWith("﻿")) raw = raw.substring(1);
+
+        // Find the start of the XML — prefer <?xml, fall back to <hierarchy
+        int xmlStart = raw.indexOf("<?xml");
+        if (xmlStart < 0) xmlStart = raw.indexOf("<hierarchy");
+        if (xmlStart < 0) return null;
+
+        String xml = raw.substring(xmlStart).trim();
+
+        // Trim anything after the closing root element
+        int end = xml.lastIndexOf("</hierarchy>");
+        if (end >= 0) xml = xml.substring(0, end + "</hierarchy>".length());
+
+        return xml.isBlank() ? null : xml;
     }
 
     // ── Keyboard detection ────────────────────────────────────────────────────
@@ -177,7 +258,13 @@ public final class UiHierarchyParser {
     // ── Element lookup ────────────────────────────────────────────────────────
 
     /**
-     * Finds the smallest element that contains (tapX, tapY).
+     * Finds the deepest node in the tree that contains (tapX, tapY).
+     *
+     * "Deepest" means the node with the greatest ancestor-count in the DOM tree,
+     * which corresponds to the most specific/leaf element — exactly what Appium
+     * selectors should target.  When two nodes are at the same depth, the one
+     * with the smaller bounding area is preferred (handles overlapping siblings).
+     *
      * Returns null when no element is found or the XML is invalid.
      */
     public static ElementInfo findElementAt(String xml, int tapX, int tapY) {
@@ -193,8 +280,9 @@ public final class UiHierarchyParser {
             Document doc = builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
 
             NodeList nodes = doc.getElementsByTagName("node");
-            ElementInfo best = null;
-            long bestArea = Long.MAX_VALUE;
+            ElementInfo best     = null;
+            int         bestDepth = -1;
+            long        bestArea  = Long.MAX_VALUE;
 
             for (int i = 0; i < nodes.getLength(); i++) {
                 Node node = nodes.item(i);
@@ -205,10 +293,14 @@ public final class UiHierarchyParser {
                 if (rect == null) continue;
                 if (tapX < rect[0] || tapX > rect[2] || tapY < rect[1] || tapY > rect[3]) continue;
 
-                long area = (long)(rect[2] - rect[0]) * (rect[3] - rect[1]);
-                if (area < bestArea) {
-                    bestArea = area;
-                    best = buildElementInfo(el);
+                int  depth = getNodeDepth(node);
+                long area  = (long)(rect[2] - rect[0]) * (rect[3] - rect[1]);
+
+                // Prefer deeper nodes; break ties by smaller area (overlapping siblings)
+                if (depth > bestDepth || (depth == bestDepth && area < bestArea)) {
+                    bestDepth = depth;
+                    bestArea  = area;
+                    best      = buildElementInfo(el);
                 }
             }
             return best;
@@ -216,6 +308,17 @@ public final class UiHierarchyParser {
             System.err.println("[UiHierarchyParser] findElementAt error: " + e.getMessage());
             return null;
         }
+    }
+
+    /** Returns the number of ancestor nodes (depth in DOM tree, 0 = document root). */
+    private static int getNodeDepth(Node node) {
+        int depth = 0;
+        Node parent = node.getParentNode();
+        while (parent != null && parent.getNodeType() != Node.DOCUMENT_NODE) {
+            depth++;
+            parent = parent.getParentNode();
+        }
+        return depth;
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

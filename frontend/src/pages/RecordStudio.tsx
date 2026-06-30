@@ -335,21 +335,46 @@ function esc(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")
 }
 
+// All locator strategies produced by the backend AccessibilityInspector.
+type LocatorStrategy =
+  | 'id'               // Android resource-id
+  | 'accessibility_id' // Android content-desc / iOS accessibility identifier
+  | 'text_xpath'       // element text via xpath @text
+  | 'xpath'            // explicit xpath (class-based fallback from backend)
+  | 'predicate_string' // iOS NSPredicate  e.g. label == "Login"
+  | 'class_chain'      // iOS XCUITest class chain
+
+type LocatorResult = { strategy: LocatorStrategy; value: string }
+
 /**
- * Applies locator priority: resource-id → accessibility-id → text/xpath.
- * Returns the resolved {strategy, value} or null when no usable identifier exists.
+ * Resolves the best available locator for an element.
+ *
+ * Priority (matches backend AndroidAccessibilityInspector / IOSAccessibilityInspector):
+ *   1. resource-id / resourceId  → id
+ *   2. content-desc / accessId   → accessibility_id
+ *   3. visible text              → text_xpath
+ *   4. locatorStrategy + locatorValue from backend inspector  → xpath / predicate_string / class_chain
+ *
+ * Returns null ONLY when absolutely no identifier of any kind is available.
  */
-function resolveLocator(el: AppEl | null): { strategy: 'id' | 'accessibility_id' | 'text_xpath'; value: string } | null {
+function resolveLocator(el: AppEl | null): LocatorResult | null {
   if (!el) return null
-  if (el.resourceId?.trim())  return { strategy: 'id',               value: el.resourceId }
-  if (el.accessId?.trim())    return { strategy: 'accessibility_id', value: el.accessId   }
-  if (el.text?.trim())        return { strategy: 'text_xpath',       value: el.text       }
+  if (el.resourceId?.trim())   return { strategy: 'id',               value: el.resourceId }
+  if (el.accessId?.trim())     return { strategy: 'accessibility_id', value: el.accessId   }
+  if (el.text?.trim())         return { strategy: 'text_xpath',       value: el.text       }
+  // Fall back to the pre-resolved locator sent by the backend AccessibilityInspector.
+  // This is the primary path for iOS elements (predicate_string, class_chain) and for
+  // Android elements that have no resource-id / content-desc / text (class xpath).
+  if (el.locatorValue?.trim()) return {
+    strategy: (el.locatorStrategy?.trim() || 'xpath') as LocatorStrategy,
+    value:    el.locatorValue,
+  }
   return null
 }
 
-// Per-language selector formatters — return a ready-to-embed selector string.
-// When el is null or no locator can be resolved, return a REPLACE_ME placeholder
-// so the generated code always compiles and the gap is visually obvious.
+// ── Per-language selector formatters ──────────────────────────────────────────
+// Every formatter handles ALL LocatorStrategy values — no silent undefined return.
+// REPLACE_ME is emitted ONLY when el is null or truly has no identifier.
 
 function javaByStr(el: AppEl | null): string {
   const loc = resolveLocator(el)
@@ -358,6 +383,10 @@ function javaByStr(el: AppEl | null): string {
     case 'id':               return `By.id("${esc(loc.value)}")`
     case 'accessibility_id': return `AppiumBy.accessibilityId("${esc(loc.value)}")`
     case 'text_xpath':       return `By.xpath("//*[@text='${esc(loc.value)}']")`
+    case 'xpath':            return `By.xpath("${esc(loc.value)}")`
+    case 'predicate_string': return `AppiumBy.iOSNsPredicateString("${esc(loc.value)}")`
+    case 'class_chain':      return `AppiumBy.iOSClassChain("${esc(loc.value)}")`
+    default:                 return `By.xpath("${esc(loc.value)}")`
   }
 }
 
@@ -368,6 +397,10 @@ function pythonByStr(el: AppEl | null): string {
     case 'id':               return `AppiumBy.ID, "${esc(loc.value)}"`
     case 'accessibility_id': return `AppiumBy.ACCESSIBILITY_ID, "${esc(loc.value)}"`
     case 'text_xpath':       return `AppiumBy.XPATH, "//*[@text='${esc(loc.value)}']"`
+    case 'xpath':            return `AppiumBy.XPATH, "${esc(loc.value)}"`
+    case 'predicate_string': return `AppiumBy.IOS_PREDICATE, "${esc(loc.value)}"`
+    case 'class_chain':      return `AppiumBy.IOS_CLASS_CHAIN, "${esc(loc.value)}"`
+    default:                 return `AppiumBy.XPATH, "${esc(loc.value)}"`
   }
 }
 
@@ -379,12 +412,18 @@ function jsByStr(el: AppEl | null, isAndroid: boolean): string {
       case 'id':               return `$('android=new UiSelector().resourceId("${esc(loc.value)}")')`
       case 'accessibility_id': return `$('~${esc(loc.value)}')`
       case 'text_xpath':       return `$('android=new UiSelector().text("${esc(loc.value)}")')`
+      case 'xpath':            return `$('${esc(loc.value)}')`
+      default:                 return `$('${esc(loc.value)}')`
     }
   } else {
     switch (loc.strategy) {
       case 'id':               return `$('id:${esc(loc.value)}')`
       case 'accessibility_id': return `$('~${esc(loc.value)}')`
       case 'text_xpath':       return `$(\`-ios predicate string:label == "${esc(loc.value)}"\`)`
+      case 'xpath':            return `$('${esc(loc.value)}')`
+      case 'predicate_string': return `$(\`-ios predicate string:${loc.value}\`)`
+      case 'class_chain':      return `$(\`-ios class chain:${loc.value}\`)`
+      default:                 return `$('${esc(loc.value)}')`
     }
   }
 }
@@ -396,6 +435,10 @@ function csByStr(el: AppEl | null): string {
     case 'id':               return `By.Id("${esc(loc.value)}")`
     case 'accessibility_id': return `MobileBy.AccessibilityId("${esc(loc.value)}")`
     case 'text_xpath':       return `By.XPath("//*[@text='${esc(loc.value)}']")`
+    case 'xpath':            return `By.XPath("${esc(loc.value)}")`
+    case 'predicate_string': return `MobileBy.IosNSPredicate("${esc(loc.value)}")`
+    case 'class_chain':      return `MobileBy.IosClassChain("${esc(loc.value)}")`
+    default:                 return `By.XPath("${esc(loc.value)}")`
   }
 }
 
@@ -406,6 +449,10 @@ function kotlinByStr(el: AppEl | null): string {
     case 'id':               return `AppiumBy.id("${esc(loc.value)}")`
     case 'accessibility_id': return `AppiumBy.accessibilityId("${esc(loc.value)}")`
     case 'text_xpath':       return `By.xpath("//*[@text='${esc(loc.value)}']")`
+    case 'xpath':            return `By.xpath("${esc(loc.value)}")`
+    case 'predicate_string': return `AppiumBy.iOSNsPredicateString("${esc(loc.value)}")`
+    case 'class_chain':      return `AppiumBy.iOSClassChain("${esc(loc.value)}")`
+    default:                 return `By.xpath("${esc(loc.value)}")`
   }
 }
 
