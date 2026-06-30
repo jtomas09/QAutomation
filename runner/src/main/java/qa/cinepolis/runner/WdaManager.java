@@ -96,6 +96,24 @@ public final class WdaManager {
     }
 
     /**
+     * Returns the best-known WDA base URL, never null.
+     * Uses the URL detected from xcodebuild output when available (CoreDevice /
+     * Xcode 16+ may bind to a device IP rather than localhost); falls back to
+     * "http://localhost:8100" for classic USB-forwarding setups.
+     *
+     * Used by IOSAccessibilityInspector so it does not need to know about
+     * WdaManager internals.
+     */
+    public static String getWdaBaseUrl() {
+        String url = detectedWdaUrl;
+        if (url != null && !url.isBlank()) {
+            // Strip trailing slash if present
+            return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        }
+        return "http://localhost:" + WDA_PORT;
+    }
+
+    /**
      * Returns true if the last ensureWdaRunning() call actually started an xcodebuild process.
      * False when the call fell through to "Appium will handle it" without attempting a launch.
      * Used by IosPreflightManager to avoid cache invalidation on the "no xcodeproj" code path.

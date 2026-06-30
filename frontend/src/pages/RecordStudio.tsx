@@ -16,6 +16,7 @@ import {
 import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
 import { RecordStudioHeader } from '../components/record-studio/RecordStudioHeader'
+import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
@@ -26,6 +27,15 @@ type AppScreen = 'home' | 'login'
 type Lang = 'java-testng' | 'java-junit' | 'python' | 'javascript' | 'csharp' | 'kotlin'
 type ViewTab = 'code' | 'xml' | 'inspector' | 'locators'
 
+/**
+ * AppEl is the element type used throughout the code generators.
+ * It extends the AccessibilityUIElement shape so that elements from both
+ * Android and iOS come in without any transformation.
+ *
+ * Backward-compat fields (shortId, resourceId, accessId, text, elType, bounds)
+ * are always present — new fields are optional so hardcoded HOME_ELS still
+ * compile without specifying them.
+ */
 interface AppEl {
   shortId:    string
   resourceId: string
@@ -34,6 +44,16 @@ interface AppEl {
   elType:     'btn' | 'input' | 'text' | 'list' | 'image'
   bounds?:    string
   className?: string
+  // New accessibility fields (present on elements from the recording engine)
+  platform?:           'android' | 'ios'
+  locatorStrategy?:    string
+  locatorValue?:       string
+  accessibilityLabel?: string
+  packageName?:        string
+  bundleId?:           string
+  enabled?:            boolean
+  clickable?:          boolean
+  visible?:            boolean
 }
 
 interface RecStep {

@@ -2,6 +2,9 @@ package qa.cinepolis.runner;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import qa.cinepolis.runner.accessibility.AccessibilityInspector;
+import qa.cinepolis.runner.accessibility.InspectorFactory;
+import qa.cinepolis.runner.accessibility.UIElement;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -10,37 +13,38 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Recording engine — manages Android action recording sessions with intelligent
- * event classification.
+ * Recording engine — manages device recording sessions with intelligent
+ * event classification, powered by the platform-agnostic AccessibilityInspector.
  *
- * Classification rules:
- *  - Tap on EditText + keyboard appears  → emits "tap" step, then starts InputWatcher
- *  - InputWatcher: polls every 600 ms until keyboard dismissed → emits "input" step
- *  - Swipe with |dy| > |dx|             → "scroll" (vertical content change)
- *  - Swipe with |dx| >= |dy|            → "swipe" (horizontal navigation)
- *  - Touch duration > 600 ms            → "long_press"
- *  - Two taps at same location < 250 ms → "double_tap" (with 250 ms buffer)
- *  - KEY_BACK from getevent             → "back"
- *  - KEY_HOME from getevent             → "home"
+ * Classification rules (unchanged):
+ *  - Tap on EditText + keyboard appears  → "tap" + starts InputWatcher
+ *  - InputWatcher: polls until keyboard gone → "input" step
+ *  - Swipe |dy| > |dx|                   → "scroll"
+ *  - Swipe |dx| >= |dy|                  → "swipe"
+ *  - Duration > 600 ms                   → "long_press"
+ *  - Two taps < 250 ms at same spot      → "double_tap"
+ *  - KEY_BACK (Android getevent)         → "back"
+ *  - KEY_HOME (Android getevent)         → "home"
  *
- * Thread safety:
- *  - sessions/stepCounters: ConcurrentHashMap
- *  - per-session volatile fields for cross-thread communication
- *  - CopyOnWriteArrayList for SSE clients
- *  - Shared ScheduledExecutorService for double-tap buffer timers
+ * Platform dispatch:
+ *  - InspectorFactory.create(udid, adbPath) auto-detects Android vs iOS and
+ *    returns an AccessibilityInspector.  This class never calls ADB or WDA
+ *    directly — all device interaction goes through the inspector.
+ *  - getevent listener is started only for Android inspectors.
+ *
+ * Thread safety: same guarantees as before (ConcurrentHashMap, volatile,
+ * CopyOnWriteArrayList, ScheduledExecutorService).
  */
 public final class RecordingEngine {
 
-    private static final ObjectMapper MAPPER                 = new ObjectMapper();
-    private static final int          ADB_TIMEOUT_S          = 8;
-    private static final int          SWIPE_THRESHOLD_PX     = 50;
-    private static final int          DOUBLE_TAP_WINDOW_MS   = 250;
+    private static final ObjectMapper MAPPER                  = new ObjectMapper();
+    private static final int          SWIPE_THRESHOLD_PX      = 50;
+    private static final int          DOUBLE_TAP_WINDOW_MS    = 250;
     private static final int          LONG_PRESS_THRESHOLD_MS = 600;
-    private static final int          UI_SETTLE_MS           = 350;
+    private static final int          UI_SETTLE_MS            = 350;
 
     private final String adbPath;
 
-    // Shared timer for 250 ms double-tap detection windows
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
         Thread t = new Thread(r, "recording-scheduler");
         t.setDaemon(true);
@@ -70,11 +74,18 @@ public final class RecordingEngine {
 
     public StartResult start(String udid) {
         String sessionId = "rec-" + System.currentTimeMillis();
-        int[]  dims      = UiHierarchyParser.getScreenSize(adbPath, udid);
-        Session session  = new Session(udid, dims[0], dims[1]);
+
+        // Auto-detect platform and create the right inspector
+        AccessibilityInspector inspector = InspectorFactory.create(udid, adbPath);
+        int[] dims = inspector.getScreenSize();
+
+        Session session = new Session(udid, dims[0], dims[1], inspector);
         sessions.put(sessionId, session);
         stepCounters.put(sessionId, new AtomicInteger(0));
+
+        // getevent listener only runs on Android (it will fail gracefully on iOS)
         session.startGeteventListener(sessionId);
+
         System.out.println("[RecordingEngine] Session started: " + sessionId
                 + " udid=" + udid + " " + dims[0] + "x" + dims[1]);
         return new StartResult(sessionId, dims[0], dims[1]);
@@ -95,11 +106,6 @@ public final class RecordingEngine {
 
     // ── Actions (overlay-triggered) ───────────────────────────────────────────
 
-    /**
-     * Executes a tap, then classifies the result by comparing pre/post hierarchy:
-     * - EditText tapped + keyboard appeared → emit "tap" step, start InputWatcher
-     * - Otherwise → emit "tap"
-     */
     public String executeTap(String sessionId, int x, int y) {
         Session s = sessions.get(sessionId);
         if (s == null) return null;
@@ -107,25 +113,20 @@ public final class RecordingEngine {
         stopInputWatcher(s);
         s.suppressUntilMs = System.currentTimeMillis() + 1400;
 
-        String preXml = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-        UiHierarchyParser.ElementInfo el = (preXml != null)
-                ? UiHierarchyParser.findElementAt(preXml, x, y) : null;
+        boolean kbBefore = s.inspector.isKeyboardVisible();
+        UIElement el     = s.inspector.findElementAt(x, y);
 
-        runAdb(s.udid, "input", "tap", str(x), str(y));
-
+        s.inspector.performTap(x, y);
         sleep(UI_SETTLE_MS);
+        s.inspector.invalidateCache();
 
-        // Classify: check if keyboard appeared after tapping an EditText
-        String postXml  = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-        boolean kbBefore = UiHierarchyParser.isKeyboardVisible(preXml);
-        boolean kbAfter  = UiHierarchyParser.isKeyboardVisible(postXml);
+        boolean kbAfter = s.inspector.isKeyboardVisible();
 
         if (!kbBefore && kbAfter && el != null && "input".equals(el.elType)) {
-            // Keyboard just appeared on an EditText tap — start watching for text
             String preText = el.text != null ? el.text : "";
-            s.activeInputWatcher = new InputWatcher(s, sessionId, el.bounds, preText);
+            s.activeInputWatcher = new InputWatcher(s, sessionId, el.getBoundsString(), preText);
             s.activeInputWatcher.start();
-            System.out.println("[RecordingEngine] InputWatcher started for bounds=" + el.bounds);
+            System.out.println("[RecordingEngine] InputWatcher started for " + el.shortId);
         }
 
         return buildStepFromEl(sessionId, s, "tap", el, null, null);
@@ -138,14 +139,12 @@ public final class RecordingEngine {
         stopInputWatcher(s);
         s.suppressUntilMs = System.currentTimeMillis() + 1600;
 
-        String preXml = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-        UiHierarchyParser.ElementInfo el = (preXml != null)
-                ? UiHierarchyParser.findElementAt(preXml, x, y) : null;
-
-        runAdb(s.udid, "input", "tap", str(x), str(y));
+        UIElement el = s.inspector.findElementAt(x, y);
+        s.inspector.performTap(x, y);
         sleep(120);
-        runAdb(s.udid, "input", "tap", str(x), str(y));
+        s.inspector.performTap(x, y);
         sleep(UI_SETTLE_MS);
+        s.inspector.invalidateCache();
 
         return buildStepFromEl(sessionId, s, "double_tap", el, null, null);
     }
@@ -157,21 +156,14 @@ public final class RecordingEngine {
         stopInputWatcher(s);
         s.suppressUntilMs = System.currentTimeMillis() + 2200;
 
-        String preXml = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-        UiHierarchyParser.ElementInfo el = (preXml != null)
-                ? UiHierarchyParser.findElementAt(preXml, x, y) : null;
-
-        runAdb(s.udid, "input", "swipe", str(x), str(y), str(x), str(y), "800");
+        UIElement el = s.inspector.findElementAt(x, y);
+        s.inspector.performLongPress(x, y, 800);
         sleep(UI_SETTLE_MS);
+        s.inspector.invalidateCache();
 
         return buildStepFromEl(sessionId, s, "long_press", el, null, null);
     }
 
-    /**
-     * Executes a swipe and classifies it:
-     * - |dy| > |dx| → "scroll" (vertical, changes content position)
-     * - |dx| >= |dy| → "swipe" (horizontal, navigates between screens)
-     */
     public String executeSwipe(String sessionId, int x1, int y1, int x2, int y2) {
         Session s = sessions.get(sessionId);
         if (s == null) return null;
@@ -179,17 +171,14 @@ public final class RecordingEngine {
         stopInputWatcher(s);
         s.suppressUntilMs = System.currentTimeMillis() + 1200;
 
-        runAdb(s.udid, "input", "swipe", str(x1), str(y1), str(x2), str(y2), "300");
+        s.inspector.performSwipe(x1, y1, x2, y2, 300);
         sleep(UI_SETTLE_MS);
+        s.inspector.invalidateCache();
 
-        int dx = x2 - x1;
-        int dy = y2 - y1;
-        // Direction label always reflects the finger movement direction
-        String dir = (Math.abs(dy) >= Math.abs(dx))
-                ? (dy > 0 ? "down" : "up")
-                : (dx > 0 ? "right" : "left");
-        // Vertical finger movement → content scrolls → "scroll"
-        // Horizontal → page/item change → "swipe"
+        int    dx   = x2 - x1;
+        int    dy   = y2 - y1;
+        String dir  = (Math.abs(dy) >= Math.abs(dx))
+                ? (dy > 0 ? "down" : "up") : (dx > 0 ? "right" : "left");
         String type = (Math.abs(dy) >= Math.abs(dx)) ? "scroll" : "swipe";
 
         return buildStepFromEl(sessionId, s, type, null, dir, null);
@@ -200,14 +189,11 @@ public final class RecordingEngine {
         if (s == null) return null;
 
         stopInputWatcher(s);
-        runAdb(s.udid, "input", "text", text.replace(" ", "%s"));
+        s.inspector.performText(text);
         sleep(UI_SETTLE_MS);
+        s.inspector.invalidateCache();
 
-        // Find currently-focused element
-        String postXml = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-        UiHierarchyParser.ElementInfo el = (postXml != null)
-                ? UiHierarchyParser.findFocusedEditText(postXml) : null;
-
+        UIElement el = s.inspector.findFocusedInputElement();
         return buildStepFromEl(sessionId, s, "input", el, null, text);
     }
 
@@ -215,13 +201,13 @@ public final class RecordingEngine {
         Session s = sessions.get(sessionId);
         if (s == null) return null;
 
-        // Key events stop any active text-input watch
         if ("back".equalsIgnoreCase(key) || "home".equalsIgnoreCase(key)
                 || "enter".equalsIgnoreCase(key) || "done".equalsIgnoreCase(key)) {
             stopInputWatcher(s);
         }
 
-        runAdb(s.udid, "input", "keyevent", toKeycode(key));
+        s.inspector.performKey(key);
+        s.inspector.invalidateCache();
 
         String type;
         switch (key.toLowerCase()) {
@@ -248,10 +234,8 @@ public final class RecordingEngine {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /** Builds a step JSON from a pre-found element (no extra hierarchy dump). */
     private String buildStepFromEl(String sessionId, Session s, String type,
-                                    UiHierarchyParser.ElementInfo el,
-                                    String dir, String inputText) {
+                                    UIElement el, String dir, String inputText) {
         try {
             AtomicInteger counter = stepCounters.get(sessionId);
             if (counter == null) return null;
@@ -262,7 +246,7 @@ public final class RecordingEngine {
             node.put("n",    n);
             node.put("type", type);
             if (inputText != null) node.put("inputVal", inputText);
-            if (dir != null)       node.put("dir", dir);
+            if (dir != null)       node.put("dir",      dir);
             appendElement(node, el);
             appendTime(node, s);
             return MAPPER.writeValueAsString(node);
@@ -272,7 +256,7 @@ public final class RecordingEngine {
         }
     }
 
-    /** Builds a step by dumping hierarchy and finding element at (x, y). Used by getevent path. */
+    /** Used by the getevent path (Android): dumps hierarchy and finds element at (x,y). */
     private String buildStep(String sessionId, Session s, String type,
                               int x, int y, String dir, String inputText) {
         try {
@@ -280,16 +264,14 @@ public final class RecordingEngine {
             if (counter == null) return null;
             int n = counter.incrementAndGet();
 
-            String xml = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-            UiHierarchyParser.ElementInfo el = (xml != null && x >= 0 && y >= 0)
-                    ? UiHierarchyParser.findElementAt(xml, x, y) : null;
+            UIElement el = (x >= 0 && y >= 0) ? s.inspector.findElementAt(x, y) : null;
 
             ObjectNode node = MAPPER.createObjectNode();
             node.put("id",   "step-" + System.currentTimeMillis() + "-" + n);
             node.put("n",    n);
             node.put("type", type);
             if (inputText != null) node.put("inputVal", inputText);
-            if (dir != null)       node.put("dir", dir);
+            if (dir != null)       node.put("dir",      dir);
             appendElement(node, el);
             appendTime(node, s);
             return MAPPER.writeValueAsString(node);
@@ -299,20 +281,28 @@ public final class RecordingEngine {
         }
     }
 
-    private void appendElement(ObjectNode node, UiHierarchyParser.ElementInfo el) {
-        if (el != null) {
-            ObjectNode e = MAPPER.createObjectNode();
-            e.put("shortId",    el.shortId);
-            e.put("resourceId", el.resourceId);
-            e.put("accessId",   el.accessId);
-            e.put("text",       el.text);
-            e.put("elType",     el.elType);
-            e.put("className",  el.className);
-            e.put("bounds",     el.bounds);
-            node.set("el", e);
-        } else {
-            node.putNull("el");
-        }
+    private void appendElement(ObjectNode node, UIElement el) {
+        if (el == null) { node.putNull("el"); return; }
+        ObjectNode e = MAPPER.createObjectNode();
+        // New fields (richer model)
+        e.put("platform",           el.platform);
+        e.put("className",          el.className);
+        e.put("locatorStrategy",    el.locatorStrategy);
+        e.put("locatorValue",       el.locatorValue);
+        e.put("accessibilityLabel", el.accessibilityLabel);
+        e.put("packageName",        el.packageName);
+        e.put("bundleId",           el.bundleId);
+        e.put("enabled",            el.enabled);
+        e.put("clickable",          el.clickable);
+        e.put("visible",            el.visible);
+        // Backward-compat fields (required by existing code generators)
+        e.put("shortId",   el.shortId);
+        e.put("resourceId",el.resourceId);
+        e.put("accessId",  el.accessId);
+        e.put("text",      el.text);
+        e.put("elType",    el.elType);
+        e.put("bounds",    el.getBoundsString());
+        node.set("el", e);
     }
 
     private void appendTime(ObjectNode node, Session s) {
@@ -327,73 +317,37 @@ public final class RecordingEngine {
         }
     }
 
-    private void runAdb(String udid, String... args) {
-        try {
-            List<String> cmd = new ArrayList<>();
-            cmd.add(adbPath);
-            cmd.add("-s");
-            cmd.add(udid);
-            Collections.addAll(cmd, args);
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            p.getInputStream().transferTo(OutputStream.nullOutputStream());
-            p.waitFor(ADB_TIMEOUT_S, TimeUnit.SECONDS);
-            p.destroyForcibly();
-        } catch (Exception e) {
-            System.err.println("[RecordingEngine] ADB error: " + e.getMessage());
-        }
-    }
-
     private static void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    }
-
-    private static String str(int n) { return Integer.toString(n); }
-
-    private static String toKeycode(String key) {
-        switch (key.toLowerCase()) {
-            case "back":   return "KEYCODE_BACK";
-            case "home":   return "KEYCODE_HOME";
-            case "enter":  return "KEYCODE_ENTER";
-            case "done":   return "KEYCODE_ENTER";
-            case "tab":    return "KEYCODE_TAB";
-            case "delete": return "KEYCODE_DEL";
-            default:
-                String k = key.toUpperCase();
-                return k.startsWith("KEYCODE_") ? k : "KEYCODE_" + k;
-        }
+        try { Thread.sleep(ms); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
     // ── InputWatcher ──────────────────────────────────────────────────────────
 
     /**
-     * Polls the device hierarchy every 600 ms after a tap on an EditText.
-     * When the on-screen keyboard is dismissed, reads the final text and
-     * emits an "input" step via SSE.
-     * Timeout: 45 seconds.
+     * Polls the device hierarchy every 600 ms after a tap on a text field.
+     * Emits an "input" step via SSE when the keyboard is dismissed and the
+     * text content has changed.  Timeout: 45 seconds.
      */
     private class InputWatcher {
         private final Session  s;
         private final String   sessionId;
-        private final String   preBounds;   // bounds of the EditText at tap time
-        private final String   preText;     // text content before the tap
+        private final String   preBounds;
+        private final String   preText;
         private final Thread   thread;
         private volatile boolean stopped = false;
 
         InputWatcher(Session s, String sessionId, String preBounds, String preText) {
-            this.s          = s;
-            this.sessionId  = sessionId;
-            this.preBounds  = preBounds != null ? preBounds : "";
-            this.preText    = preText  != null ? preText   : "";
-            this.thread     = new Thread(this::run, "input-watcher-" + s.udid);
+            this.s         = s;
+            this.sessionId = sessionId;
+            this.preBounds = preBounds != null ? preBounds : "";
+            this.preText   = preText   != null ? preText   : "";
+            this.thread    = new Thread(this::run, "input-watcher-" + s.udid);
             this.thread.setDaemon(true);
         }
 
         void start() { thread.start(); }
-
-        void stop()  {
-            stopped = true;
-            thread.interrupt();
-        }
+        void stop()  { stopped = true; thread.interrupt(); }
 
         private void run() {
             long deadline = System.currentTimeMillis() + 45_000;
@@ -402,39 +356,28 @@ public final class RecordingEngine {
                 sleep(600);
                 if (stopped) break;
 
-                String xml = UiHierarchyParser.dumpHierarchy(adbPath, s.udid);
-                if (xml == null) continue;
+                s.inspector.invalidateCache();
 
-                boolean kbVisible = UiHierarchyParser.isKeyboardVisible(xml);
+                if (!s.inspector.isKeyboardVisible()) {
+                    // Keyboard gone — read the element again and get its current text
+                    int[] center   = parseBoundsCenter(preBounds);
+                    UIElement el   = (center[0] >= 0 && center[1] >= 0)
+                                     ? s.inspector.findElementAt(center[0], center[1])
+                                     : s.inspector.findFocusedInputElement();
+                    String finalText = (el != null && el.text != null) ? el.text : "";
 
-                if (!kbVisible) {
-                    // Keyboard gone — get final text
-                    String finalText = UiHierarchyParser.getElementTextAtBounds(xml, preBounds);
-                    if (finalText == null) {
-                        // Try finding by focused EditText
-                        UiHierarchyParser.ElementInfo focused = UiHierarchyParser.findFocusedEditText(xml);
-                        if (focused != null) finalText = focused.text;
-                    }
-                    // Only emit if text actually changed
-                    if (finalText != null && !finalText.equals(preText) && !finalText.isEmpty()) {
-                        System.out.println("[InputWatcher] Text changed: '" + preText + "' → '" + finalText + "'");
-                        String json = buildStepFromEl(sessionId, s, "input",
-                                UiHierarchyParser.getElementTextAtBounds(xml, preBounds) != null
-                                        ? UiHierarchyParser.findElementAt(xml,
-                                                parseBoundsCenter(preBounds)[0],
-                                                parseBoundsCenter(preBounds)[1])
-                                        : UiHierarchyParser.findFocusedEditText(xml),
-                                null, finalText);
+                    if (!finalText.equals(preText) && !finalText.isEmpty()) {
+                        System.out.println("[InputWatcher] Text changed: '"
+                                + preText + "' → '" + finalText + "'");
+                        String json = buildStepFromEl(sessionId, s, "input", el, null, finalText);
                         if (json != null) s.pushSseEvent(json);
                     }
                     break;
                 }
             }
-            // Mark self as inactive
             if (s.activeInputWatcher == this) s.activeInputWatcher = null;
         }
 
-        /** Returns center point of "[x1,y1][x2,y2]" bounds, or [-1,-1] on failure. */
         private int[] parseBoundsCenter(String bounds) {
             try {
                 String b = bounds.replace("][", ",").replace("[", "").replace("]", "");
@@ -442,27 +385,23 @@ public final class RecordingEngine {
                 int x1 = Integer.parseInt(p[0].trim()), y1 = Integer.parseInt(p[1].trim());
                 int x2 = Integer.parseInt(p[2].trim()), y2 = Integer.parseInt(p[3].trim());
                 return new int[]{(x1 + x2) / 2, (y1 + y2) / 2};
-            } catch (Exception e) {
-                return new int[]{-1, -1};
-            }
+            } catch (Exception e) { return new int[]{-1, -1}; }
         }
     }
 
     // ── Session ───────────────────────────────────────────────────────────────
 
     private class Session {
-        final String udid;
-        final int    deviceWidth;
-        final int    deviceHeight;
-        final long   startedAtMs;
+        final String               udid;
+        final int                  deviceWidth;
+        final int                  deviceHeight;
+        final long                 startedAtMs;
+        final AccessibilityInspector inspector;
 
-        // Suppress getevent events triggered by ADB input commands
-        volatile long suppressUntilMs = 0;
+        volatile long               suppressUntilMs  = 0;
+        final List<OutputStream>    sseClients       = new CopyOnWriteArrayList<>();
 
-        // SSE clients
-        final List<OutputStream> sseClients = new CopyOnWriteArrayList<>();
-
-        // getevent movement tracking
+        // getevent movement tracking (Android only)
         volatile int     touchStartX = -1;
         volatile int     touchStartY = -1;
         volatile int     touchLastX  = -1;
@@ -470,23 +409,22 @@ public final class RecordingEngine {
         volatile boolean touchDown   = false;
 
         // Double-tap detection (250 ms window)
-        volatile long                  lastTapMs     = 0;
-        volatile int                   lastTapX      = -1;
-        volatile int                   lastTapY      = -1;
-        volatile ScheduledFuture<?>    pendingTap    = null;
+        volatile long              lastTapMs  = 0;
+        volatile int               lastTapX   = -1;
+        volatile int               lastTapY   = -1;
+        volatile ScheduledFuture<?> pendingTap = null;
 
-        // EditText input monitoring
-        volatile InputWatcher          activeInputWatcher = null;
+        volatile InputWatcher      activeInputWatcher = null;
 
-        // getevent process
         private volatile Process geteventProcess;
         private volatile Thread  geteventThread;
 
-        Session(String udid, int w, int h) {
-            this.udid         = udid;
-            this.deviceWidth  = w;
-            this.deviceHeight = h;
-            this.startedAtMs  = System.currentTimeMillis();
+        Session(String udid, int w, int h, AccessibilityInspector inspector) {
+            this.udid        = udid;
+            this.deviceWidth = w;
+            this.deviceHeight= h;
+            this.startedAtMs = System.currentTimeMillis();
+            this.inspector   = inspector;
         }
 
         void startGeteventListener(String sessionId) {
@@ -502,12 +440,8 @@ public final class RecordingEngine {
                     long   btnTouchDownMs = -1;
                     String line;
 
-                    while (!Thread.currentThread().isInterrupted() && (line = br.readLine()) != null) {
-                        // Sample lines (whitespace-normalised for parsing):
-                        // [t] /dev/input/eventX: EV_ABS ABS_MT_POSITION_X  000001f4
-                        // [t] /dev/input/eventX: EV_KEY BTN_TOUCH  DOWN
-                        // [t] /dev/input/eventX: EV_KEY KEY_BACK  DOWN
-                        // [t] /dev/input/eventX: EV_KEY KEY_HOME  DOWN
+                    while (!Thread.currentThread().isInterrupted()
+                            && (line = br.readLine()) != null) {
 
                         if (line.contains("ABS_MT_POSITION_X")) {
                             int v = parseHexToken(line);
@@ -524,15 +458,13 @@ public final class RecordingEngine {
                         } else if (line.contains("BTN_TOUCH") && line.contains("DOWN")) {
                             btnTouchDownMs = System.currentTimeMillis();
                             touchDown  = true;
-                            touchStartX = -1;
-                            touchStartY = -1;
+                            touchStartX = touchStartY = -1;
                         } else if (line.contains("BTN_TOUCH") && line.contains("UP")) {
                             touchDown = false;
                             handleTouchUp(sessionId, btnTouchDownMs);
                             btnTouchDownMs = -1;
                             touchStartX = touchStartY = touchLastX = touchLastY = -1;
 
-                        // System key events (not filtered by suppress window)
                         } else if (line.contains("KEY_BACK") && line.contains("UP")) {
                             stopInputWatcher(this);
                             String json = buildStepFromEl(sessionId, this, "back", null, null, null);
@@ -545,7 +477,9 @@ public final class RecordingEngine {
                     }
                 } catch (Exception e) {
                     if (!Thread.currentThread().isInterrupted()) {
-                        System.err.println("[RecordingEngine] getevent error [" + udid + "]: " + e.getMessage());
+                        // iOS or disconnected device: failure is expected and harmless
+                        System.out.println("[RecordingEngine] getevent unavailable for "
+                                + udid + " (" + e.getMessage() + ")");
                     }
                 }
             }, "getevent-" + udid);
@@ -557,41 +491,33 @@ public final class RecordingEngine {
             int fx = touchLastX, fy = touchLastY;
             int sx = touchStartX, sy = touchStartY;
             if (fx < 0 || fy < 0) return;
+            if (System.currentTimeMillis() < suppressUntilMs) return;
 
-            if (System.currentTimeMillis() < suppressUntilMs) return; // overlay-triggered
-
-            long duration = btnTouchDownMs > 0 ? System.currentTimeMillis() - btnTouchDownMs : 0;
-
-            // Calculate movement
-            int  dx   = (sx >= 0) ? (fx - sx) : 0;
-            int  dy   = (sy >= 0) ? (fy - sy) : 0;
-            float dist = (float) Math.sqrt((double)(dx * dx + dy * dy));
+            long  duration = btnTouchDownMs > 0 ? System.currentTimeMillis() - btnTouchDownMs : 0;
+            int   dx       = (sx >= 0) ? (fx - sx) : 0;
+            int   dy       = (sy >= 0) ? (fy - sy) : 0;
+            float dist     = (float) Math.sqrt((double)(dx * dx + dy * dy));
 
             if (dist >= SWIPE_THRESHOLD_PX) {
-                // Significant movement — classify as scroll or swipe
                 String dir  = (Math.abs(dy) >= Math.abs(dx))
-                        ? (dy > 0 ? "down" : "up")
-                        : (dx > 0 ? "right" : "left");
+                        ? (dy > 0 ? "down" : "up") : (dx > 0 ? "right" : "left");
                 String type = (Math.abs(dy) >= Math.abs(dx)) ? "scroll" : "swipe";
-                String json = buildStep(sessionId, this, type, sx >= 0 ? sx : fx, sy >= 0 ? sy : fy, dir, null);
+                String json = buildStep(sessionId, this, type,
+                        sx >= 0 ? sx : fx, sy >= 0 ? sy : fy, dir, null);
                 if (json != null) pushSseEvent(json);
                 return;
             }
 
-            // Small movement = tap-family
             if (duration >= LONG_PRESS_THRESHOLD_MS) {
-                // Long press
                 String json = buildStep(sessionId, this, "long_press", fx, fy, null, null);
                 if (json != null) pushSseEvent(json);
                 lastTapMs = 0;
                 return;
             }
 
-            // Potential tap — check for double tap
             long now = System.currentTimeMillis();
             if (lastTapMs > 0 && (now - lastTapMs) < DOUBLE_TAP_WINDOW_MS
                     && Math.abs(fx - lastTapX) < 60 && Math.abs(fy - lastTapY) < 60) {
-                // Double tap detected — cancel the buffered single tap and emit double tap
                 ScheduledFuture<?> pending = pendingTap;
                 if (pending != null) { pending.cancel(false); pendingTap = null; }
                 lastTapMs = 0;
@@ -600,7 +526,6 @@ public final class RecordingEngine {
                 return;
             }
 
-            // Buffer this tap for DOUBLE_TAP_WINDOW_MS before emitting single tap
             final int finalX = fx, finalY = fy;
             ScheduledFuture<?> existing = pendingTap;
             if (existing != null) existing.cancel(false);
@@ -610,31 +535,25 @@ public final class RecordingEngine {
             pendingTap = scheduler.schedule(() -> {
                 pendingTap = null;
                 lastTapMs  = 0;
-
-                // Check if tapped element is EditText — if so, start input watcher
-                String preXml = UiHierarchyParser.dumpHierarchy(adbPath, udid);
-                String type   = "tap";
-
-                if (preXml != null) {
-                    UiHierarchyParser.ElementInfo el = UiHierarchyParser.findElementAt(preXml, finalX, finalY);
-                    if (el != null && "input".equals(el.elType)) {
-                        // Physical tap on EditText — may trigger keyboard; start watcher
-                        String preText = el.text != null ? el.text : "";
-                        activeInputWatcher = new InputWatcher(this, sessionId, el.bounds, preText);
-                        activeInputWatcher.start();
-                    }
+                inspector.invalidateCache();
+                UIElement el = inspector.findElementAt(finalX, finalY);
+                if (el != null && "input".equals(el.elType)) {
+                    String preText = el.text != null ? el.text : "";
+                    activeInputWatcher = new InputWatcher(this, sessionId,
+                            el.getBoundsString(), preText);
+                    activeInputWatcher.start();
                 }
-
-                String json = buildStep(sessionId, this, type, finalX, finalY, null, null);
+                String json = buildStep(sessionId, this, "tap", finalX, finalY, null, null);
                 if (json != null) pushSseEvent(json);
             }, DOUBLE_TAP_WINDOW_MS, TimeUnit.MILLISECONDS);
         }
 
         void stop() {
-            if (geteventThread != null)  geteventThread.interrupt();
+            if (geteventThread  != null) geteventThread.interrupt();
             if (geteventProcess != null) geteventProcess.destroyForcibly();
-            if (pendingTap != null)      pendingTap.cancel(false);
+            if (pendingTap      != null) pendingTap.cancel(false);
             stopInputWatcher(this);
+            inspector.close();
             for (OutputStream out : sseClients) {
                 try { out.close(); } catch (Exception ignored) {}
             }
