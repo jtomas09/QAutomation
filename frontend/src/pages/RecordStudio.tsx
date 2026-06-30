@@ -20,7 +20,7 @@ import { RecordStudioHeader } from '../components/record-studio/RecordStudioHead
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
 type RecState = 'idle' | 'recording'
-type StepType = 'tap' | 'double_tap' | 'long_press' | 'input' | 'swipe' | 'scroll' | 'hide_keyboard' | 'assertion' | 'screenshot'
+type StepType = 'tap' | 'double_tap' | 'long_press' | 'input' | 'swipe' | 'scroll' | 'hide_keyboard' | 'assertion' | 'screenshot' | 'back' | 'home'
 type StepFilter = 'all' | StepType
 type AppScreen = 'home' | 'login'
 type Lang = 'java-testng' | 'java-junit' | 'python' | 'javascript' | 'csharp' | 'kotlin'
@@ -264,6 +264,8 @@ const STEP_COLORS: Record<StepType, string> = {
   hide_keyboard: '#f43f5e',
   assertion:     '#14b8a6',
   screenshot:    '#eab308',
+  back:          '#fb923c',
+  home:          '#2dd4bf',
 }
 
 function stepTypeLabel(type: StepType): string {
@@ -277,6 +279,8 @@ function stepTypeLabel(type: StepType): string {
     case 'hide_keyboard': return 'Hide Keyboard'
     case 'assertion':     return 'Assertion'
     case 'screenshot':    return 'Screenshot'
+    case 'back':          return 'Volver'
+    case 'home':          return 'Inicio'
   }
 }
 
@@ -292,6 +296,8 @@ function getStepIcon(type: StepType, size = 13): React.ReactNode {
     case 'hide_keyboard': return <Keyboard size={size} color={c} />
     case 'assertion':     return <CheckCircle size={size} color={c} />
     case 'screenshot':    return <Camera size={size} color={c} />
+    case 'back':          return <RotateCcw size={size} color={c} />
+    case 'home':          return <Smartphone size={size} color={c} />
   }
 }
 

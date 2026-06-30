@@ -95,6 +95,85 @@ public final class UiHierarchyParser {
         }
     }
 
+    // ── Keyboard detection ────────────────────────────────────────────────────
+
+    /**
+     * Returns true when the XML hierarchy contains elements belonging to an IME
+     * (on-screen keyboard) window. Checks package names for common keyboards.
+     */
+    public static boolean isKeyboardVisible(String xml) {
+        if (xml == null || xml.isBlank()) return false;
+        return xml.contains("com.android.inputmethod")
+            || xml.contains("com.google.android.inputmethod")
+            || xml.contains("com.samsung.android.honeyboard")
+            || xml.contains("com.huawei.keyboard")
+            || xml.contains("com.xiaomi.keyboard")
+            || xml.contains("com.miui.ime")
+            || xml.contains("InputMethod")
+            || xml.contains("SoftInputWindow");
+    }
+
+    /**
+     * Returns the text attribute of the node whose bounds attribute matches
+     * {@code targetBounds} exactly, or null when no match is found.
+     */
+    public static String getElementTextAtBounds(String xml, String targetBounds) {
+        if (xml == null || targetBounds == null || targetBounds.isBlank()) return null;
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setExpandEntityReferences(false);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+            NodeList nodes = doc.getElementsByTagName("node");
+            for (int i = 0; i < nodes.getLength(); i++) {
+                Node node = nodes.item(i);
+                if (!(node instanceof Element)) continue;
+                Element el = (Element) node;
+                if (targetBounds.equals(el.getAttribute("bounds"))) {
+                    return el.getAttribute("text");
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    /**
+     * Finds the focused, editable node in the hierarchy (class contains EditText
+     * and focused="true"), or the first EditText if none is focused.
+     * Returns null when no EditText is present.
+     */
+    public static ElementInfo findFocusedEditText(String xml) {
+        if (xml == null || xml.isBlank()) return null;
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setExpandEntityReferences(false);
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+            NodeList nodes = doc.getElementsByTagName("node");
+
+            Element firstEditText = null;
+            for (int i = 0; i < nodes.getLength(); i++) {
+                Node node = nodes.item(i);
+                if (!(node instanceof Element)) continue;
+                Element el = (Element) node;
+                String cls = el.getAttribute("class").toLowerCase();
+                if (!cls.contains("edittext") && !cls.contains("textfield")) continue;
+                if (firstEditText == null) firstEditText = el;
+                if ("true".equals(el.getAttribute("focused"))) {
+                    return buildElementInfo(el);
+                }
+            }
+            return (firstEditText != null) ? buildElementInfo(firstEditText) : null;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     // ── Element lookup ────────────────────────────────────────────────────────
 
     /**
