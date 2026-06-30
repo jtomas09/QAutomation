@@ -311,9 +311,82 @@ function toMethodName(shortId: string): string {
   return shortId.replace(/^(btn|txt|rv|tab|iv|cb)_/, '').split('_').map(cap).join('')
 }
 
-function selectorStr(el: AppEl, isAndroid: boolean): string {
-  if (isAndroid) return `By.id("${el.resourceId}")`
-  return `AppiumBy.accessibilityId("${el.accessId}")`
+function esc(v: string): string {
+  return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")
+}
+
+/**
+ * Applies locator priority: resource-id → accessibility-id → text/xpath.
+ * Returns the resolved {strategy, value} or null when no usable identifier exists.
+ */
+function resolveLocator(el: AppEl | null): { strategy: 'id' | 'accessibility_id' | 'text_xpath'; value: string } | null {
+  if (!el) return null
+  if (el.resourceId?.trim())  return { strategy: 'id',               value: el.resourceId }
+  if (el.accessId?.trim())    return { strategy: 'accessibility_id', value: el.accessId   }
+  if (el.text?.trim())        return { strategy: 'text_xpath',       value: el.text       }
+  return null
+}
+
+// Per-language selector formatters — return a ready-to-embed selector string.
+// When el is null or no locator can be resolved, return a REPLACE_ME placeholder
+// so the generated code always compiles and the gap is visually obvious.
+
+function javaByStr(el: AppEl | null): string {
+  const loc = resolveLocator(el)
+  if (!loc) return `By.id("REPLACE_ME")`
+  switch (loc.strategy) {
+    case 'id':               return `By.id("${esc(loc.value)}")`
+    case 'accessibility_id': return `AppiumBy.accessibilityId("${esc(loc.value)}")`
+    case 'text_xpath':       return `By.xpath("//*[@text='${esc(loc.value)}']")`
+  }
+}
+
+function pythonByStr(el: AppEl | null): string {
+  const loc = resolveLocator(el)
+  if (!loc) return `AppiumBy.ID, "REPLACE_ME"`
+  switch (loc.strategy) {
+    case 'id':               return `AppiumBy.ID, "${esc(loc.value)}"`
+    case 'accessibility_id': return `AppiumBy.ACCESSIBILITY_ID, "${esc(loc.value)}"`
+    case 'text_xpath':       return `AppiumBy.XPATH, "//*[@text='${esc(loc.value)}']"`
+  }
+}
+
+function jsByStr(el: AppEl | null, isAndroid: boolean): string {
+  const loc = resolveLocator(el)
+  if (!loc) return `$('~REPLACE_ME')`
+  if (isAndroid) {
+    switch (loc.strategy) {
+      case 'id':               return `$('android=new UiSelector().resourceId("${esc(loc.value)}")')`
+      case 'accessibility_id': return `$('~${esc(loc.value)}')`
+      case 'text_xpath':       return `$('android=new UiSelector().text("${esc(loc.value)}")')`
+    }
+  } else {
+    switch (loc.strategy) {
+      case 'id':               return `$('id:${esc(loc.value)}')`
+      case 'accessibility_id': return `$('~${esc(loc.value)}')`
+      case 'text_xpath':       return `$(\`-ios predicate string:label == "${esc(loc.value)}"\`)`
+    }
+  }
+}
+
+function csByStr(el: AppEl | null): string {
+  const loc = resolveLocator(el)
+  if (!loc) return `By.Id("REPLACE_ME")`
+  switch (loc.strategy) {
+    case 'id':               return `By.Id("${esc(loc.value)}")`
+    case 'accessibility_id': return `MobileBy.AccessibilityId("${esc(loc.value)}")`
+    case 'text_xpath':       return `By.XPath("//*[@text='${esc(loc.value)}']")`
+  }
+}
+
+function kotlinByStr(el: AppEl | null): string {
+  const loc = resolveLocator(el)
+  if (!loc) return `AppiumBy.id("REPLACE_ME")`
+  switch (loc.strategy) {
+    case 'id':               return `AppiumBy.id("${esc(loc.value)}")`
+    case 'accessibility_id': return `AppiumBy.accessibilityId("${esc(loc.value)}")`
+    case 'text_xpath':       return `By.xpath("//*[@text='${esc(loc.value)}']")`
+  }
 }
 
 function generateJava(
@@ -421,42 +494,54 @@ function generateJava(
       lines.push(`        Allure.step("${step.n}. ${label}${elText ? ` — ${elText}` : ''}");`)
     }
 
-    const sel = step.el ? selectorStr(step.el, isAndroid) : null
+    const sel = javaByStr(step.el)
+    const hasEl = !!step.el
 
-    if (opts.smartWaits && sel) {
+    if (opts.smartWaits && hasEl) {
       lines.push(`        waitForElement(${sel});`)
+    }
+    if (!hasEl && ['tap', 'double_tap', 'long_press', 'input'].includes(step.type)) {
+      lines.push(`        // ⚠ Element not found — update selector before running`)
     }
 
     switch (step.type) {
       case 'tap':
         if (opts.pageObjects && step.el) {
           lines.push(`        page.tap${toMethodName(step.el.shortId)}();`)
-        } else if (sel) {
+        } else {
           lines.push(`        click(${sel});`)
         }
         break
       case 'double_tap':
-        if (sel) lines.push(`        doubleTap(${sel});`)
+        lines.push(`        doubleTap(${sel});`)
         break
       case 'long_press':
-        if (sel) lines.push(`        longPress(${sel});`)
+        lines.push(`        longPress(${sel});`)
         break
       case 'input':
         if (opts.pageObjects && step.el) {
           lines.push(`        page.type${toMethodName(step.el.shortId)}("${step.inputVal ?? ''}");`)
-        } else if (sel) {
+        } else {
           lines.push(`        clear(${sel});`)
           lines.push(`        type(${sel}, "${step.inputVal ?? ''}");`)
         }
-        if (opts.assertions && sel) {
+        if (opts.assertions) {
           lines.push(`        Assert.assertEquals(getValue(${sel}), "${step.inputVal ?? ''}");`)
         }
         break
       case 'swipe':
-        lines.push(`        swipe(Direction.${(step.dir ?? 'up').toUpperCase()});`)
+        lines.push(`        swipe(Direction.${(step.dir ?? 'UP').toUpperCase()});`)
         break
-      case 'scroll':
-        lines.push(`        scrollDown();`)
+      case 'scroll': {
+        const scrollDir = step.dir === 'up' ? 'Up' : 'Down'
+        lines.push(`        scroll${scrollDir}();`)
+        break
+      }
+      case 'back':
+        lines.push(`        driver.navigate().back();`)
+        break
+      case 'home':
+        lines.push(`        driver.pressKey(new KeyEvent(AndroidKey.HOME));`)
         break
       case 'hide_keyboard':
         lines.push(`        driver.hideKeyboard();`)
@@ -533,55 +618,55 @@ function generatePython(
     const elText = step.el?.text ?? ''
     lines.push(`        # ${step.n}. ${label}${elText ? ` — ${elText}` : ''}`)
 
-    const sel = step.el
-      ? isAndroid
-        ? `AppiumBy.ID, "${step.el.resourceId}"`
-        : `AppiumBy.ACCESSIBILITY_ID, "${step.el.accessId}"`
-      : null
+    const sel = pythonByStr(step.el)
+    const hasEl = !!step.el
 
-    if (opts.smartWaits && sel) {
+    if (opts.smartWaits && hasEl) {
       lines.push(`        WebDriverWait(driver, 10).until(EC.presence_of_element_located((${sel})))`)
+    }
+    if (!hasEl && ['tap', 'double_tap', 'long_press', 'input'].includes(step.type)) {
+      lines.push(`        # ⚠ Element not found — update selector before running`)
     }
 
     switch (step.type) {
       case 'tap':
-        if (sel) lines.push(`        driver.find_element(${sel}).click()`)
+        lines.push(`        driver.find_element(${sel}).click()`)
         break
       case 'double_tap':
-        if (sel) {
-          lines.push(`        el = driver.find_element(${sel})`)
-          lines.push(`        from appium.webdriver.common.touch_action import TouchAction`)
-          lines.push(`        TouchAction(driver).tap(el).tap(el).perform()`)
-        }
+        lines.push(`        el = driver.find_element(${sel})`)
+        lines.push(`        from appium.webdriver.common.touch_action import TouchAction`)
+        lines.push(`        TouchAction(driver).tap(el).tap(el).perform()`)
         break
       case 'long_press':
-        if (sel) {
-          lines.push(`        el = driver.find_element(${sel})`)
-          lines.push(`        from appium.webdriver.common.touch_action import TouchAction`)
-          lines.push(`        TouchAction(driver).long_press(el, duration=1000).perform()`)
-        }
+        lines.push(`        el = driver.find_element(${sel})`)
+        lines.push(`        from appium.webdriver.common.touch_action import TouchAction`)
+        lines.push(`        TouchAction(driver).long_press(el, duration=1000).perform()`)
         break
       case 'input':
-        if (sel) {
-          lines.push(`        el = driver.find_element(${sel})`)
-          lines.push(`        el.clear()`)
-          lines.push(`        el.send_keys("${step.inputVal ?? ''}")`)
-        }
-        if (opts.assertions && sel) {
+        lines.push(`        el = driver.find_element(${sel})`)
+        lines.push(`        el.clear()`)
+        lines.push(`        el.send_keys("${step.inputVal ?? ''}")`)
+        if (opts.assertions) {
           lines.push(`        assert driver.find_element(${sel}).get_attribute("text") == "${step.inputVal ?? ''}"`)
         }
         break
       case 'swipe':
-        lines.push(`        driver.swipe(540, 1200, 540, ${step.dir === 'up' || step.dir === 'left' ? 400 : 1800}, 800)`)
+        lines.push(`        driver.execute_script("mobile: swipe", {"direction": "${step.dir ?? 'up'}"})`)
         break
       case 'scroll':
-        lines.push(`        driver.execute_script("mobile: scroll", {"direction": "down"})`)
+        lines.push(`        driver.execute_script("mobile: scroll", {"direction": "${step.dir ?? 'down'}"})`)
+        break
+      case 'back':
+        lines.push(`        driver.press_keycode(4)  # KEYCODE_BACK`)
+        break
+      case 'home':
+        lines.push(`        driver.press_keycode(3)  # KEYCODE_HOME`)
         break
       case 'hide_keyboard':
         lines.push(`        driver.hide_keyboard()`)
         break
       case 'assertion':
-        if (sel) lines.push(`        assert driver.find_element(${sel}).is_displayed()`)
+        lines.push(`        assert driver.find_element(${sel}).is_displayed()`)
         break
       case 'screenshot':
         lines.push(`        driver.save_screenshot(f"screenshot_step_${step.n}.png")`)
@@ -618,37 +703,33 @@ function generateJavaScript(
     const elText = step.el?.text ?? ''
     lines.push(`    // ${step.n}. ${label}${elText ? ` — ${elText}` : ''}`)
 
-    const sel = step.el
-      ? isAndroid
-        ? `$('android=new UiSelector().resourceId("${step.el.resourceId}")')`
-        : `$('~${step.el.accessId}')`
-      : null
+    const sel = jsByStr(step.el, isAndroid)
+    const hasEl = !!step.el
 
-    if (opts.smartWaits && sel) {
+    if (opts.smartWaits && hasEl) {
       lines.push(`    await ${sel}.waitForDisplayed({ timeout: 10000 })`)
+    }
+    if (!hasEl && ['tap', 'double_tap', 'long_press', 'input'].includes(step.type)) {
+      lines.push(`    // ⚠ Element not found — update selector before running`)
     }
 
     switch (step.type) {
       case 'tap':
-        if (sel) lines.push(`    await ${sel}.click()`)
+        lines.push(`    await ${sel}.click()`)
         break
       case 'double_tap':
-        if (sel) lines.push(`    await ${sel}.doubleClick()`)
+        lines.push(`    await ${sel}.doubleClick()`)
         break
       case 'long_press':
-        if (sel) {
-          lines.push(`    await browser.touchAction([`)
-          lines.push(`      { action: 'longPress', element: await ${sel} },`)
-          lines.push(`      { action: 'release' }`)
-          lines.push(`    ])`)
-        }
+        lines.push(`    await browser.touchAction([`)
+        lines.push(`      { action: 'longPress', element: await ${sel} },`)
+        lines.push(`      { action: 'release' }`)
+        lines.push(`    ])`)
         break
       case 'input':
-        if (sel) {
-          lines.push(`    await ${sel}.clearValue()`)
-          lines.push(`    await ${sel}.setValue('${step.inputVal ?? ''}')`)
-        }
-        if (opts.assertions && sel) {
+        lines.push(`    await ${sel}.clearValue()`)
+        lines.push(`    await ${sel}.setValue('${step.inputVal ?? ''}')`)
+        if (opts.assertions) {
           lines.push(`    expect(await ${sel}.getValue()).toBe('${step.inputVal ?? ''}')`)
         }
         break
@@ -656,13 +737,19 @@ function generateJavaScript(
         lines.push(`    await browser.execute('mobile: swipe', { direction: '${step.dir ?? 'up'}' })`)
         break
       case 'scroll':
-        lines.push(`    await browser.execute('mobile: scroll', { direction: 'down' })`)
+        lines.push(`    await browser.execute('mobile: scroll', { direction: '${step.dir ?? 'down'}' })`)
+        break
+      case 'back':
+        lines.push(`    await driver.pressKeyCode(4) // KEYCODE_BACK`)
+        break
+      case 'home':
+        lines.push(`    await driver.pressKeyCode(3) // KEYCODE_HOME`)
         break
       case 'hide_keyboard':
         lines.push(`    await driver.hideKeyboard()`)
         break
       case 'assertion':
-        if (sel) lines.push(`    await expect(${sel}).toBeDisplayed()`)
+        lines.push(`    await expect(${sel}).toBeDisplayed()`)
         break
       case 'screenshot':
         lines.push(`    await browser.saveScreenshot('./step_${step.n}.png')`)
@@ -715,40 +802,34 @@ function generateCSharp(
     const elText = step.el?.text ?? ''
     lines.push(`            // ${step.n}. ${label}${elText ? ` — ${elText}` : ''}`)
 
-    const byStr = step.el
-      ? isAndroid
-        ? `By.Id("${step.el.resourceId}")`
-        : `MobileBy.AccessibilityId("${step.el.accessId}")`
-      : null
+    const byStr = csByStr(step.el)
+    const hasEl = !!step.el
 
-    if (opts.smartWaits && byStr) {
+    if (opts.smartWaits && hasEl) {
       lines.push(`            new WebDriverWait(_driver, TimeSpan.FromSeconds(10))`)
       lines.push(`                .Until(ExpectedConditions.ElementExists(${byStr}));`)
+    }
+    if (!hasEl && ['tap', 'double_tap', 'long_press', 'input'].includes(step.type)) {
+      lines.push(`            // ⚠ Element not found — update selector before running`)
     }
 
     switch (step.type) {
       case 'tap':
-        if (byStr) lines.push(`            _driver.FindElement(${byStr}).Click();`)
+        lines.push(`            _driver.FindElement(${byStr}).Click();`)
         break
       case 'double_tap':
-        if (byStr) {
-          lines.push(`            var el${step.n} = _driver.FindElement(${byStr});`)
-          lines.push(`            new Actions(_driver).DoubleClick(el${step.n}).Perform();`)
-        }
+        lines.push(`            var el${step.n} = _driver.FindElement(${byStr});`)
+        lines.push(`            new Actions(_driver).DoubleClick(el${step.n}).Perform();`)
         break
       case 'long_press':
-        if (byStr) {
-          lines.push(`            var el${step.n} = _driver.FindElement(${byStr});`)
-          lines.push(`            new Actions(_driver).ClickAndHold(el${step.n}).Pause(TimeSpan.FromSeconds(1)).Release().Perform();`)
-        }
+        lines.push(`            var el${step.n} = _driver.FindElement(${byStr});`)
+        lines.push(`            new Actions(_driver).ClickAndHold(el${step.n}).Pause(TimeSpan.FromSeconds(1)).Release().Perform();`)
         break
       case 'input':
-        if (byStr) {
-          lines.push(`            var el${step.n} = _driver.FindElement(${byStr});`)
-          lines.push(`            el${step.n}.Clear();`)
-          lines.push(`            el${step.n}.SendKeys("${step.inputVal ?? ''}");`)
-        }
-        if (opts.assertions && byStr) {
+        lines.push(`            var el${step.n} = _driver.FindElement(${byStr});`)
+        lines.push(`            el${step.n}.Clear();`)
+        lines.push(`            el${step.n}.SendKeys("${step.inputVal ?? ''}");`)
+        if (opts.assertions) {
           lines.push(`            Assert.AreEqual("${step.inputVal ?? ''}", _driver.FindElement(${byStr}).GetAttribute("text"));`)
         }
         break
@@ -756,13 +837,19 @@ function generateCSharp(
         lines.push(`            _driver.ExecuteScript("mobile: swipe", new Dictionary<string, string> { { "direction", "${step.dir ?? 'up'}" } });`)
         break
       case 'scroll':
-        lines.push(`            _driver.ExecuteScript("mobile: scroll", new Dictionary<string, string> { { "direction", "down" } });`)
+        lines.push(`            _driver.ExecuteScript("mobile: scroll", new Dictionary<string, string> { { "direction", "${step.dir ?? 'down'}" } });`)
+        break
+      case 'back':
+        lines.push(`            _driver.Navigate().Back();`)
+        break
+      case 'home':
+        lines.push(`            _driver.PressKeyCode(AndroidKeyCode.Home);`)
         break
       case 'hide_keyboard':
         lines.push(`            _driver.HideKeyboard();`)
         break
       case 'assertion':
-        if (byStr) lines.push(`            Assert.IsTrue(_driver.FindElement(${byStr}).Displayed);`)
+        lines.push(`            Assert.IsTrue(_driver.FindElement(${byStr}).Displayed);`)
         break
       case 'screenshot':
         lines.push(`            ((ITakesScreenshot)_driver).GetScreenshot().SaveAsFile($"step_${step.n}.png");`)
@@ -812,39 +899,33 @@ function generateKotlin(
     const elText = step.el?.text ?? ''
     lines.push(`        // ${step.n}. ${label}${elText ? ` — ${elText}` : ''}`)
 
-    const byExpr = step.el
-      ? isAndroid
-        ? `AppiumBy.id("${step.el.resourceId}")`
-        : `AppiumBy.accessibilityId("${step.el.accessId}")`
-      : null
+    const byExpr = kotlinByStr(step.el)
+    const hasEl = !!step.el
 
-    if (opts.smartWaits && byExpr) {
+    if (opts.smartWaits && hasEl) {
       lines.push(`        WebDriverWait(driver, 10).until(ExpectedConditions.presenceOfElementLocated(${byExpr}))`)
+    }
+    if (!hasEl && ['tap', 'double_tap', 'long_press', 'input'].includes(step.type)) {
+      lines.push(`        // ⚠ Element not found — update selector before running`)
     }
 
     switch (step.type) {
       case 'tap':
-        if (byExpr) lines.push(`        driver.findElement(${byExpr}).click()`)
+        lines.push(`        driver.findElement(${byExpr}).click()`)
         break
       case 'double_tap':
-        if (byExpr) {
-          lines.push(`        val el${step.n} = driver.findElement(${byExpr})`)
-          lines.push(`        // TODO: double tap via TouchAction`)
-        }
+        lines.push(`        val el${step.n} = driver.findElement(${byExpr})`)
+        lines.push(`        Actions(driver).doubleClick(el${step.n}).perform()`)
         break
       case 'long_press':
-        if (byExpr) {
-          lines.push(`        val el${step.n} = driver.findElement(${byExpr})`)
-          lines.push(`        // TODO: long press via TouchAction`)
-        }
+        lines.push(`        val el${step.n} = driver.findElement(${byExpr})`)
+        lines.push(`        Actions(driver).clickAndHold(el${step.n}).pause(1000).release().perform()`)
         break
       case 'input':
-        if (byExpr) {
-          lines.push(`        val el${step.n} = driver.findElement(${byExpr})`)
-          lines.push(`        el${step.n}.clear()`)
-          lines.push(`        el${step.n}.sendKeys("${step.inputVal ?? ''}")`)
-        }
-        if (opts.assertions && byExpr) {
+        lines.push(`        val el${step.n} = driver.findElement(${byExpr})`)
+        lines.push(`        el${step.n}.clear()`)
+        lines.push(`        el${step.n}.sendKeys("${step.inputVal ?? ''}")`)
+        if (opts.assertions) {
           lines.push(`        assertEquals("${step.inputVal ?? ''}", driver.findElement(${byExpr}).getAttribute("text"))`)
         }
         break
@@ -852,13 +933,19 @@ function generateKotlin(
         lines.push(`        driver.executeScript("mobile: swipe", mapOf("direction" to "${step.dir ?? 'up'}"))`)
         break
       case 'scroll':
-        lines.push(`        driver.executeScript("mobile: scroll", mapOf("direction" to "down"))`)
+        lines.push(`        driver.executeScript("mobile: scroll", mapOf("direction" to "${step.dir ?? 'down'}"))`)
+        break
+      case 'back':
+        lines.push(`        driver.navigate().back()`)
+        break
+      case 'home':
+        lines.push(`        (driver as AndroidDriver).pressKey(KeyEvent(AndroidKey.HOME))`)
         break
       case 'hide_keyboard':
         lines.push(`        driver.hideKeyboard()`)
         break
       case 'assertion':
-        if (byExpr) lines.push(`        assertTrue(driver.findElement(${byExpr}).isDisplayed)`)
+        lines.push(`        assertTrue(driver.findElement(${byExpr}).isDisplayed)`)
         break
       case 'screenshot':
         lines.push(`        (driver as TakesScreenshot).getScreenshotAs(OutputType.FILE).copyTo(File("step_${step.n}.png"))`)
