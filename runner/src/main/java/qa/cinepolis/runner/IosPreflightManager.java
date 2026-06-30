@@ -50,21 +50,31 @@ public class IosPreflightManager {
         public final String  coreDeviceId;
         /** System.currentTimeMillis() at the moment this result was created. */
         public final long    confirmedAtMs;
+        /** transportType as reported by devicectl — WIRED, LOCAL_NETWORK, or UNKNOWN. */
+        public final String  transportType;
+        /** Runner's definitive readiness decision — false when transport/tunnel/pairing block execution. */
+        public final boolean readyForExecution;
+        /** Human-readable reason when readyForExecution=false; null when ready. */
+        public final String  notReadyReason;
 
         IosPreflightResult(String teamId, String iosVersion,
                            String wdaBundleId, boolean wdaCached, boolean wdaReady,
                            boolean xctraceConfirmed, String tunnelState,
-                           String pairingState, String coreDeviceId) {
-            this.teamId           = teamId;
-            this.iosVersion       = iosVersion;
-            this.wdaBundleId      = wdaBundleId;
-            this.wdaCached        = wdaCached;
-            this.wdaReady         = wdaReady;
-            this.xctraceConfirmed = xctraceConfirmed;
-            this.tunnelState      = tunnelState  != null ? tunnelState  : "unknown";
-            this.pairingState     = pairingState != null ? pairingState : "unknown";
-            this.coreDeviceId     = coreDeviceId != null ? coreDeviceId : "";
-            this.confirmedAtMs    = System.currentTimeMillis();
+                           String pairingState, String coreDeviceId,
+                           String transportType, boolean readyForExecution, String notReadyReason) {
+            this.teamId            = teamId;
+            this.iosVersion        = iosVersion;
+            this.wdaBundleId       = wdaBundleId;
+            this.wdaCached         = wdaCached;
+            this.wdaReady          = wdaReady;
+            this.xctraceConfirmed  = xctraceConfirmed;
+            this.tunnelState       = tunnelState   != null ? tunnelState   : "unknown";
+            this.pairingState      = pairingState  != null ? pairingState  : "unknown";
+            this.coreDeviceId      = coreDeviceId  != null ? coreDeviceId  : "";
+            this.confirmedAtMs     = System.currentTimeMillis();
+            this.transportType     = transportType != null ? transportType : "UNKNOWN";
+            this.readyForExecution = readyForExecution;
+            this.notReadyReason    = notReadyReason;
         }
     }
 
@@ -141,26 +151,53 @@ public class IosPreflightManager {
             wdaCached = false;
         }
 
+        // ── Compute Runner readiness decision — mirrors DeviceReadinessEvaluator logic ──
+        // This determination is final: the Framework must not attempt recovery when
+        // readyForExecution=false. The Runner is the single authority.
+        boolean readyForExecution;
+        String  notReadyReason;
+        if (tunnel.transportType == DevicectlParser.TransportType.UNKNOWN) {
+            readyForExecution = false;
+            notReadyReason    = "Tipo de transporte no identificado (transportType=UNKNOWN)";
+        } else if (tunnel.transportType == DevicectlParser.TransportType.LOCAL_NETWORK
+                && !"connected".equalsIgnoreCase(tunnel.tunnelState)) {
+            readyForExecution = false;
+            notReadyReason    = "Wi-Fi / Bonjour — túnel CoreDevice " + tunnel.tunnelState
+                              + " (conecta USB o ejecuta: xcrun devicectl device connection connect)";
+        } else if ("unpaired".equalsIgnoreCase(tunnel.pairingState)) {
+            readyForExecution = false;
+            notReadyReason    = "Dispositivo no emparejado — desbloquea el iPhone y acepta «Confiar en este Mac»";
+        } else {
+            readyForExecution = true;   // system health confirmed by DependencySelfHealingManager
+            notReadyReason    = null;
+        }
+
         String tunnelSummary = "connected".equalsIgnoreCase(tunnel.tunnelState)
                 ? tunnel.tunnelState + " ✅"
                 : tunnel.tunnelState + " ⚠️";
         client.sendLog(executionId, "INFO",
                 "🍎 ════════════ iOS Pre-flight completo ════════════\n"
-                + "   Team ID    : " + (teamId.isBlank()    ? "no detectado ⚠️" : teamId + " ✅") + "\n"
-                + "   iOS        : " + (iosVersion.isBlank() ? "desconocida"     : iosVersion) + "\n"
-                + "   Tunnel     : " + tunnelSummary
+                + "   Team ID          : " + (teamId.isBlank()    ? "no detectado ⚠️" : teamId + " ✅") + "\n"
+                + "   iOS              : " + (iosVersion.isBlank() ? "desconocida"     : iosVersion) + "\n"
+                + "   Transport        : " + tunnel.transportType + "\n"
+                + "   Tunnel           : " + tunnelSummary
                 + (tunnel.coreDeviceId.isBlank() ? "" : "  (" + tunnel.coreDeviceId + ")") + "\n"
-                + "   UDID       : " + udid + "  ← appium:udid\n"
-                + "   WDA bundle : " + wdaBundleId + "\n"
-                + "   WDA caché  : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
-                + "   WDA activo : " + (wdaReady  ? "sí ✅" : "iniciará con Appium"));
+                + "   ReadyForExecution: " + (readyForExecution ? "✅ true"
+                        : "❌ false — " + notReadyReason) + "\n"
+                + "   UDID             : " + udid + "  ← appium:udid\n"
+                + "   WDA bundle       : " + wdaBundleId + "\n"
+                + "   WDA caché        : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
+                + "   WDA activo       : " + (wdaReady  ? "sí ✅" : "iniciará con Appium"));
 
         return new IosPreflightResult(
             teamId, iosVersion, wdaBundleId, wdaCached, wdaReady,
             tunnel.xctraceVisible,
             tunnel.tunnelState,
             tunnel.pairingState,
-            tunnel.coreDeviceId
+            tunnel.coreDeviceId,
+            tunnel.transportType.name(),
+            readyForExecution,
+            notReadyReason
         );
     }
 

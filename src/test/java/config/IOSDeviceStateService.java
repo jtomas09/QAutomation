@@ -267,6 +267,21 @@ public final class IOSDeviceStateService {
             }
             DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
             if (info == null) return none;
+
+            // Transport type consistency gate — if the Runner declared a transportType,
+            // compare with what devicectl reports now. A mismatch means the device
+            // changed connectivity (USB→WiFi or WiFi→USB) during the execution.
+            String runnerTransport = System.getProperty("iosState.transportType");
+            if (runnerTransport != null && !runnerTransport.isBlank() && info.transportType != null) {
+                String freshTransport = info.transportType.name();
+                if (!runnerTransport.equalsIgnoreCase(freshTransport)) {
+                    log.error("[DeviceState] INCONSISTENCIA DE TRANSPORTE detectada — "
+                            + "Runner={} | devicectl ahora={} (UDID: {}) — "
+                            + "el dispositivo puede haber cambiado de conectividad durante la ejecución.",
+                            runnerTransport, freshTransport, udid);
+                }
+            }
+
             return new String[]{
                 info.tunnelState,
                 info.pairingState,

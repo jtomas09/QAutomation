@@ -50,6 +50,7 @@ public final class IOSDeviceSynchronizationManager {
         XCTRACE_NOT_VISIBLE,          // neither tool can see the device
         XCTRACE_DEVICE_NOT_VISIBLE,   // CoreDevice visible, xctrace never sees device after recovery
         TUNNEL_DISCONNECTED,          // confirmed tunnel=disconnected AND xctrace never became visible
+        RUNNER_CONFIRMED_NOT_READY,   // Runner set readyForExecution=false — Framework must not recover
         WDA_BUILD_FAILED,             // xcodebuild failed to compile WebDriverAgent
         WDA_SIGNING_FAILED,           // code-signing error during WDA build
         APPIUM_DRIVER_NOT_FOUND,      // XCUITest driver not installed (generic)
@@ -134,7 +135,39 @@ public final class IOSDeviceSynchronizationManager {
             return;
         }
 
-        // ── Device not visible in xctrace — run full diagnostic ──
+        // ── Runner is the authority: device not visible but Runner provided state ──
+        // Do NOT attempt recovery — xcrun xctrace/devicectl/killall remotedeviced must not
+        // run here. The Runner already determined and communicated the definitive state.
+        if (state.fromRunner) {
+            IOSDeviceState ios = IOSDeviceState.fromRunnerProps();
+            if (!ios.runnerReadyForExecution) {
+                String reason = ios.runnerNotReadyReason.isBlank()
+                        ? "causa desconocida" : ios.runnerNotReadyReason;
+                log.error("[DeviceSync] Runner confirmó readyForExecution=false — "
+                        + "recuperación cancelada. Razón: {}", reason);
+                throw new SyncException(
+                    SyncCategory.RUNNER_CONFIRMED_NOT_READY,
+                    "[DeviceSync] Runner determinó readyForExecution=false para " + udid
+                    + ". Razón: " + reason,
+                    "El Runner verificó que este dispositivo no puede iniciar sesión Appium.\n"
+                    + "  Razón: " + reason + "\n"
+                    + "  Revisa el estado en el Dashboard o reconecta el dispositivo.");
+            }
+            // readyForExecution=true but xctraceVisible=false — device may have disconnected
+            // between Runner preflight and Gradle execution. Abort without recovery.
+            String transport = ios.transportType.isBlank() ? "?" : ios.transportType;
+            log.error("[DeviceSync] Runner confirmó readyForExecution=true (transport={}) "
+                    + "pero xctrace no ve el dispositivo en Gradle — "
+                    + "posible desconexión tras el preflight.", transport);
+            throw new SyncException(
+                SyncCategory.XCTRACE_NOT_VISIBLE,
+                "[DeviceSync] Runner confirmó listo (transport=" + transport
+                + ") pero xctrace no detecta " + udid + " al iniciar Gradle.",
+                "El dispositivo puede haberse desconectado entre el preflight y la ejecución.\n"
+                + "  Reconecta el cable USB y reintenta desde el Dashboard.");
+        }
+
+        // ── Device not visible in xctrace — run full diagnostic (no Runner state) ──
         log.info("[DeviceSync] ══ Validando sincronización del dispositivo ══");
         log.info("[DeviceSync] UDID: {}", udid);
         logState(log, state, 0, 0);
@@ -177,6 +210,19 @@ public final class IOSDeviceSynchronizationManager {
 
     private static void recoverDesync(String udid, IOSDeviceStateService.DeviceState initial,
                                        Logger log, long startMs) {
+        // Safety invariant: recoverDesync() must never run when state came from the Runner.
+        // ensureReady() gates on !state.fromRunner before calling this method.
+        // If we reach here with fromRunner=true it is a logic error — abort immediately.
+        if (initial.fromRunner) {
+            log.error("[DeviceSync] recoverDesync() invocado con estado del Runner (fromRunner=true) — "
+                    + "abortando para preservar la autoridad del Runner sobre el estado del dispositivo.");
+            throw new SyncException(
+                SyncCategory.RUNNER_CONFIRMED_NOT_READY,
+                "[DeviceSync] recoverDesync() no debe ejecutarse cuando el Runner ya confirmó el estado.",
+                "El Runner es la única autoridad para el estado del dispositivo.\n"
+                + "  Reinicia la ejecución desde el Dashboard.");
+        }
+
         String coreDeviceId = initial.coreDeviceId;
         long   deadline     = startMs + (MAX_RECOVERY_TOTAL_SECONDS * 1_000L);
 

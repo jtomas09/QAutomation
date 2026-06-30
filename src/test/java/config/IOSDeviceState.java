@@ -63,6 +63,27 @@ public final class IOSDeviceState {
     /** Epoch-ms timestamp when the Runner confirmed the device state. */
     public final long confirmedAt;
 
+    // ── Runner DeviceAvailability fields (from -DiosState.transportType/readyForExecution/notReadyReason) ──
+
+    /**
+     * Transport type as reported by devicectl at preflight time — WIRED, LOCAL_NETWORK, or UNKNOWN.
+     * Set by IosPreflightManager via JobExecutor. Empty string when Runner did not provide this.
+     */
+    public final String  transportType;
+
+    /**
+     * Runner's definitive readiness decision for Appium session creation.
+     * False when transport/tunnel/pairing/system-health block execution.
+     * IOSDeviceSynchronizationManager must not attempt recovery when this is false.
+     */
+    public final boolean runnerReadyForExecution;
+
+    /**
+     * Human-readable explanation when runnerReadyForExecution=false.
+     * Empty string when ready. Use this instead of attempting recovery.
+     */
+    public final String  runnerNotReadyReason;
+
     // ── Private constructor ───────────────────────────────────────────────────
 
     private IOSDeviceState(
@@ -72,29 +93,33 @@ public final class IOSDeviceState {
             String  teamId,            String bundleId,
             String  updatedWDABundleId, String webDriverAgentUrl,
             boolean xcuitestInstalled, boolean wdaPrebuilt,
-            long    confirmedAt) {
+            long    confirmedAt,
+            String  transportType,     boolean runnerReadyForExecution, String runnerNotReadyReason) {
 
-        this.xctraceVisible     = xctraceVisible;
-        this.coreDeviceVisible  = coreDeviceVisible;
-        this.tunnelConnected    = tunnelConnected;
-        this.paired             = paired;
-        this.physicalUdid       = safe(physicalUdid);
-        this.coreDeviceId       = safe(coreDeviceId);
-        this.platformVersion    = safe(platformVersion);
-        this.teamId             = safe(teamId);
-        this.bundleId           = safe(bundleId);
-        this.updatedWDABundleId = safe(updatedWDABundleId);
-        this.webDriverAgentUrl  = safe(webDriverAgentUrl);
-        this.xcuitestInstalled  = xcuitestInstalled;
-        this.wdaPrebuilt        = wdaPrebuilt;
+        this.xctraceVisible          = xctraceVisible;
+        this.coreDeviceVisible       = coreDeviceVisible;
+        this.tunnelConnected         = tunnelConnected;
+        this.paired                  = paired;
+        this.physicalUdid            = safe(physicalUdid);
+        this.coreDeviceId            = safe(coreDeviceId);
+        this.platformVersion         = safe(platformVersion);
+        this.teamId                  = safe(teamId);
+        this.bundleId                = safe(bundleId);
+        this.updatedWDABundleId      = safe(updatedWDABundleId);
+        this.webDriverAgentUrl       = safe(webDriverAgentUrl);
+        this.xcuitestInstalled       = xcuitestInstalled;
+        this.wdaPrebuilt             = wdaPrebuilt;
         // All critical conditions must hold. notReadyReason() explains the first failure.
-        this.ready              = xctraceVisible
-                               && coreDeviceVisible
-                               && paired
-                               && xcuitestInstalled
-                               && !safe(teamId).isEmpty()
-                               && !safe(bundleId).isEmpty();
-        this.confirmedAt        = confirmedAt;
+        this.ready                   = xctraceVisible
+                                    && coreDeviceVisible
+                                    && paired
+                                    && xcuitestInstalled
+                                    && !safe(teamId).isEmpty()
+                                    && !safe(bundleId).isEmpty();
+        this.confirmedAt             = confirmedAt;
+        this.transportType           = safe(transportType);
+        this.runnerReadyForExecution = runnerReadyForExecution;
+        this.runnerNotReadyReason    = safe(runnerNotReadyReason);
     }
 
     // ── Factory ───────────────────────────────────────────────────────────────
@@ -122,23 +147,28 @@ public final class IOSDeviceState {
                 System.getProperty("iosState.tunnelState", "unknown").trim());
         boolean paired            = !"unpaired".equalsIgnoreCase(
                 System.getProperty("iosState.pairingState", "paired").trim());
-        boolean xcuitestInstalled = "true".equalsIgnoreCase(
+        boolean xcuitestInstalled      = "true".equalsIgnoreCase(
                 System.getProperty("appiumXcuitestInstalled", "false").trim());
-        boolean wdaPrebuilt       = "true".equalsIgnoreCase(
+        boolean wdaPrebuilt            = "true".equalsIgnoreCase(
                 System.getProperty("wdaPrebuilt", "false").trim());
+        String  transportType          = System.getProperty("iosState.transportType", "");
+        boolean runnerReadyForExecution = "true".equalsIgnoreCase(
+                System.getProperty("iosState.readyForExecution", "true").trim());
+        String  runnerNotReadyReason   = System.getProperty("iosState.notReadyReason", "");
 
         return new IOSDeviceState(
                 xctraceVisible,    coreDeviceVisible,
                 tunnelConnected,   paired,
-                System.getProperty("udid",                ""),
+                System.getProperty("udid",                  ""),
                 System.getProperty("iosState.coreDeviceId", ""),
-                System.getProperty("platformVersion",     ""),
-                System.getProperty("xcodeOrgId",          ""),
-                System.getProperty("bundleId",            ""),
-                System.getProperty("updatedWDABundleId",  ""),
-                System.getProperty("webDriverAgentUrl",   ""),
+                System.getProperty("platformVersion",       ""),
+                System.getProperty("xcodeOrgId",            ""),
+                System.getProperty("bundleId",              ""),
+                System.getProperty("updatedWDABundleId",    ""),
+                System.getProperty("webDriverAgentUrl",     ""),
                 xcuitestInstalled, wdaPrebuilt,
-                confirmedAt
+                confirmedAt,
+                transportType, runnerReadyForExecution, runnerNotReadyReason
         );
     }
 
@@ -151,7 +181,8 @@ public final class IOSDeviceState {
                 false, false, false, false,
                 "", "", "", "", "", "", "",
                 false, false,
-                System.currentTimeMillis()
+                System.currentTimeMillis(),
+                "", false, ""
         );
     }
 
@@ -229,11 +260,14 @@ public final class IOSDeviceState {
 
     @Override
     public String toString() {
-        String readyStr = ready ? "✅" : ("❌ (" + notReadyReason() + ")");
+        String readyStr        = ready ? "✅" : ("❌ (" + notReadyReason() + ")");
+        String runnerReadyStr  = runnerReadyForExecution ? "✅"
+                : ("❌ (" + (runnerNotReadyReason.isEmpty() ? "?" : runnerNotReadyReason) + ")");
         return String.format(
-                "[IOSDeviceState udid=%s xctrace=%s coreDevice=%s tunnel=%s paired=%s " +
-                "xcuitest=%s teamId=%s bundleId=%s wdaPrebuilt=%s ready=%s age=%ds]",
+                "[IOSDeviceState udid=%s transport=%s xctrace=%s coreDevice=%s tunnel=%s paired=%s " +
+                "xcuitest=%s teamId=%s bundleId=%s wdaPrebuilt=%s ready=%s runnerReady=%s age=%ds]",
                 physicalUdid.isEmpty() ? "(none)" : physicalUdid,
+                transportType.isEmpty() ? "?" : transportType,
                 xctraceVisible    ? "✅" : "❌",
                 coreDeviceVisible ? "✅" : "❌",
                 tunnelConnected   ? "connected ✅" : "disconnected ⚠️",
@@ -243,6 +277,7 @@ public final class IOSDeviceState {
                 bundleId.isEmpty() ? "❌" : "✅",
                 wdaPrebuilt       ? "✅" : "❌",
                 readyStr,
+                runnerReadyStr,
                 ageSeconds()
         );
     }

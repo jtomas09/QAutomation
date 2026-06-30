@@ -647,17 +647,24 @@ public class JobExecutor {
                     // the Runner-confirmed state without running any new subprocess — which
                     // prevents IOSDeviceSynchronizationManager from querying xctrace again
                     // and getting a stale "not visible" result seconds after Runner confirmed ready.
-                    cmd.add("-DiosState.xctraceVisible="    + iosResult.xctraceConfirmed);
+                    cmd.add("-DiosState.xctraceVisible="     + iosResult.xctraceConfirmed);
                     cmd.add("-DiosState.coreDeviceVisible=true");
-                    cmd.add("-DiosState.tunnelState="       + iosResult.tunnelState);
-                    cmd.add("-DiosState.pairingState="      + iosResult.pairingState);
+                    cmd.add("-DiosState.tunnelState="        + iosResult.tunnelState);
+                    cmd.add("-DiosState.pairingState="       + iosResult.pairingState);
                     if (!iosResult.coreDeviceId.isBlank())
-                        cmd.add("-DiosState.coreDeviceId="  + iosResult.coreDeviceId);
-                    cmd.add("-DiosState.confirmedAtMs="     + iosResult.confirmedAtMs);
+                        cmd.add("-DiosState.coreDeviceId="   + iosResult.coreDeviceId);
+                    cmd.add("-DiosState.confirmedAtMs="      + iosResult.confirmedAtMs);
+                    // Single-source-of-truth fields — Framework must not recalculate these
+                    cmd.add("-DiosState.transportType="      + iosResult.transportType);
+                    cmd.add("-DiosState.readyForExecution="  + iosResult.readyForExecution);
+                    if (iosResult.notReadyReason != null && !iosResult.notReadyReason.isBlank())
+                        cmd.add("-DiosState.notReadyReason=" + iosResult.notReadyReason);
                     client.sendLog(job.executionId, "INFO",
                             "[JobExecutor] 🔗 Estado dispositivo → Gradle: xctrace="
-                            + iosResult.xctraceConfirmed + " tunnel=" + iosResult.tunnelState
-                            + " pairing=" + iosResult.pairingState);
+                            + iosResult.xctraceConfirmed + " transport=" + iosResult.transportType
+                            + " tunnel=" + iosResult.tunnelState + " pairing=" + iosResult.pairingState
+                            + " readyForExecution=" + iosResult.readyForExecution
+                            + (iosResult.notReadyReason != null ? " reason=" + iosResult.notReadyReason : ""));
                 }
             }
 
