@@ -2831,6 +2831,8 @@ interface StepsPanelProps {
   steps: RecStep[]
   recording: boolean
   isDraft: boolean
+  savedSuiteName: string | null
+  hasChangesAfterSave: boolean
   selectedStepId: string | null
   onDeleteStep: (id: string) => void
   onDuplicateStep: (id: string) => void
@@ -2859,6 +2861,8 @@ const StepsPanel = React.memo(function StepsPanel({
   steps,
   recording,
   isDraft,
+  savedSuiteName,
+  hasChangesAfterSave,
   selectedStepId,
   onDeleteStep,
   onDuplicateStep,
@@ -2940,23 +2944,58 @@ const StepsPanel = React.memo(function StepsPanel({
                 <Layers3 size={13} color="#818cf8" />
               </div>
               <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 13 }}>Pasos Grabados</span>
-              {isDraft && steps.length > 0 && (
-                <span
-                  title="Pasos recuperados de sesión anterior — guarda para no perderlos"
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: '#f59e0b',
-                    background: 'rgba(245,158,11,0.12)',
-                    border: '1px solid rgba(245,158,11,0.3)',
-                    borderRadius: 4,
-                    padding: '1px 5px',
-                    letterSpacing: 0.3,
-                  }}
-                >
-                  sin guardar
-                </span>
-              )}
+              {steps.length > 0 && (() => {
+                if (savedSuiteName && !hasChangesAfterSave) {
+                  return (
+                    <span
+                      title={`Grabación guardada en "${savedSuiteName}"`}
+                      style={{
+                        fontSize: 9, fontWeight: 700,
+                        color: '#34d399',
+                        background: 'rgba(52,211,153,0.12)',
+                        border: '1px solid rgba(52,211,153,0.3)',
+                        borderRadius: 4, padding: '1px 5px', letterSpacing: 0.3,
+                        display: 'flex', alignItems: 'center', gap: 3,
+                      }}
+                    >
+                      ✓ {savedSuiteName.length > 18 ? savedSuiteName.slice(0, 16) + '…' : savedSuiteName}
+                    </span>
+                  )
+                }
+                if (savedSuiteName && hasChangesAfterSave) {
+                  return (
+                    <span
+                      title="Hay cambios sin guardar desde el último guardado"
+                      style={{
+                        fontSize: 9, fontWeight: 700,
+                        color: '#f97316',
+                        background: 'rgba(249,115,22,0.12)',
+                        border: '1px solid rgba(249,115,22,0.3)',
+                        borderRadius: 4, padding: '1px 5px', letterSpacing: 0.3,
+                      }}
+                    >
+                      cambios sin guardar
+                    </span>
+                  )
+                }
+                if (isDraft) {
+                  return (
+                    <span
+                      title="Pasos recuperados de sesión anterior — guarda para no perderlos"
+                      style={{
+                        fontSize: 9, fontWeight: 700,
+                        color: '#f59e0b',
+                        background: 'rgba(245,158,11,0.12)',
+                        border: '1px solid rgba(245,158,11,0.3)',
+                        borderRadius: 4, padding: '1px 5px', letterSpacing: 0.3,
+                      }}
+                    >
+                      sin guardar
+                    </span>
+                  )
+                }
+                return null
+              })()}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {steps.length > 0 && (
@@ -4247,6 +4286,7 @@ interface SaveSuiteModalProps {
     country: string
     mode: 'caso' | 'suite'
     targetSuiteId?: string
+    newSuiteName?: string
   }) => void
 }
 
@@ -4261,6 +4301,7 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
   const [description,   setDescription]   = useState('')
   const [country,       setCountry]       = useState('mexico')
   const [targetSuiteId, setTargetSuiteId] = useState('')
+  const [newSuiteName,  setNewSuiteName]  = useState('')
   const [saved,         setSaved]         = useState(false)
 
   const isSuite = mode === 'suite'
@@ -4276,14 +4317,18 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
 
   const selectedSuite = existingSuites.find(s => s.id === targetSuiteId)
 
+  const isCreatingNew = targetSuiteId === '__new__'
+  const canSave = name.trim() && (!isCreatingNew || newSuiteName.trim())
+
   const handleSave = () => {
-    if (!name.trim()) return
+    if (!canSave) return
     onConfirm({
-      name: name.trim(),
-      description: description.trim(),
+      name:         name.trim(),
+      description:  description.trim(),
       country,
       mode,
-      targetSuiteId: targetSuiteId || undefined,
+      targetSuiteId: (!isCreatingNew && targetSuiteId) ? targetSuiteId : undefined,
+      newSuiteName:  isCreatingNew ? newSuiteName.trim() : undefined,
     })
     setSaved(true)
     setTimeout(onClose, 1400)
@@ -4410,15 +4455,15 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
               />
             </div>
 
-            {/* Suite selector — only for 'caso' mode when suites exist */}
-            {!isSuite && existingSuites.length > 0 && (
+            {/* Suite selector — visible in 'caso' mode always */}
+            {!isSuite && (
               <div>
                 <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 600 }}>
                   Agregar a Suite <span style={{ color: '#475569', fontWeight: 400 }}>(opcional)</span>
                 </label>
                 <select
                   value={targetSuiteId}
-                  onChange={(e) => setTargetSuiteId(e.target.value)}
+                  onChange={(e) => { setTargetSuiteId(e.target.value); setNewSuiteName('') }}
                   style={{
                     width: '100%',
                     backgroundColor: '#0d1117',
@@ -4439,8 +4484,37 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
                       {s.icon} {s.name}
                     </option>
                   ))}
+                  <option value="__new__">+ Crear nueva Suite…</option>
                 </select>
-                {selectedSuite && (
+
+                {/* Inline new-suite name input */}
+                {isCreatingNew && (
+                  <div style={{ marginTop: 8 }}>
+                    <input
+                      autoFocus
+                      value={newSuiteName}
+                      onChange={(e) => setNewSuiteName(e.target.value)}
+                      placeholder="Nombre de la nueva Suite…"
+                      style={{
+                        width: '100%',
+                        backgroundColor: '#0d1117',
+                        border: `1px solid ${newSuiteName.trim() ? accent + '66' : 'rgba(255,255,255,0.15)'}`,
+                        borderRadius: 7,
+                        color: '#e2e8f0',
+                        padding: '7px 11px',
+                        fontSize: 12,
+                        boxSizing: 'border-box',
+                        outline: 'none',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <p style={{ margin: '4px 0 0', fontSize: 10, color: '#64748b' }}>
+                      Se creará la suite y el caso quedará dentro de ella.
+                    </p>
+                  </div>
+                )}
+
+                {selectedSuite && !isCreatingNew && (
                   <p style={{ margin: '5px 0 0', fontSize: 11, color: accent }}>
                     Se agregará a: <strong>{selectedSuite.name}</strong>
                   </p>
@@ -4487,19 +4561,19 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
             {/* Save button */}
             <button
               onClick={handleSave}
-              disabled={!name.trim()}
+              disabled={!canSave}
               style={{
                 width: '100%',
                 padding: '10px 0',
-                background: name.trim()
+                background: canSave
                   ? `linear-gradient(90deg, ${accent}, #a5b4fc)`
                   : 'rgba(255,255,255,0.05)',
                 border: 'none',
                 borderRadius: 8,
-                color: name.trim() ? '#fff' : '#475569',
+                color: canSave ? '#fff' : '#475569',
                 fontSize: 13,
                 fontWeight: 700,
-                cursor: name.trim() ? 'pointer' : 'not-allowed',
+                cursor: canSave ? 'pointer' : 'not-allowed',
                 marginTop: 2,
                 display: 'flex',
                 alignItems: 'center',
@@ -4511,9 +4585,11 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
               {isSuite ? <Layers3 size={13} /> : <CheckCircle size={13} />}
               {isSuite
                 ? 'Guardar Suite'
-                : selectedSuite
-                  ? `Guardar y agregar a ${selectedSuite.name}`
-                  : 'Guardar Caso de Prueba'
+                : isCreatingNew
+                  ? `Guardar y crear Suite "${newSuiteName.trim() || '…'}"`
+                  : selectedSuite
+                    ? `Guardar y agregar a ${selectedSuite.name}`
+                    : 'Guardar Caso de Prueba'
               }
             </button>
           </>
@@ -4826,6 +4902,9 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [className, setClassName] = useState('CinepolisTest')
   const [showSave, setShowSave] = useState<'caso' | 'suite' | null>(null)
   const [copied, setCopied] = useState(false)
+  const [savedSuiteInfo, setSavedSuiteInfo] = useState<{ id: string; name: string } | null>(null)
+  const [savedStepIds, setSavedStepIds] = useState<string[]>([])
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [sessionStart, setSessionStart] = useState<Date | null>(null)
   const [infoExpanded, setInfoExpanded] = useState(true)
   const [debugMode, setDebugMode] = useState(false)
@@ -5169,9 +5248,20 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     URL.revokeObjectURL(url)
   }, [viewTab, generatedCode, generatedXML, className])
 
+  // ── Save state helpers ─────────────────────────────────────────────────────
+  const hasChangedAfterSave = savedSuiteInfo !== null && (
+    steps.length !== savedStepIds.length ||
+    steps.some((s, i) => s.id !== savedStepIds[i])
+  )
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 3500)
+  }, [])
+
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(
-    (data: { name: string; description: string; country: string; mode: 'caso' | 'suite'; targetSuiteId?: string }) => {
+    (data: { name: string; description: string; country: string; mode: 'caso' | 'suite'; targetSuiteId?: string; newSuiteName?: string }) => {
       // Detect platform from first step that has an element with platform info
       const detectedPlatform =
         steps.find(s => s.el?.platform)?.el?.platform ??
@@ -5227,11 +5317,49 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         generatedXML,
         pageObjects,
       })
+      // Link to existing suite or create a new parent suite on the fly
       if (data.targetSuiteId) {
         suiteService.addCaseToSuite(data.targetSuiteId, newSuite.id)
+      } else if (data.newSuiteName) {
+        const parentSuite = suiteService.saveFromRecording({
+          name:          data.newSuiteName,
+          description:   '',
+          country:       data.country,
+          mode:          'suite',
+          platform:      detectedPlatform,
+          device:        selectedDevice?.deviceName ?? '',
+          udid:          selectedDevice?.udid ?? '',
+          appName:       appConfig?.appName ?? '',
+          appPackage:    appConfig?.appPackage ?? appConfig?.bundleId ?? '',
+          steps:         [],
+          lang,
+          generatedCode: '',
+          generatedXML:  '',
+          pageObjects:   '',
+        })
+        suiteService.addCaseToSuite(parentSuite.id, newSuite.id)
       }
+
+      // Update save indicator in Steps panel
+      setSavedSuiteInfo({ id: newSuite.id, name: data.name })
+      setSavedStepIds(steps.map(s => s.id))
+
       // Clear draft — steps are now persisted in the suite store
       clearDraft()
+
+      // Toast notification
+      const targetName = data.newSuiteName
+        ? data.newSuiteName
+        : data.targetSuiteId
+          ? suiteService.getSuite(data.targetSuiteId)?.name ?? ''
+          : ''
+      if (data.mode === 'caso' && targetName) {
+        showToast(`Caso agregado a la Suite "${targetName}"`)
+      } else if (data.mode === 'caso') {
+        showToast(`Caso de prueba "${data.name}" guardado correctamente`)
+      } else {
+        showToast(`Suite "${data.name}" guardada correctamente`)
+      }
 
       if (debugMode) {
         console.group('[RecordStudio] Suite saved')
@@ -5246,7 +5374,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         console.groupEnd()
       }
     },
-    [steps, generatedCode, generatedXML, generatedXML, lang, selectedDevice, appConfig, debugMode],
+    [steps, generatedCode, generatedXML, lang, selectedDevice, appConfig, debugMode, showToast, setSavedSuiteInfo, setSavedStepIds],
   )
 
   // ── Export ─────────────────────────────────────────────────────────────────
@@ -6051,7 +6179,9 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           <StepsPanel
             steps={steps}
             recording={recState === 'recording'}
-            isDraft={recState === 'idle' && steps.length > 0}
+            isDraft={recState === 'idle' && steps.length > 0 && savedSuiteInfo === null}
+            savedSuiteName={savedSuiteInfo?.name ?? null}
+            hasChangesAfterSave={hasChangedAfterSave}
             selectedStepId={selectedStepId}
             onDeleteStep={handleDeleteStep}
             onDuplicateStep={handleDuplicateStep}
@@ -6122,6 +6252,36 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               handleSave(data)
             }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ── Toast notification ── */}
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            style={{
+              position: 'fixed',
+              bottom: 28,
+              right: 28,
+              zIndex: 9999,
+              background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+              border: '1px solid rgba(52,211,153,0.35)',
+              borderRadius: 10,
+              padding: '11px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 9,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(52,211,153,0.15)',
+              maxWidth: 340,
+            }}
+          >
+            <Check size={15} color="#34d399" style={{ flexShrink: 0 }} />
+            <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 500 }}>{toastMsg}</span>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

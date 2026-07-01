@@ -67,6 +67,10 @@ export interface Suite {
   savedAt:     string   // ISO
   updatedAt:   string   // ISO
 
+  // Suite membership
+  parentSuiteId?:  string    // set on 'caso' when it belongs to a suite
+  memberCaseIds?:  string[]  // set on 'suite' to list its member caso IDs
+
   // Display helpers
   icon:   string
   accent: string
@@ -80,6 +84,55 @@ const SESSIONS_KEY = 'qa_record_sessions'
 
 const SUITE_ICONS   = ['🎬', '🎭', '🎪', '🎨', '🎯', '🎮', '🎲', '🎰', '🎳', '🎻']
 const SUITE_ACCENTS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#14b8a6', '#f43f5e']
+
+// ── App icon map ──────────────────────────────────────────────────────────────
+
+const APP_ICON_RULES: Array<{ patterns: string[]; icon: string }> = [
+  { patterns: ['cinepolis', 'cinépolis', 'cine'],      icon: '🎬' },
+  { patterns: ['netflix'],                              icon: '🎞️' },
+  { patterns: ['youtube', 'ytmusic'],                   icon: '▶️' },
+  { patterns: ['spotify'],                              icon: '🎵' },
+  { patterns: ['tiktok'],                               icon: '🎶' },
+  { patterns: ['amazon', 'shopping'],                   icon: '🛒' },
+  { patterns: ['rappi', 'ubereats', 'uber_eats',
+                'doordash', 'delivery'],                icon: '🍔' },
+  { patterns: ['instagram'],                            icon: '📸' },
+  { patterns: ['facebook', '.fb.'],                     icon: '📘' },
+  { patterns: ['twitter', 'x.com', '.x.android'],      icon: '🐦' },
+  { patterns: ['whatsapp'],                             icon: '💬' },
+  { patterns: ['telegram'],                             icon: '✈️' },
+  { patterns: ['discord'],                              icon: '🎮' },
+  { patterns: ['slack'],                                icon: '🧩' },
+  { patterns: ['zoom'],                                 icon: '📹' },
+  { patterns: ['uber', 'lyft', 'didi', 'cabify'],      icon: '🚗' },
+  { patterns: ['airbnb'],                               icon: '🏠' },
+  { patterns: ['linkedin'],                             icon: '💼' },
+  { patterns: ['gmail', 'inbox'],                       icon: '📧' },
+  { patterns: ['maps', 'waze', 'navigation'],           icon: '🗺️' },
+  { patterns: ['chrome', 'firefox', 'safari',
+                'browser', 'webview'],                  icon: '🌐' },
+  { patterns: ['camera', 'photo', 'gallery'],           icon: '📷' },
+  { patterns: ['wallet', 'pay', 'bank', 'finance',
+                'bbva', 'santander', 'banamex'],        icon: '💳' },
+  { patterns: ['health', 'fitness', 'workout',
+                'strava', 'peloton'],                   icon: '💪' },
+  { patterns: ['weather', 'clima'],                     icon: '🌤️' },
+  { patterns: ['news', 'noticias'],                     icon: '📰' },
+  { patterns: ['game', 'games'],                        icon: '🕹️' },
+  { patterns: ['music', 'audio', 'podcast'],            icon: '🎵' },
+]
+
+/**
+ * Resolves an app-specific emoji icon from a package name + app name.
+ * Returns '' if no rule matches (caller falls back to rotation icon).
+ */
+export function resolveAppIcon(packageName: string, appName = ''): string {
+  const hay = `${packageName} ${appName}`.toLowerCase()
+  for (const rule of APP_ICON_RULES) {
+    if (rule.patterns.some(p => hay.includes(p))) return rule.icon
+  }
+  return ''
+}
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
@@ -179,11 +232,31 @@ class SuiteServiceImpl {
       pageObjects:   params.pageObjects,
       savedAt:       now,
       updatedAt:     now,
-      icon:          '',   // assigned by createSuite()
+      icon:          resolveAppIcon(params.appPackage, params.appName),  // '' → createSuite assigns rotation icon
       accent:        '',
       status:        'active',
     }
     return this.createSuite(suite)
+  }
+
+  // ── Suite membership ──────────────────────────────────────────────────────
+
+  /**
+   * Links a caso to a suite:
+   *  - appends caseId to suite.memberCaseIds
+   *  - sets caso.parentSuiteId
+   */
+  addCaseToSuite(suiteId: string, caseId: string): void {
+    const suite = this.getSuite(suiteId)
+    const caso  = this.getSuite(caseId)
+    if (!suite || !caso) return
+    const members = suite.memberCaseIds ?? []
+    if (!members.includes(caseId)) {
+      this.updateSuite(suiteId, { memberCaseIds: [...members, caseId] })
+    }
+    if (caso.parentSuiteId !== suiteId) {
+      this.updateSuite(caseId, { parentSuiteId: suiteId })
+    }
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import { suiteService } from '../services/SuiteService'
+import { suiteService, resolveAppIcon } from '../services/SuiteService'
 import type { Suite } from '../services/SuiteService'
 import {
   Layers3, Trash2, Play, PencilLine, MoreHorizontal,
@@ -207,6 +207,7 @@ function SuiteRow({ suite, onView, onDelete }: {
   const amb   = deriveAmbiente(suite)
   const tags  = deriveTags(suite)
   const pl    = platformLabel(suite.platform)
+  const icon  = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
 
   return (
     <div
@@ -228,7 +229,7 @@ function SuiteRow({ suite, onView, onDelete }: {
           background: `${suite.accent}22`, border: `1px solid ${suite.accent}44`,
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19,
         }}>
-          {suite.icon || '🎬'}
+          {icon}
         </div>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
@@ -402,6 +403,7 @@ function SuiteCard({ suite, onView, onDelete }: {
   const type = deriveTestType(suite)
   const amb  = deriveAmbiente(suite)
   const pl   = platformLabel(suite.platform)
+  const icon = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
 
   return (
     <div
@@ -422,7 +424,7 @@ function SuiteCard({ suite, onView, onDelete }: {
           background: `${suite.accent}22`, border: `1px solid ${suite.accent}44`,
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
         }}>
-          {suite.icon || '🎬'}
+          {icon}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
@@ -490,6 +492,7 @@ function SuiteCard({ suite, onView, onDelete }: {
 
 function DetailModal({ suite, onClose }: { suite: Suite; onClose: () => void }) {
   const [tab, setTab] = useState<'steps' | 'code' | 'pageobjects'>('steps')
+  const icon = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
 
   return (
     <div
@@ -515,7 +518,7 @@ function DetailModal({ suite, onClose }: { suite: Suite; onClose: () => void }) 
             background: `${suite.accent}22`, border: `1px solid ${suite.accent}44`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            {suite.icon || '🎬'}
+            {icon}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{suite.name}</p>
