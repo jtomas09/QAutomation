@@ -474,7 +474,7 @@ public class RunnerAgent {
                 try {
                     Optional<JobDto> job = client.getNextJob();
                     if (job.isPresent() && jobExecutor != null) {
-                        System.out.println("[Runner] Job recibido: " + job.get().executionId());
+                        System.out.println("[Runner] Job recibido: " + job.get().executionId);
                         jobExecutor.execute(job.get());
                     } else {
                         Thread.sleep(config.pollIntervalMs);
