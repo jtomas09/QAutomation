@@ -146,6 +146,31 @@ public final class AndroidAccessibilityInspector implements AccessibilityInspect
         cache.invalidate();
     }
 
+    /**
+     * Returns the simple screen name derived from the foreground Activity.
+     * Uses the HierarchyCache's last-known screen to avoid an extra ADB call.
+     * "com.cinepolis.go/...HomeActivity" → "Home"
+     */
+    @Override
+    public String getCurrentScreenName() {
+        String cached = cache.getLastScreen();
+        String activity = (cached != null && !cached.isBlank()) ? cached : getCurrentActivity();
+        return activity != null ? extractSimpleName(activity) : "";
+    }
+
+    /** Extracts the simple Activity name, stripping package and common suffixes. */
+    private static String extractSimpleName(String activityPath) {
+        String s = activityPath;
+        // "com.pkg/com.pkg.ui.home.HomeActivity" → take after last "/"
+        int slash = s.lastIndexOf('/');
+        if (slash >= 0) s = s.substring(slash + 1);
+        // "com.pkg.ui.home.HomeActivity" → take after last "."
+        int dot = s.lastIndexOf('.');
+        if (dot >= 0) s = s.substring(dot + 1);
+        s = s.replace("Activity", "").replace("Fragment", "").replace("Screen", "");
+        return s.isEmpty() ? "App" : s;
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     /** Returns XML from cache if valid, otherwise dumps hierarchy and caches it. */

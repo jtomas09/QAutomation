@@ -248,6 +248,7 @@ public final class RecordingEngine {
             if (inputText != null) node.put("inputVal", inputText);
             if (dir != null)       node.put("dir",      dir);
             appendElement(node, el);
+            appendScreenName(node, s, el);
             appendTime(node, s);
             return MAPPER.writeValueAsString(node);
         } catch (Exception e) {
@@ -273,6 +274,7 @@ public final class RecordingEngine {
             if (inputText != null) node.put("inputVal", inputText);
             if (dir != null)       node.put("dir",      dir);
             appendElement(node, el);
+            appendScreenName(node, s, el);
             appendTime(node, s);
             return MAPPER.writeValueAsString(node);
         } catch (Exception e) {
@@ -298,8 +300,9 @@ public final class RecordingEngine {
         e.put("enabled",               el.enabled);
         e.put("clickable",             el.clickable);
         e.put("visible",               el.visible);
-        // ElementResolver output
+        // ElementResolver + SemanticAnalyzer output
         e.put("varName",               el.varName);
+        e.put("semanticName",          el.semanticName);
         e.put("pageObjectAnnotation",  el.pageObjectAnnotation);
         // Backward-compat fields (required by existing code generators)
         e.put("shortId",    el.shortId);
@@ -314,6 +317,16 @@ public final class RecordingEngine {
     private void appendTime(ObjectNode node, Session s) {
         long elapsedSec = (System.currentTimeMillis() - s.startedAtMs) / 1000;
         node.put("timeStr", String.format("%02d:%02d", elapsedSec / 60, elapsedSec % 60));
+    }
+
+    private void appendScreenName(ObjectNode node, Session s, UIElement el) {
+        if (el == null) return;
+        try {
+            String screen = s.inspector.getCurrentScreenName();
+            if (screen != null && !screen.isBlank()) {
+                node.put("screenName", screen);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void stopInputWatcher(Session s) {

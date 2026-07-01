@@ -76,4 +76,11 @@ public interface AccessibilityInspector {
 
     /** Releases all resources held by this inspector (WDA sessions, threads). */
     void close();
+
+    /**
+     * Returns the human-readable name of the current screen or activity.
+     * Examples: "Login", "Home", "ClubCinepolis".
+     * Default implementation returns an empty string; platform inspectors override it.
+     */
+    default String getCurrentScreenName() { return ""; }
 }

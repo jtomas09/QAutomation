@@ -57,19 +57,21 @@ interface AppEl {
   enabled?:            boolean
   clickable?:          boolean
   visible?:            boolean
-  // ElementResolver output — smart variable name + page object annotation
-  varName?:               string   // e.g. "btnContinuar"
+  // ElementResolver + SemanticAnalyzer output
+  varName?:               string   // Spanish semantic name, e.g. "btnContinuar"
+  semanticName?:          string   // Same as varName (explicit field from SemanticAnalyzer)
   pageObjectAnnotation?:  string   // e.g. "@AndroidFindBy(id = \"...\")\nprivate WebElement btnContinuar;"
 }
 
 interface RecStep {
-  id:        string
-  n:         number
-  type:      StepType
-  el:        AppEl | null
-  inputVal?: string
-  dir?:      'up' | 'down' | 'left' | 'right'
-  timeStr:   string
+  id:         string
+  n:          number
+  type:       StepType
+  el:         AppEl | null
+  inputVal?:  string
+  dir?:       'up' | 'down' | 'left' | 'right'
+  timeStr:    string
+  screenName?: string   // Current screen/activity, e.g. "Login", "Home"
 }
 
 interface GenOpts {
@@ -348,9 +350,17 @@ function stemFromVarName(varName: string): string {
   return varName.charAt(0).toUpperCase() + varName.slice(1)
 }
 
-/** Returns the effective field/variable name for an element. */
+/** Returns the effective field/variable name for an element (prefers Spanish semanticName). */
 function elVarName(el: AppEl): string {
-  return el.varName?.trim() || toMethodName(el.shortId).charAt(0).toLowerCase() + toMethodName(el.shortId).slice(1) || el.shortId
+  const name = el.semanticName?.trim() || el.varName?.trim()
+  if (name) return name
+  const m = toMethodName(el.shortId)
+  return m ? m.charAt(0).toLowerCase() + m.slice(1) : el.shortId
+}
+
+/** Lowercase first character. */
+function lc(s: string): string {
+  return s.length > 0 ? s.charAt(0).toLowerCase() + s.slice(1) : s
 }
 
 function esc(v: string): string {
@@ -513,6 +523,7 @@ function generateJava(
     lines.push('import io.appium.java_client.pagefactory.iOSXCUITFindBy;')
     lines.push('import io.appium.java_client.pagefactory.AppiumFieldDecorator;')
     lines.push('import org.openqa.selenium.support.PageFactory;')
+    lines.push('import qa.cinepolis.framework.BasePage;')
   }
   if (opts.allureLogs) {
     lines.push('import io.qameta.allure.Allure;')
@@ -522,80 +533,92 @@ function generateJava(
   }
   lines.push('')
 
-  // Page Objects class
+  // ── Page Objects — one class per screen ─────────────────────────────────────
   if (opts.pageObjects) {
-    // De-duplicate by varName (preferred) or shortId
-    const uniqueEls = new Map<string, AppEl>()
+    // Group elements by screenName (default "App" when screen is unknown)
+    const screenPages = new Map<string, Map<string, AppEl>>()
     for (const step of steps) {
-      if (step.el) {
-        const key = elVarName(step.el)
-        uniqueEls.set(key, step.el)
+      if (!step.el) continue
+      const screen = step.screenName?.trim() || 'App'
+      if (!screenPages.has(screen)) screenPages.set(screen, new Map())
+      screenPages.get(screen)!.set(elVarName(step.el), step.el)
+    }
+    if (screenPages.size === 0) {
+      // Fallback: collect all unique elements into a single page
+      const allEls = new Map<string, AppEl>()
+      for (const step of steps) {
+        if (step.el) allEls.set(elVarName(step.el), step.el)
       }
+      if (allEls.size > 0) screenPages.set('App', allEls)
     }
 
-    lines.push(`public class CinepolisPage extends BaseMobilePage {`)
-    lines.push('')
-    for (const [, el] of uniqueEls) {
-      const fieldName = elVarName(el)
-      const stem      = stemFromVarName(fieldName)
-      // Use pre-resolved annotation from ElementResolver when available
-      if (el.pageObjectAnnotation?.trim()) {
-        // The annotation already contains the field declaration; indent it
-        for (const annLine of el.pageObjectAnnotation.split('\n')) {
-          lines.push(`    ${annLine}`)
-        }
-      } else {
-        // Fallback: construct annotation from available locator info
-        const locVal = el.locatorValue?.trim() || el.resourceId?.trim() || ''
-        const locStrategy = el.locatorStrategy?.trim() || 'id'
-        if (isAndroid) {
-          if (locStrategy === 'id' && locVal) {
-            lines.push(`    @AndroidFindBy(id = "${esc(locVal)}")`)
-          } else if (locStrategy === 'accessibility_id' && locVal) {
-            lines.push(`    @AndroidFindBy(accessibility = "${esc(locVal)}")`)
-          } else if (locVal) {
-            lines.push(`    @AndroidFindBy(xpath = "${esc(locVal)}")`)
-          } else {
-            lines.push(`    // ⚠ No locator available for ${fieldName}`)
+    for (const [screen, els] of screenPages) {
+      const pageClass = `${screen}Page`
+      lines.push(`public class ${pageClass} extends BasePage {`)
+      lines.push('')
+
+      // ── Fields with @FindBy annotations ──
+      for (const [, el] of els) {
+        const fieldName = elVarName(el)
+        if (el.pageObjectAnnotation?.trim()) {
+          for (const annLine of el.pageObjectAnnotation.split('\n')) {
+            lines.push(`    ${annLine}`)
           }
         } else {
-          if ((locStrategy === 'accessibility_id') && (el.accessId?.trim() || locVal)) {
-            lines.push(`    @iOSXCUITFindBy(accessibility = "${esc(el.accessId?.trim() || locVal)}")`)
-          } else if (locVal) {
-            lines.push(`    @iOSXCUITFindBy(xpath = "${esc(locVal)}")`)
+          // Fallback: derive best annotation
+          const rid  = el.resourceId?.trim()
+          const aid  = el.accessId?.trim() || el.accessibilityLabel?.trim()
+          const txt  = el.text?.trim()
+          const locV = el.locatorValue?.trim()
+          if (isAndroid) {
+            if (rid)       lines.push(`    @AndroidFindBy(id = "${esc(rid)}")`)
+            else if (aid)  lines.push(`    @AndroidFindBy(accessibility = "${esc(aid)}")`)
+            else if (txt)  lines.push(`    @AndroidFindBy(uiAutomator = "new UiSelector().text(\\"${esc(txt)}\\")")`)
+            else if (locV) lines.push(`    @AndroidFindBy(xpath = "${esc(locV)}")`)
+            else           lines.push(`    // ⚠ No locator available for ${fieldName}`)
           } else {
-            lines.push(`    // ⚠ No locator available for ${fieldName}`)
+            if (aid)       lines.push(`    @iOSXCUITFindBy(accessibility = "${esc(aid)}")`)
+            else if (locV) lines.push(`    @iOSXCUITFindBy(xpath = "${esc(locV)}")`)
+            else           lines.push(`    // ⚠ No locator available for ${fieldName}`)
           }
+          lines.push(`    private WebElement ${fieldName};`)
         }
-        lines.push(`    private WebElement ${fieldName};`)
-      }
-      lines.push('')
-    }
-    lines.push(`    public CinepolisPage(AppiumDriver driver) {`)
-    lines.push(`        super(driver);`)
-    lines.push(`        PageFactory.initElements(new AppiumFieldDecorator(driver), this);`)
-    lines.push(`    }`)
-    lines.push('')
-    for (const [, el] of uniqueEls) {
-      const fieldName = elVarName(el)
-      const stem      = stemFromVarName(fieldName)
-      lines.push(`    public void tap${stem}() {`)
-      lines.push(`        ${fieldName}.click();`)
-      lines.push(`    }`)
-      lines.push('')
-      if (el.elType === 'input') {
-        lines.push(`    public void type${stem}(String value) {`)
-        lines.push(`        ${fieldName}.clear();`)
-        lines.push(`        ${fieldName}.sendKeys(value);`)
-        lines.push(`    }`)
         lines.push('')
       }
+
+      // ── Constructor ──
+      lines.push(`    public ${pageClass}(AppiumDriver driver) {`)
+      lines.push(`        super(driver);`)
+      lines.push(`        PageFactory.initElements(new AppiumFieldDecorator(driver), this);`)
+      lines.push(`    }`)
+      lines.push('')
+
+      // ── Action methods (Spanish-idiomatic) ──
+      for (const [, el] of els) {
+        const fieldName = elVarName(el)
+        const stem      = stemFromVarName(fieldName)
+        if (el.elType === 'input') {
+          // ingresarCorreo(String correo) — "ingresar" prefix for inputs
+          const param = lc(stem)
+          lines.push(`    public void ingresar${stem}(String ${param}) {`)
+          lines.push(`        type(${fieldName}, ${param});`)
+          lines.push(`    }`)
+        } else {
+          // continuar() / iniciarSesion() — verb form directly
+          const methodName = lc(stem)
+          lines.push(`    public void ${methodName}() {`)
+          lines.push(`        click(${fieldName});`)
+          lines.push(`    }`)
+        }
+        lines.push('')
+      }
+
+      lines.push(`}`)
+      lines.push('')
     }
-    lines.push(`}`)
-    lines.push('')
   }
 
-  // Test class
+  // ── Test class ───────────────────────────────────────────────────────────────
   lines.push(`public class ${effectiveClassName} extends BaseTest {`)
   lines.push('')
   if (opts.allureLogs) {
@@ -606,16 +629,29 @@ function generateJava(
   lines.push(`    @Test`)
   lines.push(`    public void ${effectiveTestName}() {`)
 
+  // Declare page instances when using Page Objects
+  if (opts.pageObjects) {
+    const uniqueScreens = [...new Set(
+      steps.filter(s => s.el).map(s => s.screenName?.trim() || 'App')
+    )]
+    for (const screen of uniqueScreens) {
+      const pageClass = `${screen}Page`
+      const pageVar   = lc(screen) + 'Page'
+      lines.push(`        ${pageClass} ${pageVar} = new ${pageClass}(driver);`)
+    }
+    if (uniqueScreens.length > 0) lines.push('')
+  }
+
   for (const step of steps) {
     lines.push('')
-    const label = stepTypeLabel(step.type)
+    const label  = stepTypeLabel(step.type)
     const elText = step.el?.text ?? ''
     lines.push(`        // ${step.n}. ${label}${elText ? ` — ${elText}` : ''}`)
     if (opts.allureLogs) {
       lines.push(`        Allure.step("${step.n}. ${label}${elText ? ` — ${elText}` : ''}");`)
     }
 
-    const sel = javaByStr(step.el)
+    const sel   = javaByStr(step.el)
     const hasEl = !!step.el
 
     if (opts.smartWaits && hasEl) {
@@ -625,10 +661,16 @@ function generateJava(
       lines.push(`        // ⚠ Element not found — update selector before running`)
     }
 
+    // Page object method or direct driver call
+    const pageVar = opts.pageObjects && step.el
+      ? lc(step.screenName?.trim() || 'App') + 'Page'
+      : null
+    const stem = step.el ? stemFromVarName(elVarName(step.el)) : ''
+
     switch (step.type) {
       case 'tap':
-        if (opts.pageObjects && step.el) {
-          lines.push(`        page.tap${stemFromVarName(elVarName(step.el))}();`)
+        if (pageVar && step.el) {
+          lines.push(`        ${pageVar}.${lc(stem)}();`)
         } else {
           lines.push(`        click(${sel});`)
         }
@@ -640,8 +682,8 @@ function generateJava(
         lines.push(`        longPress(${sel});`)
         break
       case 'input':
-        if (opts.pageObjects && step.el) {
-          lines.push(`        page.type${stemFromVarName(elVarName(step.el))}("${step.inputVal ?? ''}");`)
+        if (pageVar && step.el) {
+          lines.push(`        ${pageVar}.ingresar${stem}("${step.inputVal ?? ''}");`)
         } else {
           lines.push(`        clear(${sel});`)
           lines.push(`        type(${sel}, "${step.inputVal ?? ''}");`)
@@ -2373,6 +2415,21 @@ function StepCard({ step, index, total, isSelected, onDelete, onDuplicate, onMov
             <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 700, letterSpacing: 0.3 }}>
               {stepTypeLabel(step.type).toUpperCase()}
             </span>
+            {step.screenName && (
+              <span style={{
+                fontSize: 8,
+                color: '#64748b',
+                background: 'rgba(99,102,241,0.08)',
+                border: '1px solid rgba(99,102,241,0.18)',
+                borderRadius: 3,
+                padding: '1px 4px',
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                flexShrink: 0,
+              }}>
+                {step.screenName}
+              </span>
+            )}
           </div>
           {step.el && (
             <span
@@ -4798,16 +4855,18 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       id: string; n: number; type: string
       el: AppEl | null; inputVal?: string
       dir?: string; timeStr: string
+      screenName?: string
     }
     _stepCounter = Math.max(_stepCounter, s.n)
     return {
-      id:       s.id,
-      n:        s.n,
-      type:     s.type as StepType,
-      el:       s.el ?? null,
-      inputVal: s.inputVal,
-      dir:      s.dir as RecStep['dir'],
-      timeStr:  s.timeStr,
+      id:         s.id,
+      n:          s.n,
+      type:       s.type as StepType,
+      el:         s.el ?? null,
+      inputVal:   s.inputVal,
+      dir:        s.dir as RecStep['dir'],
+      timeStr:    s.timeStr,
+      screenName: s.screenName,
     }
   }, [])
 
@@ -4816,9 +4875,11 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     onPhysicalStep((raw) => {
       const step = mapApiStep(raw)
       if (debugMode && step.el) {
-        console.group(`[ElementResolver] Step ${step.n} — ${step.type}`)
+        console.group(`[SemanticAnalyzer] Step ${step.n} — ${step.type}`)
         console.log('Platform:    ', step.el.platform ?? '?')
+        console.log('Screen:      ', step.screenName ?? '(unknown)')
         console.log('Class:       ', step.el.className ?? '?')
+        console.log('semanticName:', step.el.semanticName ?? '(none)')
         console.log('varName:     ', step.el.varName ?? '(none)')
         console.log('Locator:     ', `${step.el.locatorStrategy ?? '?'} = ${step.el.locatorValue ?? '?'}`)
         if (step.el.pageObjectAnnotation) {
@@ -5068,6 +5129,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           platform:            s.el.platform,
           className:           s.el.className,
           varName:             s.el.varName,
+          semanticName:        s.el.semanticName,
           locatorStrategy:     s.el.locatorStrategy,
           locatorValue:        s.el.locatorValue,
           resourceId:          s.el.resourceId,
@@ -5083,11 +5145,11 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         } : null,
       }))
 
-      // Extract page objects block from generated code (between first class and closing })
+      // Extract page object classes from generated code
       const pageObjectsMatch = generatedCode.match(
-        /public class \w+Page extends BaseMobilePage \{[\s\S]*?\n\}/
+        /public class \w+Page extends BasePage \{[\s\S]*?\n\}/g
       )
-      const pageObjects = pageObjectsMatch?.[0] ?? ''
+      const pageObjects = pageObjectsMatch?.join('\n\n') ?? ''
 
       suiteService.saveFromRecording({
         name:          data.name,

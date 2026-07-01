@@ -62,4 +62,9 @@ public final class HierarchyCache {
     public synchronized void invalidate() {
         cachedXml = null;
     }
+
+    /** Returns the screen label used for the most-recently cached hierarchy, or empty string. */
+    public synchronized String getLastScreen() {
+        return lastScreen != null ? lastScreen : "";
+    }
 }

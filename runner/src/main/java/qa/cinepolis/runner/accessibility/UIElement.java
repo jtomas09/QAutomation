@@ -40,8 +40,9 @@ public final class UIElement {
     public final boolean clickable;
     public final boolean visible;
 
-    // ── Resolved by ElementResolver ──────────────────────────────────────────
-    public final String  varName;              // camelCase variable name, e.g. "btnContinuar"
+    // ── Resolved by ElementResolver + SemanticAnalyzer ───────────────────────
+    public final String  varName;              // camelCase variable name (Spanish), e.g. "btnContinuar"
+    public final String  semanticName;         // Spanish semantic name set by SemanticAnalyzer
     public final String  pageObjectAnnotation; // full @FindBy annotation block, e.g. "@AndroidFindBy(id=\"...\")\nprivate WebElement btnContinuar;"
 
     // ── Backward-compat fields (match UiHierarchyParser.ElementInfo) ──────────
@@ -69,6 +70,7 @@ public final class UIElement {
         clickable             = b.clickable;
         visible               = b.visible;
         varName               = b.varName;
+        semanticName          = b.semanticName;
         pageObjectAnnotation  = b.pageObjectAnnotation;
         shortId               = b.shortId;
         accessId              = b.accessId;
@@ -99,6 +101,7 @@ public final class UIElement {
         boolean clickable = true;
         boolean visible   = true;
         String  varName              = "";
+        String  semanticName         = "";
         String  pageObjectAnnotation = "";
         String  shortId              = "";
         String  accessId             = "";
@@ -120,6 +123,7 @@ public final class UIElement {
         public Builder clickable(boolean v)            { clickable             = v; return this; }
         public Builder visible(boolean v)              { visible               = v; return this; }
         public Builder varName(String v)               { varName               = nvl(v); return this; }
+        public Builder semanticName(String v)          { semanticName          = nvl(v); return this; }
         public Builder pageObjectAnnotation(String v)  { pageObjectAnnotation  = nvl(v); return this; }
         public Builder shortId(String v)               { shortId               = nvl(v); return this; }
         public Builder accessId(String v)              { accessId              = nvl(v); return this; }

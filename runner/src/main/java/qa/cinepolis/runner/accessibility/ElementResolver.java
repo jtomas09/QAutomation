@@ -48,13 +48,13 @@ public final class ElementResolver {
     public static UIElement enrich(UIElement el) {
         if (el == null) return null;
 
-        String varName   = generateVarName(el);
+        String varName    = generateVarName(el);
         String annotation = generatePageObjectAnnotation(el, varName);
 
         debugLog(el, varName, annotation);
 
         // Rebuild using existing Builder — all other fields are copied
-        return UIElement.builder()
+        UIElement enriched = UIElement.builder()
                 .platform(el.platform)
                 .className(el.className)
                 .locatorStrategy(el.locatorStrategy)
@@ -69,11 +69,15 @@ public final class ElementResolver {
                 .clickable(el.clickable)
                 .visible(el.visible)
                 .varName(varName)
+                .semanticName("")
                 .pageObjectAnnotation(annotation)
                 .shortId(el.shortId)
                 .accessId(el.accessId)
                 .elType(el.elType)
                 .build();
+
+        // Translate English name → Spanish and improve annotation locator priority
+        return SemanticAnalyzer.analyze(enriched);
     }
 
     // ── Variable name ─────────────────────────────────────────────────────────
