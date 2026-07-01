@@ -4246,6 +4246,7 @@ interface SaveSuiteModalProps {
     description: string
     country: string
     mode: 'caso' | 'suite'
+    targetSuiteId?: string
   }) => void
 }
 
@@ -4256,18 +4257,34 @@ const SAVE_COUNTRIES = [
 ]
 
 function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
-  const [name,        setName]        = useState('')
-  const [description, setDescription] = useState('')
-  const [country,     setCountry]     = useState('mexico')
-  const [saved,       setSaved]       = useState(false)
+  const [name,          setName]          = useState('')
+  const [description,   setDescription]   = useState('')
+  const [country,       setCountry]       = useState('mexico')
+  const [targetSuiteId, setTargetSuiteId] = useState('')
+  const [saved,         setSaved]         = useState(false)
 
   const isSuite = mode === 'suite'
   const title   = isSuite ? 'Guardar como Suite' : 'Guardar como Caso de Prueba'
   const accent  = isSuite ? '#818cf8' : '#6366f1'
 
+  // Load existing suites to offer as targets (only relevant for 'caso' mode)
+  const existingSuites = useMemo(
+    () => suiteService.getAllSuites().filter(s => s.mode === 'suite'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+
+  const selectedSuite = existingSuites.find(s => s.id === targetSuiteId)
+
   const handleSave = () => {
     if (!name.trim()) return
-    onConfirm({ name: name.trim(), description: description.trim(), country, mode })
+    onConfirm({
+      name: name.trim(),
+      description: description.trim(),
+      country,
+      mode,
+      targetSuiteId: targetSuiteId || undefined,
+    })
     setSaved(true)
     setTimeout(onClose, 1400)
   }
@@ -4393,6 +4410,44 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
               />
             </div>
 
+            {/* Suite selector — only for 'caso' mode when suites exist */}
+            {!isSuite && existingSuites.length > 0 && (
+              <div>
+                <label style={{ display: 'block', color: '#94a3b8', fontSize: 11, marginBottom: 5, fontWeight: 600 }}>
+                  Agregar a Suite <span style={{ color: '#475569', fontWeight: 400 }}>(opcional)</span>
+                </label>
+                <select
+                  value={targetSuiteId}
+                  onChange={(e) => setTargetSuiteId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: '#0d1117',
+                    border: `1px solid ${targetSuiteId ? accent : 'rgba(255,255,255,0.1)'}`,
+                    borderRadius: 7,
+                    color: targetSuiteId ? '#e2e8f0' : '#64748b',
+                    padding: '8px 11px',
+                    fontSize: 12,
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <option value="">— Sin suite —</option>
+                  {existingSuites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.icon} {s.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedSuite && (
+                  <p style={{ margin: '5px 0 0', fontSize: 11, color: accent }}>
+                    Se agregará a: <strong>{selectedSuite.name}</strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Country (only for suites — to know which Execute tab it appears under) */}
             {isSuite && (
               <div>
@@ -4454,7 +4509,12 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
               }}
             >
               {isSuite ? <Layers3 size={13} /> : <CheckCircle size={13} />}
-              {isSuite ? 'Guardar Suite' : 'Guardar Caso de Prueba'}
+              {isSuite
+                ? 'Guardar Suite'
+                : selectedSuite
+                  ? `Guardar y agregar a ${selectedSuite.name}`
+                  : 'Guardar Caso de Prueba'
+              }
             </button>
           </>
         )}
@@ -5111,7 +5171,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(
-    (data: { name: string; description: string; country: string; mode: 'caso' | 'suite' }) => {
+    (data: { name: string; description: string; country: string; mode: 'caso' | 'suite'; targetSuiteId?: string }) => {
       // Detect platform from first step that has an element with platform info
       const detectedPlatform =
         steps.find(s => s.el?.platform)?.el?.platform ??
@@ -5151,7 +5211,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       )
       const pageObjects = pageObjectsMatch?.join('\n\n') ?? ''
 
-      suiteService.saveFromRecording({
+      const newSuite = suiteService.saveFromRecording({
         name:          data.name,
         description:   data.description,
         country:       data.country,
@@ -5167,6 +5227,9 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
         generatedXML,
         pageObjects,
       })
+      if (data.targetSuiteId) {
+        suiteService.addCaseToSuite(data.targetSuiteId, newSuite.id)
+      }
       // Clear draft — steps are now persisted in the suite store
       clearDraft()
 
