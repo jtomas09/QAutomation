@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { suiteService, resolveAppIcon } from '../services/SuiteService'
 import type { Suite } from '../services/SuiteService'
+import { useConfirmation } from '../hooks/useConfirmation'
 import {
   Layers3, Trash2, Play, PencilLine, MoreHorizontal,
   Search, X, ChevronLeft, ChevronRight,
@@ -208,6 +210,18 @@ function SuiteRow({ suite, onView, onDelete }: {
   const tags  = deriveTags(suite)
   const pl    = platformLabel(suite.platform)
   const icon  = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
+  const confirm = useConfirmation()
+
+  const handleDeleteClick = async () => {
+    setMenu(false)
+    const label = suite.mode === 'caso' ? 'Caso de Prueba' : 'Suite'
+    const ok = await confirm({
+      title: `Eliminar ${label}`,
+      description: `¿Estás seguro de eliminar "${suite.name}"? Esta acción no podrá deshacerse.`,
+      type: 'delete',
+    })
+    if (ok) onDelete(suite.id)
+  }
 
   return (
     <div
@@ -363,10 +377,7 @@ function SuiteRow({ suite, onView, onDelete }: {
               <ContextMenuItem
                 label="Eliminar"
                 color="#f87171"
-                onClick={() => {
-                  setMenu(false)
-                  if (window.confirm('¿Eliminar esta suite?')) onDelete(suite.id)
-                }}
+                onClick={handleDeleteClick}
               />
             </div>
           )}
@@ -400,10 +411,22 @@ function SuiteCard({ suite, onView, onDelete }: {
   suite: Suite; onView: (s: Suite) => void; onDelete: (id: string) => void
 }) {
   const [hov, setHov] = useState(false)
-  const type = deriveTestType(suite)
-  const amb  = deriveAmbiente(suite)
-  const pl   = platformLabel(suite.platform)
-  const icon = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
+  const type    = deriveTestType(suite)
+  const amb     = deriveAmbiente(suite)
+  const pl      = platformLabel(suite.platform)
+  const icon    = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
+  const confirm = useConfirmation()
+
+  const handleDeleteClick = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const label = suite.mode === 'caso' ? 'Caso de Prueba' : 'Suite'
+    const ok = await confirm({
+      title: `Eliminar ${label}`,
+      description: `¿Estás seguro de eliminar "${suite.name}"? Esta acción no podrá deshacerse.`,
+      type: 'delete',
+    })
+    if (ok) onDelete(suite.id)
+  }
 
   return (
     <div
@@ -442,7 +465,7 @@ function SuiteCard({ suite, onView, onDelete }: {
           )}
         </div>
         <button
-          onClick={e => { e.stopPropagation(); if (window.confirm('¿Eliminar esta suite?')) onDelete(suite.id) }}
+          onClick={handleDeleteClick}
           style={{
             background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)',
             borderRadius: 6, padding: '4px 6px', color: '#ef4444', cursor: 'pointer',
@@ -649,6 +672,12 @@ export default function SuitesPage() {
   const [filterStatus,   setFilterStatus]   = useState('all')
   const [page,           setPage]           = useState(1)
   const [pageSize,       setPageSize]       = useState(10)
+  const [toastMsg,       setToastMsg]       = useState<string | null>(null)
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 3200)
+  }, [])
 
   const reload = useCallback(() => setSuites(suiteService.getAllSuites()), [])
 
@@ -693,7 +722,11 @@ export default function SuitesPage() {
   useEffect(() => setPage(1), [search, filterPlatform, filterStatus, pageSize])
 
   function handleDelete(id: string) {
+    const suite = suites.find(s => s.id === id)
     suiteService.deleteSuite(id)
+    if (viewing?.id === id) setViewing(null)
+    const label = suite?.mode === 'caso' ? 'Caso de prueba' : 'Suite'
+    showToast(`${label} "${suite?.name ?? ''}" eliminada correctamente`)
   }
 
   // Build visible page numbers
@@ -907,6 +940,30 @@ export default function SuitesPage() {
 
       {/* Detail modal */}
       {viewing && <DetailModal suite={viewing} onClose={() => setViewing(null)} />}
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toastMsg && (
+          <motion.div
+            key="suites-toast"
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0,  scale: 1    }}
+            exit={{   opacity: 0, y: 10,  scale: 0.95 }}
+            style={{
+              position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+              background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+              border: '1px solid rgba(52,211,153,0.35)',
+              borderRadius: 10, padding: '11px 18px',
+              display: 'flex', alignItems: 'center', gap: 9,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(52,211,153,0.12)',
+              maxWidth: 340,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>✓</span>
+            <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 500 }}>{toastMsg}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

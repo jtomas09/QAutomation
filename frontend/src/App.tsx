@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { ConfirmationProvider } from './hooks/useConfirmation'
 import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES, getRandomSmokeTests } from './data'
 import { useTestRunner }        from './hooks/useTestRunner'
 import { useExecutionDevices }  from './hooks/useExecutionDevices'
@@ -57,6 +58,7 @@ export default function App() {
   }
 
   return (
+    <ConfirmationProvider>
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg-main)' }}>
       {/* Sidebar */}
       <Sidebar page={page} onPageChange={setPage} runningCount={runningCount} />
@@ -234,5 +236,6 @@ export default function App() {
         </main>
       </div>
     </div>
+    </ConfirmationProvider>
   )
 }
