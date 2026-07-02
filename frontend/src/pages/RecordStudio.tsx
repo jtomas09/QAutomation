@@ -83,6 +83,33 @@ interface GenOpts {
   reusableMethods: boolean
 }
 
+/**
+ * RecordedElement — the single internal representation of a captured element.
+ *
+ * ALL names (variableName, methodName, paramName) are computed ONCE by
+ * buildRecordedElements() and are immutable from that point on.
+ * No generator, formatter, or helper ever re-derives a name from raw AppEl
+ * fields — they read from this object exclusively.
+ */
+interface RecordedElement {
+  // Identity
+  id:          string          // shortId — primary key
+  canonicalId: string          // shortId of the first-seen element with same locator
+  isDuplicate: boolean         // true → this element reuses another element's declaration
+
+  // Resolved locator (single call to resolveLocator, stored here)
+  locator:     LocatorResult | null
+
+  // Raw element reference (needed for annotation generation and assertion logic)
+  el:          AppEl
+
+  // ── Pre-computed, immutable names — SINGLE SOURCE OF TRUTH ──
+  variableName:  string        // Java field: "btnContinuar", "txtCorreo"
+  methodName:    string        // PO method:  "continuar",    "ingresarCorreo"
+  paramName:     string        // input only: "correo" (lc stem); "" for non-inputs
+  assertKind:    AssertKind    // assertion classification for this element
+}
+
 // ─── Cinépolis App Data ───────────────────────────────────────────────────────
 
 const ANDROID_PKG = 'com.cinepolis.go'
@@ -634,6 +661,98 @@ function buildLocatorAliasMap(els: Map<string, AppEl>): Map<string, string> {
   return aliases
 }
 
+/**
+ * buildRecordedElements — ElementRegistry entry point.
+ *
+ * Collects all elements from the step list, deduplicates by locator,
+ * assigns unique names to canonical elements, and pre-computes every
+ * name that code generation will ever need.
+ *
+ * Returns:  screen → (shortId → RecordedElement)
+ *
+ * Guarantees:
+ *   - Every shortId that appears in a step is present in its screen's map.
+ *   - Duplicate elements reference the canonical element's variableName.
+ *   - nameMap is built from canonical elements ONLY, so name collision
+ *     counters are never inflated by duplicates.
+ *   - If no locator can be resolved, rec.locator is null and the caller
+ *     must skip declaration/method generation for that element.
+ */
+function buildRecordedElements(steps: RecStep[]): Map<string, Map<string, RecordedElement>> {
+  // ── 1. Collect elements per screen ─────────────────────────────────────────
+  const screenElSets = new Map<string, Map<string, AppEl>>()
+  for (const step of steps) {
+    if (!step.el) continue
+    const screen = step.screenName?.trim() || 'App'
+    if (!screenElSets.has(screen)) screenElSets.set(screen, new Map())
+    screenElSets.get(screen)!.set(step.el.shortId, step.el)
+  }
+  if (screenElSets.size === 0) {
+    const allEls = new Map<string, AppEl>()
+    for (const step of steps) { if (step.el) allEls.set(step.el.shortId, step.el) }
+    if (allEls.size > 0) screenElSets.set('App', allEls)
+  }
+
+  const result = new Map<string, Map<string, RecordedElement>>()
+
+  for (const [screen, els] of screenElSets) {
+    // ── 2. Dedup: shortId → canonical shortId ────────────────────────────────
+    const aliasMap = buildLocatorAliasMap(els)
+
+    // ── 3. Name map — ONLY canonical elements, so duplicates don't steal names
+    const canonicalEls = new Map<string, AppEl>()
+    for (const [shortId, el] of els) {
+      if (aliasMap.get(shortId) === shortId) canonicalEls.set(shortId, el)
+    }
+    const nameMap = buildNameMap(canonicalEls.values())
+
+    // ── 4. Build RecordedElement for every element in this screen ────────────
+    const screenRegistry = new Map<string, RecordedElement>()
+    for (const [shortId, el] of els) {
+      const canonicalId = aliasMap.get(shortId) ?? shortId
+      const isDuplicate = canonicalId !== shortId
+
+      // variableName: backend annotation name takes priority (guarantees the
+      // field declaration and all method bodies reference the same identifier).
+      // Then the computed canonical name; never falls back to re-computing from AppEl.
+      const annotationVar = el.pageObjectAnnotation?.trim()
+        ? extractVarFromAnnotation(el.pageObjectAnnotation)
+        : null
+      const variableName = annotationVar ?? nameMap.get(canonicalId) ?? `el_${canonicalId}`
+
+      // methodName: derived from element content (Text→Accessibility→ResourceId),
+      // NOT from variableName — so a generic field like lbl6 still gets a
+      // meaningful method name if the element has readable text.
+      // Empty string = no usable stem → method generation is skipped entirely.
+      const isInput    = el.elType === 'input'
+      const rawStem    = deriveMethodStem(el)
+      const varStem    = stemFromVarName(variableName)
+      const usableStem = rawStem
+        ?? (varStem.length >= 2 && /[a-zA-Z]{2}/.test(varStem) ? varStem : null)
+      const methodName = usableStem === null
+        ? ''  // no semantic content — method will be omitted in generators
+        : isInput
+          ? `ingresar${usableStem}`
+          : smartMethodName(usableStem)
+      const paramName  = isInput && usableStem ? lc(usableStem) : ''
+
+      screenRegistry.set(shortId, {
+        id:         shortId,
+        canonicalId,
+        isDuplicate,
+        locator:    resolveLocator(el),
+        el,
+        variableName,
+        methodName,
+        paramName,
+        assertKind: elementAssertKind(el),
+      })
+    }
+    result.set(screen, screenRegistry)
+  }
+  return result
+}
+
 /** Lowercase first character. */
 function lc(s: string): string {
   return s.length > 0 ? s.charAt(0).toLowerCase() + s.slice(1) : s
@@ -688,6 +807,46 @@ function smartMethodName(stem: string): string {
   const words = stem.split(/(?=[A-Z])/).map(w => w.toLowerCase())
   if (words.some(w => SELECTION_NOUNS.has(w))) return `seleccionar${stem}`
   return `abrir${stem}`
+}
+
+// ── Method stem + annotation helpers ────────────────────────────────────────
+
+/**
+ * Derives the PascalCase stem for a Page Object method name by trying element
+ * content sources in priority order:
+ *   accessId → text → accessibilityLabel → resource-id local part
+ *
+ * Returns null when no source yields at least 2 alphabetic characters,
+ * which signals the caller to skip method generation rather than emit
+ * garbage names like abrir6(), view(), button().
+ */
+function deriveMethodStem(el: AppEl): string | null {
+  const sources = [
+    el.accessId?.trim(),
+    el.text?.trim(),
+    el.accessibilityLabel?.trim(),
+    parseInputResourceId(el.resourceId ?? ''),
+  ]
+  for (const raw of sources) {
+    if (!raw) continue
+    const clean = el.elType === 'input' ? stripInputInstruction(raw) : raw
+    const norm  = normalizeToIdentifier(removeAccents(clean))
+    if (norm.length >= 2 && /[a-zA-Z]{2}/.test(norm)) {
+      return norm.charAt(0).toUpperCase() + norm.slice(1)
+    }
+  }
+  return null
+}
+
+/**
+ * Extracts the Java field name from a backend-provided @FindBy annotation block.
+ * "@AndroidFindBy(…)\nprivate WebElement btnContinuar;" → "btnContinuar"
+ * Used so that when the backend declares its own name, variableName always
+ * matches the actual declared field — preventing click(computedName) mismatches.
+ */
+function extractVarFromAnnotation(annotation: string): string | null {
+  const m = annotation.match(/\bWebElement\s+(\w+)\s*;/)
+  return m ? m[1] : null
 }
 
 // ── Phase 7: Smart input field naming ────────────────────────────────────────
@@ -1060,62 +1219,30 @@ function generateJava(
   }
   lines.push('')
 
-  // ── Element collection — keyed by shortId so every distinct element is kept ──
-  const screenElSets = new Map<string, Map<string, AppEl>>()
-  for (const step of steps) {
-    if (!step.el) continue
-    const screen = step.screenName?.trim() || 'App'
-    if (!screenElSets.has(screen)) screenElSets.set(screen, new Map())
-    screenElSets.get(screen)!.set(step.el.shortId, step.el)
-  }
-  if (screenElSets.size === 0) {
-    const allEls = new Map<string, AppEl>()
-    for (const step of steps) { if (step.el) allEls.set(step.el.shortId, step.el) }
-    if (allEls.size > 0) screenElSets.set('App', allEls)
-  }
-  // Deduplicated name maps per screen (shortId → uniqueName)
-  const screenNameMaps = new Map<string, Map<string, string>>()
-  for (const [screen, els] of screenElSets) {
-    screenNameMaps.set(screen, buildNameMap(els.values()))
-  }
-  // Locator alias maps: shortId → canonical shortId (same-locator dedup, Phase 4)
-  const locatorAliasMaps = new Map<string, Map<string, string>>()
-  for (const [screen, els] of screenElSets) {
-    locatorAliasMaps.set(screen, buildLocatorAliasMap(els))
-  }
-  /** Resolves the unique field name, redirecting duplicate locators to their canonical element. */
-  const resolveFieldName = (el: AppEl, screenName?: string): string => {
-    const sc       = screenName?.trim() || 'App'
-    const canonical = locatorAliasMaps.get(sc)?.get(el.shortId) ?? el.shortId
-    return screenNameMaps.get(sc)?.get(canonical) ?? elVarName(el)
-  }
+  // ── ElementRegistry: build RecordedElement registry once ────────────────────
+  // All names (variableName, methodName, paramName) are pre-computed here.
+  // No generator, helper, or formatter ever re-derives names after this point.
+  const registries = buildRecordedElements(steps)
 
   // ── PageObjectGenerator ──────────────────────────────────────────────────────
   if (opts.pageObjects) {
-    for (const [screen, els] of screenElSets) {
+    for (const [screen, screenRegistry] of registries) {
       const pageClass = `${screen}Page`
       lines.push(`public class ${pageClass} extends BasePage {`)
       lines.push('')
 
-      // ── Fields with @FindBy annotations ──
-      for (const [shortId, el] of els) {
-        if (locatorAliasMaps.get(screen)!.get(shortId) !== shortId) continue  // duplicate locator — already declared
-        const fieldName = screenNameMaps.get(screen)!.get(shortId)!
-        if (el.pageObjectAnnotation?.trim()) {
-          // Backend already provided the full annotation + field declaration
-          for (const annLine of el.pageObjectAnnotation.split('\n')) {
+      // ── Fields ──
+      for (const [, rec] of screenRegistry) {
+        if (rec.isDuplicate) continue        // locator already declared via canonical
+        if (rec.el.pageObjectAnnotation?.trim()) {
+          for (const annLine of rec.el.pageObjectAnnotation.split('\n')) {
             lines.push(`    ${annLine}`)
           }
+        } else if (rec.locator) {
+          lines.push(`    ${javaAnnotationStr(rec.el, rec.locator, isAndroid)}`)
+          lines.push(`    private WebElement ${rec.variableName};`)
         } else {
-          // PlatformStrategy: resolveLocator() is the single source of truth.
-          // javaAnnotationStr() picks @AndroidFindBy or @iOSXCUITFindBy per element.
-          const loc = resolveLocator(el)
-          if (loc) {
-            lines.push(`    ${javaAnnotationStr(el, loc, isAndroid)}`)
-          } else {
-            lines.push(`    // ⚠ No locator available for ${fieldName}`)
-          }
-          lines.push(`    private WebElement ${fieldName};`)
+          lines.push(`    // ⚠ No locator — ${rec.variableName} omitted`)
         }
         lines.push('')
       }
@@ -1127,24 +1254,19 @@ function generateJava(
       lines.push(`    }`)
       lines.push('')
 
-      // ── Action methods (Spanish-idiomatic) ──
-      for (const [shortId, el] of els) {
-        if (locatorAliasMaps.get(screen)!.get(shortId) !== shortId) continue  // duplicate locator — method already exists
-        const fieldName = screenNameMaps.get(screen)!.get(shortId)!
-        const stem      = stemFromVarName(fieldName)
-        if (el.elType === 'input') {
-          // ingresarCorreo(String correo) — "ingresar" prefix for inputs
-          const param = lc(stem)
-          lines.push(`    public void ingresar${stem}(String ${param}) {`)
-          lines.push(`        type(${fieldName}, ${param});`)
-          lines.push(`    }`)
+      // ── Action methods ──
+      for (const [, rec] of screenRegistry) {
+        if (rec.isDuplicate) continue
+        if (!rec.locator) continue           // no locator → no usable method
+        if (!rec.methodName) continue        // no semantic stem → omit; don't emit garbage name
+        if (rec.el.elType === 'input') {
+          lines.push(`    public void ${rec.methodName}(String ${rec.paramName}) {`)
+          lines.push(`        type(${rec.variableName}, ${rec.paramName});`)
         } else {
-          // continuar() / abrirClubCinepolis() / seleccionarMetodoPago() — Phase 6
-          const methodName = smartMethodName(stem)
-          lines.push(`    public void ${methodName}() {`)
-          lines.push(`        click(${fieldName});`)
-          lines.push(`    }`)
+          lines.push(`    public void ${rec.methodName}() {`)
+          lines.push(`        click(${rec.variableName});`)
         }
+        lines.push(`    }`)
         lines.push('')
       }
 
@@ -1164,15 +1286,12 @@ function generateJava(
   lines.push(`    @Test`)
   lines.push(`    public void ${effectiveTestName}() {`)
 
-  // Declare page instances when using Page Objects
   if (opts.pageObjects) {
     const uniqueScreens = [...new Set(
       steps.filter(s => s.el).map(s => s.screenName?.trim() || 'App')
     )]
     for (const screen of uniqueScreens) {
-      const pageClass = `${screen}Page`
-      const pageVar   = lc(screen) + 'Page'
-      lines.push(`        ${pageClass} ${pageVar} = new ${pageClass}(driver);`)
+      lines.push(`        ${screen}Page ${lc(screen)}Page = new ${screen}Page(driver);`)
     }
     if (uniqueScreens.length > 0) lines.push('')
   }
@@ -1186,6 +1305,22 @@ function generateJava(
       lines.push(`        Allure.step("${step.n}. ${label}${elText ? ` — ${elText}` : ''}");`)
     }
 
+    // ── Registry lookup — the ONLY source of element names ───────────────────
+    const sc  = step.screenName?.trim() || 'App'
+    const rec = step.el ? (registries.get(sc)?.get(step.el.shortId) ?? null) : null
+
+    // Validation: if step needs an element but it's not in the registry, skip it.
+    // This prevents click(undefined), click(view), click(lbl6) etc.
+    if (step.el && !rec) {
+      lines.push(`        // ⚠ Element "${step.el.shortId}" not in registry — step skipped`)
+      if (opts.screenshots) lines.push(`        captureScreenshot("step_${step.n}");`)
+      continue
+    }
+
+    // pageVar is valid only when we have a registered rec
+    const pageVar = opts.pageObjects && rec ? `${lc(sc)}Page` : null
+
+    // sel is used for direct-driver paths and smartWaits (always safe — derived from locator, not from names)
     const sel   = javaByStr(step.el)
     const hasEl = !!step.el
 
@@ -1196,22 +1331,18 @@ function generateJava(
       lines.push(`        // ⚠ Element not found — update selector before running`)
     }
 
-    // Page object method or direct driver call
-    const pageVar = opts.pageObjects && step.el
-      ? lc(step.screenName?.trim() || 'App') + 'Page'
-      : null
-    const stem = step.el ? stemFromVarName(resolveFieldName(step.el, step.screenName)) : ''
-
     switch (step.type) {
       case 'tap':
-        if (pageVar && step.el) {
-          lines.push(`        ${pageVar}.${smartMethodName(stem)}();`)
+        if (pageVar && rec?.methodName) {
+          // Page Object path: method was declared → use it
+          lines.push(`        ${pageVar}.${rec.methodName}();`)
         } else {
+          // Direct path: element has no usable method name → call driver directly
           lines.push(`        click(${sel});`)
         }
-        if (opts.assertions && step.el) {
-          const assertRef = pageVar ? resolveFieldName(step.el, step.screenName) : sel
-          for (const al of javaSmartAssert(step.el, assertRef, 'tap')) lines.push(al)
+        if (opts.assertions && rec) {
+          const assertRef = pageVar && rec.methodName ? rec.variableName : sel
+          for (const al of javaSmartAssert(rec.el, assertRef, 'tap')) lines.push(al)
         }
         break
       case 'double_tap':
@@ -1221,8 +1352,8 @@ function generateJava(
         lines.push(`        longPress(${sel});`)
         break
       case 'input':
-        if (pageVar && step.el) {
-          lines.push(`        ${pageVar}.ingresar${stem}("${step.inputVal ?? ''}");`)
+        if (pageVar && rec?.methodName) {
+          lines.push(`        ${pageVar}.${rec.methodName}("${step.inputVal ?? ''}");`)
         } else {
           lines.push(`        clear(${sel});`)
           lines.push(`        type(${sel}, "${step.inputVal ?? ''}");`)
@@ -1235,13 +1366,12 @@ function generateJava(
         lines.push(`        swipe(Direction.${(step.dir ?? 'UP').toUpperCase()});`)
         break
       case 'scroll': {
-        if (step.el) {
-          const scrollRef = pageVar ? resolveFieldName(step.el, step.screenName) : sel
+        if (rec) {
+          const scrollRef = pageVar ? rec.variableName : sel
           lines.push(`        scrollUntilVisible(${scrollRef});`)
         } else {
           const d = step.dir ?? 'down'
-          const scrollDir = d.charAt(0).toUpperCase() + d.slice(1)
-          lines.push(`        scroll${scrollDir}();`)
+          lines.push(`        scroll${d.charAt(0).toUpperCase() + d.slice(1)}();`)
         }
         break
       }
@@ -1255,9 +1385,9 @@ function generateJava(
         lines.push(`        driver.hideKeyboard();`)
         break
       case 'assertion':
-        if (step.el) {
-          const assertRef = pageVar ? resolveFieldName(step.el, step.screenName) : sel
-          for (const al of javaSmartAssert(step.el, assertRef, 'assertion')) lines.push(al)
+        if (rec) {
+          const assertRef = pageVar ? rec.variableName : sel
+          for (const al of javaSmartAssert(rec.el, assertRef, 'assertion')) lines.push(al)
         } else {
           lines.push(`        // ⚠ Assertion without element — add selector`)
         }
