@@ -329,7 +329,20 @@ function getStepIcon(type: StepType, size = 13): React.ReactNode {
   }
 }
 
-// ─── Code generation helpers ──────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CODE GENERATION ENGINE  (Phases 1-12)
+//
+//  Modules in declaration order:
+//    NamingStrategy    — semantic variable / method names (Phase 2, 6, 7)
+//    ElementClassifier — control-type prefix detection (Phase 3)
+//    ElementRegistry   — deduplication + unique-name assignment (Phase 4, 5)
+//    LocatorResolver   — platform-aware locator priority chain (Phase 1, 10)
+//    AssertionGenerator — context-sensitive assertions (Phase 9)
+//    PlatformStrategy  — @FindBy annotation + per-language selector formatting (Phase 11)
+//    PageObjectGenerator — Page Object class construction (inside generateJava)
+//    TestGenerator     — test method body construction (inside generateJava)
+//    ScrollAnalyzer    — smart scroll-to-element emission (Phase 8)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
@@ -345,17 +358,280 @@ function toMethodName(shortId: string): string {
  * Falls back to capitalizing the whole varName when no known prefix is found.
  */
 function stemFromVarName(varName: string): string {
-  const m = varName.match(/^(btn|txt|lbl|img|rv|lst|sw|chk|spn|cell|el)(.+)/i)
+  const m = varName.match(/^(container|toolbar|card|nav|scr|cell|lst|img|rdo|chk|cmb|lbl|txt|btn|sw|rv|el)(.+)/i)
   if (m) return m[2].charAt(0).toUpperCase() + m[2].slice(1)
   return varName.charAt(0).toUpperCase() + varName.slice(1)
 }
 
-/** Returns the effective field/variable name for an element (prefers Spanish semanticName). */
+// ── NamingStrategy ── Phase 2, 6, 7 ──────────────────────────────────────────
+
+const ACCENT_MAP: Record<string, string> = {
+  'á':'a','à':'a','ä':'a','â':'a','ã':'a',
+  'é':'e','è':'e','ë':'e','ê':'e',
+  'í':'i','ì':'i','ï':'i','î':'i',
+  'ó':'o','ò':'o','ö':'o','ô':'o','õ':'o',
+  'ú':'u','ù':'u','ü':'u','û':'u',
+  'ñ':'n','ç':'c',
+  'Á':'A','À':'A','Ä':'A','Â':'A','Ã':'A',
+  'É':'E','È':'E','Ë':'E','Ê':'E',
+  'Í':'I','Ì':'I','Ï':'I','Î':'I',
+  'Ó':'O','Ò':'O','Ö':'O','Ô':'O','Õ':'O',
+  'Ú':'U','Ù':'U','Ü':'U','Û':'U',
+  'Ñ':'N','Ç':'C',
+}
+
+function removeAccents(s: string): string {
+  return s.split('').map(c => ACCENT_MAP[c] ?? c).join('')
+}
+
+// Spanish articles, prepositions and conjunctions stripped when building identifiers.
+const SPANISH_STOP_WORDS = new Set([
+  'de','del','el','la','los','las','un','una','en','a','al','y','o','e','ni',
+  'que','con','por','para','sin','sobre','entre','hacia','desde','hasta',
+  'se','su','sus','me','mi','mis','te','tu','tus','le','les','nos',
+  'si','no','muy','tan','ya','hay',
+])
+
+/**
+ * Converts arbitrary text to a camelCase identifier fragment with no accents,
+ * no symbols, and stop-words removed.
+ *   "Métodos de pago"  → "metodosPago"
+ *   "Tarjeta de crédito" → "tarjetaCredito"
+ *   "Continuar"          → "continuar"
+ */
+function normalizeToIdentifier(text: string): string {
+  const noAcc  = removeAccents(text)
+  const words  = noAcc.split(/[^a-zA-Z0-9]+/).filter(w => w.length > 0)
+  const useful = words.filter(w => !SPANISH_STOP_WORDS.has(w.toLowerCase()))
+  const src    = useful.length > 0 ? useful : words.slice(0, 1)  // keep ≥1 word
+  if (src.length === 0) return ''
+  return src
+    .map((w, i) => i === 0
+      ? w.charAt(0).toLowerCase() + w.slice(1).toLowerCase()
+      : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join('')
+}
+
+/**
+ * Selects the field-name prefix that best describes the element's runtime type.
+ * Checks className first (most precise), then falls back to elType.
+ * Android and iOS class names are both handled.
+ */
+// ── ElementClassifier ── Phase 3 ─────────────────────────────────────────────
+function prefixForEl(el: AppEl): string {
+  const cls = (el.className ?? '').toLowerCase()
+
+  // ── Text input controls ─────────────────────────────────────────────────
+  if (cls.includes('edittext')          || cls.includes('textfield')         ||
+      cls.includes('securedtextfield')  || cls.includes('textinput')         ||
+      cls.includes('xcuielementtypetextfield') ||
+      cls.includes('xcuielementtypesecuredtextfield'))
+    return 'txt'
+
+  // ── Checkbox ────────────────────────────────────────────────────────────
+  if (cls.includes('checkbox') || cls.includes('xcuielementtypecheckbox'))
+    return 'chk'
+
+  // ── Radio button ────────────────────────────────────────────────────────
+  if (cls.includes('radiobutton') || cls.includes('xcuielementtyperadiobutton'))
+    return 'rdo'
+
+  // ── Switch / Toggle ─────────────────────────────────────────────────────
+  if ((cls.includes('switch') && !cls.includes('viewswitcher')) ||
+      cls.includes('togglebutton') || cls.includes('xcuielementtypeswitch'))
+    return 'sw'
+
+  // ── Combo / Spinner / Picker ─────────────────────────────────────────────
+  if (cls.includes('spinner')              || cls.includes('combobox')              ||
+      cls.includes('autocompletetextview') || cls.includes('picker')                ||
+      cls.includes('xcuielementtypepopupbutton') ||
+      cls.includes('xcuielementtypecombobox'))
+    return 'cmb'
+
+  // ── Image ────────────────────────────────────────────────────────────────
+  if (cls.includes('imageview') || cls.includes('imagebutton') ||
+      cls.includes('xcuielementtypeimage'))
+    return 'img'
+
+  // ── RecyclerView / ListView / Grid / Table / Collection ──────────────────
+  if (cls.includes('recyclerview')  || cls.includes('listview')  ||
+      cls.includes('gridview')      ||
+      cls.includes('xcuielementtypetable') ||
+      cls.includes('xcuielementtypecollectionview'))
+    return 'lst'
+
+  // ── Scroll view ──────────────────────────────────────────────────────────
+  if (cls.includes('scrollview') || cls.includes('nestedscrollview') ||
+      cls.includes('horizontalscrollview') ||
+      cls.includes('xcuielementtypescrollview'))
+    return 'scr'
+
+  // ── Toolbar / AppBar ─────────────────────────────────────────────────────
+  if (cls.includes('toolbar')      || cls.includes('appbarlayout') ||
+      cls.includes('actionbar')    ||
+      cls.includes('xcuielementtypetoolbar'))
+    return 'toolbar'
+
+  // ── Navigation ───────────────────────────────────────────────────────────
+  if (cls.includes('navigationview')       || cls.includes('bottomnavigationview') ||
+      cls.includes('navhostfragment')      || cls.includes('tabbar')               ||
+      cls.includes('xcuielementtypenavigationbar') ||
+      cls.includes('xcuielementtypetabbar'))
+    return 'nav'
+
+  // ── Card ─────────────────────────────────────────────────────────────────
+  if (cls.includes('cardview') || cls.includes('materialcardview'))
+    return 'card'
+
+  // ── Cell (iOS table/collection cell) ─────────────────────────────────────
+  if (cls.includes('cell') || cls.includes('xcuielementtypecell'))
+    return 'cell'
+
+  // ── Button ───────────────────────────────────────────────────────────────
+  if (cls.includes('button')            || cls.includes('materialbutton')        ||
+      cls.includes('floatingactionbutton') ||
+      cls.includes('xcuielementtypebutton'))
+    return 'btn'
+
+  // ── Static text / Label ──────────────────────────────────────────────────
+  if (cls.includes('textview') || cls.includes('statictext') ||
+      cls.includes('xcuielementtypestatictext'))
+    return 'lbl'
+
+  // ── Container (layout wrappers) ──────────────────────────────────────────
+  if (cls.includes('framelayout')      || cls.includes('linearlayout')    ||
+      cls.includes('constraintlayout') || cls.includes('relativelayout')  ||
+      cls.includes('coordinatorlayout') || cls.includes('viewgroup')      ||
+      cls.includes('xcuielementtypegroup') || cls.includes('xcuielementtypewindow'))
+    return 'container'
+
+  // ── Fallback to semantic elType ───────────────────────────────────────────
+  switch (el.elType) {
+    case 'btn':   return 'btn'
+    case 'input': return 'txt'
+    case 'text':  return 'lbl'
+    case 'list':  return 'lst'
+    case 'image': return 'img'
+    default:      return 'el'
+  }
+}
+
+// All valid field-name prefixes, longest first to avoid partial-match issues.
+const ALL_PREFIXES = 'container|toolbar|card|nav|scr|cell|lst|img|rdo|chk|cmb|lbl|txt|btn|sw|rv|el'
+
+// Recognises content-desc / accessibilityId values that already carry a valid
+// field-name prefix, e.g. "btnComprar", "toolbarPrincipal", "txtEmail".
+const PREFIXED_CONTENT_RE = new RegExp(`^(${ALL_PREFIXES})([^a-z].*)$`, 'i')
+
+// Generic placeholder names the backend SemanticAnalyzer emits when it cannot
+// determine a meaningful identifier: btnElemento, btnElemento12, btn3, el2 …
+const GENERIC_NAME_RE = new RegExp(
+  `^(?:(?:${ALL_PREFIXES})?[Ee]lemento\\d*|(?:${ALL_PREFIXES})\\d+)$`
+)
+
+function isGenericVarName(name: string): boolean {
+  if (!name || name.length < 3) return true
+  if (new RegExp(`^(?:${ALL_PREFIXES})$`, 'i').test(name)) return true
+  return GENERIC_NAME_RE.test(name)
+}
+
+/**
+ * Returns the best field/variable name for an element.
+ *
+ * Priority:
+ *   1. Backend semanticName / varName — when it carries real meaning.
+ *   2. accessId / text / accessibilityLabel — normalised and prefixed.
+ *   3. shortId-derived name as last resort.
+ */
 function elVarName(el: AppEl): string {
-  const name = el.semanticName?.trim() || el.varName?.trim()
-  if (name) return name
-  const m = toMethodName(el.shortId)
-  return m ? m.charAt(0).toLowerCase() + m.slice(1) : el.shortId
+  const backend = el.semanticName?.trim() || el.varName?.trim()
+  if (backend && !isGenericVarName(backend)) return backend
+
+  // Phase 7: input fields use hint/placeholder priority — strip instruction prefix first
+  if (el.elType === 'input') {
+    const candidates = [
+      el.accessId?.trim()           ? stripInputInstruction(el.accessId.trim())           : '',
+      el.accessibilityLabel?.trim() ? stripInputInstruction(el.accessibilityLabel.trim()) : '',
+      parseInputResourceId(el.resourceId ?? ''),
+      (el.text?.trim().length ?? 0) >= 3 ? stripInputInstruction(el.text!.trim()) : '',
+    ]
+    for (const raw of candidates) {
+      if (!raw) continue
+      const base = normalizeToIdentifier(removeAccents(raw))
+      if (base) return `txt${base.charAt(0).toUpperCase()}${base.slice(1)}`
+    }
+  }
+
+  const content = el.accessId?.trim() || el.text?.trim() || el.accessibilityLabel?.trim()
+  if (content) {
+    const noAcc = removeAccents(content)
+    // If the content already carries a known prefix (e.g., "btnComprar"), keep it.
+    const m = noAcc.match(PREFIXED_CONTENT_RE)
+    if (m) {
+      const root = normalizeToIdentifier(m[2])
+      return root
+        ? `${m[1].toLowerCase()}${root.charAt(0).toUpperCase()}${root.slice(1)}`
+        : m[1].toLowerCase()
+    }
+    const base = normalizeToIdentifier(noAcc)
+    if (base) {
+      const prefix = prefixForEl(el)
+      return `${prefix}${base.charAt(0).toUpperCase()}${base.slice(1)}`
+    }
+  }
+
+  const derived = toMethodName(el.shortId)
+  return derived ? derived.charAt(0).toLowerCase() + derived.slice(1) : el.shortId
+}
+
+/**
+ * Assigns unique names to a group of elements (within one Page Object class).
+ * Appends "2", "3", … when two different elements produce the same base name.
+ * Returns a map: shortId → uniqueName.
+ */
+// ── ElementRegistry ── Phase 4, 5 ────────────────────────────────────────────
+function buildNameMap(els: Iterable<AppEl>): Map<string, string> {
+  const result    = new Map<string, string>()
+  const usedNames = new Set<string>()
+  for (const el of els) {
+    let name = elVarName(el)
+    if (usedNames.has(name)) {
+      let n = 2
+      while (usedNames.has(`${name}${n}`)) n++
+      name = `${name}${n}`
+    }
+    usedNames.add(name)
+    result.set(el.shortId, name)
+  }
+  return result
+}
+
+/** Canonical string that uniquely identifies a locator for deduplication purposes. */
+function locatorKey(el: AppEl): string {
+  if (el.pageObjectAnnotation?.trim()) return el.pageObjectAnnotation.trim()
+  const loc = resolveLocator(el)
+  return loc ? `${loc.strategy}::${loc.value}` : `__noloc__::${el.shortId}`
+}
+
+/**
+ * Within a screen's element map, identifies duplicate locators and returns a map
+ * shortId → canonical shortId.  Primary elements map to themselves; duplicates
+ * map to the first element that shares the same locator.
+ */
+function buildLocatorAliasMap(els: Map<string, AppEl>): Map<string, string> {
+  const firstSeen = new Map<string, string>()  // locatorKey → first shortId
+  const aliases   = new Map<string, string>()  // shortId → canonical shortId
+  for (const [shortId, el] of els) {
+    const key       = locatorKey(el)
+    const canonical = firstSeen.get(key)
+    if (canonical !== undefined) {
+      aliases.set(shortId, canonical)   // duplicate — redirect to first occurrence
+    } else {
+      firstSeen.set(key, shortId)
+      aliases.set(shortId, shortId)     // primary — maps to itself
+    }
+  }
+  return aliases
 }
 
 /** Lowercase first character. */
@@ -364,49 +640,257 @@ function lc(s: string): string {
 }
 
 function esc(v: string): string {
-  return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")
+  return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")}
+
+// ── Phase 6: Smart method names for Page Object actions ───────────────────────
+
+// Spanish + English action verbs. A stem that starts with one of these is already
+// self-describing — no extra verb prefix is added.
+const ACTION_VERBS = new Set([
+  // Spanish
+  'continuar','aceptar','cancelar','iniciar','salir','entrar','ingresar',
+  'agregar','eliminar','actualizar','confirmar','guardar','buscar','ver',
+  'abrir','cerrar','volver','siguiente','anterior','enviar','editar','borrar',
+  'compartir','descargar','comprar','pagar','seleccionar','elegir',
+  'registrar','crear','aplicar','filtrar','recargar','refrescar','limpiar',
+  'rechazar','omitir','saltar','escanear','capturar','verificar','acceder',
+  'cambiar','modificar','mostrar','ocultar','activar','desactivar',
+  'retroceder','avanzar','completar','finalizar','terminar','empezar',
+  'comenzar','revisar','gestionar','administrar',
+  // English (common in mixed-language apps)
+  'login','logout','checkout','submit','search','add','remove','delete',
+  'confirm','back','next','skip','scan','view','open','close','select',
+  'choose','buy','pay','register','save','share','download','refresh',
+  'apply','filter','reload','start','finish','accept','go','edit',
+])
+
+// Nouns that typically imply a "select one from several" context.
+const SELECTION_NOUNS = new Set([
+  'metodo','opcion','tipo','categoria','forma','manera','modo','plan',
+  'tarifa','servicio','pago','envio','entrega','direccion','promocion',
+])
+
+/** Returns true when the stem's first camelCase word is a known action verb. */
+function startsWithVerb(stem: string): boolean {
+  const first = stem.match(/^([a-z]+)/i)?.[1]?.toLowerCase() ?? ''
+  return ACTION_VERBS.has(first)
 }
 
-// All locator strategies produced by the backend AccessibilityInspector.
+/**
+ * Derives the Page Object method name for a non-input element.
+ * - Verb stems → used directly:        continuar(), aceptar(), comprar()
+ * - "Selection" nouns → seleccionar:   seleccionarMetodoPago()
+ * - Other nouns → abrir:               abrirClubCinepolis(), abrirCarrito()
+ */
+function smartMethodName(stem: string): string {
+  if (!stem) return 'interactuar'
+  if (startsWithVerb(stem)) return lc(stem)
+  const words = stem.split(/(?=[A-Z])/).map(w => w.toLowerCase())
+  if (words.some(w => SELECTION_NOUNS.has(w))) return `seleccionar${stem}`
+  return `abrir${stem}`
+}
+
+// ── Phase 7: Smart input field naming ────────────────────────────────────────
+
+// Strips leading instructional phrases from hint/placeholder text so only the
+// semantic field label remains.
+// "Ingresa tu correo electrónico" → "correo electrónico"
+// "Enter your email address"      → "email address"
+const INPUT_INSTRUCTION_RE = /^(?:ingresa?|escribe?|introduce?|anota|coloca|captura|enter|type|input|write|insert)(?:\s+(?:tu|su|el|la|un|una|your|the|a|an))?[:\s]+/i
+
+function stripInputInstruction(s: string): string {
+  return s.replace(INPUT_INSTRUCTION_RE, '').trim()
+}
+
+/**
+ * Extracts a semantic label from a resource-id, stripping generic input prefixes.
+ * "com.cinepolis.go:id/input_correo"  → "correo"
+ * "com.app:id/edit_email_field"       → "email field"
+ */
+function parseInputResourceId(resourceId: string): string {
+  if (!resourceId) return ''
+  const m = resourceId.match(/:id\/(.+)$/)
+  if (!m) return ''
+  const local = m[1].replace(/^(?:input|edit|et|edt|field|txt|text|inp|tf)_?/i, '')
+  return local.replace(/_/g, ' ').trim()
+}
+
+// ── AssertionGenerator ── Phase 9 ────────────────────────────────────────────
+
+type AssertKind = 'checked' | 'selected' | 'enabled' | 'text' | 'exists' | 'visible'
+
+/**
+ * Classifies what kind of assertion is most meaningful for a given element.
+ * Used by all language generators to avoid generic assertVisible() everywhere.
+ */
+function elementAssertKind(el: AppEl): AssertKind {
+  const cls = (el.className ?? '').toLowerCase()
+  if (cls.includes('checkbox') || cls.includes('xcuielementtypecheckbox'))
+    return 'checked'
+  if (cls.includes('radiobutton') || cls.includes('xcuielementtyperadiobutton'))
+    return 'selected'
+  if (cls.includes('switch') && !cls.includes('viewswitcher') && !cls.includes('tabswitch'))
+    return 'enabled'
+  if (cls.includes('imageview') || cls.includes('xcuielementtypeimage'))
+    return 'exists'
+  if (cls.includes('recyclerview') || cls.includes('listview') ||
+      cls.includes('scrollview') || cls.includes('xcuielementtypetable') ||
+      cls.includes('xcuielementtypescrollview'))
+    return 'exists'
+  if (el.elType === 'text' || cls.includes('textview') || cls.includes('xcuielementtypestatictext'))
+    return 'text'
+  return 'visible'
+}
+
+/**
+ * Generates Java assertion lines for a given element reference.
+ * ctx='tap'  → only state-changing assertions (chk/rdo/sw); skips btn/lbl to
+ *              avoid asserting an element that may have navigated away.
+ * ctx='assertion' → full contextual assertions.
+ */
+function javaSmartAssert(el: AppEl, ref: string, ctx: 'tap' | 'assertion'): string[] {
+  const out: string[] = []
+  const prefix = ref.match(/^([a-z]+)/)?.[1] ?? ''
+  switch (prefix) {
+    case 'chk':
+      out.push(`        assertChecked(${ref});`)
+      break
+    case 'rdo':
+      out.push(`        assertSelected(${ref});`)
+      break
+    case 'sw':
+      out.push(`        assertEnabled(${ref});`)
+      break
+    case 'lbl': {
+      const txt = el.text?.trim()
+      if (txt) out.push(`        assertText(${ref}, "${txt}");`)
+      else if (ctx === 'assertion') out.push(`        assertVisible(${ref});`)
+      break
+    }
+    case 'img': case 'lst': case 'scr': case 'rv':
+      out.push(`        assertExists(${ref});`)
+      break
+    case 'btn':
+      if (ctx === 'assertion') {
+        out.push(`        assertVisible(${ref});`)
+        out.push(`        assertEnabled(${ref});`)
+      }
+      break
+    default:
+      if (ctx === 'assertion') out.push(`        assertVisible(${ref});`)
+  }
+  return out
+}
+
+// All locator strategies produced by the backend AccessibilityInspector or this engine.
 type LocatorStrategy =
   | 'id'               // Android resource-id
   | 'accessibility_id' // Android content-desc / iOS accessibility identifier
-  | 'text_xpath'       // element text via xpath @text
-  | 'xpath'            // explicit xpath (class-based fallback from backend)
+  | 'uiautomator'      // Android UiSelector expression — more reliable than @text XPath
+  | 'text_xpath'       // legacy: element text via xpath @text (kept for stored sessions)
+  | 'xpath'            // explicit xpath (class-based fallback — last resort only)
   | 'predicate_string' // iOS NSPredicate  e.g. label == "Login"
   | 'class_chain'      // iOS XCUITest class chain
 
 type LocatorResult = { strategy: LocatorStrategy; value: string }
 
-/**
- * Resolves the best available locator for an element.
- *
- * Priority (matches backend AndroidAccessibilityInspector / IOSAccessibilityInspector):
- *   1. resource-id / resourceId  → id
- *   2. content-desc / accessId   → accessibility_id
- *   3. visible text              → text_xpath
- *   4. locatorStrategy + locatorValue from backend inspector  → xpath / predicate_string / class_chain
- *
- * Returns null ONLY when absolutely no identifier of any kind is available.
- */
-function resolveLocator(el: AppEl | null): LocatorResult | null {
-  if (!el) return null
-  if (el.resourceId?.trim())   return { strategy: 'id',               value: el.resourceId }
-  if (el.accessId?.trim())     return { strategy: 'accessibility_id', value: el.accessId   }
-  if (el.text?.trim())         return { strategy: 'text_xpath',       value: el.text       }
-  // Fall back to the pre-resolved locator sent by the backend AccessibilityInspector.
-  // This is the primary path for iOS elements (predicate_string, class_chain) and for
-  // Android elements that have no resource-id / content-desc / text (class xpath).
-  if (el.locatorValue?.trim()) return {
-    strategy: (el.locatorStrategy?.trim() || 'xpath') as LocatorStrategy,
-    value:    el.locatorValue,
+// Resource IDs that carry no semantic signal and should be skipped in favour of
+// content-desc, text, or UiSelector.  Matches fully-qualified class paths and
+// generic slot names like :id/container, :id/root, :id/item_3, etc.
+const GENERIC_RESOURCE_ID_RE = [
+  /^android\.(view|widget|support|graphics|app)\./i,
+  /^androidx\./i,
+  /^com\.android\./i,
+  /:id\/(container|wrapper|root|frame|layout|view|group|scroll|recycler|pager|page|content|inner|outer|main|body|header|footer|toolbar|nav|tab|cell|row|item|card|panel|box|surface)(_\w+)?$/i,
+  /:id\/\d+$/,
+]
+
+function isGenericResourceId(id: string): boolean {
+  return !id.trim() || GENERIC_RESOURCE_ID_RE.some(p => p.test(id))
+}
+
+// ── LocatorResolver ── Phase 1, 10 ───────────────────────────────────────────
+// When a backend XPath carries an attribute that maps to a better strategy
+// (resource-id, content-desc, @text, @label), extract it so we never emit XPath
+// when a semantic locator is available inside the XPath itself.
+function extractFromXPath(xpath: string, isIOS: boolean): LocatorResult | null {
+  if (!isIOS) {
+    const idM = xpath.match(/@resource-id=['"]([^'"]+)['"]/i)
+    if (idM && !isGenericResourceId(idM[1]))
+      return { strategy: 'id', value: idM[1] }
+    const descM = xpath.match(/@content-desc=['"]([^'"]+)['"]/i)
+    if (descM && descM[1].trim())
+      return { strategy: 'accessibility_id', value: descM[1] }
+    const textM = xpath.match(/@text=['"]([^'"]+)['"]/i)
+    if (textM && textM[1].trim())
+      return { strategy: 'uiautomator', value: `new UiSelector().text("${textM[1]}")` }
+  } else {
+    const labelM = xpath.match(/@label=['"]([^'"]+)['"]/i)
+    if (labelM && labelM[1].trim())
+      return { strategy: 'predicate_string', value: `label == "${labelM[1]}"` }
+    const nameM = xpath.match(/@name=['"]([^'"]+)['"]/i)
+    if (nameM && nameM[1].trim())
+      return { strategy: 'accessibility_id', value: nameM[1] }
+    const valueM = xpath.match(/@value=['"]([^'"]+)['"]/i)
+    if (valueM && valueM[1].trim())
+      return { strategy: 'predicate_string', value: `value == "${valueM[1]}"` }
   }
   return null
 }
 
-// ── Per-language selector formatters ──────────────────────────────────────────
-// Every formatter handles ALL LocatorStrategy values — no silent undefined return.
-// REPLACE_ME is emitted ONLY when el is null or truly has no identifier.
+/**
+ * Resolves the best available locator for an element using platform-aware
+ * priority chains recommended for professional Appium test suites.
+ *
+ * Android: accessibilityId → resource-id (non-generic) → content-desc → text (UiSelector) → XPath mining → xpath
+ * iOS:     accessibilityId → accessibilityLabel → text (predicate label) → predicate → class chain → XPath mining → xpath
+ *
+ * XPath is emitted ONLY as absolute last resort — Phase 10 mines attributes
+ * out of incoming XPaths before ever emitting a raw XPath locator.
+ */
+function resolveLocator(el: AppEl | null): LocatorResult | null {
+  if (!el) return null
+  const isIOS = el.platform === 'ios'
+
+  if (!isIOS) {
+    if (el.accessId?.trim())
+      return { strategy: 'accessibility_id', value: el.accessId }
+    if (el.resourceId?.trim() && !isGenericResourceId(el.resourceId))
+      return { strategy: 'id', value: el.resourceId }
+    if (el.accessibilityLabel?.trim())
+      return { strategy: 'accessibility_id', value: el.accessibilityLabel }
+    if (el.text?.trim())
+      return { strategy: 'uiautomator', value: `new UiSelector().text("${el.text}")` }
+    if (el.locatorStrategy === 'uiautomator' && el.locatorValue?.trim())
+      return { strategy: 'uiautomator', value: el.locatorValue }
+    if (el.locatorValue?.trim()) {
+      const mined = extractFromXPath(el.locatorValue, false)
+      return mined ?? { strategy: 'xpath', value: el.locatorValue }
+    }
+  } else {
+    if (el.accessId?.trim())
+      return { strategy: 'accessibility_id', value: el.accessId }
+    if (el.accessibilityLabel?.trim())
+      return { strategy: 'accessibility_id', value: el.accessibilityLabel }
+    if (el.text?.trim())
+      return { strategy: 'predicate_string', value: `label == "${el.text}"` }
+    if (el.locatorStrategy === 'predicate_string' && el.locatorValue?.trim())
+      return { strategy: 'predicate_string', value: el.locatorValue }
+    if (el.locatorStrategy === 'class_chain' && el.locatorValue?.trim())
+      return { strategy: 'class_chain', value: el.locatorValue }
+    if (el.locatorValue?.trim()) {
+      const mined = extractFromXPath(el.locatorValue, true)
+      return mined ?? { strategy: 'xpath', value: el.locatorValue }
+    }
+  }
+  return null
+}
+
+// ── PlatformStrategy ── Phase 11 ─────────────────────────────────────────────
+// Single engine for both Android and iOS.
+// javaAnnotationStr() is the authoritative mapping from LocatorResult →
+// @AndroidFindBy / @iOSXCUITFindBy. Per-language selector formatters delegate
+// to resolveLocator() so there is no duplicated priority-chain logic anywhere.
 
 function javaByStr(el: AppEl | null): string {
   const loc = resolveLocator(el)
@@ -414,10 +898,11 @@ function javaByStr(el: AppEl | null): string {
   switch (loc.strategy) {
     case 'id':               return `By.id("${esc(loc.value)}")`
     case 'accessibility_id': return `AppiumBy.accessibilityId("${esc(loc.value)}")`
-    case 'text_xpath':       return `By.xpath("//*[@text='${esc(loc.value)}']")`
-    case 'xpath':            return `By.xpath("${esc(loc.value)}")`
+    case 'uiautomator':      return `AppiumBy.androidUIAutomator("${esc(loc.value)}")`
     case 'predicate_string': return `AppiumBy.iOSNsPredicateString("${esc(loc.value)}")`
     case 'class_chain':      return `AppiumBy.iOSClassChain("${esc(loc.value)}")`
+    case 'text_xpath':       return `AppiumBy.androidUIAutomator("new UiSelector().text(\\"${esc(loc.value)}\\")")`
+    case 'xpath':            return `By.xpath("${esc(loc.value)}")`
     default:                 return `By.xpath("${esc(loc.value)}")`
   }
 }
@@ -428,10 +913,11 @@ function pythonByStr(el: AppEl | null): string {
   switch (loc.strategy) {
     case 'id':               return `AppiumBy.ID, "${esc(loc.value)}"`
     case 'accessibility_id': return `AppiumBy.ACCESSIBILITY_ID, "${esc(loc.value)}"`
-    case 'text_xpath':       return `AppiumBy.XPATH, "//*[@text='${esc(loc.value)}']"`
-    case 'xpath':            return `AppiumBy.XPATH, "${esc(loc.value)}"`
+    case 'uiautomator':      return `AppiumBy.ANDROID_UIAUTOMATOR, "${esc(loc.value)}"`
     case 'predicate_string': return `AppiumBy.IOS_PREDICATE, "${esc(loc.value)}"`
     case 'class_chain':      return `AppiumBy.IOS_CLASS_CHAIN, "${esc(loc.value)}"`
+    case 'text_xpath':       return `AppiumBy.ANDROID_UIAUTOMATOR, "new UiSelector().text(\\"${esc(loc.value)}\\")"`
+    case 'xpath':            return `AppiumBy.XPATH, "${esc(loc.value)}"`
     default:                 return `AppiumBy.XPATH, "${esc(loc.value)}"`
   }
 }
@@ -443,6 +929,7 @@ function jsByStr(el: AppEl | null, isAndroid: boolean): string {
     switch (loc.strategy) {
       case 'id':               return `$('android=new UiSelector().resourceId("${esc(loc.value)}")')`
       case 'accessibility_id': return `$('~${esc(loc.value)}')`
+      case 'uiautomator':      return `$('android=${loc.value}')`
       case 'text_xpath':       return `$('android=new UiSelector().text("${esc(loc.value)}")')`
       case 'xpath':            return `$('${esc(loc.value)}')`
       default:                 return `$('${esc(loc.value)}')`
@@ -451,10 +938,10 @@ function jsByStr(el: AppEl | null, isAndroid: boolean): string {
     switch (loc.strategy) {
       case 'id':               return `$('id:${esc(loc.value)}')`
       case 'accessibility_id': return `$('~${esc(loc.value)}')`
-      case 'text_xpath':       return `$(\`-ios predicate string:label == "${esc(loc.value)}"\`)`
-      case 'xpath':            return `$('${esc(loc.value)}')`
       case 'predicate_string': return `$(\`-ios predicate string:${loc.value}\`)`
       case 'class_chain':      return `$(\`-ios class chain:${loc.value}\`)`
+      case 'text_xpath':       return `$(\`-ios predicate string:label == "${esc(loc.value)}"\`)`
+      case 'xpath':            return `$('${esc(loc.value)}')`
       default:                 return `$('${esc(loc.value)}')`
     }
   }
@@ -466,10 +953,11 @@ function csByStr(el: AppEl | null): string {
   switch (loc.strategy) {
     case 'id':               return `By.Id("${esc(loc.value)}")`
     case 'accessibility_id': return `MobileBy.AccessibilityId("${esc(loc.value)}")`
-    case 'text_xpath':       return `By.XPath("//*[@text='${esc(loc.value)}']")`
-    case 'xpath':            return `By.XPath("${esc(loc.value)}")`
+    case 'uiautomator':      return `MobileBy.AndroidUIAutomator("${esc(loc.value)}")`
     case 'predicate_string': return `MobileBy.IosNSPredicate("${esc(loc.value)}")`
     case 'class_chain':      return `MobileBy.IosClassChain("${esc(loc.value)}")`
+    case 'text_xpath':       return `MobileBy.AndroidUIAutomator("new UiSelector().text(\\"${esc(loc.value)}\\")")`
+    case 'xpath':            return `By.XPath("${esc(loc.value)}")`
     default:                 return `By.XPath("${esc(loc.value)}")`
   }
 }
@@ -480,11 +968,50 @@ function kotlinByStr(el: AppEl | null): string {
   switch (loc.strategy) {
     case 'id':               return `AppiumBy.id("${esc(loc.value)}")`
     case 'accessibility_id': return `AppiumBy.accessibilityId("${esc(loc.value)}")`
-    case 'text_xpath':       return `By.xpath("//*[@text='${esc(loc.value)}']")`
-    case 'xpath':            return `By.xpath("${esc(loc.value)}")`
+    case 'uiautomator':      return `AppiumBy.androidUIAutomator("${esc(loc.value)}")`
     case 'predicate_string': return `AppiumBy.iOSNsPredicateString("${esc(loc.value)}")`
     case 'class_chain':      return `AppiumBy.iOSClassChain("${esc(loc.value)}")`
+    case 'text_xpath':       return `AppiumBy.androidUIAutomator("new UiSelector().text(\\"${esc(loc.value)}\\")")`
+    case 'xpath':            return `By.xpath("${esc(loc.value)}")`
     default:                 return `By.xpath("${esc(loc.value)}")`
+  }
+}
+
+/**
+ * PlatformStrategy — Phase 11
+ * Maps a LocatorResult to the correct Java Page Object @FindBy annotation.
+ *
+ * Platform resolution order:
+ *   1. el.platform (per-element, set by the recording engine)
+ *   2. globalIsAndroid (session-level fallback from the platform dropdown)
+ *
+ * This is the single engine for both Android and iOS — no duplicated priority
+ * logic elsewhere.  All annotation emission in PageObjectGenerator calls here.
+ */
+function javaAnnotationStr(el: AppEl, loc: LocatorResult, globalIsAndroid: boolean): string {
+  const isAndroid = el.platform ? el.platform !== 'ios' : globalIsAndroid
+  if (isAndroid) {
+    switch (loc.strategy) {
+      case 'accessibility_id': return `@AndroidFindBy(accessibility = "${esc(loc.value)}")`
+      case 'id':               return `@AndroidFindBy(id = "${esc(loc.value)}")`
+      case 'uiautomator':      return `@AndroidFindBy(uiAutomator = "${esc(loc.value)}")`
+      case 'text_xpath':       return `@AndroidFindBy(uiAutomator = "new UiSelector().text(\\"${esc(loc.value)}\\")")`
+      case 'predicate_string':
+      case 'class_chain':
+      case 'xpath':
+      default:                 return `@AndroidFindBy(xpath = "${esc(loc.value)}")`
+    }
+  } else {
+    switch (loc.strategy) {
+      case 'accessibility_id': return `@iOSXCUITFindBy(accessibility = "${esc(loc.value)}")`
+      case 'predicate_string': return `@iOSXCUITFindBy(iOSNsPredicate = "${esc(loc.value)}")`
+      case 'class_chain':      return `@iOSXCUITFindBy(iOSClassChain = "${esc(loc.value)}")`
+      case 'id':               return `@iOSXCUITFindBy(accessibility = "${esc(loc.value)}")`
+      case 'uiautomator':      return `@iOSXCUITFindBy(iOSNsPredicate = "${esc(loc.value)}")`
+      case 'text_xpath':       return `@iOSXCUITFindBy(iOSNsPredicate = "label == \\"${esc(loc.value)}\\"")`
+      case 'xpath':
+      default:                 return `@iOSXCUITFindBy(xpath = "${esc(loc.value)}")`
+    }
   }
 }
 
@@ -533,53 +1060,60 @@ function generateJava(
   }
   lines.push('')
 
-  // ── Page Objects — one class per screen ─────────────────────────────────────
-  if (opts.pageObjects) {
-    // Group elements by screenName (default "App" when screen is unknown)
-    const screenPages = new Map<string, Map<string, AppEl>>()
-    for (const step of steps) {
-      if (!step.el) continue
-      const screen = step.screenName?.trim() || 'App'
-      if (!screenPages.has(screen)) screenPages.set(screen, new Map())
-      screenPages.get(screen)!.set(elVarName(step.el), step.el)
-    }
-    if (screenPages.size === 0) {
-      // Fallback: collect all unique elements into a single page
-      const allEls = new Map<string, AppEl>()
-      for (const step of steps) {
-        if (step.el) allEls.set(elVarName(step.el), step.el)
-      }
-      if (allEls.size > 0) screenPages.set('App', allEls)
-    }
+  // ── Element collection — keyed by shortId so every distinct element is kept ──
+  const screenElSets = new Map<string, Map<string, AppEl>>()
+  for (const step of steps) {
+    if (!step.el) continue
+    const screen = step.screenName?.trim() || 'App'
+    if (!screenElSets.has(screen)) screenElSets.set(screen, new Map())
+    screenElSets.get(screen)!.set(step.el.shortId, step.el)
+  }
+  if (screenElSets.size === 0) {
+    const allEls = new Map<string, AppEl>()
+    for (const step of steps) { if (step.el) allEls.set(step.el.shortId, step.el) }
+    if (allEls.size > 0) screenElSets.set('App', allEls)
+  }
+  // Deduplicated name maps per screen (shortId → uniqueName)
+  const screenNameMaps = new Map<string, Map<string, string>>()
+  for (const [screen, els] of screenElSets) {
+    screenNameMaps.set(screen, buildNameMap(els.values()))
+  }
+  // Locator alias maps: shortId → canonical shortId (same-locator dedup, Phase 4)
+  const locatorAliasMaps = new Map<string, Map<string, string>>()
+  for (const [screen, els] of screenElSets) {
+    locatorAliasMaps.set(screen, buildLocatorAliasMap(els))
+  }
+  /** Resolves the unique field name, redirecting duplicate locators to their canonical element. */
+  const resolveFieldName = (el: AppEl, screenName?: string): string => {
+    const sc       = screenName?.trim() || 'App'
+    const canonical = locatorAliasMaps.get(sc)?.get(el.shortId) ?? el.shortId
+    return screenNameMaps.get(sc)?.get(canonical) ?? elVarName(el)
+  }
 
-    for (const [screen, els] of screenPages) {
+  // ── PageObjectGenerator ──────────────────────────────────────────────────────
+  if (opts.pageObjects) {
+    for (const [screen, els] of screenElSets) {
       const pageClass = `${screen}Page`
       lines.push(`public class ${pageClass} extends BasePage {`)
       lines.push('')
 
       // ── Fields with @FindBy annotations ──
-      for (const [, el] of els) {
-        const fieldName = elVarName(el)
+      for (const [shortId, el] of els) {
+        if (locatorAliasMaps.get(screen)!.get(shortId) !== shortId) continue  // duplicate locator — already declared
+        const fieldName = screenNameMaps.get(screen)!.get(shortId)!
         if (el.pageObjectAnnotation?.trim()) {
+          // Backend already provided the full annotation + field declaration
           for (const annLine of el.pageObjectAnnotation.split('\n')) {
             lines.push(`    ${annLine}`)
           }
         } else {
-          // Fallback: derive best annotation
-          const rid  = el.resourceId?.trim()
-          const aid  = el.accessId?.trim() || el.accessibilityLabel?.trim()
-          const txt  = el.text?.trim()
-          const locV = el.locatorValue?.trim()
-          if (isAndroid) {
-            if (rid)       lines.push(`    @AndroidFindBy(id = "${esc(rid)}")`)
-            else if (aid)  lines.push(`    @AndroidFindBy(accessibility = "${esc(aid)}")`)
-            else if (txt)  lines.push(`    @AndroidFindBy(uiAutomator = "new UiSelector().text(\\"${esc(txt)}\\")")`)
-            else if (locV) lines.push(`    @AndroidFindBy(xpath = "${esc(locV)}")`)
-            else           lines.push(`    // ⚠ No locator available for ${fieldName}`)
+          // PlatformStrategy: resolveLocator() is the single source of truth.
+          // javaAnnotationStr() picks @AndroidFindBy or @iOSXCUITFindBy per element.
+          const loc = resolveLocator(el)
+          if (loc) {
+            lines.push(`    ${javaAnnotationStr(el, loc, isAndroid)}`)
           } else {
-            if (aid)       lines.push(`    @iOSXCUITFindBy(accessibility = "${esc(aid)}")`)
-            else if (locV) lines.push(`    @iOSXCUITFindBy(xpath = "${esc(locV)}")`)
-            else           lines.push(`    // ⚠ No locator available for ${fieldName}`)
+            lines.push(`    // ⚠ No locator available for ${fieldName}`)
           }
           lines.push(`    private WebElement ${fieldName};`)
         }
@@ -594,8 +1128,9 @@ function generateJava(
       lines.push('')
 
       // ── Action methods (Spanish-idiomatic) ──
-      for (const [, el] of els) {
-        const fieldName = elVarName(el)
+      for (const [shortId, el] of els) {
+        if (locatorAliasMaps.get(screen)!.get(shortId) !== shortId) continue  // duplicate locator — method already exists
+        const fieldName = screenNameMaps.get(screen)!.get(shortId)!
         const stem      = stemFromVarName(fieldName)
         if (el.elType === 'input') {
           // ingresarCorreo(String correo) — "ingresar" prefix for inputs
@@ -604,8 +1139,8 @@ function generateJava(
           lines.push(`        type(${fieldName}, ${param});`)
           lines.push(`    }`)
         } else {
-          // continuar() / iniciarSesion() — verb form directly
-          const methodName = lc(stem)
+          // continuar() / abrirClubCinepolis() / seleccionarMetodoPago() — Phase 6
+          const methodName = smartMethodName(stem)
           lines.push(`    public void ${methodName}() {`)
           lines.push(`        click(${fieldName});`)
           lines.push(`    }`)
@@ -618,7 +1153,7 @@ function generateJava(
     }
   }
 
-  // ── Test class ───────────────────────────────────────────────────────────────
+  // ── TestGenerator ────────────────────────────────────────────────────────────
   lines.push(`public class ${effectiveClassName} extends BaseTest {`)
   lines.push('')
   if (opts.allureLogs) {
@@ -665,14 +1200,18 @@ function generateJava(
     const pageVar = opts.pageObjects && step.el
       ? lc(step.screenName?.trim() || 'App') + 'Page'
       : null
-    const stem = step.el ? stemFromVarName(elVarName(step.el)) : ''
+    const stem = step.el ? stemFromVarName(resolveFieldName(step.el, step.screenName)) : ''
 
     switch (step.type) {
       case 'tap':
         if (pageVar && step.el) {
-          lines.push(`        ${pageVar}.${lc(stem)}();`)
+          lines.push(`        ${pageVar}.${smartMethodName(stem)}();`)
         } else {
           lines.push(`        click(${sel});`)
+        }
+        if (opts.assertions && step.el) {
+          const assertRef = pageVar ? resolveFieldName(step.el, step.screenName) : sel
+          for (const al of javaSmartAssert(step.el, assertRef, 'tap')) lines.push(al)
         }
         break
       case 'double_tap':
@@ -696,8 +1235,14 @@ function generateJava(
         lines.push(`        swipe(Direction.${(step.dir ?? 'UP').toUpperCase()});`)
         break
       case 'scroll': {
-        const scrollDir = step.dir === 'up' ? 'Up' : 'Down'
-        lines.push(`        scroll${scrollDir}();`)
+        if (step.el) {
+          const scrollRef = pageVar ? resolveFieldName(step.el, step.screenName) : sel
+          lines.push(`        scrollUntilVisible(${scrollRef});`)
+        } else {
+          const d = step.dir ?? 'down'
+          const scrollDir = d.charAt(0).toUpperCase() + d.slice(1)
+          lines.push(`        scroll${scrollDir}();`)
+        }
         break
       }
       case 'back':
@@ -709,9 +1254,20 @@ function generateJava(
       case 'hide_keyboard':
         lines.push(`        driver.hideKeyboard();`)
         break
+      case 'assertion':
+        if (step.el) {
+          const assertRef = pageVar ? resolveFieldName(step.el, step.screenName) : sel
+          for (const al of javaSmartAssert(step.el, assertRef, 'assertion')) lines.push(al)
+        } else {
+          lines.push(`        // ⚠ Assertion without element — add selector`)
+        }
+        break
+      case 'screenshot':
+        lines.push(`        captureScreenshot("step_${step.n}");`)
+        break
     }
 
-    if (opts.screenshots) {
+    if (opts.screenshots && step.type !== 'screenshot') {
       lines.push(`        captureScreenshot("step_${step.n}");`)
     }
   }
@@ -817,7 +1373,12 @@ function generatePython(
         lines.push(`        driver.execute_script("mobile: swipe", {"direction": "${step.dir ?? 'up'}"})`)
         break
       case 'scroll':
-        lines.push(`        driver.execute_script("mobile: scroll", {"direction": "${step.dir ?? 'down'}"})`)
+        if (step.el) {
+          lines.push(`        scroll_target = driver.find_element(${sel})`)
+          lines.push(`        driver.execute_script("mobile: scrollTo", {"element": scroll_target})`)
+        } else {
+          lines.push(`        driver.execute_script("mobile: scroll", {"direction": "${step.dir ?? 'down'}"})`)
+        }
         break
       case 'back':
         lines.push(`        driver.press_keycode(4)  # KEYCODE_BACK`)
@@ -828,9 +1389,31 @@ function generatePython(
       case 'hide_keyboard':
         lines.push(`        driver.hide_keyboard()`)
         break
-      case 'assertion':
-        lines.push(`        assert driver.find_element(${sel}).is_displayed()`)
+      case 'assertion': {
+        const kind = step.el ? elementAssertKind(step.el) : 'visible'
+        const elTxt = step.el?.text?.trim() ?? ''
+        switch (kind) {
+          case 'checked':
+            lines.push(`        assert driver.find_element(${sel}).get_attribute("checked") == "true"`)
+            break
+          case 'selected':
+            lines.push(`        assert driver.find_element(${sel}).get_attribute("selected") == "true"`)
+            break
+          case 'enabled':
+            lines.push(`        assert driver.find_element(${sel}).is_enabled()`)
+            break
+          case 'text':
+            if (elTxt) lines.push(`        assert driver.find_element(${sel}).get_attribute("text") == "${elTxt}"`)
+            else       lines.push(`        assert driver.find_element(${sel}).is_displayed()`)
+            break
+          case 'exists':
+            lines.push(`        assert len(driver.find_elements(${sel})) > 0`)
+            break
+          default:
+            lines.push(`        assert driver.find_element(${sel}).is_displayed()`)
+        }
         break
+      }
       case 'screenshot':
         lines.push(`        driver.save_screenshot(f"screenshot_step_${step.n}.png")`)
         break
@@ -900,7 +1483,12 @@ function generateJavaScript(
         lines.push(`    await browser.execute('mobile: swipe', { direction: '${step.dir ?? 'up'}' })`)
         break
       case 'scroll':
-        lines.push(`    await browser.execute('mobile: scroll', { direction: '${step.dir ?? 'down'}' })`)
+        if (step.el) {
+          lines.push(`    const scrollTarget = await ${sel}`)
+          lines.push(`    await browser.execute('mobile: scrollTo', { element: scrollTarget })`)
+        } else {
+          lines.push(`    await browser.execute('mobile: scroll', { direction: '${step.dir ?? 'down'}' })`)
+        }
         break
       case 'back':
         lines.push(`    await driver.pressKeyCode(4) // KEYCODE_BACK`)
@@ -911,9 +1499,31 @@ function generateJavaScript(
       case 'hide_keyboard':
         lines.push(`    await driver.hideKeyboard()`)
         break
-      case 'assertion':
-        lines.push(`    await expect(${sel}).toBeDisplayed()`)
+      case 'assertion': {
+        const kind = step.el ? elementAssertKind(step.el) : 'visible'
+        const elTxt = step.el?.text?.trim() ?? ''
+        switch (kind) {
+          case 'checked':
+            lines.push(`    expect(await ${sel}).toHaveAttr('checked', 'true')`)
+            break
+          case 'selected':
+            lines.push(`    expect(await ${sel}).toHaveAttr('selected', 'true')`)
+            break
+          case 'enabled':
+            lines.push(`    expect(await ${sel}).toBeEnabled()`)
+            break
+          case 'text':
+            if (elTxt) lines.push(`    expect(await ${sel}).toHaveText('${elTxt}')`)
+            else       lines.push(`    expect(await ${sel}).toBeDisplayed()`)
+            break
+          case 'exists':
+            lines.push(`    expect(await ${sel}).toExist()`)
+            break
+          default:
+            lines.push(`    expect(await ${sel}).toBeDisplayed()`)
+        }
         break
+      }
       case 'screenshot':
         lines.push(`    await browser.saveScreenshot('./step_${step.n}.png')`)
         break
@@ -1000,7 +1610,12 @@ function generateCSharp(
         lines.push(`            _driver.ExecuteScript("mobile: swipe", new Dictionary<string, string> { { "direction", "${step.dir ?? 'up'}" } });`)
         break
       case 'scroll':
-        lines.push(`            _driver.ExecuteScript("mobile: scroll", new Dictionary<string, string> { { "direction", "${step.dir ?? 'down'}" } });`)
+        if (step.el) {
+          lines.push(`            var scrollTarget${step.n} = _driver.FindElement(${byStr});`)
+          lines.push(`            ((IJavaScriptExecutor)_driver).ExecuteScript("mobile: scrollTo", new Dictionary<string, object> { { "element", scrollTarget${step.n} } });`)
+        } else {
+          lines.push(`            _driver.ExecuteScript("mobile: scroll", new Dictionary<string, string> { { "direction", "${step.dir ?? 'down'}" } });`)
+        }
         break
       case 'back':
         lines.push(`            _driver.Navigate().Back();`)
@@ -1011,9 +1626,31 @@ function generateCSharp(
       case 'hide_keyboard':
         lines.push(`            _driver.HideKeyboard();`)
         break
-      case 'assertion':
-        lines.push(`            Assert.IsTrue(_driver.FindElement(${byStr}).Displayed);`)
+      case 'assertion': {
+        const kind = step.el ? elementAssertKind(step.el) : 'visible'
+        const elTxt = step.el?.text?.trim() ?? ''
+        switch (kind) {
+          case 'checked':
+            lines.push(`            Assert.AreEqual("true", _driver.FindElement(${byStr}).GetAttribute("checked"));`)
+            break
+          case 'selected':
+            lines.push(`            Assert.AreEqual("true", _driver.FindElement(${byStr}).GetAttribute("selected"));`)
+            break
+          case 'enabled':
+            lines.push(`            Assert.IsTrue(_driver.FindElement(${byStr}).Enabled);`)
+            break
+          case 'text':
+            if (elTxt) lines.push(`            Assert.AreEqual("${elTxt}", _driver.FindElement(${byStr}).GetAttribute("text"));`)
+            else       lines.push(`            Assert.IsTrue(_driver.FindElement(${byStr}).Displayed);`)
+            break
+          case 'exists':
+            lines.push(`            Assert.IsNotEmpty(_driver.FindElements(${byStr}));`)
+            break
+          default:
+            lines.push(`            Assert.IsTrue(_driver.FindElement(${byStr}).Displayed);`)
+        }
         break
+      }
       case 'screenshot':
         lines.push(`            ((ITakesScreenshot)_driver).GetScreenshot().SaveAsFile($"step_${step.n}.png");`)
         break
@@ -1096,7 +1733,12 @@ function generateKotlin(
         lines.push(`        driver.executeScript("mobile: swipe", mapOf("direction" to "${step.dir ?? 'up'}"))`)
         break
       case 'scroll':
-        lines.push(`        driver.executeScript("mobile: scroll", mapOf("direction" to "${step.dir ?? 'down'}"))`)
+        if (step.el) {
+          lines.push(`        val scrollTarget${step.n} = driver.findElement(${byExpr})`)
+          lines.push(`        driver.executeScript("mobile: scrollTo", mapOf("element" to scrollTarget${step.n}))`)
+        } else {
+          lines.push(`        driver.executeScript("mobile: scroll", mapOf("direction" to "${step.dir ?? 'down'}"))`)
+        }
         break
       case 'back':
         lines.push(`        driver.navigate().back()`)
@@ -1107,9 +1749,31 @@ function generateKotlin(
       case 'hide_keyboard':
         lines.push(`        driver.hideKeyboard()`)
         break
-      case 'assertion':
-        lines.push(`        assertTrue(driver.findElement(${byExpr}).isDisplayed)`)
+      case 'assertion': {
+        const kind = step.el ? elementAssertKind(step.el) : 'visible'
+        const elTxt = step.el?.text?.trim() ?? ''
+        switch (kind) {
+          case 'checked':
+            lines.push(`        assertEquals("true", driver.findElement(${byExpr}).getAttribute("checked"))`)
+            break
+          case 'selected':
+            lines.push(`        assertEquals("true", driver.findElement(${byExpr}).getAttribute("selected"))`)
+            break
+          case 'enabled':
+            lines.push(`        assertTrue(driver.findElement(${byExpr}).isEnabled)`)
+            break
+          case 'text':
+            if (elTxt) lines.push(`        assertEquals("${elTxt}", driver.findElement(${byExpr}).getAttribute("text"))`)
+            else       lines.push(`        assertTrue(driver.findElement(${byExpr}).isDisplayed)`)
+            break
+          case 'exists':
+            lines.push(`        assertTrue(driver.findElements(${byExpr}).isNotEmpty())`)
+            break
+          default:
+            lines.push(`        assertTrue(driver.findElement(${byExpr}).isDisplayed)`)
+        }
         break
+      }
       case 'screenshot':
         lines.push(`        (driver as TakesScreenshot).getScreenshotAs(OutputType.FILE).copyTo(File("step_${step.n}.png"))`)
         break
