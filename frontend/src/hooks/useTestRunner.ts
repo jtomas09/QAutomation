@@ -1,6 +1,19 @@
 import { useState, useCallback, useRef } from 'react'
 import type { RunState, LogLevel, LogEntry } from '../types'
 import { postRun, streamExecution, stopExecution, ApiError } from '../api'
+import { executionTrackingService } from '../services/ExecutionTrackingService'
+
+/** Mirrors JobExecutor.extractTestName — parses "Class > method() PASSED" → "method" */
+function extractTestNameFromLog(line: string): string {
+  const idx = line.indexOf(' > ')
+  if (idx < 0) return line.trim().slice(0, 80)
+  let after = line.substring(idx + 3).trim()
+  for (const suffix of [' PASSED', ' FAILED', ' SKIPPED']) {
+    if (after.toUpperCase().endsWith(suffix)) { after = after.slice(0, -suffix.length).trim(); break }
+  }
+  if (after.endsWith('()')) after = after.slice(0, -2)
+  return after || 'unknown'
+}
 
 const initState: RunState = {
   status:        'idle',
@@ -95,15 +108,43 @@ export function useTestRunner() {
         addLog('INFO', `🆔 ${r.executionId}${multi ? ` → ${labelOf(i)}` : ''}`)
       )
 
+      // Create one tracking record per device in ExecutionTrackingService so LiveExecutionPanel shows them
+      const trackingIds = runs.map((r, i) => {
+        const rec = executionTrackingService.createExecution({
+          suiteId:     suiteId,
+          suiteName:   suiteId,
+          device:      labelOf(i),
+          environment: env,
+          country,
+          cases:       [],
+        })
+        executionTrackingService.startExecution(rec.id)
+        return rec.id
+      })
+
       // Open one SSE stream per execution
       let finished = 0
 
       const unsubscribers = runs.map(({ executionId }, i) => {
-        const prefix = multi ? `[${labelOf(i)}] ` : ''
+        const prefix     = multi ? `[${labelOf(i)}] ` : ''
+        const trackingId = trackingIds[i]
         return streamExecution(
           executionId,
-          (level, message) => addLog(level, `${prefix}${message}`),
-          () => {
+          (level, message) => {
+            addLog(level, `${prefix}${message}`)
+            // Bridge SSE results into ExecutionTrackingService for LiveExecutionPanel
+            if (level === 'PASS')
+              executionTrackingService.onRunnerResult(trackingId, extractTestNameFromLog(message), 'passed', message)
+            else if (level === 'FAIL')
+              executionTrackingService.onRunnerResult(trackingId, extractTestNameFromLog(message), 'failed', message)
+            else if (level === 'SKIP')
+              executionTrackingService.onRunnerResult(trackingId, extractTestNameFromLog(message), 'skipped', message)
+            else
+              executionTrackingService.logActivity(trackingId, message,
+                level === 'ERROR' ? 'error' : level === 'WARN' ? 'warn' : 'info')
+          },
+          (result) => {
+            executionTrackingService.finishExecution(trackingId, result.failed > 0 ? 'failed' : 'passed')
             finished++
             if (finished === runs.length) {
               closeStreamRef.current  = null
@@ -119,6 +160,7 @@ export function useTestRunner() {
             }
           },
           (errMsg) => {
+            executionTrackingService.finishExecution(trackingId, 'error')
             addLog('ERROR', errMsg)
             finished++
             if (finished === runs.length) {
@@ -132,7 +174,10 @@ export function useTestRunner() {
       })
 
       // Close ALL streams on stop
-      closeStreamRef.current = () => unsubscribers.forEach(u => u())
+      closeStreamRef.current = () => {
+        unsubscribers.forEach(u => u())
+        trackingIds.forEach(tid => executionTrackingService.cancelExecution(tid))
+      }
 
     } catch (err) {
       const msg = err instanceof ApiError
@@ -174,13 +219,31 @@ export function useTestRunner() {
     }))
     addLog('INFO', `📡 Ejecución programada detectada: ${executionId} — suite: ${suiteName}`)
 
+    // Create tracking record for LiveExecutionPanel
+    const rec = executionTrackingService.createExecution({
+      suiteId: suiteName, suiteName, environment: 'QA', cases: [],
+    })
+    executionTrackingService.startExecution(rec.id)
+
     const unsubscribe = streamExecution(
       executionId,
-      addLog,
+      (level, message) => {
+        addLog(level as Parameters<typeof addLog>[0], message)
+        if (level === 'PASS')
+          executionTrackingService.onRunnerResult(rec.id, extractTestNameFromLog(message), 'passed', message)
+        else if (level === 'FAIL')
+          executionTrackingService.onRunnerResult(rec.id, extractTestNameFromLog(message), 'failed', message)
+        else if (level === 'SKIP')
+          executionTrackingService.onRunnerResult(rec.id, extractTestNameFromLog(message), 'skipped', message)
+        else
+          executionTrackingService.logActivity(rec.id, message,
+            level === 'ERROR' ? 'error' : level === 'WARN' ? 'warn' : 'info')
+      },
       (result) => {
         closeStreamRef.current  = null
         executionIdRef.current  = null
         executionIdsRef.current = []
+        executionTrackingService.finishExecution(rec.id, result.failed > 0 ? 'failed' : 'passed')
         setState(prev => ({
           ...prev,
           status:  'finished',
@@ -194,11 +257,15 @@ export function useTestRunner() {
         closeStreamRef.current  = null
         executionIdRef.current  = null
         executionIdsRef.current = []
+        executionTrackingService.finishExecution(rec.id, 'error')
         addLog('ERROR', errMsg)
         setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
       },
     )
-    closeStreamRef.current = unsubscribe
+    closeStreamRef.current = () => {
+      unsubscribe()
+      executionTrackingService.cancelExecution(rec.id)
+    }
   }, [addLog])
 
   return { state, runTest, stopTest, clearLog, attachToExecution }

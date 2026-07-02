@@ -42,6 +42,7 @@ const STATUS_CFG: Record<ExecStatus, { label: string; color: string; bg: string;
   running:      { label: 'Ejecutando',  color: '#34d399', bg: 'rgba(52,211,153,0.12)',  pulse: true  },
   passed:       { label: 'Pasado',      color: '#4ade80', bg: 'rgba(74,222,128,0.12)',  pulse: false },
   failed:       { label: 'Fallado',     color: '#f87171', bg: 'rgba(248,113,113,0.12)', pulse: false },
+  skipped:      { label: 'Omitido',     color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', pulse: false },
   cancelled:    { label: 'Cancelado',   color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  pulse: false },
   error:        { label: 'Error',       color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  pulse: false },
 }
@@ -53,6 +54,7 @@ const CASE_STATUS_CFG: Record<CaseRun['status'], { color: string; icon: React.El
   running:      { color: '#60a5fa', icon: Play        },
   passed:       { color: '#4ade80', icon: CheckCircle2 },
   failed:       { color: '#f87171', icon: XCircle     },
+  skipped:      { color: '#94a3b8', icon: Clock       },
   cancelled:    { color: '#f59e0b', icon: Square      },
   error:        { color: '#fb923c', icon: AlertCircle  },
 }

@@ -16,7 +16,7 @@ import type { PhysicalDevice } from '../types'
 
 export type ExecStatus =
   | 'queued' | 'initializing' | 'running'
-  | 'passed' | 'failed' | 'cancelled' | 'error'
+  | 'passed' | 'failed' | 'skipped' | 'cancelled' | 'error'
 
 export const ACTIVE_STATUSES: ExecStatus[] = ['queued', 'initializing', 'running']
 export const DONE_STATUSES:   ExecStatus[] = ['passed', 'failed', 'cancelled', 'error']
@@ -214,6 +214,43 @@ class ExecutionTrackingServiceImpl {
     this.finishCurrentCase(id, 'failed', msg)
     this.startNextCase(id)
     this.addActivity(id, msg, 'error')
+  }
+
+  /**
+   * Dynamic case tracking — called when test results arrive via SSE and cases are
+   * not known upfront. Creates a new case entry each time a PASS/FAIL/SKIP line arrives.
+   * Used by useTestRunner which doesn't have the case list before execution starts.
+   */
+  onRunnerResult(id: string, caseName: string, status: 'passed' | 'failed' | 'skipped', msg: string): void {
+    const level: ActivityEntry['level'] = status === 'passed' ? 'ok' : status === 'failed' ? 'error' : 'warn'
+    this.patch(id, r => {
+      const entry: CaseRun = {
+        caseId:      caseName,
+        caseName,
+        status,
+        finishedAt:  now(),
+        stepsPassed: status === 'passed' ? 1 : 0,
+        stepsFailed: status === 'failed' ? 1 : 0,
+        stepsTotal:  1,
+      }
+      // Deduplicate by caseName (retry scenario)
+      const existing = r.cases.findIndex(c => c.caseName === caseName)
+      const cases = existing >= 0
+        ? r.cases.map((c, i) => i === existing ? entry : c)
+        : [...r.cases, entry]
+      const passed    = cases.filter(c => c.status === 'passed').length
+      const failed    = cases.filter(c => c.status === 'failed').length
+      const skipped   = cases.filter(c => c.status === 'skipped' as string).length
+      return {
+        ...r,
+        cases,
+        totalCases:     cases.length,
+        passedCases:    passed,
+        failedCases:    failed,
+        completedCases: passed + failed + skipped,
+      }
+    })
+    this.addActivity(id, msg, level)
   }
 
   logActivity(id: string, msg: string, level: ActivityEntry['level'] = 'info'): void {
