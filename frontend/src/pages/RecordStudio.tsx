@@ -108,6 +108,7 @@ interface RecordedElement {
   methodName:    string        // PO method:  "continuar",    "ingresarCorreo"
   paramName:     string        // input only: "correo" (lc stem); "" for non-inputs
   assertKind:    AssertKind    // assertion classification for this element
+  readableName:  string        // human-readable label for UI chips and error messages
 }
 
 // ─── Cinépolis App Data ───────────────────────────────────────────────────────
@@ -365,6 +366,8 @@ function getStepIcon(type: StepType, size = 13): React.ReactNode {
 //    ElementRegistry   — deduplication + unique-name assignment (Phase 4, 5)
 //    LocatorResolver   — platform-aware locator priority chain (Phase 1, 10)
 //    AssertionGenerator — context-sensitive assertions (Phase 9)
+//    NamingEngine      — centralized name-resolution service (Problem 9)
+//    ValidationEngine  — pre-generation consistency checks (Problem 10)
 //    PlatformStrategy  — @FindBy annotation + per-language selector formatting (Phase 11)
 //    PageObjectGenerator — Page Object class construction (inside generateJava)
 //    TestGenerator     — test method body construction (inside generateJava)
@@ -556,10 +559,39 @@ const GENERIC_NAME_RE = new RegExp(
   `^(?:(?:${ALL_PREFIXES})?[Ee]lemento\\d*|(?:${ALL_PREFIXES})\\d+)$`
 )
 
+// Words that describe the UI class/type of an element, not its purpose.
+// When the backend sends one of these as varName/semanticName it adds no value —
+// we reject it so the naming chain can fall through to content attributes.
+const TYPE_DERIVED_NAMES = new Set([
+  // Android view classes
+  'view','button','imagebutton','scrollview','nestedscrollview','horizontalscrollview',
+  'textview','imageview','edittext','checkbox','radiobutton','togglebutton',
+  'framelayout','linearlayout','relativelayout','constraintlayout','coordinatorlayout',
+  'recyclerview','listview','gridview','expandablelistview','cardview',
+  'toolbar','appbar','actionbar','bottomnavigationview','navigationview',
+  'fragment','activity','dialog','alertdialog','viewpager','tablayout',
+  // iOS view classes
+  'uiview','uibutton','uilabel','uitextfield','uitextview','uiimageview',
+  'uiscrollview','uitableview','uicollectionview','uiswitch','uislider',
+  'uinavigationbar','uitabbar','uisearchbar',
+  // Generic low-value identifiers
+  'element','widget','component','container','layout','panel','item','cell',
+  'row','column','content','wrapper','holder','group','frame',
+  'header','footer','body','section',
+])
+
 function isGenericVarName(name: string): boolean {
   if (!name || name.length < 3) return true
   if (new RegExp(`^(?:${ALL_PREFIXES})$`, 'i').test(name)) return true
-  return GENERIC_NAME_RE.test(name)
+  if (GENERIC_NAME_RE.test(name)) return true
+  // Reject names that are purely Android/iOS class names or type descriptors.
+  const lower = name.toLowerCase()
+  if (TYPE_DERIVED_NAMES.has(lower)) return true
+  // Also reject when the stem after stripping the known prefix is type-derived:
+  // "btnView" → stem "view" → rejected; "btnContinuar" → stem "continuar" → kept.
+  const stemMatch = name.match(new RegExp(`^(?:${ALL_PREFIXES})(.+)$`, 'i'))
+  if (stemMatch) return TYPE_DERIVED_NAMES.has(stemMatch[1].toLowerCase())
+  return false
 }
 
 /**
@@ -585,30 +617,44 @@ function elVarName(el: AppEl): string {
     for (const raw of candidates) {
       if (!raw) continue
       const base = normalizeToIdentifier(removeAccents(raw))
-      if (base) return `txt${base.charAt(0).toUpperCase()}${base.slice(1)}`
+      // Require ≥2 alphabetic chars — rejects "6", "$12.50", "12:30", "05/06".
+      if (base && /[a-zA-Z]{2}/.test(base))
+        return `txt${base.charAt(0).toUpperCase()}${base.slice(1)}`
     }
   }
 
-  const content = el.accessId?.trim() || el.text?.trim() || el.accessibilityLabel?.trim()
-  if (content) {
+  // Try each content source independently — purely numeric values (prices, times,
+  // dates, indices) are skipped so the next attribute in the chain is tried instead.
+  // Order: accessId → text → accessibilityLabel → resourceId
+  const contentSources = [
+    el.accessId?.trim()           ?? '',
+    el.text?.trim()               ?? '',
+    el.accessibilityLabel?.trim() ?? '',
+    parseInputResourceId(el.resourceId ?? ''),
+  ]
+  for (const content of contentSources) {
+    if (!content) continue
     const noAcc = removeAccents(content)
-    // If the content already carries a known prefix (e.g., "btnComprar"), keep it.
+    // Honour content that already carries a known prefix (e.g. "btnComprar").
     const m = noAcc.match(PREFIXED_CONTENT_RE)
     if (m) {
       const root = normalizeToIdentifier(m[2])
-      return root
-        ? `${m[1].toLowerCase()}${root.charAt(0).toUpperCase()}${root.slice(1)}`
-        : m[1].toLowerCase()
+      if (root) return `${m[1].toLowerCase()}${root.charAt(0).toUpperCase()}${root.slice(1)}`
+      continue  // prefix matched but root empty — try next source
     }
     const base = normalizeToIdentifier(noAcc)
-    if (base) {
+    // Require ≥2 alphabetic chars — rejects "6", "$12.50", "12:30", "05/06".
+    if (base && /[a-zA-Z]{2}/.test(base)) {
       const prefix = prefixForEl(el)
       return `${prefix}${base.charAt(0).toUpperCase()}${base.slice(1)}`
     }
+    // Source is purely numeric or single-char — try next source
   }
 
-  const derived = toMethodName(el.shortId)
-  return derived ? derived.charAt(0).toLowerCase() + derived.slice(1) : el.shortId
+  // All content sources are empty or numeric — return bare prefix.
+  // buildNameMap will append collision counters (lbl, lbl2, lbl3…) which is
+  // far better than lbl6/lbl12 derived from the element's numeric text content.
+  return prefixForEl(el)
 }
 
 /**
@@ -699,53 +745,114 @@ function buildRecordedElements(steps: RecStep[]): Map<string, Map<string, Record
     // ── 2. Dedup: shortId → canonical shortId ────────────────────────────────
     const aliasMap = buildLocatorAliasMap(els)
 
-    // ── 3. Name map — ONLY canonical elements, so duplicates don't steal names
+    // ── 3. Canonical elements in step order (Map preserves insertion order) ──
     const canonicalEls = new Map<string, AppEl>()
     for (const [shortId, el] of els) {
       if (aliasMap.get(shortId) === shortId) canonicalEls.set(shortId, el)
     }
+    // Step-order array used for context lookups below.
+    const canonicalEntries = [...canonicalEls.entries()]
+
+    // ── 4. Initial name map from content attributes (no context yet) ─────────
     const nameMap = buildNameMap(canonicalEls.values())
 
-    // ── 4. Build RecordedElement for every element in this screen ────────────
+    // ── 5. Context enrichment — bare-prefix names get meaning from neighbours ─
+    // When an element has no semantic content of its own (name resolved to a bare
+    // type prefix like "btn", "lbl") look at the N preceding canonical elements
+    // for a text label that reveals the visual context.  A symbol element like "+"
+    // next to "Tarjeta de crédito" becomes "btnAgregarTarjetaCredito".
+    const usedNames = new Set(nameMap.values())
+    const bareRe    = new RegExp(`^(?:${ALL_PREFIXES})\\d*$`)
+    for (let i = 0; i < canonicalEntries.length; i++) {
+      const [shortId, el] = canonicalEntries[i]
+      const currentName   = nameMap.get(shortId)!
+      if (!bareRe.test(currentName)) continue  // already has a semantic name
+
+      // Look back up to 5 canonical elements for a real text label.
+      let ctxStem: string | null = null
+      for (let j = i - 1; j >= 0 && j >= i - 5; j--) {
+        // Skip other symbol-only elements — they provide action words, not context labels.
+        if (symbolActionStem(canonicalEntries[j][1])) continue
+        const s = deriveMethodStem(canonicalEntries[j][1])
+        if (s) { ctxStem = s; break }
+      }
+
+      const sym = symbolActionStem(el)
+      if (!sym && !ctxStem) continue  // no enrichment available
+
+      const prefix   = currentName.replace(/\d+$/, '')  // "btn2" → "btn"
+      const combined = sym && ctxStem ? `${sym}${ctxStem}` : sym ?? ctxStem!
+      let   newName  = `${prefix}${cap(combined)}`
+
+      // Ensure uniqueness against all other entries.
+      usedNames.delete(currentName)
+      if (usedNames.has(newName)) {
+        let n = 2; while (usedNames.has(`${newName}${n}`)) n++; newName = `${newName}${n}`
+      }
+      nameMap.set(shortId, newName)
+      usedNames.add(newName)
+    }
+
+    // ── 6. Build RecordedElement for every element in this screen ────────────
     const screenRegistry = new Map<string, RecordedElement>()
     for (const [shortId, el] of els) {
       const canonicalId = aliasMap.get(shortId) ?? shortId
       const isDuplicate = canonicalId !== shortId
 
-      // variableName: backend annotation name takes priority (guarantees the
-      // field declaration and all method bodies reference the same identifier).
-      // Then the computed canonical name; never falls back to re-computing from AppEl.
+      // variableName: backend annotation name takes priority.
       const annotationVar = el.pageObjectAnnotation?.trim()
         ? extractVarFromAnnotation(el.pageObjectAnnotation)
         : null
       const variableName = annotationVar ?? nameMap.get(canonicalId) ?? `el_${canonicalId}`
 
-      // methodName: derived from element content (Text→Accessibility→ResourceId),
-      // NOT from variableName — so a generic field like lbl6 still gets a
-      // meaningful method name if the element has readable text.
-      // Empty string = no usable stem → method generation is skipped entirely.
-      const isInput    = el.elType === 'input'
-      const rawStem    = deriveMethodStem(el)
-      const varStem    = stemFromVarName(variableName)
-      const usableStem = rawStem
-        ?? (varStem.length >= 2 && /[a-zA-Z]{2}/.test(varStem) ? varStem : null)
-      const methodName = usableStem === null
-        ? ''  // no semantic content — method will be omitted in generators
-        : isInput
-          ? `ingresar${usableStem}`
-          : smartMethodName(usableStem)
-      const paramName  = isInput && usableStem ? lc(usableStem) : ''
+      // methodName: built from the enriched stem so it mirrors the variable name.
+      const isInput  = el.elType === 'input'
+      const rawStem  = deriveMethodStem(el)   // includes symbol detection
+      const isSymbol = symbolActionStem(el) !== null
+
+      // Context lookup for the method name (same window as step 5).
+      const canonIdx = canonicalEntries.findIndex(([id]) => id === canonicalId)
+      let ctxStem: string | null = null
+      if ((isSymbol || rawStem === null) && canonIdx >= 0) {
+        for (let j = canonIdx - 1; j >= 0 && j >= canonIdx - 5; j--) {
+          if (symbolActionStem(canonicalEntries[j][1])) continue
+          const s = deriveMethodStem(canonicalEntries[j][1])
+          if (s) { ctxStem = s; break }
+        }
+      }
+
+      // Effective stem priority:
+      //  1. symbol + context  → "AgregarTarjetaCredito" ("+" near "Tarjeta de crédito")
+      //  2. semantic own text → "Continuar"
+      //  3. context only      → element with no own text inherits neighbour label
+      //  4. varStem           → last resort, only when it is NOT a type-derived word
+      // Effective stem — combines own content, symbol action, and context.
+      // Uses nameMap (enriched in step 5) as varStem source, NOT variableName,
+      // so annotationVar from the backend doesn't pollute the stem derivation.
+      const effectiveStem = (() => {
+        if (rawStem && isSymbol && ctxStem) return `${rawStem}${ctxStem}`
+        if (rawStem) return rawStem
+        if (ctxStem) return ctxStem
+        const vs = stemFromVarName(nameMap.get(canonicalId) ?? '')
+        if (TYPE_DERIVED_NAMES.has(vs.toLowerCase())) return null
+        return vs.length >= 2 && /[a-zA-Z]{2}/.test(vs) ? vs : null
+      })()
+
+      // ── NamingEngine: final name resolution ────────────────────────────────
+      const methodName  = NamingEngine.resolveMethodName(el, effectiveStem)
+      const paramName   = isInput && effectiveStem ? lc(effectiveStem) : ''
 
       screenRegistry.set(shortId, {
-        id:         shortId,
+        id:          shortId,
         canonicalId,
         isDuplicate,
-        locator:    resolveLocator(el),
+        locator:     resolveLocator(el),
         el,
         variableName,
         methodName,
         paramName,
-        assertKind: elementAssertKind(el),
+        assertKind:   NamingEngine.resolveAssertionName(el),
+        readableName: NamingEngine.resolveReadableName(el),
       })
     }
     result.set(screen, screenRegistry)
@@ -762,6 +869,34 @@ function esc(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")}
 
 // ── Phase 6: Smart method names for Page Object actions ───────────────────────
+
+// Maps common single-character symbols and icon text to semantic action words.
+// When an element's text is a bare symbol ("+", "✕", ">") the element has no
+// useful text content on its own — but we can infer the intended action and
+// then combine it with a nearby contextual label.
+const SYMBOL_ACTION_MAP: Record<string, string> = {
+  '+': 'Agregar',  '−': 'Quitar',   '-': 'Quitar',
+  '×': 'Cerrar',   '✕': 'Cerrar',   '✗': 'Cerrar',  '✖': 'Cerrar',
+  '✓': 'Confirmar','✔': 'Confirmar',
+  '>': 'Siguiente','→': 'Siguiente', '»': 'Siguiente',
+  '<': 'Atras',    '←': 'Atras',    '«': 'Atras',
+  '↑': 'Subir',   '↓': 'Bajar',   '⬆': 'Subir',   '⬇': 'Bajar',
+  '🔍': 'Buscar', '🔎': 'Buscar',  '⌕': 'Buscar',
+  '♡': 'Favorito','♥': 'Favorito', '❤': 'Favorito',
+  '🛒': 'Carrito','🛍': 'Carrito',
+  '✏': 'Editar',  '✎': 'Editar',   '📝': 'Editar',
+  '🗑': 'Eliminar','🗙': 'Eliminar',
+  '▶': 'Reproducir','⏸': 'Pausar', '⏹': 'Detener',
+  '☰': 'Menu',    '≡': 'Menu',
+  '⚙': 'Configurar','⚙️': 'Configurar',
+  '↩': 'Volver',  '↪': 'Siguiente',
+}
+
+/** Returns the action stem when el.text / el.accessId is a known symbol, null otherwise. */
+function symbolActionStem(el: AppEl): string | null {
+  const t = el.text?.trim() || el.accessId?.trim() || ''
+  return SYMBOL_ACTION_MAP[t] ?? null
+}
 
 // Spanish + English action verbs. A stem that starts with one of these is already
 // self-describing — no extra verb prefix is added.
@@ -821,6 +956,10 @@ function smartMethodName(stem: string): string {
  * garbage names like abrir6(), view(), button().
  */
 function deriveMethodStem(el: AppEl): string | null {
+  // Single-char / icon text → semantic action word ("+" → "Agregar")
+  const sym = symbolActionStem(el)
+  if (sym) return sym
+
   const sources = [
     el.accessId?.trim(),
     el.text?.trim(),
@@ -899,6 +1038,205 @@ function elementAssertKind(el: AppEl): AssertKind {
   if (el.elType === 'text' || cls.includes('textview') || cls.includes('xcuielementtypestatictext'))
     return 'text'
   return 'visible'
+}
+
+// ── NamingEngine ── Centralized name-resolution service ──────────────────────
+//
+// All name resolution in Record Studio passes through these four methods.
+// No generator, formatter, or helper may compute variable / method / assertion
+// names by any other means.  This guarantees that a field declared as
+// "btnContinuar" is always referenced as "btnContinuar" — never re-derived.
+//
+// Pipeline position:
+//   RecordedElement → LocatorResolver → ElementClassifier
+//     → NamingEngine  ← YOU ARE HERE
+//       → ValidationEngine → PageObjectGenerator → TestGenerator
+
+const NamingEngine = {
+  /**
+   * Java field name for a Page Object element.
+   *   1. annotationVar  — backend-declared name overrides everything
+   *   2. prefix + stem  — type prefix + semantic content ("btnContinuar")
+   *   3. prefix only    — no semantic content ("btn", "lbl" …)
+   */
+  resolveVariableName(
+    el:            AppEl,
+    enrichedStem:  string | null,
+    annotationVar: string | null,
+  ): string {
+    if (annotationVar) return annotationVar
+    const prefix = prefixForEl(el)
+    return enrichedStem ? `${prefix}${cap(enrichedStem)}` : prefix
+  },
+
+  /**
+   * Page Object method name.
+   * Returns '' when there is no semantic content — callers must omit the method.
+   */
+  resolveMethodName(el: AppEl, effectiveStem: string | null): string {
+    if (!effectiveStem) return ''
+    return el.elType === 'input'
+      ? `ingresar${effectiveStem}`
+      : smartMethodName(effectiveStem)
+  },
+
+  /** Assertion classification for AssertionGenerator. */
+  resolveAssertionName(el: AppEl): AssertKind {
+    return elementAssertKind(el)
+  },
+
+  /**
+   * Human-readable label for UI chips, debug panels, and validation messages.
+   * Never returns an empty string — falls back to shortId as last resort.
+   */
+  resolveReadableName(el: AppEl): string {
+    return el.accessId?.trim()
+        || el.text?.trim()
+        || el.accessibilityLabel?.trim()
+        || parseInputResourceId(el.resourceId ?? '')
+        || ((el.className ?? '').split(/[./]/).pop()?.replace(/xcuielementtype/i, '') ?? '')
+        || el.shortId
+  },
+}
+
+// ── ValidationEngine ── Pre-generation consistency checks ────────────────────
+//
+// Called once after buildRecordedElements, before any code is emitted.
+// Errors block generation entirely and are shown in the preview panel.
+// Warnings are included as comment headers in the generated output.
+//
+// Rules:
+//   E1 – No duplicate variable names per screen
+//   E2 – No duplicate locators per screen
+//   E3 – Every method references a variable declared in this screen
+//   W1 – Elements without a resolved locator (will be silently skipped)
+//   W2 – Declared elements not referenced by any recorded step
+//   W3 – Generated methods never called in the test body
+
+interface ValidationIssue {
+  level:   'error' | 'warning'
+  code:    string
+  message: string
+}
+
+interface ValidationResult {
+  valid:   boolean           // false → do not emit code
+  issues:  ValidationIssue[]
+}
+
+const ValidationEngine = {
+  validate(
+    registries: Map<string, Map<string, RecordedElement>>,
+    steps:      RecStep[],
+  ): ValidationResult {
+    const issues: ValidationIssue[] = []
+
+    for (const [screen, registry] of registries) {
+      const declaredVars = new Map<string, string>()  // varName  → shortId
+      const declaredLocs = new Map<string, string>()  // locKey   → shortId
+
+      const referencedIds = new Set(
+        steps
+          .filter(s => (s.screenName?.trim() || 'App') === screen && s.el)
+          .map(s => s.el!.shortId)
+      )
+      const calledMethods = new Set(
+        steps
+          .filter(s => (s.screenName?.trim() || 'App') === screen && s.el
+                        && s.type !== 'screenshot' && s.type !== 'assertion')
+          .map(s => registry.get(s.el!.shortId)?.methodName ?? '')
+          .filter(Boolean)
+      )
+
+      for (const [, rec] of registry) {
+        if (rec.isDuplicate) continue
+
+        // W1 — no locator resolved
+        if (!rec.locator) {
+          issues.push({ level: 'warning', code: 'W1_NO_LOCATOR',
+            message: `"${screen}" › "${rec.readableName}" no tiene locator — se omitirá` })
+          continue
+        }
+
+        // E1 — duplicate variable name
+        const prev = declaredVars.get(rec.variableName)
+        if (prev && prev !== rec.id) {
+          issues.push({ level: 'error', code: 'E1_DUPLICATE_VAR',
+            message: `"${screen}" › nombre duplicado "${rec.variableName}" (${rec.id} y ${prev})` })
+        } else {
+          declaredVars.set(rec.variableName, rec.id)
+        }
+
+        // E2 — duplicate locator
+        const locKey = `${rec.locator.strategy}::${rec.locator.value}`
+        const dupLoc = declaredLocs.get(locKey)
+        if (dupLoc && dupLoc !== rec.id) {
+          issues.push({ level: 'error', code: 'E2_DUPLICATE_LOCATOR',
+            message: `"${screen}" › locator duplicado [${rec.locator.strategy}] en "${rec.variableName}" y "${dupLoc}"` })
+        } else {
+          declaredLocs.set(locKey, rec.id)
+        }
+      }
+
+      // E3 — method references an undeclared variable
+      for (const [, rec] of registry) {
+        if (!rec.methodName || rec.isDuplicate || !rec.locator) continue
+        if (!declaredVars.has(rec.variableName)) {
+          issues.push({ level: 'error', code: 'E3_ORPHAN_METHOD',
+            message: `"${screen}" › método "${rec.methodName}()" → variable "${rec.variableName}" no declarada` })
+        }
+      }
+
+      // W2 — element declared but no step references it
+      for (const [shortId, rec] of registry) {
+        if (rec.isDuplicate || !rec.locator || !rec.methodName) continue
+        if (!referencedIds.has(shortId)) {
+          issues.push({ level: 'warning', code: 'W2_UNUSED_ELEMENT',
+            message: `"${screen}" › "${rec.variableName}" declarado pero sin uso en pasos grabados` })
+        }
+      }
+
+      // W3 — method generated but never called from a step
+      for (const [, rec] of registry) {
+        if (!rec.methodName || rec.isDuplicate || !rec.locator) continue
+        if (!calledMethods.has(rec.methodName)) {
+          issues.push({ level: 'warning', code: 'W3_UNUSED_METHOD',
+            message: `"${screen}" › método "${rec.methodName}()" generado pero no llamado desde ningún paso` })
+        }
+      }
+    }
+
+    return { valid: issues.filter(i => i.level === 'error').length === 0, issues }
+  },
+
+  /** Formats validation issues as a Java comment block for the code preview. */
+  formatAsComments(result: ValidationResult): string {
+    const errors   = result.issues.filter(i => i.level === 'error')
+    const warnings = result.issues.filter(i => i.level === 'warning')
+    const lines: string[] = []
+
+    if (!result.valid) {
+      lines.push('// ╔══════════════════════════════════════════════════════════════╗')
+      lines.push('// ║  ❌  ValidationEngine — generación bloqueada                 ║')
+      lines.push('// ╚══════════════════════════════════════════════════════════════╝')
+      lines.push('//')
+      lines.push('// Corrija los siguientes errores antes de generar código:')
+      errors.forEach(e => lines.push(`//  [${e.code}]  ${e.message}`))
+      if (warnings.length > 0) {
+        lines.push('//')
+        lines.push('// Advertencias adicionales:')
+        warnings.forEach(w => lines.push(`//  [${w.code}]  ${w.message}`))
+      }
+    } else if (warnings.length > 0) {
+      lines.push('// ╔══════════════════════════════════════════════════════════════╗')
+      lines.push('// ║  ⚠   ValidationEngine — advertencias                        ║')
+      lines.push('// ╚══════════════════════════════════════════════════════════════╝')
+      warnings.forEach(w => lines.push(`//  [${w.code}]  ${w.message}`))
+      lines.push('//')
+    }
+
+    return lines.length > 0 ? lines.join('\n') + '\n' : ''
+  },
 }
 
 /**
@@ -1219,10 +1557,15 @@ function generateJava(
   }
   lines.push('')
 
-  // ── ElementRegistry: build RecordedElement registry once ────────────────────
-  // All names (variableName, methodName, paramName) are pre-computed here.
-  // No generator, helper, or formatter ever re-derives names after this point.
+  // ── Pipeline: RecordedElement → NamingEngine → ValidationEngine ─────────────
   const registries = buildRecordedElements(steps)
+
+  // ── ValidationEngine: verify registry before emitting any code ──────────────
+  const validation = ValidationEngine.validate(registries, steps)
+  if (!validation.valid) {
+    return ValidationEngine.formatAsComments(validation)
+  }
+  const validationHeader = ValidationEngine.formatAsComments(validation)  // warnings only
 
   // ── PageObjectGenerator ──────────────────────────────────────────────────────
   if (opts.pageObjects) {
@@ -1405,7 +1748,7 @@ function generateJava(
   lines.push(`    }`)
   lines.push(`}`)
 
-  return lines.join('\n')
+  return validationHeader + lines.join('\n')
 }
 
 function getLangFileExt(lang: Lang): string {
