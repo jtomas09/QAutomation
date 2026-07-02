@@ -7,6 +7,8 @@ import qa.cinepolis.runner.model.TestCaseResult;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -833,32 +835,65 @@ public class JobExecutor {
                            + failed.get() + " FAILED · "
                            + skipped.get() + " SKIPPED";
 
-            // INFO level: this is a runner summary, NOT an individual test result.
-            client.sendLog(job.executionId, "INFO",
-                    exitCode == 0
-                        ? "✅ Suite completada — " + summary
-                        : "❌ Suite terminó con errores (exit " + exitCode + ") — " + summary);
+            // ── Post-processing: each step is isolated so a failure in one never skips the rest ──
 
-            // iOS device cleanup happens HERE — before sendResult() — so that messages
-            // are visible to the user. IOSExecutionCleanupManager verifies WDA is truly
-            // stopped before logging "✓ Dispositivo liberado correctamente".
+            // [POST-1] Resumen de ejecución
+            System.out.println("[Executor] [POST-1] Enviando resumen de ejecución…");
+            try {
+                client.sendLog(job.executionId, "INFO",
+                        exitCode == 0
+                            ? "✅ Suite completada — " + summary
+                            : "❌ Suite terminó con errores (exit " + exitCode + ") — " + summary);
+            } catch (Exception ex) {
+                System.err.println("[Executor] [POST-1] Error al enviar resumen: " + ex.getMessage());
+            }
+
+            // [POST-2] Cleanup de dispositivo iOS (si aplica)
             if (isPlatformIos && !iosUdid.isBlank()) {
-                IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
-                        config.appiumHub.replaceAll("/wd/hub$", ""));
-                iosCleanupDone = true;
+                System.out.println("[Executor] [POST-2] Iniciando cleanup de dispositivo iOS…");
+                try {
+                    IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
+                            config.appiumHub.replaceAll("/wd/hub$", ""));
+                    iosCleanupDone = true;
+                    System.out.println("[Executor] [POST-2] Cleanup iOS completado.");
+                } catch (Exception ex) {
+                    System.err.println("[Executor] [POST-2] Error en cleanup iOS:\n" + getStackTrace(ex));
+                    try { client.sendLog(job.executionId, "WARN",
+                            "[POST-2] Error en cleanup iOS — " + describeException(ex)); } catch (Exception ignored) {}
+                }
             }
 
-            // Only upload videos when recording was expected to produce output.
-            // Skipping avoids "No se encontraron videos" when recording was disabled
-            // (e.g. devicectl recordVideo removed in Xcode 26).
-            if (iosRecordingActive || !isPlatformIos) {
-                uploadVideos(job.executionId, job.suite, workDir);
+            // [POST-3] Upload de videos
+            System.out.println("[Executor] [POST-3] Procesando videos…");
+            try {
+                if (iosRecordingActive || !isPlatformIos) {
+                    uploadVideos(job.executionId, job.suite, workDir);
+                }
+                System.out.println("[Executor] [POST-3] Videos procesados.");
+            } catch (Exception ex) {
+                System.err.println("[Executor] [POST-3] Error al subir videos:\n" + getStackTrace(ex));
+                try { client.sendLog(job.executionId, "WARN",
+                        "[POST-3] Error al subir videos — " + describeException(ex)); } catch (Exception ignored) {}
             }
-            String allureUrl = generateAllureReport(job.executionId, workDir);
+
+            // [POST-4] Generación de reporte Allure
+            System.out.println("[Executor] [POST-4] Generando reporte Allure…");
+            String allureUrl = null;
+            try {
+                allureUrl = generateAllureReport(job.executionId, workDir);
+                System.out.println("[Executor] [POST-4] Allure: "
+                        + (allureUrl != null ? allureUrl : "no disponible (allure-cli ausente o fallo)"));
+            } catch (Exception ex) {
+                System.err.println("[Executor] [POST-4] Error en Allure:\n" + getStackTrace(ex));
+            }
+
+            // [POST-5] Envío de resultado final al Backend (obligatorio)
+            System.out.println("[Executor] [POST-5] Enviando resultado final al Backend…");
             client.sendResult(job.executionId,
                     passed.get(), failed.get(), skipped.get(), allureUrl, testCases);
             resultSent.set(true);
-            System.out.println("[Executor] ✓ Finalizado: " + job.executionId);
+            System.out.println("[Executor] ✓ Finalizado correctamente: " + job.executionId
+                    + " — " + summary);
 
         } catch (Exception e) {
             // Each step is independently protected — a failure here must never prevent sendResult()
@@ -871,10 +906,11 @@ public class JobExecutor {
                     iosCleanupDone = true;
                 } catch (Exception ignored) {}
             }
-            System.err.println("[Executor] Error fatal en ejecución " + job.executionId + ": " + e.getMessage());
-            e.printStackTrace();
+            String stackTrace = getStackTrace(e);
+            System.err.println("[Executor] Error fatal en ejecución " + job.executionId + ":\n" + stackTrace);
             try { client.sendLog(job.executionId, "ERROR",
-                    "❌ Error interno del runner: " + e.getMessage()); } catch (Exception ignored) {}
+                    "❌ Error interno del runner: " + describeException(e)
+                    + "\n" + stackTrace.lines().limit(10).reduce("", (a, b) -> a + b + "\n")); } catch (Exception ignored) {}
             try {
                 client.sendResult(job.executionId,
                         passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
@@ -1384,6 +1420,21 @@ public class JobExecutor {
             System.out.println("[Executor] Allure CLI no disponible (opcional): " + e.getMessage());
         }
         return null;
+    }
+
+    // ── Exception helpers ─────────────────────────────────────────────────────
+
+    /** Full stacktrace as a String — avoids null when getMessage() is null (e.g. NPE). */
+    private static String getStackTrace(Throwable t) {
+        StringWriter sw = new StringWriter();
+        t.printStackTrace(new PrintWriter(sw));
+        return sw.toString();
+    }
+
+    /** Short human-readable description: ClassName: message, or just ClassName if message is null. */
+    private static String describeException(Throwable t) {
+        String msg = t.getMessage();
+        return msg != null ? t.getClass().getSimpleName() + ": " + msg : t.getClass().getName();
     }
 
     // ── Log level detection — Gradle / JUnit5 output ──────────────────────────
