@@ -484,9 +484,13 @@ public class JobExecutor {
         List<TestCaseResult> testCases = new ArrayList<>();
         boolean iosRecordingActive = false;
         boolean iosCleanupDone     = false; // prevents double-cleanup in finally safety net
-        // Hoisted outside try so finally can access them for cleanup
+        // Hoisted outside try so finally can access them for cleanup and finalization
         final boolean isPlatformIos = "ios".equalsIgnoreCase(nvl(job.platform, ""));
         final String  iosUdid       = nvl(job.udid, "");
+        // Tracks whether the abort-watcher already called confirmAbort() (marks ABORTED in backend)
+        final AtomicBoolean wasAborted = new AtomicBoolean(false);
+        // Guards against duplicate sendResult() and enables the finally safety-net
+        final AtomicBoolean resultSent = new AtomicBoolean(false);
 
         try {
             client.sendLog(job.executionId, "INFO",
@@ -543,6 +547,9 @@ public class JobExecutor {
             IosPreflightManager.IosPreflightResult iosResult = null;
             if (isAndroid) {
                 checkAdbDevices(job.executionId);
+                if (!receivedUdid.isBlank()) {
+                    clearUiAutomator2SystemPort(receivedUdid, job.executionId);
+                }
             } else {
                 if (!checkIosXcuitestDriver(job.executionId)) {
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
@@ -761,7 +768,6 @@ public class JobExecutor {
             activeProcess = process;
 
             // Abort watcher — polls backend every 1s; kills Gradle tree si ABORTING/ABORTED
-            AtomicBoolean wasAborted = new AtomicBoolean(false);
             Thread abortWatcher = new Thread(() -> {
                 while (process.isAlive()) {
                     try { Thread.sleep(1_000); } catch (InterruptedException e) { return; }
@@ -771,8 +777,9 @@ public class JobExecutor {
                             "🛑 Aborto recibido — deteniendo proceso Gradle...");
                         System.out.println("\n[Executor] Aborto detectado — terminando árbol de procesos Gradle");
                         forceKillProcessTree(process);
-                        // Confirmar al backend que el proceso fue terminado
+                        // Confirmar al backend que el proceso fue terminado (marca ABORTED + libera device)
                         client.confirmAbort(job.executionId);
+                        resultSent.set(true); // confirmAbort finalizes the execution — do NOT call sendResult()
                         client.sendLog(job.executionId, "WARN", "⛔ Ejecución abortada correctamente.");
                         return;
                     }
@@ -810,8 +817,11 @@ public class JobExecutor {
                 }
                 client.sendLog(job.executionId, "WARN", "Ejecución abortada por el usuario");
                 System.out.println("[Executor] Job abortado: " + job.executionId);
+                resultSent.set(true); // confirmAbort() was already called by the abort-watcher thread
                 return;
             }
+
+            System.out.printf("[Executor] Gradle terminó | exit=%d | %s%n", exitCode, job.executionId);
 
             // If Gradle crashed with no test output (e.g. compilation error),
             // record at least one failure so the execution doesn't finish as PASSED.
@@ -847,10 +857,12 @@ public class JobExecutor {
             String allureUrl = generateAllureReport(job.executionId, workDir);
             client.sendResult(job.executionId,
                     passed.get(), failed.get(), skipped.get(), allureUrl, testCases);
+            resultSent.set(true);
             System.out.println("[Executor] ✓ Finalizado: " + job.executionId);
 
         } catch (Exception e) {
-            if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
+            // Each step is independently protected — a failure here must never prevent sendResult()
+            try { if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId); } catch (Exception ignored) {}
             // iOS cleanup in the catch path — runs before sendResult so messages are visible
             if (isPlatformIos && !iosUdid.isBlank() && !iosCleanupDone) {
                 try {
@@ -859,21 +871,36 @@ public class JobExecutor {
                     iosCleanupDone = true;
                 } catch (Exception ignored) {}
             }
-            System.err.println("[Executor] Error fatal: " + e.getMessage());
+            System.err.println("[Executor] Error fatal en ejecución " + job.executionId + ": " + e.getMessage());
             e.printStackTrace();
-            client.sendLog(job.executionId, "ERROR",
-                    "❌ Error interno del runner: " + e.getMessage());
+            try { client.sendLog(job.executionId, "ERROR",
+                    "❌ Error interno del runner: " + e.getMessage()); } catch (Exception ignored) {}
             try {
                 client.sendResult(job.executionId,
                         passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
+                resultSent.set(true);
             } catch (Exception ignored) {}
         } finally {
-            // Safety net: only fires when an exception bypassed the normal cleanup paths.
-            // IOSVideoRecordingManager.stop() is idempotent — no-op if already called above.
-            if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
+            // Safety net: guarantees cleanup and execution finalization regardless of what failed above.
+            // IOSVideoRecordingManager.stop() is idempotent — no-op if already called.
+            try { if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId); } catch (Exception ignored) {}
             if (!iosCleanupDone && isPlatformIos && !iosUdid.isBlank()) {
-                IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
-                        config.appiumHub.replaceAll("/wd/hub$", ""));
+                try {
+                    IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
+                            config.appiumHub.replaceAll("/wd/hub$", ""));
+                } catch (Exception ignored) {}
+            }
+            // If neither the happy path nor the catch block sent a result, finalize here.
+            // This handles the case where the catch block itself throws before reaching sendResult().
+            if (!resultSent.get() && !wasAborted.get()) {
+                System.err.println("[Executor] ⚠ [finally] Ejecución " + job.executionId
+                        + " sin resultado previo — ejecutando sendResult de emergencia");
+                try {
+                    client.sendLog(job.executionId, "ERROR",
+                            "⚠ Ejecución finalizada por safety-net del runner. Revise los logs para más detalles.");
+                    client.sendResult(job.executionId,
+                            passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
+                } catch (Exception ignored) {}
             }
         }
     }
@@ -1029,6 +1056,23 @@ public class JobExecutor {
     private String embeddedAdbPath() {
         String path = System.getProperty("ADB_PATH");
         return (path != null && !path.isBlank()) ? path : "adb";
+    }
+
+    /**
+     * Removes stale ADB port forwarding for UiAutomator2's systemPort (default 8200).
+     * A previous execution may have left tcp:8200 forwarded; if not removed, Appium cannot
+     * re-establish it cleanly and the session creation fails with "systemPort 8200 is busy".
+     */
+    private void clearUiAutomator2SystemPort(String udid, String executionId) {
+        try {
+            Process p = new ProcessBuilder(embeddedAdbPath(), "-s", udid, "forward", "--remove", "tcp:8200")
+                    .redirectErrorStream(true).start();
+            p.waitFor(3, TimeUnit.SECONDS);
+            client.sendLog(executionId, "INFO",
+                    "[Android] Limpieza previa: ADB forward tcp:8200 removido (previene conflicto systemPort UiAutomator2)");
+        } catch (Exception ignored) {
+            // Silently ignore — if there was no forward, "adb forward --remove" exits with error (that's expected)
+        }
     }
 
     private void checkAdbDevices(String executionId) {
