@@ -12,7 +12,6 @@ import ActivityLog         from '../components/dashboard/ActivityLog'
 import ResultsDonut        from '../components/dashboard/ResultsDonut'
 import DailyChart          from '../components/dashboard/DailyChart'
 import ConnectedDevices    from '../components/dashboard/ConnectedDevices'
-import LiveExecutionPanel  from '../components/dashboard/LiveExecutionPanel'
 
 interface Props {
   state:              RunState
@@ -175,9 +174,6 @@ export default function Dashboard({
           </motion.button>
         </div>
       </motion.div>
-
-      {/* Live executions — only renders when active executions exist */}
-      <LiveExecutionPanel />
 
       {/* Suite metrics row */}
       <div className="flex gap-3">

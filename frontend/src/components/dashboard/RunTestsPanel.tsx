@@ -1,11 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import ReactCountryFlag from 'react-country-flag'
 import { ENVIRONMENTS, SUITES, COUNTRIES } from '../../data'
 import type { RunStatus } from '../../types'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
-import { RefreshCw, X, ChevronDown, Video, Check } from 'lucide-react'
+import { RefreshCw, X, ChevronDown, Video, Check, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { PlatformIcon } from '../PlatformIcon'
+import { executionTrackingService } from '../../services/ExecutionTrackingService'
+import type { ExecutionRecord } from '../../services/ExecutionTrackingService'
 
 interface Props {
   suite:              string
@@ -133,6 +135,79 @@ function ConfiguredDevicesPanel({ devices, onConfigure }: { devices: ConfiguredD
   )
 }
 
+// ── Live cases panel (shown in right column during execution) ─────────────────
+
+function LiveCasesPanel({ exec }: { exec: ExecutionRecord | null }) {
+  const cases = exec ? [...exec.cases].reverse() : []
+  const passed  = exec?.passedCases  ?? 0
+  const failed  = exec?.failedCases  ?? 0
+  const total   = exec?.totalCases   ?? 0
+  const done    = exec?.completedCases ?? 0
+
+  return (
+    <div style={{
+      width: 188, flexShrink: 0, display: 'flex', flexDirection: 'column',
+      borderLeft: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%', background: '#34d399', flexShrink: 0,
+            animation: 'pulse 1.5s ease-in-out infinite',
+          }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Casos de prueba
+          </span>
+        </div>
+        {/* mini progress bar */}
+        <div style={{ height: 3, borderRadius: 2, background: '#1e293b', overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: 2, transition: 'width 0.4s',
+            background: failed > 0 ? '#f87171' : '#34d399',
+            width: total > 0 ? `${(done / total) * 100}%` : '0%',
+          }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {passed > 0 && <span style={{ fontSize: 9, color: '#4ade80', fontWeight: 700 }}>✓ {passed}</span>}
+            {failed > 0 && <span style={{ fontSize: 9, color: '#f87171', fontWeight: 700 }}>✗ {failed}</span>}
+          </div>
+          <span style={{ fontSize: 9, color: '#475569' }}>{done}/{total || '—'}</span>
+        </div>
+      </div>
+
+      {/* Cases list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+        {cases.length === 0 ? (
+          <div style={{ padding: '20px 12px', textAlign: 'center', color: '#334155', fontSize: 10 }}>
+            Esperando resultados…
+          </div>
+        ) : cases.map((c, i) => {
+          const ok      = c.status === 'passed'
+          const fail    = c.status === 'failed'
+          const color   = ok ? '#4ade80' : fail ? '#f87171' : '#94a3b8'
+          const Icon    = ok ? CheckCircle2 : fail ? XCircle : Clock
+          return (
+            <div key={c.caseId + i} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '3px 10px',
+            }}>
+              <Icon size={10} color={color} style={{ flexShrink: 0 }} />
+              <span style={{
+                fontSize: 10, color: ok ? '#86efac' : fail ? '#fca5a5' : '#64748b',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+              }} title={c.caseName}>
+                {c.caseName}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export default function RunTestsPanel(props: Props) {
@@ -145,6 +220,19 @@ export default function RunTestsPanel(props: Props) {
   const running   = status === 'running'
   const completed = passed + failed + skipped
   const canRun    = configuredDevices.length > 0
+
+  // Track active execution for live cases panel
+  const [activeExec, setActiveExec] = useState<ExecutionRecord | null>(null)
+  useEffect(() => {
+    const refresh = () => {
+      const active = executionTrackingService.getActiveExecutions()
+      setActiveExec(active[0] ?? null)
+    }
+    refresh()
+    const events = ['qa:exec:created', 'qa:exec:updated', 'qa:exec:finished']
+    events.forEach(e => window.addEventListener(e, refresh))
+    return () => events.forEach(e => window.removeEventListener(e, refresh))
+  }, [])
 
   return (
     <div className="flex flex-col h-full overflow-hidden rounded-2xl"
@@ -271,42 +359,46 @@ export default function RunTestsPanel(props: Props) {
           </div>
         </div>
 
-        {/* Rocket */}
-        <div className="w-36 flex flex-col items-center justify-center relative flex-shrink-0"
-          style={{ borderLeft: '1px solid rgba(255,255,255,0.05)' }}>
-          <div className="absolute inset-0 pointer-events-none"
-            style={{ background: 'radial-gradient(ellipse at 50% 60%, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
-          <motion.div animate={{ y: [0, -10, 0], rotate: [-4, 4, -4] }}
-            transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }} className="relative z-10">
-            <svg width="72" height="100" viewBox="0 0 72 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="rBody2" x1="36" y1="5" x2="36" y2="80" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stopColor="#818cf8" /><stop offset="100%" stopColor="#4f46e5" />
-                </linearGradient>
-                <linearGradient id="rWindow2" x1="36" y1="30" x2="36" y2="50" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stopColor="#e0e7ff" /><stop offset="100%" stopColor="#818cf8" />
-                </linearGradient>
-                <radialGradient id="rFlame2" cx="50%" cy="0%" r="80%">
-                  <stop offset="0%" stopColor="#fbbf24" stopOpacity="1"/>
-                  <stop offset="50%" stopColor="#f97316" stopOpacity="0.8"/>
-                  <stop offset="100%" stopColor="#dc2626" stopOpacity="0"/>
-                </radialGradient>
-              </defs>
-              <ellipse cx="36" cy="86" rx="9" ry="14" fill="url(#rFlame2)" />
-              <ellipse cx="36" cy="82" rx="5" ry="8"  fill="#fbbf24" opacity="0.9"/>
-              <path d="M36 5C36 5 16 32 16 58H56C56 32 36 5 36 5Z" fill="url(#rBody2)" />
-              <path d="M36 5C36 5 28 25 28 38H36V5Z" fill="rgba(255,255,255,0.15)" />
-              <path d="M16 58L6 78H20L16 58Z"  fill="#6366f1" />
-              <path d="M56 58L66 78H52L56 58Z" fill="#6366f1" />
-              <rect x="16" y="56" width="40" height="6" rx="3" fill="#4f46e5" />
-              <circle cx="36" cy="40" r="10" fill="url(#rWindow2)" />
-              <circle cx="36" cy="40" r="7"  fill="rgba(255,255,255,0.15)" />
-              <circle cx="33" cy="37" r="2.5" fill="rgba(255,255,255,0.6)" />
-            </svg>
-          </motion.div>
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-12 h-4 rounded-full pointer-events-none"
-            style={{ background: 'rgba(99,102,241,0.4)', filter: 'blur(10px)' }} />
-        </div>
+        {/* Right column: live cases during execution, rocket otherwise */}
+        {running ? (
+          <LiveCasesPanel exec={activeExec} />
+        ) : (
+          <div className="w-36 flex flex-col items-center justify-center relative flex-shrink-0"
+            style={{ borderLeft: '1px solid rgba(255,255,255,0.05)' }}>
+            <div className="absolute inset-0 pointer-events-none"
+              style={{ background: 'radial-gradient(ellipse at 50% 60%, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
+            <motion.div animate={{ y: [0, -10, 0], rotate: [-4, 4, -4] }}
+              transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }} className="relative z-10">
+              <svg width="72" height="100" viewBox="0 0 72 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="rBody2" x1="36" y1="5" x2="36" y2="80" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#818cf8" /><stop offset="100%" stopColor="#4f46e5" />
+                  </linearGradient>
+                  <linearGradient id="rWindow2" x1="36" y1="30" x2="36" y2="50" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#e0e7ff" /><stop offset="100%" stopColor="#818cf8" />
+                  </linearGradient>
+                  <radialGradient id="rFlame2" cx="50%" cy="0%" r="80%">
+                    <stop offset="0%" stopColor="#fbbf24" stopOpacity="1"/>
+                    <stop offset="50%" stopColor="#f97316" stopOpacity="0.8"/>
+                    <stop offset="100%" stopColor="#dc2626" stopOpacity="0"/>
+                  </radialGradient>
+                </defs>
+                <ellipse cx="36" cy="86" rx="9" ry="14" fill="url(#rFlame2)" />
+                <ellipse cx="36" cy="82" rx="5" ry="8"  fill="#fbbf24" opacity="0.9"/>
+                <path d="M36 5C36 5 16 32 16 58H56C56 32 36 5 36 5Z" fill="url(#rBody2)" />
+                <path d="M36 5C36 5 28 25 28 38H36V5Z" fill="rgba(255,255,255,0.15)" />
+                <path d="M16 58L6 78H20L16 58Z"  fill="#6366f1" />
+                <path d="M56 58L66 78H52L56 58Z" fill="#6366f1" />
+                <rect x="16" y="56" width="40" height="6" rx="3" fill="#4f46e5" />
+                <circle cx="36" cy="40" r="10" fill="url(#rWindow2)" />
+                <circle cx="36" cy="40" r="7"  fill="rgba(255,255,255,0.15)" />
+                <circle cx="33" cy="37" r="2.5" fill="rgba(255,255,255,0.6)" />
+              </svg>
+            </motion.div>
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-12 h-4 rounded-full pointer-events-none"
+              style={{ background: 'rgba(99,102,241,0.4)', filter: 'blur(10px)' }} />
+          </div>
+        )}
       </div>
     </div>
   )
