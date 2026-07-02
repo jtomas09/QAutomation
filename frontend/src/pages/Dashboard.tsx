@@ -1,16 +1,18 @@
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Calendar, Clapperboard, Circle, ChevronRight, Clock, Code2, Layers3 } from 'lucide-react'
+import { Plus, Calendar, Clapperboard, Circle, ChevronRight, Clock, Code2, Layers3, CheckCircle2, Package } from 'lucide-react'
 import type { RunState } from '../types'
 import type { ConfiguredDevice } from '../hooks/useExecutionDevices'
 import { getExecutions } from '../api'
-import StatsCards       from '../components/dashboard/StatsCards'
-import RunTestsPanel    from '../components/dashboard/RunTestsPanel'
-import RecentExecutions from '../components/dashboard/RecentExecutions'
-import ActivityLog      from '../components/dashboard/ActivityLog'
-import ResultsDonut     from '../components/dashboard/ResultsDonut'
-import DailyChart       from '../components/dashboard/DailyChart'
-import ConnectedDevices from '../components/dashboard/ConnectedDevices'
+import { suiteService } from '../services/SuiteService'
+import StatsCards          from '../components/dashboard/StatsCards'
+import RunTestsPanel       from '../components/dashboard/RunTestsPanel'
+import RecentExecutions    from '../components/dashboard/RecentExecutions'
+import ActivityLog         from '../components/dashboard/ActivityLog'
+import ResultsDonut        from '../components/dashboard/ResultsDonut'
+import DailyChart          from '../components/dashboard/DailyChart'
+import ConnectedDevices    from '../components/dashboard/ConnectedDevices'
+import LiveExecutionPanel  from '../components/dashboard/LiveExecutionPanel'
 
 interface Props {
   state:              RunState
@@ -56,6 +58,7 @@ export default function Dashboard({
   const [daysBack,   setDaysBack]   = useState<number>(7)
   const [clearedAt,  setClearedAt]  = useState<number>(0)
   const [aggStats,   setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
+  const [suiteMetrics, setSuiteMetrics] = useState({ suites: 0, cases: 0, steps: 0 })
 
   useEffect(() => {
     const aggregate = async () => {
@@ -96,6 +99,14 @@ export default function Dashboard({
     const id = setInterval(detect, 5_000)
     return () => clearInterval(id)
   }, [state.status, state.executionId, onAttach])
+
+  useEffect(() => {
+    const refresh = () => setSuiteMetrics(suiteService.getMetrics())
+    refresh()
+    const events = ['qa:suite:created', 'qa:suite:updated', 'qa:suite:deleted', 'qa:case:created', 'qa:case:deleted']
+    events.forEach(e => window.addEventListener(e, refresh))
+    return () => events.forEach(e => window.removeEventListener(e, refresh))
+  }, [])
 
   const handleClear = () => {
     setClearedAt(Date.now())
@@ -164,6 +175,42 @@ export default function Dashboard({
           </motion.button>
         </div>
       </motion.div>
+
+      {/* Live executions — only renders when active executions exist */}
+      <LiveExecutionPanel />
+
+      {/* Suite metrics row */}
+      <div className="flex gap-3">
+        {([
+          { label: 'Suites',   value: suiteMetrics.suites, Icon: Layers3,       color: '#818cf8' },
+          { label: 'Casos',    value: suiteMetrics.cases,  Icon: CheckCircle2,  color: '#34d399' },
+          { label: 'Pasos',    value: suiteMetrics.steps,  Icon: Package,       color: '#60a5fa' },
+        ] as const).map(({ label, value, Icon, color }) => (
+          <button
+            key={label}
+            onClick={() => onNavigate?.('suites')}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl flex-1 text-left"
+            style={{
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              cursor: onNavigate ? 'pointer' : 'default',
+            }}
+          >
+            <div style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              background: `${color}18`, border: `1px solid ${color}33`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Icon size={14} color={color} />
+            </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#f1f5f9', lineHeight: 1 }}>{value.toLocaleString()}</div>
+              <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>{label}</div>
+            </div>
+          </button>
+        ))}
+        <div style={{ flex: 2 }} />
+      </div>
 
       {/* Stats cards row */}
       <StatsCards

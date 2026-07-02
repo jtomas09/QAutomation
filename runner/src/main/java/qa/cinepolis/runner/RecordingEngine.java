@@ -241,14 +241,16 @@ public final class RecordingEngine {
             if (counter == null) return null;
             int n = counter.incrementAndGet();
 
+            UIElement enriched = enrichAndDeduplicate(s, el);
+
             ObjectNode node = MAPPER.createObjectNode();
             node.put("id",   "step-" + System.currentTimeMillis() + "-" + n);
             node.put("n",    n);
             node.put("type", type);
             if (inputText != null) node.put("inputVal", inputText);
             if (dir != null)       node.put("dir",      dir);
-            appendElement(node, el);
-            appendScreenName(node, s, el);
+            appendElement(node, enriched);
+            appendScreenName(node, s, enriched);
             appendTime(node, s);
             return MAPPER.writeValueAsString(node);
         } catch (Exception e) {
@@ -265,7 +267,8 @@ public final class RecordingEngine {
             if (counter == null) return null;
             int n = counter.incrementAndGet();
 
-            UIElement el = (x >= 0 && y >= 0) ? s.inspector.findElementAt(x, y) : null;
+            UIElement rawEl   = (x >= 0 && y >= 0) ? s.inspector.findElementAt(x, y) : null;
+            UIElement enriched = enrichAndDeduplicate(s, rawEl);
 
             ObjectNode node = MAPPER.createObjectNode();
             node.put("id",   "step-" + System.currentTimeMillis() + "-" + n);
@@ -273,8 +276,8 @@ public final class RecordingEngine {
             node.put("type", type);
             if (inputText != null) node.put("inputVal", inputText);
             if (dir != null)       node.put("dir",      dir);
-            appendElement(node, el);
-            appendScreenName(node, s, el);
+            appendElement(node, enriched);
+            appendScreenName(node, s, enriched);
             appendTime(node, s);
             return MAPPER.writeValueAsString(node);
         } catch (Exception e) {
@@ -283,13 +286,55 @@ public final class RecordingEngine {
         }
     }
 
-    private void appendElement(ObjectNode node, UIElement rawEl) {
-        if (rawEl == null) { node.putNull("el"); return; }
-        // Enrich with varName and pageObjectAnnotation before serializing
+    /**
+     * Enriches a raw element with SemanticAnalyzer naming and deduplicates the
+     * variable name within the session scope.
+     *
+     * Dedup strategy:
+     *  1. First occurrence of a name  → used as-is.
+     *  2. Collision → qualify with the current screen name (e.g. "btnContinuarPago").
+     *  3. Still collides → append the numeric count as a last resort.
+     */
+    private UIElement enrichAndDeduplicate(Session s, UIElement rawEl) {
+        if (rawEl == null) return null;
         UIElement el = qa.cinepolis.runner.accessibility.ElementResolver.enrich(rawEl);
-        if (el == null) el = rawEl; // safety fallback
+        if (el == null) return rawEl;
+
+        String base = el.varName;
+        if (base == null || base.isBlank()) return el;
+
+        AtomicInteger baseCounter = s.varNameCount.computeIfAbsent(base, k -> new AtomicInteger(0));
+        int count = baseCounter.incrementAndGet();
+        if (count == 1) return el;  // first use of this name — unique
+
+        // Collision: qualify with the current screen to distinguish context
+        String screen = "";
+        try { screen = s.inspector.getCurrentScreenName(); } catch (Exception ignored) {}
+
+        if (!screen.isBlank()) {
+            String token = screen
+                .replaceAll("Activity$|Fragment$|Page$|Screen$|ViewController$", "")
+                .replaceAll("[^A-Za-z0-9]", "").trim();
+            if (!token.isEmpty()) {
+                String qualified = base + Character.toUpperCase(token.charAt(0))
+                                 + (token.length() > 1 ? token.substring(1) : "");
+                if (s.varNameCount.computeIfAbsent(qualified, k -> new AtomicInteger(0))
+                                   .incrementAndGet() == 1) {
+                    return qa.cinepolis.runner.accessibility.SemanticAnalyzer
+                            .renameElement(el, qualified);
+                }
+            }
+        }
+
+        // Last resort: numeric suffix
+        String numbered = base + count;
+        return qa.cinepolis.runner.accessibility.SemanticAnalyzer.renameElement(el, numbered);
+    }
+
+    private void appendElement(ObjectNode node, UIElement el) {
+        if (el == null) { node.putNull("el"); return; }
+        // el is already enriched by enrichAndDeduplicate — serialize directly
         ObjectNode e = MAPPER.createObjectNode();
-        // Core fields
         e.put("platform",              el.platform);
         e.put("className",             el.className);
         e.put("locatorStrategy",       el.locatorStrategy);
@@ -300,11 +345,9 @@ public final class RecordingEngine {
         e.put("enabled",               el.enabled);
         e.put("clickable",             el.clickable);
         e.put("visible",               el.visible);
-        // ElementResolver + SemanticAnalyzer output
         e.put("varName",               el.varName);
         e.put("semanticName",          el.semanticName);
         e.put("pageObjectAnnotation",  el.pageObjectAnnotation);
-        // Backward-compat fields (required by existing code generators)
         e.put("shortId",    el.shortId);
         e.put("resourceId", el.resourceId);
         e.put("accessId",   el.accessId);
@@ -419,6 +462,9 @@ public final class RecordingEngine {
 
         volatile long               suppressUntilMs  = 0;
         final List<OutputStream>    sseClients       = new CopyOnWriteArrayList<>();
+
+        // Session-scoped variable name deduplication map (name → occurrence count)
+        final ConcurrentHashMap<String, AtomicInteger> varNameCount = new ConcurrentHashMap<>();
 
         // getevent movement tracking (Android only)
         volatile int     touchStartX = -1;

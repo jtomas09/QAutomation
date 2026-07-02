@@ -128,7 +128,7 @@ export default function App() {
             <RecordStudio onNavigateToExecute={() => setPage('execute')} />
           )}
 
-          {page === 'suites' && <SuitesPage />}
+          {page === 'suites' && <SuitesPage onNavigate={p => setPage(p as import('./components/Sidebar').Page)} />}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []

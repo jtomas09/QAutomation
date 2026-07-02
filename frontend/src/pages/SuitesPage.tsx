@@ -1,14 +1,18 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef, DragEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { suiteService, resolveAppIcon } from '../services/SuiteService'
-import type { Suite } from '../services/SuiteService'
+import { suiteService } from '../services/SuiteService'
+import type { TestSuite, TestCase } from '../services/SuiteService'
 import { useConfirmation } from '../hooks/useConfirmation'
+import { appIconResolver } from '../services/ApplicationIconResolver'
+import { executionTrackingService } from '../services/ExecutionTrackingService'
+import { getDevices } from '../api'
+import type { PhysicalDevice } from '../types'
 import {
   Layers3, Trash2, Play, PencilLine, MoreHorizontal,
-  Search, X, ChevronLeft, ChevronRight,
-  CheckCircle2, XCircle, Clock, Smartphone,
-  LayoutList, LayoutGrid, BarChart3, ListChecks,
-  Code2, FileCode2, AlertCircle,
+  Search, X, ChevronDown, ChevronRight,
+  CheckCircle2, Clock, Smartphone,
+  Code2, FileCode2, ListChecks, Copy, Check,
+  Plus, GripVertical, AlertCircle, Package, Zap,
 } from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -16,954 +20,1218 @@ import {
 function fmtDate(iso: string): string {
   if (!iso) return '—'
   try {
-    const d    = new Date(iso)
-    const now  = new Date()
+    const d   = new Date(iso)
+    const now = new Date()
     const yday = new Date(now); yday.setDate(now.getDate() - 1)
     const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
     if (d.toDateString() === now.toDateString())  return `Hoy, ${time}`
     if (d.toDateString() === yday.toDateString()) return `Ayer, ${time}`
-    return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) + ` ${time}`
+    return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) + ` ${time}`
   } catch { return iso }
 }
 
-function fmtShort(iso: string): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  } catch { return iso }
+function platformBadge(platform: string): { label: string; color: string } {
+  if (platform === 'ios')     return { label: 'iOS',     color: '#60a5fa' }
+  if (platform === 'android') return { label: 'Android', color: '#4ade80' }
+  return                             { label: 'Multi',   color: '#94a3b8' }
 }
 
-function deriveTestType(s: Suite): { label: string; color: string; bg: string } {
-  const t = `${s.name} ${s.description}`.toLowerCase()
-  if (t.includes('smoke'))                               return { label:'SMOKE', color:'#fb923c', bg:'rgba(249,115,22,0.15)' }
-  if (t.includes('e2e') || t.includes('flujo'))          return { label:'E2E',   color:'#818cf8', bg:'rgba(99,102,241,0.15)' }
-  if (t.includes('reg') || t.includes('regres'))         return { label:'REG',   color:'#c084fc', bg:'rgba(192,132,252,0.15)' }
-  if (s.mode === 'caso')                                 return { label:'CASO',  color:'#34d399', bg:'rgba(52,211,153,0.15)' }
-  return                                                        { label:'SUITE', color:'#94a3b8', bg:'rgba(148,163,184,0.1)'  }
+function langLabel(lang: string): string {
+  const MAP: Record<string, string> = {
+    'java-testng': 'TestNG', 'java-junit': 'JUnit',
+    'python': 'Python', 'javascript': 'JS',
+    'csharp': 'C#', 'kotlin': 'Kotlin',
+  }
+  return MAP[lang] ?? lang
 }
 
-function deriveAmbiente(s: Suite): { label: string; color: string } {
-  const t = `${s.name} ${s.description}`.toLowerCase()
-  if (t.includes('prod'))                          return { label:'Producción', color:'#4ade80' }
-  if (t.includes('staging') || t.includes('stage'))return { label:'Staging',   color:'#f59e0b' }
-  return                                                  { label:'QA',         color:'#60a5fa' }
+function suiteType(name: string, desc: string): { label: string; color: string; bg: string } {
+  const t = `${name} ${desc}`.toLowerCase()
+  if (t.includes('smoke'))              return { label: 'SMOKE', color: '#fb923c', bg: 'rgba(249,115,22,0.15)' }
+  if (t.includes('e2e') || t.includes('flujo')) return { label: 'E2E', color: '#818cf8', bg: 'rgba(99,102,241,0.15)' }
+  if (t.includes('reg'))                return { label: 'REG',   color: '#c084fc', bg: 'rgba(192,132,252,0.15)' }
+  return                                       { label: 'SUITE', color: '#94a3b8', bg: 'rgba(148,163,184,0.1)'  }
 }
 
-function deriveTags(s: Suite): string[] {
-  const t = `${s.name} ${s.description}`.toLowerCase()
-  const r: string[] = []
-  if (t.includes('login'))   r.push('login')
-  if (t.includes('compra'))  r.push('compra')
-  if (t.includes('menú') || t.includes('menu')) r.push('menú')
-  if (t.includes('perfil'))  r.push('perfil')
-  if (t.includes('registro'))r.push('registro')
-  r.push(s.mode)
-  return [...new Set(r)].slice(0, 4)
-}
+// ── AppIcon — auto-resolves logo from package name ────────────────────────────
 
-function platformLabel(p: string): { text: string; sub: string; color: string } {
-  if (p?.toLowerCase() === 'ios')     return { text:'iOS',     sub:'iOS 16+',  color:'#60a5fa' }
-  if (p?.toLowerCase() === 'android') return { text:'Android', sub:'API 13+',  color:'#4ade80' }
-  return                                     { text:'—',        sub:'',         color:'#475569' }
-}
+function AppIcon({ pkg, appName, size = 32 }: { pkg: string; appName: string; size?: number }) {
+  const app = appIconResolver.resolveApplication(pkg, '', appName)
+  const [failed, setFailed] = useState(false)
+  const r = Math.min(size * 0.28, 10)
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-
-function StatCard({
-  icon, iconBg, iconColor, label, value, sub, subColor,
-}: {
-  icon: React.ReactNode; iconBg: string; iconColor: string
-  label: string; value: string; sub: string; subColor?: string
-}) {
+  if (app.iconUrl && !failed) {
+    return (
+      <img
+        src={app.iconUrl}
+        alt={app.displayName}
+        onError={() => setFailed(true)}
+        style={{ width: size, height: size, borderRadius: r, objectFit: 'cover', flexShrink: 0 }}
+      />
+    )
+  }
   return (
     <div style={{
-      flex: '1 1 155px', minWidth: 0,
-      background: 'rgba(255,255,255,0.03)',
-      border: '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 12, padding: '14px 16px',
-      display: 'flex', alignItems: 'flex-start', gap: 12,
+      width: size, height: size, borderRadius: r, flexShrink: 0,
+      background: app.color,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.44, fontWeight: 800,
     }}>
-      <div style={{
-        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-        background: iconBg, border: `1px solid ${iconColor}33`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <span style={{ color: iconColor }}>{icon}</span>
-      </div>
-      <div style={{ minWidth: 0 }}>
-        <p style={{ margin: 0, fontSize: 9, color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</p>
-        <p style={{ margin: '3px 0 0', fontSize: 20, fontWeight: 800, color: '#e2e8f0', lineHeight: 1.1 }}>{value}</p>
-        <p style={{ margin: '3px 0 0', fontSize: 10, color: subColor ?? '#475569' }}>{sub}</p>
-      </div>
+      {app.fallbackEmoji || app.displayName.charAt(0)}
     </div>
   )
 }
 
-// ── Small helpers ─────────────────────────────────────────────────────────────
+// ── ExecuteSuiteModal ─────────────────────────────────────────────────────────
 
-function FilterSelect({
-  label, value, onChange, options,
-}: {
-  label: string; value: string; onChange: (v: string) => void
-  options: { value: string; label: string }[]
-}) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 0,
-      background: 'rgba(255,255,255,0.05)',
-      border: '1px solid rgba(255,255,255,0.09)', borderRadius: 8,
-      overflow: 'hidden',
-    }}>
-      <span style={{
-        padding: '5px 8px 5px 10px', fontSize: 10, color: '#475569', fontWeight: 600,
-        borderRight: '1px solid rgba(255,255,255,0.07)', whiteSpace: 'nowrap',
-      }}>
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          background: 'transparent', border: 'none', outline: 'none',
-          color: '#94a3b8', fontSize: 11, padding: '5px 8px', cursor: 'pointer',
-        }}
-      >
-        {options.map(o => (
-          <option key={o.value} value={o.value} style={{ background: '#1e293b' }}>{o.label}</option>
-        ))}
-      </select>
-    </div>
-  )
+interface ExecuteSuiteModalProps {
+  suite: TestSuite
+  onClose(): void
+  onExecute(device: PhysicalDevice | null, environment: string): void
 }
 
-function ToggleBtn({ active, onClick, title, children }: {
-  active: boolean; onClick: () => void; title: string; children: React.ReactNode
-}) {
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      style={{
-        padding: '6px 9px', border: 'none', cursor: 'pointer',
-        background: active ? 'rgba(99,102,241,0.2)' : 'transparent',
-        color: active ? '#818cf8' : '#475569',
-        display: 'flex', alignItems: 'center', transition: 'all 0.12s',
-      }}
-    >
-      {children}
-    </button>
-  )
-}
+const ENVIRONMENTS = [
+  { id: 'qa',      label: 'QA',         flag: '🧪' },
+  { id: 'staging', label: 'Staging',    flag: '🔶' },
+  { id: 'prod',    label: 'Producción', flag: '🟢' },
+]
 
-function PageBtn({ active, disabled, onClick, children }: {
-  active?: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        minWidth: 28, height: 28, borderRadius: 6, border: 'none',
-        background: active
-          ? 'rgba(99,102,241,0.25)'
-          : 'rgba(255,255,255,0.04)',
-        color: active ? '#818cf8' : disabled ? '#1e293b' : '#64748b',
-        fontSize: 11, fontWeight: active ? 700 : 400, cursor: disabled ? 'default' : 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.12s', padding: '0 6px',
-      }}
-    >
-      {children}
-    </button>
-  )
-}
+function ExecuteSuiteModal({ suite, onClose, onExecute }: ExecuteSuiteModalProps) {
+  const [env,     setEnv]     = useState('qa')
+  const [devices, setDevices] = useState<PhysicalDevice[]>([])
+  const [deviceId, setDeviceId] = useState('')
+  const [loading, setLoading] = useState(false)
 
-function ActionBtn({ title, color, bg, onClick, children }: {
-  title: string; color: string; bg: string; onClick?: (e: React.MouseEvent) => void; children: React.ReactNode
-}) {
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      style={{
-        width: 26, height: 26, borderRadius: 6, flexShrink: 0,
-        background: bg, border: `1px solid ${color}28`,
-        color, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  )
-}
+  useEffect(() => {
+    getDevices().then(d => {
+      setDevices(d)
+      if (d.length > 0 && !deviceId) setDeviceId(d[0].udid)
+    }).catch(() => {})
+  }, [deviceId])
 
-// ── Suite row (list view) ─────────────────────────────────────────────────────
+  const selectedDevice = devices.find(d => d.udid === deviceId) ?? null
+  const caseCount      = suite.testCases.length
 
-const COL = '2fr 110px 170px 110px 80px 148px 90px 106px 104px'
-
-function SuiteRow({ suite, onView, onDelete }: {
-  suite: Suite; onView: (s: Suite) => void; onDelete: (id: string) => void
-}) {
-  const [hov, setHov]       = useState(false)
-  const [menu, setMenu]     = useState(false)
-  const type  = deriveTestType(suite)
-  const amb   = deriveAmbiente(suite)
-  const tags  = deriveTags(suite)
-  const pl    = platformLabel(suite.platform)
-  const icon  = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
-  const confirm = useConfirmation()
-
-  const handleDeleteClick = async () => {
-    setMenu(false)
-    const label = suite.mode === 'caso' ? 'Caso de Prueba' : 'Suite'
-    const ok = await confirm({
-      title: `Eliminar ${label}`,
-      description: `¿Estás seguro de eliminar "${suite.name}"? Esta acción no podrá deshacerse.`,
-      type: 'delete',
-    })
-    if (ok) onDelete(suite.id)
+  const handleRun = async () => {
+    setLoading(true)
+    await onExecute(selectedDevice, env)
+    setLoading(false)
+    onClose()
   }
 
   return (
-    <div
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => { setHov(false); setMenu(false) }}
-      onClick={() => onView(suite)}
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       style={{
-        display: 'grid', gridTemplateColumns: COL, alignItems: 'center',
-        padding: '10px 20px', gap: 8, cursor: 'pointer',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        background: hov ? 'rgba(255,255,255,0.028)' : 'transparent',
-        transition: 'background 0.1s',
-      }}
-    >
-      {/* SUITE */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-          background: `${suite.accent}22`, border: `1px solid ${suite.accent}44`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19,
-        }}>
-          {icon}
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-            <span style={{
-              fontSize: 12, fontWeight: 700, color: '#e2e8f0',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {suite.name}
-            </span>
-            <span style={{
-              fontSize: 9, fontWeight: 700, color: type.color,
-              background: type.bg, borderRadius: 4, padding: '2px 5px', flexShrink: 0,
-            }}>
-              {type.label}
-            </span>
-          </div>
-          <p style={{
-            margin: '0 0 4px', fontSize: 10, color: '#475569',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {suite.description || '—'}
-          </p>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-            {tags.map(t => (
-              <span key={t} style={{
-                fontSize: 9, color: '#334155',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: 4, padding: '1px 5px',
-              }}>
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* PLATAFORMA */}
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
-          <Smartphone size={11} color={pl.color} />
-          <span style={{ fontSize: 11, color: pl.color, fontWeight: 600 }}>{pl.text}</span>
-        </div>
-        <span style={{ fontSize: 9, color: '#334155' }}>{pl.sub}</span>
-      </div>
-
-      {/* APLICACIÓN */}
-      <div style={{ minWidth: 0 }}>
-        <p style={{ margin: 0, fontSize: 11, color: '#94a3b8', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {suite.appName || 'App'}
-        </p>
-        <p style={{ margin: '2px 0 0', fontSize: 9, color: '#334155', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {suite.appPackage || '—'}
-        </p>
-      </div>
-
-      {/* AMBIENTE */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: amb.color, boxShadow: `0 0 5px ${amb.color}88` }} />
-        <span style={{ fontSize: 11, color: amb.color, fontWeight: 500 }}>{amb.label}</span>
-      </div>
-
-      {/* PASOS */}
-      <div>
-        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{suite.stepCount}</p>
-        <p style={{ margin: '1px 0 0', fontSize: 9, color: '#334155' }}>pasos</p>
-      </div>
-
-      {/* ÚLTIMA EJECUCIÓN */}
-      <div>
-        <p style={{ margin: 0, fontSize: 11, color: '#94a3b8' }}>{fmtDate(suite.updatedAt || suite.savedAt)}</p>
-        <p style={{ margin: '2px 0 0', fontSize: 9, color: '#334155' }}>{fmtShort(suite.savedAt)}</p>
-      </div>
-
-      {/* ÉXITO */}
-      <div>
-        <p style={{ margin: 0, fontSize: 12, color: '#334155' }}>—</p>
-      </div>
-
-      {/* ESTADO */}
-      <div>
-        {suite.status === 'active' ? (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 10, fontWeight: 600, borderRadius: 6, padding: '3px 8px',
-            color: '#4ade80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.25)',
-          }}>
-            <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#4ade80' }} />
-            Activa
-          </span>
-        ) : (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            fontSize: 10, fontWeight: 600, borderRadius: 6, padding: '3px 8px',
-            color: '#f87171', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
-          }}>
-            <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#f87171' }} />
-            {suite.status === 'pending' ? 'Inactiva' : 'Borrador'}
-          </span>
-        )}
-      </div>
-
-      {/* ACCIONES */}
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: 4, opacity: hov ? 1 : 0, transition: 'opacity 0.12s' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <ActionBtn title="Ejecutar" color="#4ade80" bg="rgba(74,222,128,0.1)">
-          <Play size={9} fill="#4ade80" />
-        </ActionBtn>
-        <ActionBtn title="Editar" color="#818cf8" bg="rgba(99,102,241,0.1)">
-          <PencilLine size={9} />
-        </ActionBtn>
-        <div style={{ position: 'relative' }}>
-          <ActionBtn
-            title="Más opciones"
-            color="#64748b"
-            bg="rgba(100,116,139,0.08)"
-            onClick={() => setMenu(v => !v)}
-          >
-            <MoreHorizontal size={9} />
-          </ActionBtn>
-          {menu && (
-            <div style={{
-              position: 'absolute', right: 0, top: '110%', zIndex: 100,
-              background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 8, overflow: 'hidden', minWidth: 130,
-              boxShadow: '0 8px 28px rgba(0,0,0,0.6)',
-            }}>
-              <ContextMenuItem label="Ver detalle" onClick={() => { onView(suite); setMenu(false) }} />
-              <ContextMenuItem
-                label="Eliminar"
-                color="#f87171"
-                onClick={handleDeleteClick}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ContextMenuItem({ label, color, onClick }: { label: string; color?: string; onClick: () => void }) {
-  const [h, setH] = useState(false)
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setH(true)}
-      onMouseLeave={() => setH(false)}
-      style={{
-        width: '100%', padding: '8px 14px', textAlign: 'left',
-        background: h ? 'rgba(255,255,255,0.05)' : 'transparent',
-        border: 'none', color: color ?? '#94a3b8', fontSize: 11, cursor: 'pointer',
-      }}
-    >
-      {label}
-    </button>
-  )
-}
-
-// ── Suite card (grid view) ────────────────────────────────────────────────────
-
-function SuiteCard({ suite, onView, onDelete }: {
-  suite: Suite; onView: (s: Suite) => void; onDelete: (id: string) => void
-}) {
-  const [hov, setHov] = useState(false)
-  const type    = deriveTestType(suite)
-  const amb     = deriveAmbiente(suite)
-  const pl      = platformLabel(suite.platform)
-  const icon    = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
-  const confirm = useConfirmation()
-
-  const handleDeleteClick = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    const label = suite.mode === 'caso' ? 'Caso de Prueba' : 'Suite'
-    const ok = await confirm({
-      title: `Eliminar ${label}`,
-      description: `¿Estás seguro de eliminar "${suite.name}"? Esta acción no podrá deshacerse.`,
-      type: 'delete',
-    })
-    if (ok) onDelete(suite.id)
-  }
-
-  return (
-    <div
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      onClick={() => onView(suite)}
-      style={{
-        background: hov ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.025)',
-        border: `1px solid ${hov ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.07)'}`,
-        borderRadius: 12, padding: '14px 16px',
-        display: 'flex', flexDirection: 'column', gap: 10,
-        cursor: 'pointer', transition: 'all 0.15s', position: 'relative',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
-          background: `${suite.accent}22`, border: `1px solid ${suite.accent}44`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-        }}>
-          {icon}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {suite.name}
-            </span>
-            <span style={{ fontSize: 9, fontWeight: 700, color: type.color, background: type.bg, borderRadius: 4, padding: '2px 5px', flexShrink: 0 }}>
-              {type.label}
-            </span>
-          </div>
-          {suite.description && (
-            <p style={{ margin: '2px 0 0', fontSize: 10, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {suite.description}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={handleDeleteClick}
-          style={{
-            background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)',
-            borderRadius: 6, padding: '4px 6px', color: '#ef4444', cursor: 'pointer',
-            opacity: hov ? 1 : 0, transition: 'opacity 0.15s', flexShrink: 0,
-            display: 'flex', alignItems: 'center',
-          }}
-        >
-          <Trash2 size={10} />
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <span style={{ fontSize: 10, color: pl.color, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Smartphone size={10} />{pl.text}
-        </span>
-        <span style={{ fontSize: 10, color: amb.color, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <div style={{ width: 6, height: 6, borderRadius: '50%', background: amb.color }} />
-          {amb.label}
-        </span>
-        <span style={{ fontSize: 10, color: '#475569', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <ListChecks size={10} />{suite.stepCount} pasos
-        </span>
-      </div>
-
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)',
-      }}>
-        <span style={{ fontSize: 9, color: '#334155', display: 'flex', alignItems: 'center', gap: 3 }}>
-          <Clock size={8} />{fmtDate(suite.savedAt).split(',')[0]}
-        </span>
-        {suite.status === 'active' ? (
-          <span style={{ fontSize: 9, fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.2)', borderRadius: 4, padding: '2px 7px' }}>
-            Activa
-          </span>
-        ) : (
-          <span style={{ fontSize: 9, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 4, padding: '2px 7px' }}>
-            Borrador
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Detail modal ──────────────────────────────────────────────────────────────
-
-function DetailModal({ suite, onClose }: { suite: Suite; onClose: () => void }) {
-  const [tab, setTab] = useState<'steps' | 'code' | 'pageobjects'>('steps')
-  const icon = resolveAppIcon(suite.appPackage ?? '', suite.appName ?? '') || suite.icon || '🎬'
-
-  return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)',
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      onClick={onClose}
     >
-      <div style={{
-        background: '#0d1117', border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 16, width: '100%', maxWidth: 860, maxHeight: '88vh',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        {/* header */}
-        <div style={{
-          padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.07)',
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 9, flexShrink: 0, fontSize: 18,
-            background: `${suite.accent}22`, border: `1px solid ${suite.accent}44`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {icon}
-          </div>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.94, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.94, y: 10 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#111827', border: '1px solid rgba(52,211,153,0.25)',
+          borderRadius: 14, padding: 28, width: '100%', maxWidth: 420,
+          display: 'flex', flexDirection: 'column', gap: 18,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <AppIcon pkg={suite.appPackage} appName={suite.appName} size={40} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{suite.name}</p>
-            <p style={{ margin: 0, fontSize: 10, color: '#475569' }}>{suite.description}</p>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {suite.name}
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>
+              {caseCount} caso{caseCount !== 1 ? 's' : ''} · {suite.platform || 'Multi'}
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 7, padding: '5px 9px', color: '#64748b', cursor: 'pointer', display: 'flex',
-            }}
-          >
-            <X size={13} />
+          <button onClick={onClose} style={{ color: '#475569', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <X size={16} />
           </button>
         </div>
 
-        {/* tabs */}
-        <div style={{ display: 'flex', gap: 2, padding: '8px 20px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          {([
-            { id: 'steps',       label: 'Pasos',        icon: <Layers3 size={10} /> },
-            { id: 'code',        label: 'Código',       icon: <Code2 size={10} /> },
-            { id: 'pageobjects', label: 'Page Objects', icon: <FileCode2 size={10} /> },
-          ] as const).map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px',
-                fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none', borderRadius: '5px 5px 0 0',
-                color: tab === t.id ? '#818cf8' : '#475569',
-                background: tab === t.id ? 'rgba(99,102,241,0.12)' : 'transparent',
-                borderBottom: tab === t.id ? '2px solid #6366f1' : '2px solid transparent',
-              }}
-            >
-              {t.icon}{t.label}
-            </button>
-          ))}
+        {/* Environment */}
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 7 }}>Ambiente</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {ENVIRONMENTS.map(e => (
+              <button
+                key={e.id}
+                onClick={() => setEnv(e.id)}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11,
+                  fontWeight: env === e.id ? 700 : 500,
+                  border: `1px solid ${env === e.id ? 'rgba(52,211,153,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                  background: env === e.id ? 'rgba(52,211,153,0.1)' : 'rgba(255,255,255,0.03)',
+                  color: env === e.id ? '#34d399' : '#64748b',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                }}
+              >
+                {e.flag} {e.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* body */}
+        {/* Device */}
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 5 }}>
+            Dispositivo
+          </label>
+          {devices.length === 0 ? (
+            <div style={{
+              padding: '10px 12px', borderRadius: 7, fontSize: 11, color: '#f59e0b',
+              background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)',
+            }}>
+              Sin dispositivos conectados — la ejecución se realizará sin dispositivo físico.
+            </div>
+          ) : (
+            <select
+              value={deviceId}
+              onChange={e => setDeviceId(e.target.value)}
+              style={{
+                width: '100%', background: '#0d1117', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 7, color: '#e2e8f0', padding: '8px 11px', fontSize: 12,
+                boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit',
+              }}
+            >
+              <option value="">— Sin dispositivo —</option>
+              {devices.map(d => (
+                <option key={d.udid} value={d.udid}>{d.deviceName} ({d.platform})</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Execute */}
+        <button
+          onClick={handleRun}
+          disabled={loading || caseCount === 0}
+          style={{
+            width: '100%', padding: '11px 0', borderRadius: 8, border: 'none',
+            background: loading || caseCount === 0
+              ? 'rgba(255,255,255,0.05)'
+              : 'linear-gradient(90deg, #059669, #34d399)',
+            color: loading || caseCount === 0 ? '#475569' : '#fff',
+            fontSize: 13, fontWeight: 700, cursor: loading || caseCount === 0 ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          }}
+        >
+          <Zap size={14} />
+          {loading ? 'Iniciando…' : caseCount === 0 ? 'Sin casos de prueba' : `Ejecutar ${caseCount} caso${caseCount !== 1 ? 's' : ''}`}
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ── Tabs shared ───────────────────────────────────────────────────────────────
+
+const TABS: { id: string; label: string; icon: React.ElementType }[] = [
+  { id: 'pasos',   label: 'Pasos',       icon: ListChecks },
+  { id: 'code',    label: 'Código',      icon: Code2       },
+  { id: 'objects', label: 'Page Objects', icon: FileCode2   },
+]
+
+// ── CaseDetailModal ───────────────────────────────────────────────────────────
+
+interface CaseDetailModalProps {
+  tc: TestCase
+  suiteName: string
+  onClose(): void
+  onDelete(): void
+}
+
+function CaseDetailModal({ tc, suiteName, onClose, onDelete }: CaseDetailModalProps) {
+  const [tab,    setTab]    = useState('pasos')
+  const [copied, setCopied] = useState(false)
+
+  const copyCode = useCallback(() => {
+    const src = tab === 'code' ? tc.generatedCode : tab === 'objects' ? tc.pageObjects : ''
+    if (!src) return
+    navigator.clipboard.writeText(src).then(() => {
+      setCopied(true); setTimeout(() => setCopied(false), 1500)
+    })
+  }, [tab, tc])
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 500,
+        background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#0f172a', border: '1px solid #1e293b',
+          borderRadius: 14, width: '100%', maxWidth: 700, maxHeight: '85vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid #1e293b',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+              <span style={{ fontSize: 11, color: '#64748b' }}>
+                {suiteName} <span style={{ color: '#334155', margin: '0 4px' }}>/</span>
+              </span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>{tc.name}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <span style={{ fontSize: 10, color: '#64748b' }}>{tc.stepCount} pasos</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>·</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>{langLabel(tc.lang)}</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>·</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>{fmtDate(tc.updatedAt)}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={onDelete}
+              style={{
+                padding: '6px 10px', borderRadius: 7, cursor: 'pointer',
+                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                color: '#f87171', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <Trash2 size={12} /> Eliminar
+            </button>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 4 }}>
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 2, padding: '8px 16px 0', borderBottom: '1px solid #1e293b' }}>
+          {TABS.map(t => {
+            const active = tab === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                style={{
+                  padding: '7px 14px', border: 'none', cursor: 'pointer', borderRadius: '8px 8px 0 0',
+                  background: active ? '#1e293b' : 'none',
+                  color: active ? '#e2e8f0' : '#64748b',
+                  fontSize: 12, fontWeight: active ? 700 : 500,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  borderBottom: active ? '2px solid #6366f1' : '2px solid transparent',
+                  marginBottom: -1,
+                }}
+              >
+                <t.icon size={12} /> {t.label}
+              </button>
+            )
+          })}
+          {(tab === 'code' || tab === 'objects') && (
+            <button
+              onClick={copyCode}
+              style={{
+                marginLeft: 'auto', padding: '5px 10px', borderRadius: 6,
+                background: copied ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${copied ? 'rgba(52,211,153,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                color: copied ? '#34d399' : '#64748b', cursor: 'pointer', fontSize: 11,
+                display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4,
+              }}
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? 'Copiado' : 'Copiar'}
+            </button>
+          )}
+        </div>
+
+        {/* Tab content */}
         <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-          {tab === 'steps' && (
-            suite.steps.length === 0
-              ? <p style={{ color: '#334155', fontSize: 12, textAlign: 'center', padding: '36px 0' }}>Sin pasos registrados.</p>
-              : <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  {suite.steps.map(s => (
-                    <div key={s.id} style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 9,
-                      padding: '7px 11px', background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.06)', borderRadius: 7,
+          {tab === 'pasos' && (
+            tc.steps.length === 0
+              ? <p style={{ color: '#475569', fontSize: 13, textAlign: 'center', padding: 32 }}>Sin pasos grabados.</p>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {tc.steps.map((s, i) => (
+                    <div key={s.id || i} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10,
+                      padding: '7px 10px', borderRadius: 7,
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.06)',
                     }}>
-                      <span style={{ fontSize: 9, color: '#475569', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 3, padding: '1px 5px', fontWeight: 600, flexShrink: 0, fontFamily: 'monospace' }}>
-                        #{s.n}
-                      </span>
+                      <span style={{
+                        minWidth: 20, height: 20, borderRadius: 6,
+                        background: 'rgba(99,102,241,0.18)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        fontSize: 9, fontWeight: 700, color: '#818cf8', flexShrink: 0,
+                      }}>{s.n}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#e2e8f0', textTransform: 'uppercase' }}>{s.type}</span>
-                        {s.el?.varName && <span style={{ fontSize: 10, color: '#818cf8', fontFamily: 'monospace', marginLeft: 7 }}>{s.el.varName}</span>}
-                        {s.el?.locatorValue && <span style={{ fontSize: 10, color: '#475569', marginLeft: 7, fontFamily: 'monospace' }}>{s.el.locatorStrategy}={s.el.locatorValue}</span>}
-                        {s.inputVal && <span style={{ fontSize: 10, color: '#34d399', marginLeft: 7 }}>"{s.inputVal}"</span>}
+                        <span style={{ fontSize: 12, color: '#e2e8f0', fontWeight: 600, textTransform: 'capitalize' }}>
+                          {s.type.replace(/_/g, ' ')}
+                        </span>
+                        {s.el?.varName && (
+                          <span style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>
+                            {s.el.varName}
+                          </span>
+                        )}
+                        {s.inputVal && (
+                          <span style={{
+                            marginLeft: 6, fontSize: 10, color: '#94a3b8',
+                            background: 'rgba(148,163,184,0.08)', padding: '0 5px', borderRadius: 4,
+                          }}>
+                            "{s.inputVal}"
+                          </span>
+                        )}
                       </div>
-                      <span style={{ fontSize: 9, color: '#334155', fontFamily: 'monospace', flexShrink: 0 }}>{s.timeStr}</span>
+                      <span style={{ fontSize: 10, color: '#334155', flexShrink: 0 }}>{s.timeStr}</span>
                     </div>
                   ))}
                 </div>
           )}
-          {tab === 'code' && (
-            <pre style={{ margin: 0, fontSize: 11, lineHeight: 1.65, color: '#94a3b8', fontFamily: '"JetBrains Mono","Fira Code",monospace', background: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 8, overflowX: 'auto' }}>
-              {suite.generatedCode || '// Sin código generado'}
-            </pre>
-          )}
-          {tab === 'pageobjects' && (
-            <pre style={{ margin: 0, fontSize: 11, lineHeight: 1.65, color: '#94a3b8', fontFamily: '"JetBrains Mono","Fira Code",monospace', background: 'rgba(0,0,0,0.3)', padding: 16, borderRadius: 8, overflowX: 'auto' }}>
-              {suite.pageObjects || '// Sin Page Objects generados'}
+          {(tab === 'code' || tab === 'objects') && (
+            <pre style={{
+              margin: 0, fontSize: 11, lineHeight: 1.6,
+              color: '#94a3b8', fontFamily: 'monospace',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            }}>
+              {(tab === 'code' ? tc.generatedCode : tc.pageObjects) || '// (sin contenido)'}
             </pre>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── CreateSuiteModal ──────────────────────────────────────────────────────────
 
-function EmptyState({ hasFilters }: { hasFilters: boolean }) {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', padding: '64px 32px', gap: 14, textAlign: 'center',
-    }}>
-      <div style={{
-        width: 60, height: 60, borderRadius: 16,
-        background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <Layers3 size={26} color="rgba(99,102,241,0.45)" />
-      </div>
-      <div>
-        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>
-          {hasFilters ? 'Sin resultados' : 'Sin suites guardadas'}
-        </p>
-        <p style={{ margin: '5px 0 0', fontSize: 11, color: '#475569', lineHeight: 1.6 }}>
-          {hasFilters
-            ? 'Ninguna suite coincide con los filtros aplicados.'
-            : <>Graba una sesión en Record Studio y guárdala<br />como Suite para que aparezca aquí.</>}
-        </p>
-      </div>
-      {!hasFilters && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 5, padding: '7px 13px',
-          background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8,
-        }}>
-          <AlertCircle size={10} color="#6366f1" />
-          <span style={{ fontSize: 11, color: '#6366f1' }}>Record Studio → Guardar Suite</span>
-        </div>
-      )}
-    </div>
-  )
+interface CreateSuiteModalProps {
+  onClose(): void
+  onCreate(data: { name: string; description: string; platform: 'android' | 'ios' | '' }): void
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+function CreateSuiteModal({ onClose, onCreate }: CreateSuiteModalProps) {
+  const [name,     setName]     = useState('')
+  const [desc,     setDesc]     = useState('')
+  const [platform, setPlatform] = useState<'android' | 'ios' | ''>('')
 
-export default function SuitesPage() {
-  const [suites,         setSuites]         = useState<Suite[]>(() => suiteService.getAllSuites())
-  const [viewing,        setViewing]        = useState<Suite | null>(null)
-  const [viewMode,       setViewMode]       = useState<'list' | 'grid'>('list')
-  const [search,         setSearch]         = useState('')
-  const [filterPlatform, setFilterPlatform] = useState('all')
-  const [filterStatus,   setFilterStatus]   = useState('all')
-  const [page,           setPage]           = useState(1)
-  const [pageSize,       setPageSize]       = useState(10)
-  const [toastMsg,       setToastMsg]       = useState<string | null>(null)
-
-  const showToast = useCallback((msg: string) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), 3200)
-  }, [])
-
-  const reload = useCallback(() => setSuites(suiteService.getAllSuites()), [])
-
-  useEffect(() => {
-    window.addEventListener('qa:suite:created', reload)
-    window.addEventListener('qa:suite:updated', reload)
-    window.addEventListener('qa:suite:deleted', reload)
-    return () => {
-      window.removeEventListener('qa:suite:created', reload)
-      window.removeEventListener('qa:suite:updated', reload)
-      window.removeEventListener('qa:suite:deleted', reload)
-    }
-  }, [reload])
-
-  // Stats
-  const activeCount   = useMemo(() => suites.filter(s => s.status === 'active').length, [suites])
-  const inactiveCount = suites.length - activeCount
-  const totalSteps    = useMemo(() => suites.reduce((sum, s) => sum + s.stepCount, 0), [suites])
-  const lastSuite     = useMemo(() => {
-    if (!suites.length) return null
-    return [...suites].sort((a, b) => (b.savedAt > a.savedAt ? 1 : -1))[0]
-  }, [suites])
-
-  // Filters
-  const hasFilters = search !== '' || filterPlatform !== 'all' || filterStatus !== 'all'
-  const filtered = useMemo(() => suites.filter(s => {
-    if (search) {
-      const q = search.toLowerCase()
-      if (!s.name.toLowerCase().includes(q) &&
-          !s.description.toLowerCase().includes(q) &&
-          !(s.appPackage ?? '').toLowerCase().includes(q)) return false
-    }
-    if (filterPlatform !== 'all' && s.platform !== filterPlatform) return false
-    if (filterStatus !== 'all' && s.status !== filterStatus) return false
-    return true
-  }), [suites, search, filterPlatform, filterStatus])
-
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const paginated  = filtered.slice((page - 1) * pageSize, page * pageSize)
-
-  useEffect(() => setPage(1), [search, filterPlatform, filterStatus, pageSize])
-
-  function handleDelete(id: string) {
-    const suite = suites.find(s => s.id === id)
-    suiteService.deleteSuite(id)
-    if (viewing?.id === id) setViewing(null)
-    const label = suite?.mode === 'caso' ? 'Caso de prueba' : 'Suite'
-    showToast(`${label} "${suite?.name ?? ''}" eliminada correctamente`)
-  }
-
-  // Build visible page numbers
-  const pageNums = useMemo(() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
-    const around = new Set([1, 2, page - 1, page, page + 1, totalPages - 1, totalPages].filter(n => n >= 1 && n <= totalPages))
-    return [...around].sort((a, b) => a - b)
-  }, [totalPages, page])
+  const canCreate = name.trim().length > 0
 
   return (
-    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 18, minHeight: '100%' }}>
-
-      {/* ── Page header ── */}
-      <div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: '#e2e8f0', letterSpacing: -0.4 }}>Suites</h1>
-        <p style={{ margin: '4px 0 0', fontSize: 12, color: '#475569' }}>
-          Gestiona y organiza todas tus suites de pruebas automatizadas
-        </p>
-      </div>
-
-      {/* ── Stats row ── */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <StatCard
-          icon={<BarChart3 size={15} />}
-          iconBg="rgba(99,102,241,0.12)" iconColor="#818cf8"
-          label="Total Suites"
-          value={String(suites.length)}
-          sub={suites.length === 0 ? 'Sin suites' : `+${suites.length} grabadas`}
-        />
-        <StatCard
-          icon={<Layers3 size={15} />}
-          iconBg="rgba(74,222,128,0.12)" iconColor="#4ade80"
-          label="Suites Activas"
-          value={String(activeCount)}
-          sub={suites.length > 0 ? `${Math.round(activeCount / suites.length * 100)}% del total` : '—'}
-          subColor="#4ade80"
-        />
-        <StatCard
-          icon={<XCircle size={15} />}
-          iconBg="rgba(239,68,68,0.1)" iconColor="#f87171"
-          label="Suites Inactivas"
-          value={String(inactiveCount)}
-          sub={suites.length > 0 ? `${Math.round(inactiveCount / suites.length * 100)}% del total` : '—'}
-          subColor="#f87171"
-        />
-        <StatCard
-          icon={<ListChecks size={15} />}
-          iconBg="rgba(168,85,247,0.12)" iconColor="#c084fc"
-          label="Total Pasos"
-          value={totalSteps.toLocaleString('es-MX')}
-          sub="pasos grabados"
-        />
-        <StatCard
-          icon={<Clock size={15} />}
-          iconBg="rgba(20,184,166,0.12)" iconColor="#2dd4bf"
-          label="Última Grabación"
-          value={lastSuite ? fmtDate(lastSuite.savedAt).split(',')[0] : '—'}
-          sub={lastSuite ? lastSuite.name : 'Sin registros'}
-        />
-        <StatCard
-          icon={<CheckCircle2 size={15} />}
-          iconBg="rgba(74,222,128,0.08)" iconColor="#4ade80"
-          label="Éxito Promedio"
-          value="—"
-          sub="sin datos de ejecución"
-        />
-      </div>
-
-      {/* ── Table / grid container ── */}
-      <div style={{
-        background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(255,255,255,0.07)',
-        borderRadius: 14, overflow: 'hidden',
-      }}>
-        {/* Filter bar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          padding: '11px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)',
-        }}>
-          {/* Search */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 7,
-            background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)',
-            borderRadius: 8, padding: '5px 10px', flex: '1 1 170px', maxWidth: 260,
-          }}>
-            <Search size={11} color="#475569" />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar suites..."
-              style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 11, color: '#94a3b8' }}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 0, display: 'flex' }}>
-                <X size={10} />
-              </button>
-            )}
-          </div>
-
-          <FilterSelect
-            label="Plataforma"
-            value={filterPlatform}
-            onChange={setFilterPlatform}
-            options={[{ value:'all',label:'Todas' },{ value:'android',label:'Android' },{ value:'ios',label:'iOS' }]}
-          />
-          <FilterSelect
-            label="Estado"
-            value={filterStatus}
-            onChange={setFilterStatus}
-            options={[{ value:'all',label:'Todos' },{ value:'active',label:'Activa' },{ value:'draft',label:'Borrador' }]}
-          />
-
-          {hasFilters && (
-            <button
-              onClick={() => { setSearch(''); setFilterPlatform('all'); setFilterStatus('all') }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 7,
-                background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                color: '#f87171', fontSize: 11, cursor: 'pointer',
-              }}
-            >
-              <X size={9} /> Limpiar filtros
-            </button>
-          )}
-
-          <div style={{ flex: 1 }} />
-
-          <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, overflow: 'hidden' }}>
-            <ToggleBtn active={viewMode === 'list'} onClick={() => setViewMode('list')} title="Vista lista"><LayoutList size={13} /></ToggleBtn>
-            <ToggleBtn active={viewMode === 'grid'} onClick={() => setViewMode('grid')} title="Vista cuadrícula"><LayoutGrid size={13} /></ToggleBtn>
-          </div>
-        </div>
-
-        {/* Table header — list mode */}
-        {viewMode === 'list' && filtered.length > 0 && (
-          <div style={{
-            display: 'grid', gridTemplateColumns: COL,
-            padding: '7px 20px', gap: 8,
-            background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.05)',
-          }}>
-            {['SUITE','PLATAFORMA','APLICACIÓN','AMBIENTE','PASOS','ÚLTIMA EJECUCIÓN','ÉXITO','ESTADO','ACCIONES'].map(c => (
-              <span key={c} style={{ fontSize: 9, fontWeight: 700, color: '#334155', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                {c}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Rows / cards / empty */}
-        {filtered.length === 0 ? (
-          <EmptyState hasFilters={hasFilters} />
-        ) : viewMode === 'list' ? (
-          paginated.map(s => (
-            <SuiteRow key={s.id} suite={s} onView={setViewing} onDelete={handleDelete} />
-          ))
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, padding: 16 }}>
-            {paginated.map(s => (
-              <SuiteCard key={s.id} suite={s} onView={setViewing} onDelete={handleDelete} />
-            ))}
-          </div>
-        )}
-
-        {/* Pagination */}
-        {filtered.length > 0 && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
-            padding: '10px 20px', borderTop: '1px solid rgba(255,255,255,0.05)',
-          }}>
-            <span style={{ fontSize: 11, color: '#475569' }}>
-              Mostrando {Math.min((page - 1) * pageSize + 1, filtered.length)} a{' '}
-              {Math.min(page * pageSize, filtered.length)} de {filtered.length} suite{filtered.length !== 1 ? 's' : ''}
-            </span>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <PageBtn onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-                <ChevronLeft size={11} />
-              </PageBtn>
-              {pageNums.map((n, i) => (
-                <React.Fragment key={n}>
-                  {i > 0 && pageNums[i - 1] !== n - 1 && (
-                    <span style={{ fontSize: 11, color: '#334155', padding: '0 2px' }}>…</span>
-                  )}
-                  <PageBtn active={n === page} onClick={() => setPage(n)}>{n}</PageBtn>
-                </React.Fragment>
-              ))}
-              <PageBtn onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-                <ChevronRight size={11} />
-              </PageBtn>
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.94, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.94, y: 10 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#111827', border: '1px solid #6366f144',
+          borderRadius: 14, padding: 28, width: '100%', maxWidth: 400,
+          display: 'flex', flexDirection: 'column', gap: 16,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Layers3 size={14} color="#818cf8" />
             </div>
+            <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14 }}>Nueva Suite</span>
+          </div>
+          <button onClick={onClose} style={{ color: '#475569', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <X size={16} />
+          </button>
+        </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 11, color: '#475569' }}>Mostrar</span>
-              <select
-                value={pageSize}
-                onChange={e => setPageSize(Number(e.target.value))}
+        {/* Name */}
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 5 }}>Nombre *</label>
+          <input
+            value={name} onChange={e => setName(e.target.value)}
+            placeholder="E2E Flujo de Compra"
+            autoFocus
+            style={{
+              width: '100%', background: '#0d1117', border: `1px solid ${name.trim() ? '#6366f155' : 'rgba(255,255,255,0.1)'}`,
+              borderRadius: 7, color: '#e2e8f0', padding: '8px 11px', fontSize: 12,
+              boxSizing: 'border-box', outline: 'none',
+            }}
+          />
+        </div>
+
+        {/* Description */}
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 5 }}>Descripción</label>
+          <textarea
+            value={desc} onChange={e => setDesc(e.target.value)}
+            placeholder="Descripción opcional…"
+            rows={2}
+            style={{
+              width: '100%', background: '#0d1117', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 7, color: '#e2e8f0', padding: '8px 11px', fontSize: 12,
+              boxSizing: 'border-box', outline: 'none', resize: 'none', fontFamily: 'inherit',
+            }}
+          />
+        </div>
+
+        {/* Platform */}
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 7 }}>Plataforma</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['', 'android', 'ios'] as const).map(p => (
+              <button
+                key={p || 'all'}
+                onClick={() => setPlatform(p)}
                 style={{
-                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 6, color: '#94a3b8', fontSize: 11, padding: '3px 6px', cursor: 'pointer',
-                  outline: 'none',
+                  flex: 1, padding: '7px 0', borderRadius: 7, cursor: 'pointer',
+                  border: `1px solid ${platform === p ? '#6366f1' : 'rgba(255,255,255,0.1)'}`,
+                  background: platform === p ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
+                  color: platform === p ? '#818cf8' : '#64748b', fontSize: 11, fontWeight: platform === p ? 700 : 500,
                 }}
               >
-                <option value={10} style={{ background: '#1e293b' }}>10</option>
-                <option value={25} style={{ background: '#1e293b' }}>25</option>
-                <option value={50} style={{ background: '#1e293b' }}>50</option>
-              </select>
-            </div>
+                {p === '' ? '🌐 Todos' : p === 'android' ? '🤖 Android' : '🍎 iOS'}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
+
+        {/* Action */}
+        <button
+          onClick={() => { if (canCreate) onCreate({ name: name.trim(), description: desc.trim(), platform }) }}
+          disabled={!canCreate}
+          style={{
+            width: '100%', padding: '10px 0', borderRadius: 8, border: 'none',
+            background: canCreate ? 'linear-gradient(90deg, #6366f1, #818cf8)' : 'rgba(255,255,255,0.05)',
+            color: canCreate ? '#fff' : '#475569', fontSize: 13, fontWeight: 700,
+            cursor: canCreate ? 'pointer' : 'not-allowed',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          }}
+        >
+          <Plus size={13} /> Crear Suite
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ── CaseRow — one draggable row per TestCase ──────────────────────────────────
+
+interface CaseRowProps {
+  tc:          TestCase
+  suiteId:     string
+  suiteName:   string
+  index:       number
+  dragging:    boolean
+  dragOver:    boolean
+  onDragStart(i: number): void
+  onDragOver(e: DragEvent, i: number): void
+  onDrop(i: number): void
+  onDragEnd(): void
+  onOpen(tc: TestCase): void
+  onDelete(suiteId: string, caseId: string): void
+  onExecute(tc: TestCase): void
+}
+
+function CaseRow({
+  tc, suiteId, suiteName, index, dragging, dragOver,
+  onDragStart, onDragOver, onDrop, onDragEnd,
+  onOpen, onDelete, onExecute,
+}: CaseRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const pb = platformBadge(tc.platform)
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  return (
+    <div
+      draggable
+      onDragStart={() => onDragStart(index)}
+      onDragOver={e => onDragOver(e, index)}
+      onDrop={() => onDrop(index)}
+      onDragEnd={onDragEnd}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px 8px 28px',
+        borderRadius: 7, cursor: 'grab',
+        background: dragOver ? 'rgba(99,102,241,0.08)' : dragging ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.02)',
+        border: `1px solid ${dragOver ? 'rgba(99,102,241,0.35)' : 'rgba(255,255,255,0.05)'}`,
+        opacity: dragging ? 0.45 : 1,
+        transition: 'background 0.1s, border-color 0.1s',
+        position: 'relative',
+      }}
+    >
+      {/* Drag handle */}
+      <GripVertical size={13} color="#334155" style={{ flexShrink: 0, cursor: 'grab' }} />
+
+      {/* Case icon */}
+      <div style={{
+        width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+        background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.18)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <CheckCircle2 size={12} color="#818cf8" />
       </div>
 
-      {/* Detail modal */}
-      {viewing && <DetailModal suite={viewing} onClose={() => setViewing(null)} />}
+      {/* Name */}
+      <button
+        onClick={() => onOpen(tc)}
+        style={{
+          flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+          color: '#e2e8f0', fontSize: 12, fontWeight: 600, padding: 0,
+          minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}
+      >
+        {tc.name}
+      </button>
 
-      {/* Toast */}
-      <AnimatePresence>
-        {toastMsg && (
-          <motion.div
-            key="suites-toast"
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0,  scale: 1    }}
-            exit={{   opacity: 0, y: 10,  scale: 0.95 }}
+      {/* Meta chips */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <span style={{
+          fontSize: 10, color: pb.color, background: `${pb.color}18`,
+          border: `1px solid ${pb.color}33`, borderRadius: 4, padding: '1px 5px',
+        }}>
+          {pb.label}
+        </span>
+        <span style={{ fontSize: 10, color: '#64748b' }}>
+          {tc.stepCount}p · {langLabel(tc.lang)}
+        </span>
+        <span style={{ fontSize: 10, color: '#334155' }}>{fmtDate(tc.updatedAt)}</span>
+
+        {/* Execute */}
+        <button
+          onClick={() => onExecute(tc)}
+          title="Ejecutar caso"
+          style={{
+            width: 26, height: 26, borderRadius: 6, cursor: 'pointer',
+            background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)',
+            color: '#34d399', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <Play size={10} />
+        </button>
+
+        {/* More menu */}
+        <div ref={menuRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setMenuOpen(p => !p)}
             style={{
-              position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
-              background: 'linear-gradient(135deg, #1e293b, #0f172a)',
-              border: '1px solid rgba(52,211,153,0.35)',
-              borderRadius: 10, padding: '11px 18px',
-              display: 'flex', alignItems: 'center', gap: 9,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(52,211,153,0.12)',
-              maxWidth: 340,
+              width: 26, height: 26, borderRadius: 6, cursor: 'pointer',
+              background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+              color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >
-            <span style={{ fontSize: 14 }}>✓</span>
-            <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 500 }}>{toastMsg}</span>
+            <MoreHorizontal size={12} />
+          </button>
+          {menuOpen && (
+            <div style={{
+              position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 200,
+              background: '#1e293b', border: '1px solid #334155', borderRadius: 8,
+              padding: '4px 0', minWidth: 140,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            }}>
+              <button
+                onClick={() => { setMenuOpen(false); onOpen(tc) }}
+                style={menuItemStyle}
+              >
+                <PencilLine size={12} /> Ver / Editar
+              </button>
+              <div style={{ height: 1, background: '#334155', margin: '3px 0' }} />
+              <button
+                onClick={() => { setMenuOpen(false); onDelete(suiteId, tc.id) }}
+                style={{ ...menuItemStyle, color: '#f87171' }}
+              >
+                <Trash2 size={12} /> Eliminar caso
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const menuItemStyle: React.CSSProperties = {
+  width: '100%', padding: '7px 12px', background: 'none', border: 'none',
+  cursor: 'pointer', color: '#94a3b8', fontSize: 12,
+  display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+}
+
+// ── SuiteAccordion — one expandable block per TestSuite ───────────────────────
+
+interface SuiteAccordionProps {
+  suite:     TestSuite
+  onDelete(id: string): void
+  onDeleteCase(suiteId: string, caseId: string): void
+  onOpenCase(tc: TestCase, suiteName: string): void
+  onExecuteCase(tc: TestCase): void
+  onExecuteSuite(suite: TestSuite): void
+  onReorder(suiteId: string, newOrder: string[]): void
+}
+
+function SuiteAccordion({
+  suite, onDelete, onDeleteCase, onOpenCase,
+  onExecuteCase, onExecuteSuite, onReorder,
+}: SuiteAccordionProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [dragIdx, setDragIdx]   = useState<number | null>(null)
+  const [dropIdx, setDropIdx]   = useState<number | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const st         = suiteType(suite.name, suite.description)
+  const pb         = platformBadge(suite.platform)
+  const totalSteps = suite.testCases.reduce((s, c) => s + c.stepCount, 0)
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  // ── Drag-and-drop ────────────────────────────────────────────────────────
+
+  const handleDragStart = (i: number) => setDragIdx(i)
+
+  const handleDragOver = (e: DragEvent, i: number) => {
+    e.preventDefault(); setDropIdx(i)
+  }
+
+  const handleDrop = (targetIdx: number) => {
+    if (dragIdx === null || dragIdx === targetIdx) { setDragIdx(null); setDropIdx(null); return }
+    const ids = suite.testCases.map(c => c.id)
+    const [moved] = ids.splice(dragIdx, 1)
+    ids.splice(targetIdx, 0, moved)
+    onReorder(suite.id, ids)
+    setDragIdx(null); setDropIdx(null)
+  }
+
+  const handleDragEnd = () => { setDragIdx(null); setDropIdx(null) }
+
+  return (
+    <div style={{
+      background: '#0f172a', border: `1px solid ${expanded ? '#1e293b' : '#1a2236'}`,
+      borderRadius: 10, overflow: 'hidden',
+      boxShadow: expanded ? '0 4px 16px rgba(0,0,0,0.3)' : 'none',
+      transition: 'box-shadow 0.2s',
+    }}>
+      {/* Suite header row */}
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '12px 16px', cursor: 'pointer',
+          background: expanded ? 'rgba(99,102,241,0.04)' : 'transparent',
+        }}
+      >
+        {/* Expand toggle */}
+        <button
+          onClick={() => setExpanded(p => !p)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 2, flexShrink: 0 }}
+        >
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+
+        {/* App icon — auto-resolved from package name */}
+        <AppIcon pkg={suite.appPackage} appName={suite.appName} size={34} />
+
+        {/* Name + meta */}
+        <div style={{ flex: 1, minWidth: 0 }} onClick={() => setExpanded(p => !p)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>{suite.name}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 700, color: st.color, background: st.bg,
+              borderRadius: 4, padding: '1px 5px',
+            }}>{st.label}</span>
+            {suite.appName && (
+              <span style={{ fontSize: 11, color: '#475569' }}>{suite.appName}</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
+            <span style={{ fontSize: 10, color: '#64748b' }}>
+              {suite.testCases.length} {suite.testCases.length === 1 ? 'caso' : 'casos'}
+            </span>
+            <span style={{ fontSize: 10, color: '#334155' }}>·</span>
+            <span style={{ fontSize: 10, color: '#64748b' }}>{totalSteps} pasos</span>
+            <span style={{ fontSize: 10, color: '#334155' }}>·</span>
+            <span style={{ fontSize: 10, color: pb.color }}>{pb.label}</span>
+            <span style={{ fontSize: 10, color: '#334155' }}>·</span>
+            <span style={{ fontSize: 10, color: '#475569' }}>{fmtDate(suite.updatedAt)}</span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {/* Execute suite */}
+          <button
+            onClick={e => { e.stopPropagation(); onExecuteSuite(suite) }}
+            title="Ejecutar todos los casos"
+            style={{
+              height: 30, padding: '0 12px', borderRadius: 7, cursor: 'pointer',
+              background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)',
+              color: '#34d399', fontSize: 11, fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <Play size={10} /> Ejecutar Suite
+          </button>
+
+          {/* More */}
+          <div ref={menuRef} style={{ position: 'relative' }}>
+            <button
+              onClick={e => { e.stopPropagation(); setMenuOpen(p => !p) }}
+              style={{
+                width: 30, height: 30, borderRadius: 7, cursor: 'pointer',
+                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+            {menuOpen && (
+              <div style={{
+                position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 300,
+                background: '#1e293b', border: '1px solid #334155', borderRadius: 8,
+                padding: '4px 0', minWidth: 150,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              }}>
+                <button
+                  onClick={() => { setMenuOpen(false); onDelete(suite.id) }}
+                  style={{ ...menuItemStyle, color: '#f87171' }}
+                >
+                  <Trash2 size={12} /> Eliminar suite
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Cases list */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            key="cases"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div style={{
+              padding: '4px 12px 12px',
+              borderTop: '1px solid #1e293b',
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              {suite.testCases.length === 0 ? (
+                <div style={{
+                  padding: '20px 16px', textAlign: 'center',
+                  color: '#334155', fontSize: 12,
+                }}>
+                  Sin casos de prueba — graba un flujo y guárdalo en esta suite.
+                </div>
+              ) : (
+                suite.testCases.map((tc, i) => (
+                  <CaseRow
+                    key={tc.id}
+                    tc={tc}
+                    suiteId={suite.id}
+                    suiteName={suite.name}
+                    index={i}
+                    dragging={dragIdx === i}
+                    dragOver={dropIdx === i}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    onDragEnd={handleDragEnd}
+                    onOpen={t => onOpenCase(t, suite.name)}
+                    onDelete={onDeleteCase}
+                    onExecute={onExecuteCase}
+                  />
+                ))
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ── SuitesPage ────────────────────────────────────────────────────────────────
+
+interface SuitesPageProps {
+  onNavigate?: (page: string) => void
+}
+
+export default function SuitesPage({ onNavigate }: SuitesPageProps = {}) {
+  const [suites,      setSuites]      = useState<TestSuite[]>([])
+  const [search,      setSearch]      = useState('')
+  const [pfFilter,    setPfFilter]    = useState<'all' | 'android' | 'ios'>('all')
+  const [showCreate,  setShowCreate]  = useState(false)
+  const [detailCase,  setDetailCase]  = useState<{ tc: TestCase; suiteName: string } | null>(null)
+  const [execTarget,  setExecTarget]  = useState<TestSuite | null>(null)
+  const [toast,       setToast]       = useState<string | null>(null)
+
+  const confirm = useConfirmation()
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg); setTimeout(() => setToast(null), 3500)
+  }, [])
+
+  const reload = useCallback(() => setSuites(suiteService.getSuites()), [])
+
+  useEffect(() => {
+    reload()
+    const events = ['qa:suite:created', 'qa:suite:updated', 'qa:suite:deleted', 'qa:case:created', 'qa:case:updated', 'qa:case:deleted']
+    events.forEach(e => window.addEventListener(e, reload))
+    return () => events.forEach(e => window.removeEventListener(e, reload))
+  }, [reload])
+
+  // ── Metrics ──────────────────────────────────────────────────────────────
+
+  const metrics = useMemo(() => {
+    let cases = 0, steps = 0
+    for (const s of suites) {
+      cases += s.testCases.length
+      for (const c of s.testCases) steps += c.stepCount
+    }
+    const lastMod = suites.reduce<string>((latest, s) =>
+      s.updatedAt > latest ? s.updatedAt : latest, '')
+    return { suites: suites.length, cases, steps, lastMod }
+  }, [suites])
+
+  // ── Filtered list ─────────────────────────────────────────────────────────
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return suites.filter(s => {
+      if (pfFilter !== 'all' && s.platform && s.platform !== pfFilter) return false
+      if (q && !s.name.toLowerCase().includes(q) && !s.appName.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [suites, search, pfFilter])
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const handleDeleteSuite = useCallback(async (id: string) => {
+    const suite = suites.find(s => s.id === id)
+    if (!suite) return
+    const ok = await confirm({
+      title: 'Eliminar Suite',
+      description: `¿Eliminar "${suite.name}" y sus ${suite.testCases.length} caso(s)? Esta acción no se puede deshacer.`,
+      type: 'delete',
+      confirmText: 'Eliminar',
+    })
+    if (ok) { suiteService.deleteSuite(id); reload() }
+  }, [suites, confirm, reload])
+
+  const handleDeleteCase = useCallback(async (suiteId: string, caseId: string) => {
+    const suite = suites.find(s => s.id === suiteId)
+    const tc = suite?.testCases.find(c => c.id === caseId)
+    if (!tc) return
+    const ok = await confirm({
+      title: 'Eliminar Caso',
+      description: `¿Eliminar el caso "${tc.name}"? Esta acción no se puede deshacer.`,
+      type: 'delete',
+      confirmText: 'Eliminar',
+    })
+    if (ok) { suiteService.deleteCase(suiteId, caseId); reload() }
+  }, [suites, confirm, reload])
+
+  const handleExecuteSuite = useCallback((suite: TestSuite) => {
+    setExecTarget(suite)
+  }, [])
+
+  const handleExecuteCase = useCallback((tc: TestCase) => {
+    // Execute a single case by wrapping it in a one-case suite run
+    const parentSuite = suites.find(s => s.id === tc.suiteId)
+    if (!parentSuite) return
+    executionTrackingService.runSuite({
+      suiteId:     parentSuite.id,
+      suiteName:   `${parentSuite.name} › ${tc.name}`,
+      appName:     parentSuite.appName,
+      appPackage:  parentSuite.appPackage,
+      platform:    parentSuite.platform,
+      environment: 'qa',
+      country:     parentSuite.country,
+      cases:       [{ caseId: tc.id, caseName: tc.name, stepsTotal: tc.stepCount }],
+      onNavigateToDashboard: () => onNavigate?.('dashboard'),
+    }).catch(console.warn)
+    showToast(`Ejecutando caso "${tc.name}"`)
+  }, [suites, onNavigate, showToast])
+
+  const handleExecuteConfirm = useCallback(async (device: PhysicalDevice | null, environment: string) => {
+    if (!execTarget) return
+    await executionTrackingService.runSuite({
+      suiteId:     execTarget.id,
+      suiteName:   execTarget.name,
+      appName:     execTarget.appName,
+      appPackage:  execTarget.appPackage,
+      platform:    execTarget.platform,
+      device,
+      environment,
+      country:     execTarget.country,
+      cases:       execTarget.testCases.map(c => ({ caseId: c.id, caseName: c.name, stepsTotal: c.stepCount })),
+      onNavigateToDashboard: () => onNavigate?.('dashboard'),
+    })
+    setExecTarget(null)
+    showToast(`Suite "${execTarget.name}" enviada al runner`)
+  }, [execTarget, onNavigate, showToast])
+
+  const handleReorder = useCallback((suiteId: string, newOrder: string[]) => {
+    suiteService.reorderCases(suiteId, newOrder)
+    reload()
+  }, [reload])
+
+  const handleCreate = useCallback((data: { name: string; description: string; platform: 'android' | 'ios' | '' }) => {
+    suiteService.createSuite(data)
+    setShowCreate(false)
+    reload()
+  }, [reload])
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+      background: '#060d1a', padding: '0 24px 24px',
+    }}>
+      {/* Page header */}
+      <div style={{
+        paddingTop: 24, paddingBottom: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: '#f1f5f9' }}>Suites de Prueba</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#475569' }}>
+            Organiza tus casos de prueba en suites para ejecutarlos en secuencia.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '9px 16px', borderRadius: 8, cursor: 'pointer',
+            background: 'linear-gradient(90deg, #6366f1, #818cf8)',
+            border: 'none', color: '#fff', fontSize: 13, fontWeight: 700,
+          }}
+        >
+          <Plus size={14} /> Nueva Suite
+        </button>
+      </div>
+
+      {/* Stats row */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+        {[
+          { label: 'Suites',        value: metrics.suites, color: '#818cf8', icon: Layers3 },
+          { label: 'Casos',         value: metrics.cases,  color: '#34d399', icon: CheckCircle2 },
+          { label: 'Pasos totales', value: metrics.steps,  color: '#60a5fa', icon: Package },
+          { label: 'Última mod.',   value: metrics.lastMod ? fmtDate(metrics.lastMod) : '—', color: '#f59e0b', icon: Clock },
+        ].map(({ label, value, color, icon: Icon }) => (
+          <div key={label} style={{
+            flex: 1, background: '#0f172a', border: '1px solid #1e293b',
+            borderRadius: 10, padding: '14px 16px',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 9,
+              background: `${color}18`, border: `1px solid ${color}33`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <Icon size={16} color={color} />
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#f1f5f9', lineHeight: 1 }}>
+                {typeof value === 'number' ? value.toLocaleString() : value}
+              </div>
+              <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Search + filters */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <Search size={13} color="#475569" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} />
+          <input
+            value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar suite por nombre o app…"
+            style={{
+              width: '100%', background: '#0f172a', border: '1px solid #1e293b',
+              borderRadius: 8, color: '#e2e8f0', padding: '8px 10px 8px 30px',
+              fontSize: 12, boxSizing: 'border-box', outline: 'none',
+            }}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#475569', padding: 2 }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['all', 'android', 'ios'] as const).map(p => (
+            <button
+              key={p}
+              onClick={() => setPfFilter(p)}
+              style={{
+                padding: '7px 12px', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: pfFilter === p ? 700 : 500,
+                border: `1px solid ${pfFilter === p ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
+                background: pfFilter === p ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
+                color: pfFilter === p ? '#818cf8' : '#64748b',
+              }}
+            >
+              {p === 'all' ? 'Todos' : p === 'android' ? '🤖 Android' : '🍎 iOS'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Suite list */}
+      <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filtered.length === 0 ? (
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: 12, padding: 48,
+          }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 14,
+              background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <AlertCircle size={24} color="#6366f1" />
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 15, margin: '0 0 4px' }}>
+                {suites.length === 0 ? 'No hay suites aún' : 'Sin resultados'}
+              </p>
+              <p style={{ color: '#475569', fontSize: 12, margin: 0 }}>
+                {suites.length === 0
+                  ? 'Crea una suite o graba un flujo en Record Studio y guárdalo aquí.'
+                  : 'Intenta con otro término de búsqueda o filtro.'}
+              </p>
+            </div>
+            {suites.length === 0 && (
+              <button
+                onClick={() => setShowCreate(true)}
+                style={{
+                  padding: '9px 18px', borderRadius: 8, cursor: 'pointer',
+                  background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+                  color: '#818cf8', fontSize: 13, fontWeight: 600,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <Plus size={14} /> Crear primera Suite
+              </button>
+            )}
+          </div>
+        ) : (
+          filtered.map(suite => (
+            <SuiteAccordion
+              key={suite.id}
+              suite={suite}
+              onDelete={handleDeleteSuite}
+              onDeleteCase={handleDeleteCase}
+              onOpenCase={(tc, name) => setDetailCase({ tc, suiteName: name })}
+              onExecuteCase={handleExecuteCase}
+              onExecuteSuite={handleExecuteSuite}
+              onReorder={handleReorder}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showCreate && (
+          <CreateSuiteModal
+            key="create-modal"
+            onClose={() => setShowCreate(false)}
+            onCreate={handleCreate}
+          />
+        )}
+        {detailCase && (
+          <CaseDetailModal
+            key="detail-modal"
+            tc={detailCase.tc}
+            suiteName={detailCase.suiteName}
+            onClose={() => setDetailCase(null)}
+            onDelete={() => {
+              handleDeleteCase(detailCase.tc.suiteId, detailCase.tc.id)
+              setDetailCase(null)
+            }}
+          />
+        )}
+        {execTarget && (
+          <ExecuteSuiteModal
+            key="exec-modal"
+            suite={execTarget}
+            onClose={() => setExecTarget(null)}
+            onExecute={handleExecuteConfirm}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            style={{
+              position: 'fixed', bottom: 28, right: 28, zIndex: 999,
+              background: '#1e293b', border: '1px solid rgba(52,211,153,0.35)',
+              borderRadius: 10, padding: '10px 18px',
+              fontSize: 12, fontWeight: 600, color: '#34d399',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            <Zap size={13} /> {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   )
 }

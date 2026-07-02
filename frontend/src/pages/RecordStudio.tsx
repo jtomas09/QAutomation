@@ -2339,14 +2339,46 @@ interface StepCardProps {
   onCardClick: () => void
 }
 
+// Strips platform-specific class prefixes so the display is concise.
+// "android.widget.Button" → "Button",  "XCUIElementTypeTextField" → "TextField"
+function classNameShort(cn: string): string {
+  if (!cn) return ''
+  if (cn.startsWith('android.widget.')) return cn.slice(15)
+  if (cn.startsWith('android.view.'))   return cn.slice(13)
+  if (cn.startsWith('XCUIElementType')) return cn.slice(15)
+  return cn
+}
+
+// Returns the best locator strategy label + value for a step detail panel.
+// Priority matches the Android/iOS locator hierarchy (id > accessibility > text > xpath).
+function effectiveLocator(el: AppEl): { label: string; value: string } | null {
+  if (el.resourceId)         return { label: 'Resource ID',      value: el.resourceId }
+  if (el.accessId)           return { label: 'Accessibility ID', value: el.accessId }
+  if (el.accessibilityLabel) return { label: 'Accessibility',    value: el.accessibilityLabel }
+  if (el.text)               return { label: 'Text',             value: el.text }
+  if (el.locatorValue) {
+    const LABELS: Record<string, string> = {
+      id:               'Resource ID',
+      accessibility_id: 'Accessibility ID',
+      xpath:            'XPath',
+      predicate_string: 'Predicate',
+      class_chain:      'Class Chain',
+      text:             'Text',
+      uiautomator:      'UIAutomator',
+    }
+    return {
+      label: LABELS[el.locatorStrategy ?? ''] ?? (el.locatorStrategy ?? 'Locator'),
+      value: el.locatorValue,
+    }
+  }
+  return null
+}
+
 function StepCard({ step, index, total, isSelected, onDelete, onDuplicate, onMoveUp, onMoveDown, onEdit, onCardClick }: StepCardProps) {
   const [hovered, setHovered] = useState(false)
   const color = STEP_COLORS[step.type]
-  const isAndroid = true // demo defaults to Android
 
-  const locatorValue = step.el
-    ? isAndroid ? step.el.resourceId : step.el.accessId
-    : null
+  const locator = step.el ? effectiveLocator(step.el) : null
 
   return (
     <motion.div
@@ -2536,24 +2568,25 @@ function StepCard({ step, index, total, isSelected, onDelete, onDuplicate, onMov
         {/* Element + locator (tap/long/double) */}
         {(step.type === 'tap' || step.type === 'double_tap' || step.type === 'long_press') && step.el && (
           <>
-            {step.el.className && <DetailRow label="Tipo" value={step.el.className} mono truncate />}
-            <DetailRow label="Variable" value={elVarName(step.el)} mono color="#818cf8" />
-            {step.el.locatorStrategy && <DetailRow label="Locator" value={step.el.locatorStrategy} />}
-            {locatorValue && (
-              <DetailRow label="Valor" value={locatorValue} mono truncate />
+            {step.el.className && (
+              <DetailRow label="Tipo" value={classNameShort(step.el.className)} mono truncate />
             )}
+            <DetailRow label="Variable" value={elVarName(step.el)} mono color="#818cf8" />
+            {locator && <DetailRow label={locator.label} value={locator.value} mono truncate />}
           </>
         )}
 
         {/* Input */}
         {step.type === 'input' && (
           <>
-            {step.el?.className && <DetailRow label="Tipo" value={step.el.className} mono truncate />}
+            {step.el?.className && (
+              <DetailRow label="Tipo" value={classNameShort(step.el.className)} mono truncate />
+            )}
             {step.el && <DetailRow label="Variable" value={elVarName(step.el)} mono color="#818cf8" />}
             {step.inputVal && (
               <DetailRow label="Valor" value={`"${step.inputVal}"`} color="#34d399" />
             )}
-            {locatorValue && <DetailRow label="Locator" value={locatorValue} mono truncate />}
+            {locator && <DetailRow label={locator.label} value={locator.value} mono truncate />}
           </>
         )}
 
@@ -2832,6 +2865,7 @@ interface StepsPanelProps {
   recording: boolean
   isDraft: boolean
   savedSuiteName: string | null
+  savedCaseName?: string | null
   hasChangesAfterSave: boolean
   selectedStepId: string | null
   onDeleteStep: (id: string) => void
@@ -2862,6 +2896,7 @@ const StepsPanel = React.memo(function StepsPanel({
   recording,
   isDraft,
   savedSuiteName,
+  savedCaseName,
   hasChangesAfterSave,
   selectedStepId,
   onDeleteStep,
@@ -2946,9 +2981,15 @@ const StepsPanel = React.memo(function StepsPanel({
               <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 13 }}>Pasos Grabados</span>
               {steps.length > 0 && (() => {
                 if (savedSuiteName && !hasChangesAfterSave) {
+                  const badgeText = savedCaseName
+                    ? `${savedSuiteName.length > 12 ? savedSuiteName.slice(0, 10) + '…' : savedSuiteName} / ${savedCaseName.length > 12 ? savedCaseName.slice(0, 10) + '…' : savedCaseName}`
+                    : (savedSuiteName.length > 18 ? savedSuiteName.slice(0, 16) + '…' : savedSuiteName)
+                  const titleText = savedCaseName
+                    ? `Suite: "${savedSuiteName}" · Caso: "${savedCaseName}"`
+                    : `Guardado en "${savedSuiteName}"`
                   return (
                     <span
-                      title={`Grabación guardada en "${savedSuiteName}"`}
+                      title={titleText}
                       style={{
                         fontSize: 9, fontWeight: 700,
                         color: '#34d399',
@@ -2958,7 +2999,7 @@ const StepsPanel = React.memo(function StepsPanel({
                         display: 'flex', alignItems: 'center', gap: 3,
                       }}
                     >
-                      ✓ {savedSuiteName.length > 18 ? savedSuiteName.slice(0, 16) + '…' : savedSuiteName}
+                      ✓ {badgeText}
                     </span>
                   )
                 }
@@ -4308,9 +4349,9 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
   const title   = isSuite ? 'Guardar como Suite' : 'Guardar como Caso de Prueba'
   const accent  = isSuite ? '#818cf8' : '#6366f1'
 
-  // Load existing suites to offer as targets (only relevant for 'caso' mode)
+  // Load existing TestSuites to offer as targets (only relevant for 'caso' mode)
   const existingSuites = useMemo(
-    () => suiteService.getAllSuites().filter(s => s.mode === 'suite'),
+    () => suiteService.getSuites(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   )
@@ -4903,6 +4944,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [showSave, setShowSave] = useState<'caso' | 'suite' | null>(null)
   const [copied, setCopied] = useState(false)
   const [savedSuiteInfo, setSavedSuiteInfo] = useState<{ id: string; name: string } | null>(null)
+  const [savedCaseName, setSavedCaseName] = useState<string | null>(null)
   const [savedStepIds, setSavedStepIds] = useState<string[]>([])
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [sessionStart, setSessionStart] = useState<Date | null>(null)
@@ -5262,119 +5304,100 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSave = useCallback(
     (data: { name: string; description: string; country: string; mode: 'caso' | 'suite'; targetSuiteId?: string; newSuiteName?: string }) => {
-      // Detect platform from first step that has an element with platform info
       const detectedPlatform =
-        steps.find(s => s.el?.platform)?.el?.platform ??
-        (selectedDevice?.platform?.toLowerCase().includes('ios') ? 'ios' : 'android')
+        (steps.find(s => s.el?.platform)?.el?.platform as 'android' | 'ios' | undefined) ??
+        (selectedDevice?.platform?.toLowerCase().includes('ios') ? 'ios' as const : 'android' as const)
 
-      // Map RecStep[] → SuiteStep[] (strip non-serialisable fields)
       const suiteSteps: SuiteStep[] = steps.map(s => ({
-        id:       s.id,
-        n:        s.n,
-        type:     s.type,
-        timeStr:  s.timeStr,
-        inputVal: s.inputVal,
-        dir:      s.dir,
+        id: s.id, n: s.n, type: s.type, timeStr: s.timeStr,
+        inputVal: s.inputVal, dir: s.dir,
         el: s.el ? {
-          platform:            s.el.platform,
-          className:           s.el.className,
-          varName:             s.el.varName,
-          semanticName:        s.el.semanticName,
-          locatorStrategy:     s.el.locatorStrategy,
-          locatorValue:        s.el.locatorValue,
-          resourceId:          s.el.resourceId,
-          accessId:            s.el.accessId,
-          text:                s.el.text,
-          elType:              s.el.elType,
-          bounds:              s.el.bounds,
-          accessibilityLabel:  s.el.accessibilityLabel,
+          platform: s.el.platform, className: s.el.className,
+          varName: s.el.varName, semanticName: s.el.semanticName,
+          locatorStrategy: s.el.locatorStrategy, locatorValue: s.el.locatorValue,
+          resourceId: s.el.resourceId, accessId: s.el.accessId,
+          text: s.el.text, elType: s.el.elType, bounds: s.el.bounds,
+          accessibilityLabel: s.el.accessibilityLabel,
           pageObjectAnnotation: s.el.pageObjectAnnotation,
-          enabled:             s.el.enabled,
-          clickable:           s.el.clickable,
-          visible:             s.el.visible,
+          enabled: s.el.enabled, clickable: s.el.clickable, visible: s.el.visible,
         } : null,
       }))
 
-      // Extract page object classes from generated code
-      const pageObjectsMatch = generatedCode.match(
+      const pageObjects = generatedCode.match(
         /public class \w+Page extends BasePage \{[\s\S]*?\n\}/g
-      )
-      const pageObjects = pageObjectsMatch?.join('\n\n') ?? ''
+      )?.join('\n\n') ?? ''
 
-      const newSuite = suiteService.saveFromRecording({
-        name:          data.name,
-        description:   data.description,
-        country:       data.country,
-        mode:          data.mode,
-        platform:      detectedPlatform,
-        device:        selectedDevice?.deviceName ?? '',
-        udid:          selectedDevice?.udid ?? '',
-        appName:       appConfig?.appName ?? '',
-        appPackage:    appConfig?.appPackage ?? appConfig?.bundleId ?? '',
-        steps:         suiteSteps,
-        lang,
-        generatedCode,
-        generatedXML,
-        pageObjects,
-      })
-      // Link to existing suite or create a new parent suite on the fly
-      if (data.targetSuiteId) {
-        suiteService.addCaseToSuite(data.targetSuiteId, newSuite.id)
-      } else if (data.newSuiteName) {
-        const parentSuite = suiteService.saveFromRecording({
-          name:          data.newSuiteName,
-          description:   '',
-          country:       data.country,
-          mode:          'suite',
-          platform:      detectedPlatform,
-          device:        selectedDevice?.deviceName ?? '',
-          udid:          selectedDevice?.udid ?? '',
-          appName:       appConfig?.appName ?? '',
-          appPackage:    appConfig?.appPackage ?? appConfig?.bundleId ?? '',
-          steps:         [],
-          lang,
-          generatedCode: '',
-          generatedXML:  '',
-          pageObjects:   '',
-        })
-        suiteService.addCaseToSuite(parentSuite.id, newSuite.id)
+      const commonSuiteData = {
+        platform: detectedPlatform, device: selectedDevice?.deviceName ?? '',
+        udid: selectedDevice?.udid ?? '', appName: appConfig?.appName ?? '',
+        appPackage: appConfig?.appPackage ?? appConfig?.bundleId ?? '',
+        lang, country: data.country,
       }
 
-      // Update save indicator in Steps panel
-      setSavedSuiteInfo({ id: newSuite.id, name: data.name })
-      setSavedStepIds(steps.map(s => s.id))
+      if (data.mode === 'suite') {
+        // "Guardar Suite" — creates an empty TestSuite container (no cases yet)
+        const ts = suiteService.createSuite({
+          name: data.name, description: data.description, ...commonSuiteData,
+        })
+        setSavedSuiteInfo({ id: ts.id, name: ts.name })
+        setSavedCaseName(null)
+        setSavedStepIds(steps.map(s => s.id))
+        clearDraft()
+        showToast(`Suite "${ts.name}" creada`)
+        return
+      }
 
-      // Clear draft — steps are now persisted in the suite store
-      clearDraft()
+      // "Guardar Caso" — creates a TestCase inside a TestSuite
+      const caseData = {
+        name: data.name, description: data.description,
+        steps: suiteSteps, generatedCode, generatedXML, pageObjects,
+        ...commonSuiteData,
+      }
 
-      // Toast notification
-      const targetName = data.newSuiteName
-        ? data.newSuiteName
-        : data.targetSuiteId
-          ? suiteService.getSuite(data.targetSuiteId)?.name ?? ''
-          : ''
-      if (data.mode === 'caso' && targetName) {
-        showToast(`Caso agregado a la Suite "${targetName}"`)
-      } else if (data.mode === 'caso') {
-        showToast(`Caso de prueba "${data.name}" guardado correctamente`)
+      let targetSuiteId = data.targetSuiteId
+      let suiteName = ''
+
+      if (!targetSuiteId && data.newSuiteName) {
+        // Inline "create new suite" path
+        const newSuite = suiteService.createSuite({
+          name: data.newSuiteName, description: '', ...commonSuiteData,
+        })
+        targetSuiteId = newSuite.id
+        suiteName = newSuite.name
+      } else if (targetSuiteId) {
+        suiteName = suiteService.getSuiteById(targetSuiteId)?.name ?? ''
+      }
+
+      if (targetSuiteId) {
+        const tc = suiteService.addCase(targetSuiteId, caseData)
+        setSavedSuiteInfo({ id: targetSuiteId, name: suiteName })
+        setSavedCaseName(tc?.name ?? data.name)
+        setSavedStepIds(steps.map(s => s.id))
+        clearDraft()
+        showToast(`Caso "${data.name}" guardado en "${suiteName}"`)
       } else {
-        showToast(`Suite "${data.name}" guardada correctamente`)
+        // No suite selected — create a solo suite with the case inside it
+        const soloSuite = suiteService.createSuite({
+          name: data.name, description: data.description, ...commonSuiteData,
+        })
+        const tc = suiteService.addCase(soloSuite.id, caseData)
+        setSavedSuiteInfo({ id: soloSuite.id, name: soloSuite.name })
+        setSavedCaseName(tc?.name ?? data.name)
+        setSavedStepIds(steps.map(s => s.id))
+        clearDraft()
+        showToast(`Caso "${data.name}" guardado correctamente`)
       }
 
       if (debugMode) {
-        console.group('[RecordStudio] Suite saved')
-        console.log('Platform:', detectedPlatform)
-        console.log('Steps:', suiteSteps.length)
-        console.log('Lang:', lang)
+        console.group('[RecordStudio] Caso saved')
+        console.log('Platform:', detectedPlatform, '| Steps:', suiteSteps.length, '| Lang:', lang)
         suiteSteps.forEach(s => {
-          if (s.el?.varName) {
-            console.log(`  Step ${s.n} ${s.type}: varName=${s.el.varName} locator=${s.el.locatorStrategy}:${s.el.locatorValue}`)
-          }
+          if (s.el?.varName) console.log(`  ${s.n} ${s.type}: ${s.el.varName} [${s.el.locatorStrategy}]`)
         })
         console.groupEnd()
       }
     },
-    [steps, generatedCode, generatedXML, lang, selectedDevice, appConfig, debugMode, showToast, setSavedSuiteInfo, setSavedStepIds],
+    [steps, generatedCode, generatedXML, lang, selectedDevice, appConfig, debugMode, showToast],
   )
 
   // ── Export ─────────────────────────────────────────────────────────────────
@@ -6181,6 +6204,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             recording={recState === 'recording'}
             isDraft={recState === 'idle' && steps.length > 0 && savedSuiteInfo === null}
             savedSuiteName={savedSuiteInfo?.name ?? null}
+            savedCaseName={savedCaseName}
             hasChangesAfterSave={hasChangedAfterSave}
             selectedStepId={selectedStepId}
             onDeleteStep={handleDeleteStep}

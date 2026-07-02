@@ -185,11 +185,25 @@ public final class SemanticAnalyzer {
         EN_ES.put("club",        "Club");
     }
 
-    // Names that produce noise — force fallback to prefixed generic
+    // Names that produce noise — force fallback to content-based name or generic
     private static final Set<String> FORBIDDEN = Set.of(
         "view", "button", "text", "a", "b", "c", "d", "e",
         "btnview", "btnbutton", "txttext", "lblelement",
-        "elelement", "el", "elemento"
+        "elelement", "el", "elemento",
+        "btnelemento", "txtelemento", "lblelemento", "imgelemento",
+        "btnvista",    "txtvista",    "lblvista",
+        "btnlayout",   "btnframe",    "btncontainer",
+        "eldesconocido", "elunknown"
+    );
+
+    // Words to skip when building a name from visible content
+    private static final Set<String> STOP_WORDS = Set.of(
+        // Spanish
+        "a", "al", "de", "del", "el", "la", "los", "las",
+        "y", "o", "en", "con", "para", "por", "un", "una", "su", "mi",
+        // English
+        "the", "to", "of", "an", "and", "or", "in", "with",
+        "for", "on", "at", "by", "is", "it", "this", "that"
     );
 
     private static final String[] PREFIXES = {
@@ -255,6 +269,15 @@ public final class SemanticAnalyzer {
             result = prefix.isEmpty() ? "elElemento" : prefix + "Elemento";
         }
 
+        // When no EN_ES dictionary word matched, the stem is untranslated — try to
+        // derive a more descriptive name from the element's visible content instead.
+        if (!anyWordTranslated(stem) || FORBIDDEN.contains(result.toLowerCase())) {
+            String fromContent = nameFromContent(el, prefix);
+            if (!fromContent.isEmpty()) {
+                result = fromContent;
+            }
+        }
+
         if (!varName.equals(result)) {
             System.out.printf("[SemanticAnalyzer] %s → %s%n", varName, result);
         }
@@ -283,13 +306,100 @@ public final class SemanticAnalyzer {
         return sb.length() > 0 ? sb.toString() : stem;
     }
 
+    // ── Content-based naming ──────────────────────────────────────────────────
+
+    /** Returns true if at least one camelCase word in {@code stem} has a dictionary entry. */
+    private static boolean anyWordTranslated(String stem) {
+        if (blank(stem)) return false;
+        String[] words = stem.split("(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])");
+        for (String w : words) {
+            if (!w.isEmpty() && EN_ES.containsKey(w.toLowerCase())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Builds a variable name by inspecting the element's visible text,
+     * accessibilityLabel, and accessId — in that priority order.
+     * Returns an empty string when no usable content is found.
+     */
+    private static String nameFromContent(UIElement el, String prefix) {
+        String[] sources = { el.text, el.accessibilityLabel, el.accessId };
+        for (String source : sources) {
+            if (blank(source)) continue;
+            String t = source.trim();
+            // Skip: too short/long, resource-ID-like strings, pure numbers
+            if (t.length() < 2 || t.length() > 60) continue;
+            if (t.contains("/") || t.contains(":"))  continue;
+            if (t.matches("\\d+"))                   continue;
+
+            // Normalize accents and keep only alphanumeric + spaces
+            String norm = t
+                .replace("á","a").replace("é","e").replace("í","i")
+                .replace("ó","o").replace("ú","u")
+                .replace("Á","A").replace("É","E").replace("Í","I")
+                .replace("Ó","O").replace("Ú","U")
+                .replace("ñ","n").replace("Ñ","N")
+                .replaceAll("[^a-zA-Z0-9 ]", " ")
+                .replaceAll("\\s+", " ").trim();
+            if (norm.isEmpty()) continue;
+
+            StringBuilder sb = new StringBuilder();
+            int wordCount = 0;
+            for (String w : norm.split(" ")) {
+                if (w.isEmpty() || STOP_WORDS.contains(w.toLowerCase())) continue;
+                if (wordCount >= 4) break;
+                String tr = EN_ES.get(w.toLowerCase());
+                sb.append(tr != null ? tr
+                        : Character.toUpperCase(w.charAt(0)) + w.substring(1).toLowerCase());
+                wordCount++;
+            }
+            if (sb.length() == 0) continue;
+
+            String candidate = (prefix.isEmpty() ? "el" : prefix) + sb;
+            if (!FORBIDDEN.contains(candidate.toLowerCase())) return candidate;
+        }
+        return "";
+    }
+
+    // ── Rename helper (used by RecordingEngine for deduplication) ─────────────
+
+    /**
+     * Returns a copy of {@code el} with varName/semanticName set to
+     * {@code newName} and a freshly regenerated pageObjectAnnotation.
+     */
+    public static UIElement renameElement(UIElement el, String newName) {
+        String ann = regenerateAnnotation(el, newName);
+        return UIElement.builder()
+                .platform(el.platform)
+                .className(el.className)
+                .locatorStrategy(el.locatorStrategy)
+                .locatorValue(el.locatorValue)
+                .text(el.text)
+                .accessibilityLabel(el.accessibilityLabel)
+                .resourceId(el.resourceId)
+                .packageName(el.packageName)
+                .bundleId(el.bundleId)
+                .rect(el.x, el.y, el.width, el.height)
+                .enabled(el.enabled)
+                .clickable(el.clickable)
+                .visible(el.visible)
+                .varName(newName)
+                .semanticName(newName)
+                .pageObjectAnnotation(ann)
+                .shortId(el.shortId)
+                .accessId(el.accessId)
+                .elType(el.elType)
+                .build();
+    }
+
     // ── Annotation improvement ─────────────────────────────────────────────────
 
     /**
      * Regenerates @FindBy annotation using the semantic varName and the best
      * available locator.  Never emits XPath when id/accessibility/text exists.
      */
-    static String regenerateAnnotation(UIElement el, String semanticVarName) {
+    public static String regenerateAnnotation(UIElement el, String semanticVarName) {
         if (blank(semanticVarName)) return "";
 
         String ann;
