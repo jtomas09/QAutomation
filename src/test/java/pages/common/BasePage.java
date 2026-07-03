@@ -1031,24 +1031,27 @@ protected List<WebElement> safeFindElements(By locator) {
 
         log.debug("[scroll-vh] buscando {} | presupuesto v={} h={}", locator, allowedV, TOTAL_HORIZONTAL_SWIPE_BUDGET);
 
+        // ── Fase 1: búsqueda vertical completa ───────────────────────────────────
+        // Recorre toda la pantalla hacia abajo SIN explorar carruseles horizontales.
+        // Prioridad: agotar el scroll vertical (stall / presupuesto) antes de tocar
+        // cualquier carrusel — evita recorrer "Destacados" / "Combos" cuando el ítem
+        // puede estar simplemente más abajo en pantalla.
+        String cachedFP = null;
         for (int i = 0; i < allowedV; i++) {
             if (isVisible(locator)) {
-                log.debug("[scroll-vh] encontrado en fila {}/{}", i + 1, allowedV);
+                log.debug("[scroll-vh] encontrado en swipe vertical {}/{}", i + 1, allowedV);
                 return true;
             }
 
-            if (oneShotHorizontalSearch(locator, maxRightSwipesPerRow, budgetH)) return true;
-            if (budgetH[0] <= 0) {
-                log.debug("[scroll-vh] presupuesto horizontal agotado");
-                break;
-            }
-
-            String before = richFingerPrint();
+            // Reutiliza el fingerprint calculado en la iteración anterior —
+            // el screen no cambia entre checkeos sin swipe intermedio.
+            String before = (cachedFP != null) ? cachedFP : richFingerPrint();
             log.debug("[scroll-vh] swipe-v {}/{} | antes=[{}] stalled={}", i + 1, allowedV, before, stalledCount);
 
             slowSwipeUp();
 
             String after = richFingerPrint();
+            cachedFP = after;
             log.debug("[scroll-vh] swipe-v {}/{} | despues=[{}]", i + 1, allowedV, after);
 
             if (after.equals(before)) {
@@ -1062,6 +1065,17 @@ protected List<WebElement> safeFindElements(By locator) {
                 stalledCount = 0;
             }
         }
+
+        if (isVisible(locator)) {
+            log.debug("[scroll-vh] encontrado tras búsqueda vertical completa");
+            return true;
+        }
+
+        // ── Fase 2: búsqueda horizontal (carrusel) ───────────────────────────────
+        // Solo se ejecuta después de que la búsqueda vertical terminó por completo.
+        // Nunca se exploran carruseles mientras existan secciones verticales por ver.
+        log.debug("[scroll-vh] vertical exhausto → iniciando búsqueda horizontal en posición final");
+        if (oneShotHorizontalSearch(locator, maxRightSwipesPerRow, budgetH)) return true;
 
         boolean found = isVisible(locator);
         log.debug("[scroll-vh] terminado | encontrado={}", found);
