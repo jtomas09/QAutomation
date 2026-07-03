@@ -835,6 +835,10 @@ public class JobExecutor {
                            + failed.get() + " FAILED · "
                            + skipped.get() + " SKIPPED";
 
+            // ── Notificar Backend: pasamos a FINALIZING (post-procesamiento activo) ──
+            System.out.println("[Executor] [FINALIZING] Gradle terminó — notificando estado FINALIZING al Backend…");
+            try { client.sendFinalizing(job.executionId); } catch (Exception ignored) {}
+
             // ── Post-processing: each step is isolated so a failure in one never skips the rest ──
 
             // [POST-1] Resumen de ejecución

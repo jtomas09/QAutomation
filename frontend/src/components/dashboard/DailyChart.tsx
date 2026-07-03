@@ -9,6 +9,8 @@ import type { ExecutionSummary } from '../../types'
 
 interface DayEntry { day: string; Exitosas: number; Fallidas: number; Omitidas: number }
 
+const TERMINAL_STATUSES = ['PASSED', 'COMPLETED', 'FAILED', 'ABORTED']
+
 const SERIES = [
   { key: 'Exitosas' as const, color: '#10b981' },
   { key: 'Fallidas' as const, color: '#f43f5e' },
@@ -32,21 +34,26 @@ function buildDays(executions: ExecutionSummary[]): DayEntry[] {
   })
 }
 
-export default function DailyChart() {
+interface Props { isLive?: boolean }
+
+export default function DailyChart({ isLive = false }: Props) {
   const [data,   setData]   = useState<DayEntry[]>(() => buildDays([]))
   const [hidden, setHidden] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const load = async () => {
+      // Freeze chart during active execution — same pattern as Dashboard aggregate().
+      if (isLive) return
       try {
         const execs = await getExecutions()
-        setData(buildDays(execs))
+        setData(buildDays(execs.filter(e => TERMINAL_STATUSES.includes(e.status))))
       } catch { /* backend offline — keep last known */ }
     }
+    // isLive in deps: restarts when execution ends → immediate refresh.
     load()
     const id = setInterval(load, 10_000)
     return () => clearInterval(id)
-  }, [])
+  }, [isLive])
 
   const toggle = (key: string) =>
     setHidden(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
@@ -68,7 +75,19 @@ export default function DailyChart() {
         style={{ borderBottom: '1px solid var(--panel-divide)' }}>
         <div>
           <div className="text-sm font-bold text-slate-100">Ejecuciones por Día</div>
-          <div className="text-xs text-slate-500 mt-0.5">Últimos 7 días</div>
+          <div className="text-xs mt-0.5 flex items-center gap-1.5">
+            {isLive ? (
+              <>
+                <motion.span
+                  className="w-1.5 h-1.5 rounded-full inline-block"
+                  style={{ background: '#818cf8' }}
+                  animate={{ opacity: [1, 0.3, 1] }}
+                  transition={{ duration: 1.2, repeat: Infinity }}
+                />
+                <span style={{ color: '#818cf8', fontWeight: 700 }}>En ejecución — pausado</span>
+              </>
+            ) : <span className="text-slate-500">Últimos 7 días</span>}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {SERIES.map(s => (

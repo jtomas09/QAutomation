@@ -156,6 +156,14 @@ export function streamExecution(
     }
   })
 
+  es.addEventListener('status', (e: MessageEvent) => {
+    try {
+      const { status } = JSON.parse(e.data) as { status: string }
+      if (status === 'FINALIZING') addLog('INFO', '⏳ Post-procesamiento activo — limpiando dispositivo, generando reporte…')
+      if (status === 'ABORTING')   addLog('WARN', '⛔ Abortando ejecución…')
+    } catch { /* ignore malformed events */ }
+  })
+
   es.addEventListener('done', () => {
     const icon = failed > 0 ? '❌' : '✅'
     addLog('INFO', `${icon} Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)

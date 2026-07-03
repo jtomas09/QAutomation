@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 
-interface Props { passed: number; failed: number; skipped: number }
+interface Props { passed: number; failed: number; skipped: number; isLive?: boolean }
 
 const SERIES = [
   { name: 'Exitosas', color: '#10b981' },
@@ -11,7 +11,7 @@ const SERIES = [
 
 const EMPTY_DATA = [{ name: 'Sin datos', value: 1, color: 'rgba(255,255,255,0.07)' }]
 
-export default function ResultsDonut({ passed, failed, skipped }: Props) {
+export default function ResultsDonut({ passed, failed, skipped, isLive = false }: Props) {
   const total = passed + failed + skipped
   const isEmpty = total === 0
 
@@ -40,7 +40,19 @@ export default function ResultsDonut({ passed, failed, skipped }: Props) {
       {/* Header */}
       <div className="px-5 py-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--panel-divide)' }}>
         <div className="text-sm font-bold text-slate-100">Distribución de Resultados</div>
-        <div className="text-xs text-slate-500 mt-0.5">Resumen del período</div>
+        <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+          {isLive ? (
+            <>
+              <motion.span
+                className="w-1.5 h-1.5 rounded-full inline-block"
+                style={{ background: '#818cf8' }}
+                animate={{ opacity: [1, 0.3, 1] }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+              />
+              <span style={{ color: '#818cf8', fontWeight: 700 }}>En ejecución — pausado</span>
+            </>
+          ) : 'Resumen del período'}
+        </div>
       </div>
 
       {/* Chart */}

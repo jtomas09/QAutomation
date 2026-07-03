@@ -59,13 +59,25 @@ export default function Dashboard({
   const [aggStats,   setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
   const [suiteMetrics, setSuiteMetrics] = useState({ suites: 0, cases: 0, steps: 0 })
 
+  // True while a run is actively in progress — historical stats freeze during this window.
+  const isLive = state.status === 'running'
+
+  // Only terminal executions contribute to global stats. RUNNING / FINALIZING / ABORTING / QUEUED
+  // are never included so an in-progress run never pollutes historical metrics.
+  const TERMINAL_STATUSES = ['PASSED', 'COMPLETED', 'FAILED', 'ABORTED']
+
   useEffect(() => {
     const aggregate = async () => {
+      // Freeze while a run is active — stats update only after Backend confirms COMPLETED / FAILED.
+      if (isLive) return
       try {
         const execs    = await getExecutions()
         const windowMs = daysBack * 24 * 60 * 60 * 1000
         const cutoff   = Math.max(clearedAt, Date.now() - windowMs)
-        const filtered = execs.filter(e => new Date(e.startTime).getTime() >= cutoff)
+        const filtered = execs.filter(e =>
+          TERMINAL_STATUSES.includes(e.status) &&
+          new Date(e.startTime).getTime() >= cutoff
+        )
         const passed   = filtered.reduce((s, e) => s + e.passed,  0)
         const failed   = filtered.reduce((s, e) => s + e.failed,  0)
         const skipped  = filtered.reduce((s, e) => s + e.skipped, 0)
@@ -77,10 +89,12 @@ export default function Dashboard({
         setAggStats({ passed, failed, skipped, total, avgMs })
       } catch { /* backend offline — keep last known values */ }
     }
+    // isLive in deps: when execution finishes (true → false), effect restarts and aggregate()
+    // fires immediately — Dashboard refreshes the moment the Backend confirms the run is done.
     aggregate()
     const id = setInterval(aggregate, 10_000)
     return () => clearInterval(id)
-  }, [clearedAt, daysBack])
+  }, [clearedAt, daysBack, isLive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-attach to scheduled executions that started without user interaction
   useEffect(() => {
@@ -215,6 +229,7 @@ export default function Dashboard({
         skipped={aggStats.skipped}
         total={aggStats.total}
         avgMs={aggStats.avgMs}
+        isLive={isLive}
         onClear={handleClear}
       />
 
@@ -249,8 +264,9 @@ export default function Dashboard({
           passed={aggStats.passed}
           failed={aggStats.failed}
           skipped={aggStats.skipped}
+          isLive={isLive}
         />
-        <DailyChart />
+        <DailyChart isLive={isLive} />
       </div>
 
       {/* Row 4: Devices + Quick Access */}

@@ -45,7 +45,7 @@ export interface RunState {
 }
 
 export type ExecutionStatus =
-  | 'PENDING' | 'QUEUED' | 'RUNNING'
+  | 'PENDING' | 'QUEUED' | 'RUNNING' | 'FINALIZING' | 'ABORTING'
   | 'PASSED'  | 'FAILED' | 'SKIPPED'
   | 'COMPLETED' | 'ABORTED'
 

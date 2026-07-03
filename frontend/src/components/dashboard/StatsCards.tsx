@@ -21,6 +21,7 @@ interface Props {
   total:   number
   avgMs:   number
   onClear: () => void
+  isLive?: boolean
 }
 
 function fmtAvg(ms: number): string {
@@ -34,7 +35,7 @@ function fmtAvg(ms: number): string {
 const BASE = [40,45,38,52,48,55,50,60,58,65,62,70,68,75,72,80]
 const jit  = (a: number[]) => a.map(v => ({ v: v + Math.random()*8-4 }))
 
-export default function StatsCards({ passed, failed, skipped, total, avgMs, onClear }: Props) {
+export default function StatsCards({ passed, failed, skipped, total, avgMs, onClear, isLive = false }: Props) {
   const stats = useMemo<Stat[]>(() => {
     const successRate = total > 0 ? Math.round(passed  / total * 1000) / 10 : 0
     const failRate    = total > 0 ? Math.round(failed  / total * 1000) / 10 : 0
@@ -87,9 +88,25 @@ export default function StatsCards({ passed, failed, skipped, total, avgMs, onCl
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
-          Estadísticas Globales
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+            Estadísticas Globales
+          </span>
+          {isLive && (
+            <span
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider"
+              style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#818cf8' }}
+            >
+              <motion.span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: '#818cf8' }}
+                animate={{ opacity: [1, 0.3, 1] }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+              />
+              En ejecución — pausado
+            </span>
+          )}
+        </div>
         <button
           onClick={onClear}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-400 hover:text-red-400 hover:border-red-500/30 transition-colors"

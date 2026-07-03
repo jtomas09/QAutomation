@@ -91,6 +91,16 @@ public class BackendClient {
         catch (Exception e) { System.err.println("[BackendClient] confirmAbort error: " + e.getMessage()); }
     }
 
+    /** Notifica al Backend que la ejecución entró en post-procesamiento (cleanup, videos, Allure). */
+    public void sendFinalizing(String executionId) {
+        try {
+            String body = json.writeValueAsString(Map.of("status", "FINALIZING"));
+            post("/api/jobs/" + executionId + "/status", body);
+        } catch (Exception e) {
+            System.err.println("[BackendClient] sendFinalizing error (non-critical): " + e.getMessage());
+        }
+    }
+
     public void ping() {
         try { post("/api/jobs/ping", "{}"); }
         catch (Exception e) { System.err.println("[BackendClient] ping error: " + e.getMessage()); }

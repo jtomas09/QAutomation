@@ -6,34 +6,40 @@ import { getExecutions } from '../../api'
 import { PlatformBadge } from '../PlatformIcon'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
-  PENDING:   'Pendiente',
-  QUEUED:    'En Cola',
-  RUNNING:   'Ejecutando',
-  PASSED:    'Passed',
-  FAILED:    'Failed',
-  SKIPPED:   'Skipped',
-  COMPLETED: 'Completado',
-  ABORTED:   'Abortado',
+  PENDING:    'Pendiente',
+  QUEUED:     'En Cola',
+  RUNNING:    'Ejecutando',
+  FINALIZING: 'Finalizando',
+  ABORTING:   'Abortando',
+  PASSED:     'Passed',
+  FAILED:     'Failed',
+  SKIPPED:    'Skipped',
+  COMPLETED:  'Completado',
+  ABORTED:    'Abortado',
 }
 const STATUS_COLOR: Record<ExecutionStatus, string> = {
-  PENDING:   '#facc15',
-  QUEUED:    '#fb923c',
-  RUNNING:   '#22d3ee',
-  PASSED:    '#4ade80',
-  FAILED:    '#f87171',
-  SKIPPED:   '#eab308',
-  COMPLETED: '#10b981',
-  ABORTED:   '#94a3b8',
+  PENDING:    '#facc15',
+  QUEUED:     '#fb923c',
+  RUNNING:    '#22d3ee',
+  FINALIZING: '#a78bfa',
+  ABORTING:   '#f97316',
+  PASSED:     '#4ade80',
+  FAILED:     '#f87171',
+  SKIPPED:    '#eab308',
+  COMPLETED:  '#10b981',
+  ABORTED:    '#94a3b8',
 }
 const STATUS_BG: Record<ExecutionStatus, string> = {
-  PENDING:   'rgba(250,204,21,0.10)',
-  QUEUED:    'rgba(251,146,60,0.12)',
-  RUNNING:   'rgba(34,211,238,0.12)',
-  PASSED:    'rgba(74,222,128,0.12)',
-  FAILED:    'rgba(248,113,113,0.12)',
-  SKIPPED:   'rgba(234,179,8,0.10)',
-  COMPLETED: 'rgba(16,185,129,0.12)',
-  ABORTED:   'rgba(148,163,184,0.10)',
+  PENDING:    'rgba(250,204,21,0.10)',
+  QUEUED:     'rgba(251,146,60,0.12)',
+  RUNNING:    'rgba(34,211,238,0.12)',
+  FINALIZING: 'rgba(167,139,250,0.12)',
+  ABORTING:   'rgba(249,115,22,0.12)',
+  PASSED:     'rgba(74,222,128,0.12)',
+  FAILED:     'rgba(248,113,113,0.12)',
+  SKIPPED:    'rgba(234,179,8,0.10)',
+  COMPLETED:  'rgba(16,185,129,0.12)',
+  ABORTED:    'rgba(148,163,184,0.10)',
 }
 
 const IOS_UDID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$/
@@ -126,7 +132,7 @@ export default function RecentExecutions({ onViewAll }: Props) {
             {rows.map((row, i) => {
               const color  = STATUS_COLOR[row.status]
               const bg     = STATUS_BG[row.status]
-              const isRun  = row.status === 'RUNNING'
+              const isRun  = row.status === 'RUNNING' || row.status === 'FINALIZING' || row.status === 'ABORTING'
 
               return (
                 <motion.tr

@@ -69,7 +69,7 @@ public class ExecutionService {
             e.setFailed(failed);
             e.setSkipped(skipped);
             e.setTotal(passed + failed + skipped);
-            e.setStatus(failed == 0 ? ExecutionStatus.PASSED : ExecutionStatus.FAILED);
+            e.setStatus(failed == 0 ? ExecutionStatus.COMPLETED : ExecutionStatus.FAILED);
             e.setEndTime(Instant.now());
             if (allureUrl  != null && !allureUrl.isBlank())  e.setAllureUrl(allureUrl);
             if (testCases  != null && !testCases.isEmpty())  e.setTestCases(testCases);
@@ -124,6 +124,14 @@ public class ExecutionService {
 
     public Optional<Execution> findById(String id) { return store.findById(id); }
     public List<Execution>     findAll()            { return store.findAll(); }
+
+    /** Marca la ejecución como FINALIZING (post-procesamiento activo: cleanup, videos, Allure). */
+    public void setFinalizing(String executionId) {
+        store.findById(executionId).ifPresent(e -> {
+            e.setStatus(ExecutionStatus.FINALIZING);
+            sse.broadcast(executionId, "status", Map.of("status", "FINALIZING"));
+        });
+    }
 
     public boolean isRunning() {
         return store.findAll().stream()
