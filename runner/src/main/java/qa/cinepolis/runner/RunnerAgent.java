@@ -424,10 +424,21 @@ public class RunnerAgent {
         // Notify backend immediately
         silentHeartbeat("STOPPING");
 
+        // ── Kill active job FIRST ─────────────────────────────────────────────────
+        // MUST happen before interrupting the job-poll thread.  If we interrupt the
+        // thread first, jobPollThread is blocked inside process.waitFor() and the
+        // interrupt propagates as InterruptedException — which JobExecutor.execute()
+        // would (wrongly) treat as a fatal error while Gradle is still running.
+        // Killing the process first lets waitFor() return naturally before the
+        // thread interrupt arrives, so execute() can finalize the execution cleanly.
+        if (jobExecutor != null) {
+            jobExecutor.killActiveProcess();
+        }
+
         // ── Job poll thread ────────────────────────────────────────────────────
         if (jobPollThread != null) {
             jobPollThread.interrupt();
-            try { jobPollThread.join(3_000); } catch (InterruptedException ignored) {}
+            try { jobPollThread.join(5_000); } catch (InterruptedException ignored) {}
             jobPollThread = null;
         }
 
@@ -444,8 +455,8 @@ public class RunnerAgent {
         deviceHealerRef.set(null);
         deviceHealer = null;
 
-        // ── Kill active job ────────────────────────────────────────────────────
-        if (jobExecutor != null)  { jobExecutor.killActiveProcess(); jobExecutor = null; }
+        // ── Null out jobExecutor (process already killed above) ───────────────
+        if (jobExecutor != null)  { jobExecutor = null; }
 
         // ── Appium ─────────────────────────────────────────────────────────────
         if (appiumMgr != null)    { appiumMgr.stop(); appiumMgr = null; }

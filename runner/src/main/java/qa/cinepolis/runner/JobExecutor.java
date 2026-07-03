@@ -806,9 +806,63 @@ public class JobExecutor {
                 }
             }
 
-            int exitCode = process.waitFor();
-            activeProcess = null;
-            abortWatcher.interrupt();
+            // ── Resilient waitFor ──────────────────────────────────────────────────
+            // process.waitFor() can receive an InterruptedException when the Runner
+            // lifecycle calls jobPollThread.interrupt() (e.g. STOP/RESTART command).
+            // An interrupt does NOT mean Gradle finished — if process.isAlive() is
+            // still true we MUST keep waiting; otherwise we finalize a live execution.
+            //
+            // Defence-in-depth: RunnerAgent.stopAllServices() now kills the process
+            // BEFORE interrupting the thread, so the process should already be dead
+            // when the interrupt arrives.  This loop handles any case where the
+            // interrupt reaches waitFor() before the kill (race, JVM shutdown hook,
+            // future refactors, etc.).
+            int exitCode;
+            {
+                boolean wasInterrupted = false;
+                exitCode = 0;
+                while (true) {
+                    try {
+                        exitCode = process.waitFor();
+                        break; // process finished normally
+                    } catch (InterruptedException ie) {
+                        wasInterrupted = true;
+                        boolean alive = process.isAlive();
+                        // ── Diagnostic log (always printed) ─────────────────────
+                        System.out.printf("[Runner] ⚠ waitFor() fue interrumpido%n");
+                        System.out.printf("[Runner]   Hilo actual        : %s%n",
+                                Thread.currentThread().getName());
+                        System.out.printf("[Runner]   Estado process.isAlive(): %s%n", alive);
+                        System.out.printf("[Runner]   Stack completa:%n%s%n", getStackTrace(ie));
+                        try {
+                            client.sendLog(job.executionId, "WARN",
+                                    "[Runner] waitFor() interrumpido | process.isAlive(): " + alive
+                                    + " | Hilo: " + Thread.currentThread().getName());
+                        } catch (Exception ignored) {}
+
+                        if (!alive) {
+                            // Proceso ya terminó — leer exitValue() y continuar
+                            System.out.println("[Runner] Proceso ya terminado — leyendo exitValue()");
+                            try { exitCode = process.exitValue(); } catch (Exception ev) { exitCode = -1; }
+                            break;
+                        }
+
+                        // Proceso sigue vivo: NO finalizar.  Limpiar el flag de
+                        // interrupción para poder re-entrar en waitFor().
+                        Thread.interrupted(); // clear interrupt flag
+                        System.out.println("[Runner] Proceso Gradle sigue vivo — ignorando interrupción, re-esperando terminación real");
+                        try {
+                            client.sendLog(job.executionId, "WARN",
+                                    "[Runner] Proceso Gradle sigue vivo — continuando monitoreo (no se finalizará hasta que el proceso termine)");
+                        } catch (Exception ignored) {}
+                    }
+                }
+                activeProcess = null;
+                abortWatcher.interrupt();
+                // Restaurar el flag para que el bucle job-poll detecte la señal
+                // de parada y salga limpiamente tras el retorno de execute().
+                if (wasInterrupted) Thread.currentThread().interrupt();
+            }
 
             // Stop recording before any other work (must precede uploadVideos to finalize MP4)
             if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
