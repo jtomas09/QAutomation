@@ -944,12 +944,14 @@ protected List<WebElement> safeFindElements(By locator) {
     private static final int SCROLL_STALL_THRESHOLD = 2;
 
     protected boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
-        if (isVisible(locator)) return true;
-
         int allowed = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
         int stalledCount = 0;
 
         log.debug("[scroll-v] buscando {} | presupuesto={}", locator, allowed);
+
+        // 'after' de la iteración N es el 'before' de la iteración N+1 — reutilizar evita
+        // un round-trip de driver por ciclo (el screen no cambia entre iteraciones sin swipe).
+        String cachedFP = null;
 
         for (int i = 0; i < allowed; i++) {
             if (isVisible(locator)) {
@@ -957,12 +959,13 @@ protected List<WebElement> safeFindElements(By locator) {
                 return true;
             }
 
-            String before = richFingerPrint();
+            String before = (cachedFP != null) ? cachedFP : richFingerPrint();
             log.debug("[scroll-v] swipe {}/{} | antes=[{}] stalled={}", i + 1, allowed, before, stalledCount);
 
             slowSwipeUp();
 
             String after = richFingerPrint();
+            cachedFP = after;
             log.debug("[scroll-v] swipe {}/{} | despues=[{}]", i + 1, allowed, after);
 
             if (after.equals(before)) {
@@ -983,8 +986,6 @@ protected List<WebElement> safeFindElements(By locator) {
     }
 
     private boolean oneShotHorizontalSearch(By locator, int maxRightSwipes, int[] budgetH) {
-        if (isVisible(locator)) return true;
-
         int allowed = maxRightSwipes;
         if (budgetH != null) {
             allowed = Math.min(maxRightSwipes, budgetH[0]);
@@ -992,13 +993,15 @@ protected List<WebElement> safeFindElements(By locator) {
         }
 
         int stalledCount = 0;
+        String cachedFP = null;
 
         for (int i = 0; i < allowed; i++) {
             if (isVisible(locator)) return true;
 
-            String before = richFingerPrint();
+            String before = (cachedFP != null) ? cachedFP : richFingerPrint();
             slowSwipeLeft();
             String after = richFingerPrint();
+            cachedFP = after;
 
             log.debug("[scroll-h] swipe {}/{} | antes=[{}] despues=[{}]", i + 1, allowed, before, after);
 
@@ -1022,8 +1025,6 @@ protected List<WebElement> safeFindElements(By locator) {
     }
 
     private boolean oneShotVerticalAndHorizontal(By locator, int maxDownSwipes, int maxRightSwipesPerRow) {
-        if (isVisible(locator)) return true;
-
         int allowedV = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
         int[] budgetH = new int[]{TOTAL_HORIZONTAL_SWIPE_BUDGET};
         int stalledCount = 0;

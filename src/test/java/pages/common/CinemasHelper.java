@@ -435,16 +435,18 @@ public class CinemasHelper extends BasePage {
     }
 
     private void goToAlimentosTab() {
+        long t0 = System.currentTimeMillis();
         // ✅ Antes de navegar, quita pantalla Club si apareció
         dismissClubLoginIfPresent();
 
         // ✅ Reintentos para garantizar que realmente quedamos en Alimentos
         for (int i = 1; i <= 6; i++) {
             if (clickIfPresent(TAB_ALIMENTOS) || tapIfPresent(TAB_ALIMENTOS) || tapIfPresent(TAB_ALIMENTOS_ALT)) {
-                sleep(750);
+                // Espera inteligente: sale en cuanto estamos en Alimentos (máx 750ms)
+                smartWait(this::isOnAlimentosHome, 750, 100);
             } else {
-                // a veces el tab no es visible inmediatamente
-                sleep(500);
+                // tab no visible — espera breve a que aparezca o la app se estabilice
+                smartWait(this::isOnAlimentosHome, 500, 100);
             }
 
             // 🔒 Intento duro: buscar el item del bottom-nav por UiSelector/XPath y tap
@@ -454,15 +456,19 @@ public class CinemasHelper extends BasePage {
                             "new UiSelector().textContains(\"Alimentos\")"
                     ));
                     tapCenter(alimentos);
-                    sleep(650);
+                    // Espera inteligente: sale en cuanto estamos en Alimentos (máx 650ms)
+                    smartWait(this::isOnAlimentosHome, 650, 100);
                 } catch (Exception ignored) {}
             }
 
             // ✅ Si ya vemos el header/elementos de Alimentos, salimos
-            if (isOnAlimentosHome()) return;
+            if (isOnAlimentosHome()) {
+                log.debug("[CinemasHelper][MainNav] goToAlimentosTab OK intento={} total={}ms", i, System.currentTimeMillis() - t0);
+                return;
+            }
 
             // si falló, espera un poco y reintenta
-            sleep(650);
+            smartWait(this::isOnAlimentosHome, 650, 100);
         }
 
         // 🚨 Si aún vemos Cartelera/Horarios, forzamos tap final.
@@ -474,10 +480,12 @@ public class CinemasHelper extends BasePage {
                             "new UiSelector().textContains(\"Alimentos\")"
                     ));
                     tapCenter(alimentos);
-                    sleep(900);
+                    // Espera inteligente: máx 900ms
+                    smartWait(this::isOnAlimentosHome, 900, 100);
                 } catch (Exception ignored) {}
             }
         }
+        log.info("[PERF][MainNav] goToAlimentosTab total={}ms", System.currentTimeMillis() - t0);
     }
 
     private void openSelectorFromAlimentosIfNeeded() {
@@ -775,45 +783,71 @@ public class CinemasHelper extends BasePage {
 
     // ✅ Guard con logs para verificar que sí se ejecuta y qué hizo
     public void dismissClubLoginGuard(String where) {
+        long t0 = System.currentTimeMillis();
         try {
             log.info("[CinemasHelper][ClubGuard] ENTER where={}", where);
 
-            // Espera única de 600ms para que la pantalla de Club aparezca si va a aparecer
-            safeSleep(600);
-            boolean visible = isClubLoginVisible();
+            // Espera inteligente: sale en cuanto Club aparece (máx 600ms) — no consume el timeout completo.
+            long t0Espera = System.currentTimeMillis();
+            boolean visible = smartWait(this::isClubLoginVisible, 600, 100);
+            log.debug("[CinemasHelper][ClubGuard] espera inicial: {}ms visible={}", System.currentTimeMillis() - t0Espera, visible);
 
             if (!visible) {
                 log.debug("[CinemasHelper][ClubGuard] No visible -> SKIP where={}", where);
+                log.info("[PERF][ClubGuard] where={} total={}ms", where, System.currentTimeMillis() - t0);
                 return;
             }
 
             log.info("[CinemasHelper][ClubGuard] Visible -> attempting dismiss...");
+            long t0Dismiss = System.currentTimeMillis();
             boolean closedReturn = dismissClubLoginIfPresent();
 
             // Solo chequeamos stillVisible si dismissClubLoginIfPresent() falló (return false)
             // para evitar una consulta de elemento lenta cuando ya sabemos que cerró.
             boolean stillVisible = !closedReturn && isClubLoginVisible();
-
-            log.info("[CinemasHelper][ClubGuard] closedReturn={} stillVisible={}", closedReturn, stillVisible);
+            log.info("[CinemasHelper][ClubGuard] closedReturn={} stillVisible={} dismiss={}ms",
+                    closedReturn, stillVisible, System.currentTimeMillis() - t0Dismiss);
 
             if (stillVisible) {
                 log.warn("[CinemasHelper][ClubGuard] STILL visible -> last resort navigate.back()");
                 try {
                     driver.navigate().back();
-                    safeSleep(700);
+                    smartWait(() -> !isClubLoginVisible(), 700, 100);
                 } catch (Exception ignored) {}
                 log.debug("[CinemasHelper][ClubGuard] after last resort stillVisible={}", isClubLoginVisible());
             }
 
             log.info("[CinemasHelper][ClubGuard] EXIT where={}", where);
+            log.info("[PERF][ClubGuard] where={} total={}ms", where, System.currentTimeMillis() - t0);
 
         } catch (Exception e) {
-            log.error("[CinemasHelper][ClubGuard] ERROR where={} msg={}", where, e.getMessage());
+            log.error("[CinemasHelper][ClubGuard] ERROR where={} msg={} total={}ms", where, e.getMessage(), System.currentTimeMillis() - t0);
         }
     }
 
     private static void safeSleep(long ms) {
         try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    /**
+     * Espera activa: retorna en cuanto la condición es verdadera o se agota el timeout.
+     * Sale inmediatamente cuando el estado de la app cambia — no consume el timeout completo.
+     * Reemplaza Thread.sleep fijos donde la duración real depende del estado de la app.
+     *
+     * @param condition condición a evaluar (true = condición cumplida)
+     * @param maxMs     tiempo máximo de espera en ms
+     * @param pollMs    intervalo de polling en ms
+     * @return true si la condición se cumplió antes del timeout
+     */
+    private boolean smartWait(java.util.function.BooleanSupplier condition, long maxMs, long pollMs) {
+        long end = System.currentTimeMillis() + maxMs;
+        while (System.currentTimeMillis() < end) {
+            if (condition.getAsBoolean()) return true;
+            long remaining = end - System.currentTimeMillis();
+            if (remaining <= 0) break;
+            safeSleep(Math.min(pollMs, remaining));
+        }
+        return condition.getAsBoolean();
     }
     private void acceptAlertsIfPresent() {
         long end = System.currentTimeMillis() + 4500;
@@ -1042,7 +1076,8 @@ public class CinemasHelper extends BasePage {
                 // 1) navigate().back() — el más rápido, no busca elementos
                 try {
                     driver.navigate().back();
-                    sleep(600);
+                    // Espera inteligente: sale en cuanto Club desaparece (máx 600ms)
+                    smartWait(() -> !isClubLoginVisible(), 600, 100);
                     if (!isClubLoginVisible()) {
                         log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
                         return true;
@@ -1051,7 +1086,8 @@ public class CinemasHelper extends BasePage {
 
                 // 2) Tap botón back real (por bounds del elemento en la UI)
                 if (tapBackFromClubUI()) {
-                    sleep(400);
+                    // Espera inteligente: sale en cuanto Club desaparece (máx 400ms)
+                    smartWait(() -> !isClubLoginVisible(), 400, 100);
                     if (!isClubLoginVisible()) {
                         log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI).");
                         return true;
@@ -1060,17 +1096,19 @@ public class CinemasHelper extends BasePage {
 
                 // 3) Tap por content-desc (Atrás / Navigate up)
                 tapIfPresent(CLUB_BACK_BUTTON_A11Y);
-                sleep(400);
+                // Espera inteligente: sale en cuanto Club desaparece (máx 400ms)
+                smartWait(() -> !isClubLoginVisible(), 400, 100);
                 if (!isClubLoginVisible()) {
                     log.info("[CinemasHelper] Pantalla Club cerrada OK (A11Y).");
                     return true;
                 }
 
-                // 3) navigate().back() — tecla Back del sistema; Club tiene su propia Activity
+                // 4) navigate().back() — tecla Back del sistema; Club tiene su propia Activity
                 //    así que vuelve al main sin cerrar la app.
                 try {
                     driver.navigate().back();
-                    sleep(700);
+                    // Espera inteligente: sale en cuanto Club desaparece (máx 700ms)
+                    smartWait(() -> !isClubLoginVisible(), 700, 100);
                 } catch (Exception ignored) {}
                 if (!isClubLoginVisible()) {
                     log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
@@ -1115,13 +1153,15 @@ public class CinemasHelper extends BasePage {
             ));
             if (!ctas.isEmpty()) {
                 ctas.get(0).click();
-                Thread.sleep(800);
+                // Espera inteligente: sale en cuanto la promo desaparece (máx 800ms)
+                smartWait(() -> !isMarioPromoVisible(), 800, 100);
                 return;
             }
 
             // Intento 2: back (fallback)
             driver.navigate().back();
-            Thread.sleep(600);
+            // Espera inteligente: sale en cuanto la promo desaparece (máx 600ms)
+            smartWait(() -> !isMarioPromoVisible(), 600, 100);
 
         } catch (Exception e) {
             log.warn("[CinemasHelper] No se pudo cerrar promo Mario (safe ignore)");
@@ -1225,7 +1265,7 @@ public class CinemasHelper extends BasePage {
                 long t0Nav = System.currentTimeMillis();
                 if (isMainNavVisible()) {
                     msMainNav += System.currentTimeMillis() - t0Nav;
-                    log.info("[PromosGuard] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | EXIT pass={} where={}",
+                    log.info("[PERF][BeforeEach] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | EXIT pass={} where={}",
                             msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, pass, where);
                     return;
                 }
@@ -1239,10 +1279,11 @@ public class CinemasHelper extends BasePage {
                 tryGenericOverlayDismiss();
             }
 
-            safeSleep(500);
+            // Espera inteligente: sale en cuanto Main Nav es visible (máx 500ms) en lugar de sleep fijo.
+            smartWait(this::isMainNavVisible, 500, 100);
         }
 
-        log.warn("[PromosGuard] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | Max passes where={}",
+        log.warn("[PERF][BeforeEach] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | Max passes where={}",
                 msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, where);
         log.info("[CinemasHelper][PromosGuard] EXIT where={}", where);
     }
@@ -1312,6 +1353,7 @@ public class CinemasHelper extends BasePage {
     }
 
     private void dismissLocationChangePopupIfPresent(String where) {
+        long t0 = System.currentTimeMillis();
         if (!isLocationChangePopupVisible()) {
             log.debug("[CinemasHelper][ZonaGuard] Popup zona no visible -> SKIP where={}", where);
             return;
@@ -1322,9 +1364,11 @@ public class CinemasHelper extends BasePage {
         for (int i = 1; i <= 3; i++) {
             // Intento 1: tap directo por locator
             if (tapIfPresent(BTN_NO_CAMBIAR)) {
-                safeSleep(600);
+                // Espera inteligente: sale en cuanto el popup desaparece (máx 600ms)
+                smartWait(() -> !isLocationChangePopupVisible(), 600, 100);
                 if (!isLocationChangePopupVisible()) {
                     log.info("[CinemasHelper][ZonaGuard] Popup cerrado OK (tapIfPresent) intento={}", i);
+                    log.info("[PERF][ZonaGuard] where={} total={}ms", where, System.currentTimeMillis() - t0);
                     return;
                 }
             }
@@ -1335,9 +1379,11 @@ public class CinemasHelper extends BasePage {
                     WebElement btn = driver.findElement(
                             AppiumBy.androidUIAutomator("new UiSelector().text(\"No cambiar\")"));
                     tapCenter(btn);
-                    safeSleep(600);
+                    // Espera inteligente: sale en cuanto el popup desaparece (máx 600ms)
+                    smartWait(() -> !isLocationChangePopupVisible(), 600, 100);
                     if (!isLocationChangePopupVisible()) {
                         log.info("[CinemasHelper][ZonaGuard] Popup cerrado OK (UiAutomator) intento={}", i);
+                        log.info("[PERF][ZonaGuard] where={} total={}ms", where, System.currentTimeMillis() - t0);
                         return;
                     }
                 } catch (Exception ignored) {}
@@ -1346,7 +1392,8 @@ public class CinemasHelper extends BasePage {
             safeSleep(300);
         }
 
-        log.warn("[CinemasHelper][ZonaGuard] No se pudo cerrar popup de zona; se continúa flujo.");
+        log.warn("[CinemasHelper][ZonaGuard] No se pudo cerrar popup de zona ({}ms); se continúa flujo.",
+                System.currentTimeMillis() - t0);
     }
 
     /**

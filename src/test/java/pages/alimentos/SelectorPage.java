@@ -1509,85 +1509,114 @@ public class SelectorPage extends BasePage {
     protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipes) {
         long t0 = System.currentTimeMillis();
         By locator = By.xpath(xpath);
-        if (this.isVisibleQuick(locator)) {
-            log.debug("[Scroll-V] Sección ya visible (sin scrolls necesarios)");
-            log.info("[Scroll] Producto encontrado | Swipe 0/{} | Tiempo total búsqueda: {}ms",
-                    maxVerticalSwipes, System.currentTimeMillis() - t0);
-            return true;
-        }
-        int screenH = driver.manage().window().getSize().getHeight();
-        // Umbral de "sin movimiento": 2.5% de pantalla (era 5% → demasiado sensible en Compose/LazyColumn)
-        int threshold = Math.max(15, screenH / 40);
-        // Requiere 2 swipes consecutivos sin movimiento antes de declarar fin de catálogo,
-        // igual que BasePage.oneShotVerticalSearch (SCROLL_STALL_THRESHOLD = 2).
-        // Con 1 solo swipe se producían falsos positivos cuando Compose tiene inercia variable.
-        int stalledCount = 0;
-        final int STALL_REQUIRED = 2;
-        int swipesDone = 0;
-        for (int i = 0; i < maxVerticalSwipes; ++i) {
-            if (this.isVisibleQuick(locator)) {
-                log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
-                log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
-                        (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
+
+        try {
+            // implicitlyWait=0 para toda la búsqueda vertical — findElements() retorna
+            // inmediatamente en lugar de bloquear hasta 10 s cuando el elemento no existe todavía.
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+
+            long tCheck = System.currentTimeMillis();
+            if (!driver.findElements(locator).isEmpty()) {
+                log.debug("[Scroll-V] Sección ya visible (sin scrolls necesarios)");
+                log.info("[PERF] check inicial: {}ms", System.currentTimeMillis() - tCheck);
+                log.info("[Scroll] Producto encontrado | Swipe 0/{} | Tiempo total búsqueda: {}ms",
+                        maxVerticalSwipes, System.currentTimeMillis() - t0);
                 return true;
             }
-            // Capturar último elemento visible para comparar posición tras el swipe (2 llamadas al driver)
-            WebElement refEl = null;
-            int refY = -1;
-            try {
-                driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-                java.util.List<WebElement> candidates =
-                        driver.findElements(By.className("android.widget.TextView"));
-                if (!candidates.isEmpty()) {
-                    refEl = candidates.get(candidates.size() - 1);
-                    try { refY = refEl.getLocation().getY(); } catch (Exception ignored) { refEl = null; }
+
+            int screenH = driver.manage().window().getSize().getHeight();
+            int threshold = Math.max(15, screenH / 40);
+            int stalledCount = 0;
+            final int STALL_REQUIRED = 2;
+            int swipesDone = 0;
+
+            for (int i = 0; i < maxVerticalSwipes; ++i) {
+                long tIter = System.currentTimeMillis();
+
+                // Pre-swipe check — instantáneo porque implicitlyWait=0
+                tCheck = System.currentTimeMillis();
+                if (!driver.findElements(locator).isEmpty()) {
+                    log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
+                    log.info("[PERF] Swipe {}/{} | pre-check: {}ms | iter: {}ms",
+                            (i + 1), maxVerticalSwipes,
+                            System.currentTimeMillis() - tCheck, System.currentTimeMillis() - tIter);
+                    log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
+                            (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
+                    return true;
                 }
-            } catch (Exception ignored) {
-            } finally {
-                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-            }
-            log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
-            long tSwipe = System.currentTimeMillis();
-            this.swipeUpInMainContent(450);
-            swipesDone++;
-            log.info("[Scroll] Swipe {}/{} — {}ms", (i + 1), maxVerticalSwipes,
-                    System.currentTimeMillis() - tSwipe);
-            // Detección de fin de catálogo por posición visual (sin getPageSource)
-            // Si el elemento de referencia no se movió → el scroll no tuvo efecto → fin de catálogo
-            // Si lanza StaleElementReferenceException → el elemento salió de pantalla → hay más contenido
-            if (refEl != null && refY >= 0) {
+                long checkMs = System.currentTimeMillis() - tCheck;
+
+                // Capturar elemento de referencia para detección de stall (ya en implicitlyWait=0)
+                WebElement refEl = null;
+                int refY = -1;
                 try {
-                    int newY = refEl.getLocation().getY();
-                    if (Math.abs(newY - refY) < threshold) {
-                        stalledCount++;
-                        if (stalledCount >= STALL_REQUIRED) {
-                            log.info("[Scroll] Fin de catálogo detectado ({}/{} swipes sin movimiento)",
-                                    stalledCount, STALL_REQUIRED);
-                            log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
-                                    swipesDone, System.currentTimeMillis() - t0);
-                            break;
-                        }
-                        log.debug("[Scroll-V] Swipe sin movimiento ({}/{}), continuando...",
-                                stalledCount, STALL_REQUIRED);
-                    } else {
-                        stalledCount = 0; // movimiento real detectado → reiniciar contador
+                    java.util.List<WebElement> candidates =
+                            driver.findElements(By.className("android.widget.TextView"));
+                    if (!candidates.isEmpty()) {
+                        refEl = candidates.get(candidates.size() - 1);
+                        try { refY = refEl.getLocation().getY(); } catch (Exception ignored) { refEl = null; }
                     }
-                } catch (Exception ignored) {
-                    // Elemento desapareció de pantalla → scroll funcionó → hay más contenido
-                    stalledCount = 0;
+                } catch (Exception ignored) {}
+
+                log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
+                long tSwipe = System.currentTimeMillis();
+                this.swipeUpInMainContent(450);
+                swipesDone++;
+                long swipeMs = System.currentTimeMillis() - tSwipe;
+
+                // Detección de fin de catálogo por posición visual
+                int newY = -1;
+                if (refEl != null && refY >= 0) {
+                    try {
+                        newY = refEl.getLocation().getY();
+                        if (Math.abs(newY - refY) < threshold) {
+                            stalledCount++;
+                            if (stalledCount >= STALL_REQUIRED) {
+                                log.info("[PERF] Swipe {}/{} | pre-check: {}ms | swipe: {}ms | iter: {}ms | STALL {}/{}",
+                                        (i + 1), maxVerticalSwipes, checkMs, swipeMs,
+                                        System.currentTimeMillis() - tIter, stalledCount, STALL_REQUIRED);
+                                log.info("[Scroll] Fin de catálogo detectado ({}/{} swipes sin movimiento)",
+                                        stalledCount, STALL_REQUIRED);
+                                log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
+                                        swipesDone, System.currentTimeMillis() - t0);
+                                break;
+                            }
+                            log.debug("[Scroll-V] Swipe sin movimiento ({}/{}), continuando...",
+                                    stalledCount, STALL_REQUIRED);
+                        } else {
+                            stalledCount = 0;
+                        }
+                    } catch (Exception ignored) {
+                        stalledCount = 0;
+                    }
                 }
+
+                // Post-swipe check — instantáneo porque implicitlyWait=0
+                tCheck = System.currentTimeMillis();
+                if (!driver.findElements(locator).isEmpty()) {
+                    log.info("[PERF] Swipe {}/{} | pre-check: {}ms | swipe: {}ms | post-check: {}ms | iter: {}ms",
+                            (i + 1), maxVerticalSwipes, checkMs, swipeMs,
+                            System.currentTimeMillis() - tCheck, System.currentTimeMillis() - tIter);
+                    log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
+                    log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
+                            (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
+                    return true;
+                }
+                long postCheckMs = System.currentTimeMillis() - tCheck;
+
+                log.info("[PERF] Swipe {}/{} | pre-check: {}ms | swipe: {}ms | post-check: {}ms | iter: {}ms",
+                        (i + 1), maxVerticalSwipes, checkMs, swipeMs, postCheckMs,
+                        System.currentTimeMillis() - tIter);
             }
-            if (this.isVisibleQuick(locator)) {
-                log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
-                log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
-                        (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
-                return true;
-            }
+
+            log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
+            log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
+                    swipesDone, System.currentTimeMillis() - t0);
+            return !driver.findElements(locator).isEmpty();
+
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
-        log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
-        log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
-                swipesDone, System.currentTimeMillis() - t0);
-        return this.isVisibleQuick(locator);
     }
 
 //    private void clickRightFromAnchorOneTry(String anchorXpath, String targetXpath, int verticalSwipes) {
