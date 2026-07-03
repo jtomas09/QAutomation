@@ -2,12 +2,14 @@ package qa.cinepolis.backend.model;
 
 public enum ExecutionStatus {
     QUEUED,
-    RUNNING,
-    FINALIZING, // post-procesamiento activo: limpieza dispositivo, videos, Allure
-    ABORTING,   // solicitud recibida, esperando que el runner detenga el proceso
+    STARTING,           // Runner recibió el job — preflight en progreso (device, Appium, etc.)
+    RUNNING,            // Gradle ejecutando tests activamente
+    FINALIZING,         // Todos los tests terminaron — post-procesamiento (cleanup, Allure, etc.)
+    ABORTING,           // Solicitud de aborto recibida, esperando que el runner detenga el proceso
     PASSED,
     FAILED,
+    FAILED_FINALIZATION, // Post-procesamiento falló — la ejecución no pudo completarse limpiamente
     SKIPPED,
     ABORTED,
-    COMPLETED   // ejecución terminada — todos los tests pasaron; FAILED si alguno falló
+    COMPLETED           // Ejecución terminada correctamente; FAILED si algún test falló
 }

@@ -45,8 +45,8 @@ export interface RunState {
 }
 
 export type ExecutionStatus =
-  | 'PENDING' | 'QUEUED' | 'RUNNING' | 'FINALIZING' | 'ABORTING'
-  | 'PASSED'  | 'FAILED' | 'SKIPPED'
+  | 'PENDING' | 'QUEUED' | 'STARTING' | 'RUNNING' | 'FINALIZING' | 'ABORTING'
+  | 'PASSED'  | 'FAILED' | 'FAILED_FINALIZATION' | 'SKIPPED'
   | 'COMPLETED' | 'ABORTED'
 
 export interface DeviceConfig {

@@ -29,14 +29,23 @@ public class ExecutionService {
         return store.create(suite, env, device, country, videoEnabled, testClass);
     }
 
-    /** Atomically claims the next QUEUED job and marks it RUNNING. */
+    /** Atomically claims the next QUEUED job and marks it STARTING (Runner received it, preflight begins). */
     public synchronized Optional<Execution> claimNextPending() {
         return store.findNextPending().filter(e -> {
             if (e.getStatus() != ExecutionStatus.QUEUED) return false;
-            e.setStatus(ExecutionStatus.RUNNING);
+            e.setStatus(ExecutionStatus.STARTING);
             sse.broadcast(e.getExecutionId(), "status",
-                    Map.of("status", "RUNNING", "executionId", e.getExecutionId()));
+                    Map.of("status", "STARTING", "executionId", e.getExecutionId()));
             return true;
+        });
+    }
+
+    /** Runner transitions STARTING → RUNNING when Gradle process actually starts executing tests. */
+    public void setRunning(String executionId) {
+        store.findById(executionId).ifPresent(e -> {
+            if (e.getStatus() != ExecutionStatus.STARTING) return;
+            e.setStatus(ExecutionStatus.RUNNING);
+            sse.broadcast(executionId, "status", Map.of("status", "RUNNING"));
         });
     }
 
@@ -48,14 +57,24 @@ public class ExecutionService {
         });
     }
 
+    /**
+     * Generic status update — routes guarded transitions through their specific methods
+     * so that pre-condition checks (e.g. RUNNING→FINALIZING only from RUNNING) are enforced
+     * even when called via the generic POST /api/jobs/{id}/status endpoint.
+     */
     public void updateStatus(String executionId, String statusStr) {
-        store.findById(executionId).ifPresent(e -> {
-            try {
-                ExecutionStatus status = ExecutionStatus.valueOf(statusStr.toUpperCase());
-                e.setStatus(status);
-                sse.broadcast(executionId, "status", Map.of("status", status.name()));
-            } catch (IllegalArgumentException ignored) {}
-        });
+        try {
+            ExecutionStatus target = ExecutionStatus.valueOf(statusStr.toUpperCase());
+            switch (target) {
+                case RUNNING            -> setRunning(executionId);
+                case FINALIZING         -> setFinalizing(executionId);
+                case FAILED_FINALIZATION -> setFailedFinalization(executionId);
+                default -> store.findById(executionId).ifPresent(e -> {
+                    e.setStatus(target);
+                    sse.broadcast(executionId, "status", Map.of("status", target.name()));
+                });
+            }
+        } catch (IllegalArgumentException ignored) {}
     }
 
     public void complete(String executionId, int passed, int failed, int skipped, String allureUrl) {
@@ -125,11 +144,30 @@ public class ExecutionService {
     public Optional<Execution> findById(String id) { return store.findById(id); }
     public List<Execution>     findAll()            { return store.findAll(); }
 
-    /** Marca la ejecución como FINALIZING (post-procesamiento activo: cleanup, videos, Allure). */
+    /**
+     * Marca la ejecución como FINALIZING (post-procesamiento activo: cleanup, videos, Allure).
+     * Guard: sólo acepta la transición desde RUNNING — rechaza si hay tests pendientes (estado
+     * inconsistente) o si la ejecución ya terminó / fue abortada.
+     */
     public void setFinalizing(String executionId) {
         store.findById(executionId).ifPresent(e -> {
+            // Only RUNNING → FINALIZING is valid. Any other source state means the transition
+            // is premature (still in preflight) or a duplicate (already finalizing/done).
+            if (e.getStatus() != ExecutionStatus.RUNNING) return;
             e.setStatus(ExecutionStatus.FINALIZING);
             sse.broadcast(executionId, "status", Map.of("status", "FINALIZING"));
+        });
+    }
+
+    /** Post-procesamiento falló de forma crítica — la ejecución no pudo completarse limpiamente. */
+    public void setFailedFinalization(String executionId) {
+        store.findById(executionId).ifPresent(e -> {
+            if (e.getStatus() != ExecutionStatus.FINALIZING) return;
+            e.setStatus(ExecutionStatus.FAILED_FINALIZATION);
+            e.setEndTime(java.time.Instant.now());
+            if (e.getDeviceUdid() != null) deviceStore.releaseDevice(e.getDeviceUdid());
+            sse.broadcast(executionId, "status", Map.of("status", "FAILED_FINALIZATION"));
+            sse.complete(executionId);
         });
     }
 

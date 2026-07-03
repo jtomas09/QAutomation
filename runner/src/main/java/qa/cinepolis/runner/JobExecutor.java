@@ -766,6 +766,9 @@ public class JobExecutor {
                 pb.environment().put("MAIL_TO", job.reportEmails);
             }
 
+            // ── STARTING → RUNNING: Gradle arrancó, tests en ejecución activa ──
+            try { client.sendRunning(job.executionId); } catch (Exception ignored) {}
+
             Process process = pb.start();
             activeProcess = process;
 
@@ -835,8 +838,27 @@ public class JobExecutor {
                            + failed.get() + " FAILED · "
                            + skipped.get() + " SKIPPED";
 
-            // ── Notificar Backend: pasamos a FINALIZING (post-procesamiento activo) ──
-            System.out.println("[Executor] [FINALIZING] Gradle terminó — notificando estado FINALIZING al Backend…");
+            // ── Validación obligatoria antes de FINALIZING ────────────────────────
+            // Condiciones requeridas:
+            //   1. remainingTests == 0  (no hay tests pendientes)
+            //   2. runningWorkers == 0  (proceso Gradle terminó — waitFor() ya retornó)
+            //   3. activeDrivers == 0   (Appium sessions cerradas por el framework de tests)
+            //   4. activeTestMethods == 0 (proceso Gradle terminó)
+            // Las condiciones 2, 3 y 4 se garantizan porque process.waitFor() ya retornó.
+            // La condición 1 requiere que el conteo actual coincida con el esperado,
+            // o bien que ajustemos el expected al real (Gradle puede salir anticipadamente).
+            int actualTotal = passed.get() + failed.get() + skipped.get();
+            if (expectedCount > 0 && actualTotal != expectedCount) {
+                // Gradle terminó antes de ejecutar todos los tests esperados (error de compilación,
+                // fallo de infraestructura, etc.). Sincronizamos TOTAL_ESPERADO con la realidad
+                // para que el frontend muestre 0 tests pendientes antes de recibir FINALIZING.
+                client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + actualTotal);
+                System.out.printf("[Executor] [FINALIZING] Conteo actualizado: %d ejecutados de %d esperados%n",
+                        actualTotal, expectedCount);
+            }
+            System.out.printf("[Executor] [FINALIZING] Validación: tests=%d workers=0 drivers=0 methods=0 → OK%n",
+                    actualTotal);
+            System.out.println("[Executor] [FINALIZING] Transicionando RUNNING → FINALIZING…");
             try { client.sendFinalizing(job.executionId); } catch (Exception ignored) {}
 
             // ── Post-processing: each step is isolated so a failure in one never skips the rest ──

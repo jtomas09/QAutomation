@@ -91,13 +91,33 @@ public class BackendClient {
         catch (Exception e) { System.err.println("[BackendClient] confirmAbort error: " + e.getMessage()); }
     }
 
-    /** Notifica al Backend que la ejecución entró en post-procesamiento (cleanup, videos, Allure). */
+    /** STARTING → RUNNING: Gradle process arrancó, los tests están en ejecución activa. */
+    public void sendRunning(String executionId) {
+        try {
+            String body = json.writeValueAsString(Map.of("status", "RUNNING"));
+            post("/api/jobs/" + executionId + "/status", body);
+        } catch (Exception e) {
+            System.err.println("[BackendClient] sendRunning error (non-critical): " + e.getMessage());
+        }
+    }
+
+    /** RUNNING → FINALIZING: todos los tests terminaron, post-procesamiento activo. */
     public void sendFinalizing(String executionId) {
         try {
             String body = json.writeValueAsString(Map.of("status", "FINALIZING"));
             post("/api/jobs/" + executionId + "/status", body);
         } catch (Exception e) {
             System.err.println("[BackendClient] sendFinalizing error (non-critical): " + e.getMessage());
+        }
+    }
+
+    /** FINALIZING → FAILED_FINALIZATION: post-procesamiento falló de forma crítica. */
+    public void sendFailedFinalization(String executionId) {
+        try {
+            String body = json.writeValueAsString(Map.of("status", "FAILED_FINALIZATION"));
+            post("/api/jobs/" + executionId + "/status", body);
+        } catch (Exception e) {
+            System.err.println("[BackendClient] sendFailedFinalization error: " + e.getMessage());
         }
     }
 

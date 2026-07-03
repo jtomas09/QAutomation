@@ -4,29 +4,33 @@ import { getExecutions } from '../api'
 import s from './ExecutionHistory.module.css'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
-  PENDING:    'Pendiente',
-  QUEUED:     'En Cola',
-  RUNNING:    'Ejecutando',
-  FINALIZING: 'Finalizando',
-  ABORTING:   'Abortando',
-  PASSED:     'Passed',
-  FAILED:     'Failed',
-  SKIPPED:    'Skipped',
-  COMPLETED:  'Completado',
-  ABORTED:    'Abortado',
+  PENDING:             'Pendiente',
+  QUEUED:              'En Cola',
+  STARTING:            'Iniciando',
+  RUNNING:             'Ejecutando',
+  FINALIZING:          'Finalizando',
+  ABORTING:            'Abortando',
+  PASSED:              'Passed',
+  FAILED:              'Failed',
+  FAILED_FINALIZATION: 'Error al cerrar',
+  SKIPPED:             'Skipped',
+  COMPLETED:           'Completado',
+  ABORTED:             'Abortado',
 }
 
 const STATUS_CLASS: Record<ExecutionStatus, string> = {
-  PENDING:    s.queued,
-  QUEUED:     s.queued,
-  RUNNING:    s.running,
-  FINALIZING: s.running,
-  ABORTING:   s.running,
-  PASSED:     s.passed,
-  FAILED:     s.failed,
-  SKIPPED:    s.skipped,
-  COMPLETED:  s.completed,
-  ABORTED:    s.aborted,
+  PENDING:             s.queued,
+  QUEUED:              s.queued,
+  STARTING:            s.running,
+  RUNNING:             s.running,
+  FINALIZING:          s.running,
+  ABORTING:            s.running,
+  PASSED:              s.passed,
+  FAILED:              s.failed,
+  FAILED_FINALIZATION: s.failed,
+  SKIPPED:             s.skipped,
+  COMPLETED:           s.completed,
+  ABORTED:             s.aborted,
 }
 
 function duration(start: string, end: string | null): string {
