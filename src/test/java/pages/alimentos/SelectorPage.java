@@ -965,6 +965,7 @@ public class SelectorPage extends BasePage {
     private boolean tryFuzzyClick(String targetText) {
         if (targetText == null || targetText.isBlank()) return false;
         long t0 = System.currentTimeMillis();
+        log.info("[Fuzzy] ENTER producto='{}' | implicitlyWait=0 via tryClickByXpathContains", targetText);
         String norm = normalizeForSearch(targetText);
         String[] words = norm.split("\\s+");
 
@@ -984,6 +985,15 @@ public class SelectorPage extends BasePage {
             searchTerms.add(words[0]);
         }
 
+        // UiScrollable(...).scrollIntoView(...) es una operación NATIVA de UiAutomator2:
+        // recorre el catálogo COMPLETO de forma exhaustiva y nunca retrocede. Si ya se
+        // ejecutó una vez para un término y no encontró nada, un segundo/tercer/cuarto
+        // intento con otro término no puede descubrir nada nuevo (no queda catálogo sin
+        // recorrer) — repetirlo es la causa confirmada de los 180-220 s observados en
+        // Búsqueda-Fallback (hasta 4 recorridos completos redundantes del mismo catálogo,
+        // uno por cada término candidato). Se ejecuta como máximo UNA vez por llamada.
+        boolean uia2ScrollExhausted = false;
+
         for (String term : searchTerms) {
             String safeT = escapeXpathValue(term);
             log.debug("[Fuzzy] Probando término: '{}'", term);
@@ -998,7 +1008,7 @@ public class SelectorPage extends BasePage {
                 return true;
             }
             // UiAutomator2 textContains con scroll automático (Android only)
-            if (!isIOS()) {
+            if (!isIOS() && !uia2ScrollExhausted) {
                 try {
                     String cleanTerm = term.replace("\"", "").replace("'", "");
                     String uiSel = "new UiScrollable(new UiSelector().scrollable(true))" +
@@ -1013,6 +1023,11 @@ public class SelectorPage extends BasePage {
                         tapCenterW3C(el);
                         return true;
                     }
+                    // El scroll nativo ya recorrió TODO el catálogo sin éxito y no puede
+                    // retroceder — omitir para los términos restantes de esta llamada.
+                    uia2ScrollExhausted = true;
+                    log.debug("[Fuzzy] uia2-scrollIntoView agotó el catálogo sin éxito ({}ms) — se omite para términos restantes",
+                        System.currentTimeMillis() - t0);
                 } catch (Exception e) {
                     rethrowIfAborted(e);
                     driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
@@ -1056,6 +1071,8 @@ public class SelectorPage extends BasePage {
     // ─────────────────────────────────────────────────────────────────────────
 
     private void clickCardByTextWithFallback(String visibleText, int longTimeoutSeconds) {
+        long tEntry = System.currentTimeMillis();
+        log.info("[ClickCard] ENTER producto='{}' longTimeout={}s", visibleText, longTimeoutSeconds);
 
         // ✅ 1) Construcción de XPaths Mejorada (Texto exacto o Descripción de accesibilidad)
         // Esto cubre tanto el TextView como el contenedor de Compose
@@ -1066,14 +1083,19 @@ public class SelectorPage extends BasePage {
         By byParent = By.xpath(xpathParent);
 
         // ✅ 2) Fast path MUY corto (tap por coordenadas si está visible)
-        if (isVisibleQuick(byText)) {
+        // OPTIMIZACIÓN: isVisibleFast() fuerza implicitlyWait=0 durante el chequeo y
+        // restaura el wait ambiente al salir — evita que un "miss" pague el implicitlyWait
+        // de 10s que queda activo en el driver tras cualquier búsqueda fuzzy/telemetría previa.
+        long t2 = System.currentTimeMillis();
+        log.info("[ClickCard] Paso-2 ENTER (visible check)");
+        if (isVisibleFast(byText)) {
             try {
                 WebElement el = driver.findElement(byText);
                 tapCenterW3C(el);
             } catch (Exception ignored) {}
             return;
         }
-        if (isVisibleQuick(byParent)) {
+        if (isVisibleFast(byParent)) {
             try {
                 WebElement el = driver.findElement(byParent);
                 tapCenterW3C(el);
@@ -1081,104 +1103,165 @@ public class SelectorPage extends BasePage {
             return;
         }
 
+        log.info("[ClickCard] Paso-2 EXIT no visible ({}ms)", System.currentTimeMillis() - t2);
+
         // ✅ 3) One-shot vertical (rápido)
+        long t3 = System.currentTimeMillis();
+        log.info("[ClickCard] Paso-3 ENTER (vertical ×2 | maxSwipes={})", Math.min(longTimeoutSeconds, 10));
         try {
             findVisibleOrScrollToXpathAndClick(xpathText, Math.min(longTimeoutSeconds, 10));
+            log.info("[ClickCard] Paso-3 EXIT found xpathText ({}ms)", System.currentTimeMillis() - t3);
             return;
         } catch (Throwable ignored) {}
 
         try {
             findVisibleOrScrollToXpathAndClick(xpathParent, Math.min(longTimeoutSeconds, 10));
+            log.info("[ClickCard] Paso-3 EXIT found xpathParent ({}ms)", System.currentTimeMillis() - t3);
             return;
         } catch (Throwable ignored) {}
+        log.info("[ClickCard] Paso-3 EXIT no encontrado ({}ms)", System.currentTimeMillis() - t3);
 
         // ✅ 4) Si no salió con vertical, 1 sola pasada V/H y FIN (fast-fail)
+        long t4 = System.currentTimeMillis();
+        log.info("[ClickCard] Paso-4 ENTER (V/H ×2 | maxV={} maxH=5)", Math.min(longTimeoutSeconds, 10));
         try {
             findVisibleOrScrollDownAndRightSlowToXpathAndClick(xpathText, Math.min(longTimeoutSeconds, 10), 5);
+            log.info("[ClickCard] Paso-4 EXIT found xpathText ({}ms)", System.currentTimeMillis() - t4);
             return;
         } catch (Throwable ignored) {}
 
         try {
             findVisibleOrScrollDownAndRightSlowToXpathAndClick(xpathParent, Math.min(longTimeoutSeconds, 10), 5);
+            log.info("[ClickCard] Paso-4 EXIT found xpathParent ({}ms)", System.currentTimeMillis() - t4);
             return;
         } catch (Throwable ignored) {}
+        log.info("[ClickCard] Paso-4 EXIT no encontrado ({}ms)", System.currentTimeMillis() - t4);
 
-        // ✅ 5) Último intento “barato” con tap antes de lanzar error
-        if (isVisibleQuick(byText)) {
+        // ✅ 5) Último intento "barato" con tap antes de lanzar error
+        long t5 = System.currentTimeMillis();
+        log.info("[ClickCard] Paso-5 ENTER (visible check final)");
+        if (isVisibleFast(byText)) {
             try {
                 WebElement el = driver.findElement(byText);
                 tapCenterW3C(el);
             } catch (Exception ignored) {}
+            log.info("[ClickCard] Paso-5 EXIT found byText ({}ms)", System.currentTimeMillis() - t5);
             return;
         }
-        if (isVisibleQuick(byParent)) {
+        if (isVisibleFast(byParent)) {
             try {
                 WebElement el = driver.findElement(byParent);
                 tapCenterW3C(el);
             } catch (Exception ignored) {}
+            log.info("[ClickCard] Paso-5 EXIT found byParent ({}ms)", System.currentTimeMillis() - t5);
             return;
         }
+        log.info("[ClickCard] Paso-5 EXIT no visible ({}ms)", System.currentTimeMillis() - t5);
 
         // ✅ 6) Fallback REAL: swipes manuales (slowSwipeUp) + re-check
-        // Esto asegura scroll real aunque los helpers no alcancen el elemento.
+        // OPTIMIZACIÓN: implicitlyWait=0 UNA sola vez para todo el bucle (no por chequeo,
+        // para no pagar el costo de alternar el wait extraSwipes×2 veces) — antes cada
+        // "miss" de isVisibleQuick heredaba el implicitlyWait=10s ambiente, acumulando
+        // hasta extraSwipes×2×10s (300+ s) antes de llegar al paso 7 (fuzzy).
+        // Además: corte anticipado por fingerprint — si 2 swipes consecutivos no cambian
+        // la pantalla (fin real del catálogo), seguir iterando solo repetiría chequeos
+        // sobre los mismos elementos ya inspeccionados. El tope extraSwipes no se reduce;
+        // solo se evita seguir cuando ya no hay nada nuevo que recorrer.
+        long t6 = System.currentTimeMillis();
         try {
             int extraSwipes = Math.min(Math.max(longTimeoutSeconds, 6), 20); // 6..20
-            for (int i = 0; i < extraSwipes; i++) {
+            log.info("[ClickCard] Paso-6 ENTER ({} swipes manuales)", extraSwipes);
 
-                if (isVisibleQuick(byText)) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            try {
+                String lastFingerprint = null;
+                int stalled = 0;
+
+                for (int i = 0; i < extraSwipes; i++) {
+
+                    if (isDisplayedNoWaitManaged(byText)) {
+                        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+                        try {
+                            WebElement el = driver.findElement(byText);
+                            tapCenterW3C(el);
+                        } catch (Exception ignored) {}
+                        return;
+                    }
+                    if (isDisplayedNoWaitManaged(byParent)) {
+                        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+                        try {
+                            WebElement el = driver.findElement(byParent);
+                            tapCenterW3C(el);
+                        } catch (Exception ignored) {}
+                        return;
+                    }
+
+                    // 👇 ESTE MÉTODO SÍ EXISTE EN TU BasePage
+                    slowSwipeUp();
+
+                    String fp = viewportFingerPrintPublic();
+                    if (fp.equals(lastFingerprint)) {
+                        if (++stalled >= 2) {
+                            log.info("[ClickCard] Paso-6 fin de catálogo detectado en swipe {}/{} — corte anticipado",
+                                    i + 1, extraSwipes);
+                            break;
+                        }
+                    } else {
+                        stalled = 0;
+                    }
+                    lastFingerprint = fp;
+                }
+
+                // Último re-check después de swipes
+                if (isDisplayedNoWaitManaged(byText)) {
+                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
                     try {
                         WebElement el = driver.findElement(byText);
                         tapCenterW3C(el);
                     } catch (Exception ignored) {}
                     return;
                 }
-                if (isVisibleQuick(byParent)) {
+                if (isDisplayedNoWaitManaged(byParent)) {
+                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
                     try {
                         WebElement el = driver.findElement(byParent);
                         tapCenterW3C(el);
                     } catch (Exception ignored) {}
                     return;
                 }
-
-                // 👇 ESTE MÉTODO SÍ EXISTE EN TU BasePage
-                slowSwipeUp();
-            }
-
-            // Último re-check después de swipes
-            if (isVisibleQuick(byText)) {
-                try {
-                    WebElement el = driver.findElement(byText);
-                    tapCenterW3C(el);
-                } catch (Exception ignored) {}
-                return;
-            }
-            if (isVisibleQuick(byParent)) {
-                try {
-                    WebElement el = driver.findElement(byParent);
-                    tapCenterW3C(el);
-                } catch (Exception ignored) {}
-                return;
+            } finally {
+                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             }
         } catch (Throwable ignored) {}
+        log.info("[ClickCard] Paso-6 EXIT no encontrado ({}ms)", System.currentTimeMillis() - t6);
 
         // ✅ 7) Búsqueda fuzzy: tolerante a variaciones de nombre en catálogo
-        log.info("[Fuzzy] Iniciando búsqueda tolerante para: '{}'", visibleText);
+        long t7 = System.currentTimeMillis();
+        log.info("[ClickCard] Paso-7 ENTER (fuzzy) | acumulado={}ms", System.currentTimeMillis() - tEntry);
         try {
             if (tryFuzzyClick(visibleText)) {
-                log.info("[Fuzzy] '{}' encontrado con búsqueda tolerante", visibleText);
+                log.info("[ClickCard] Paso-7 EXIT fuzzy ok ({}ms) | total={}ms",
+                        System.currentTimeMillis() - t7, System.currentTimeMillis() - tEntry);
                 return;
             }
             // Scroll adicional + reintento fuzzy (el producto puede estar fuera de pantalla)
             for (int i = 0; i < 5; i++) {
                 slowSwipeUp();
                 if (tryFuzzyClick(visibleText)) {
-                    log.info("[Fuzzy] '{}' encontrado tras scroll {} con búsqueda tolerante", visibleText, i + 1);
+                    log.info("[ClickCard] Paso-7 EXIT fuzzy+scroll({}) ok ({}ms) | total={}ms",
+                            (i + 1), System.currentTimeMillis() - t7, System.currentTimeMillis() - tEntry);
                     return;
                 }
             }
         } catch (Throwable ignored2) {}
+        log.info("[ClickCard] Paso-7 EXIT fuzzy no encontrado ({}ms)", System.currentTimeMillis() - t7);
 
         // ✅ 8) Fail definitivo con telemetría completa
+        log.warn("[ClickCard] EXIT FAIL | total={}ms | pasos: 2={}ms 3={}ms 4={}ms 5={}ms 6={}ms 7={}ms",
+                System.currentTimeMillis() - tEntry,
+                System.currentTimeMillis() - t2, System.currentTimeMillis() - t3,
+                System.currentTimeMillis() - t4, System.currentTimeMillis() - t5,
+                System.currentTimeMillis() - t6, System.currentTimeMillis() - t7);
         logVisibleElements("FAIL definitivo para '" + visibleText + "'");
         takeScreenshotOnFailure();
         throw new RuntimeException("[TELEMETRIA] No se encontró el elemento: '" + visibleText
@@ -1425,17 +1508,77 @@ public class SelectorPage extends BasePage {
                     anchorXpath, ANCHOR_SCROLL_MAX, extractedText);
         }
 
-        // ─── Intento 2: búsqueda directa del producto sin depender de ancla ──────────
-        log.info("[Búsqueda-Fallback] Buscando \"{}\" directamente (sin ancla)", extractedText);
+        // ─── Intento 2: fast-path directo a fuzzy ────────────────────────────────────
+        // PROBLEMA ORIGINAL: clickCardByTextWithFallback(15) re-ejecutaba pasos 3-6 completos
+        // (vertical ×2 + V/H ×2 + swipes manuales ×15) con implicitlyWait=10s por llamada,
+        // acumulando 15-34 minutos antes de alcanzar el fuzzy (paso 7, 2-3 s).
+        //
+        // CAUSA: isVisibleQuick / clickIfPresent usan driver.findElements con implicitlyWait=10s.
+        // Cada llamada bloquea 10s cuando el elemento NO está en el DOM. Los pasos 3-6 suman
+        // ~100 de esas llamadas → 15-34 min de bloqueo innecesario.
+        //
+        // FIX: el ancla ya recorrió la pantalla verticalmente (ANCHOR_SCROLL_MAX swipes) y
+        // el carrusel horizontalmente (MAX_CAROUSEL_SWIPES swipes). Repetir esos recorridos
+        // es redundante. Se pasa DIRECTAMENTE a:
+        //   (a) check visible instantáneo (implicitlyWait=0) — si ya está en pantalla, clic
+        //   (b) tryFuzzyClick                                — 2-3 s, tolerante a variaciones
+        //   (c) 5 scrolls mínimos + retry fuzzy             — cobertura para posición media
+        log.info("[Búsqueda-Fallback] ENTER fast-path para '{}' | t={}ms",
+                extractedText, System.currentTimeMillis() - t0);
+        long tFallback = System.currentTimeMillis();
         try {
-            this.clickCardByTextWithFallback(extractedText, 15);
-            log.info("[Búsqueda-Fallback] \"{}\" encontrado | Tiempo total: {}ms",
-                    extractedText, System.currentTimeMillis() - t0);
-            return;
+            // (a) Check visible instantáneo ───────────────────────────────────────────────
+            By targetFallback = By.xpath("//*[@text=\"" + escapeXpathValue(extractedText)
+                    + "\" or @content-desc=\"" + escapeXpathValue(extractedText) + "\"]");
+            long tCheck = System.currentTimeMillis();
+            boolean yaVisible;
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            try {
+                yaVisible = !driver.findElements(targetFallback).isEmpty();
+            } finally {
+                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            }
+            log.info("[Búsqueda-Fallback] (a) check instantáneo: visible={} ({}ms)",
+                    yaVisible, System.currentTimeMillis() - tCheck);
+            if (yaVisible) {
+                this.verificarYAbortarSiAgotado(extractedText);
+                this.forzarClic(targetFallback);
+                log.info("[Búsqueda-Fallback] EXIT clic directo | fallback={}ms | total={}ms",
+                        System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
+                return;
+            }
+
+            // (b) Fuzzy directo ────────────────────────────────────────────────────────────
+            log.info("[Búsqueda-Fallback] (b) fuzzy directo ENTER | t={}ms",
+                    System.currentTimeMillis() - tFallback);
+            if (tryFuzzyClick(extractedText)) {
+                log.info("[Búsqueda-Fallback] EXIT fuzzy ok | fallback={}ms | total={}ms",
+                        System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
+                return;
+            }
+            log.info("[Búsqueda-Fallback] (b) fuzzy directo EXIT no encontrado | t={}ms",
+                    System.currentTimeMillis() - tFallback);
+
+            // (c) 5 scrolls mínimos + retry fuzzy ─────────────────────────────────────────
+            log.info("[Búsqueda-Fallback] (c) fuzzy+scroll ENTER | t={}ms",
+                    System.currentTimeMillis() - tFallback);
+            for (int fi = 0; fi < 5; fi++) {
+                slowSwipeUp();
+                if (tryFuzzyClick(extractedText)) {
+                    log.info("[Búsqueda-Fallback] EXIT fuzzy+scroll({}) ok | fallback={}ms | total={}ms",
+                            (fi + 1), System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
+                    return;
+                }
+            }
+            log.warn("[Búsqueda-Fallback] EXIT no encontrado tras fast-path | fallback={}ms | total={}ms",
+                    System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
+
         } catch (org.opentest4j.TestAbortedException aborted) {
-            throw aborted; // propagar SKIP (producto agotado detectado en fallback)
+            throw aborted; // propagar SKIP (producto agotado)
         } catch (Exception fallbackEx) {
-            log.warn("[Búsqueda-Fallback] Búsqueda directa también falló: {}", fallbackEx.getMessage());
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+            log.warn("[Búsqueda-Fallback] ERROR: {} | fallback={}ms",
+                    fallbackEx.getMessage(), System.currentTimeMillis() - tFallback);
         }
 
         // ─── No localizado tras ancla + fallback → SKIP ───────────────────────────────
@@ -1460,6 +1603,41 @@ public class SelectorPage extends BasePage {
             return !driver.findElements(locator).isEmpty();
         } catch (Exception ignore) {
             return false;
+        }
+    }
+
+    /**
+     * Mismo criterio de "visible" que isVisibleQuick() (BasePage) — requiere que el
+     * primer elemento encontrado esté además isDisplayed() == true, a diferencia de
+     * isVisibleInstantaneamente() que solo exige presencia en el DOM — pero SIN
+     * gestionar implicitlyWait: asume que el llamador ya lo dejó en 0.
+     *
+     * Existe para poder envolver un bloque completo (p. ej. un bucle de swipes) en
+     * un único implicitlyWait(0)/restore en el llamador, en vez de pagar el costo de
+     * alternar el wait en cada chequeo individual dentro del bucle.
+     */
+    private boolean isDisplayedNoWaitManaged(By locator) {
+        try {
+            java.util.List<WebElement> els = driver.findElements(locator);
+            if (els.isEmpty()) return false;
+            try { return els.get(0).isDisplayed(); } catch (Exception ignore) { return false; }
+        } catch (Exception ignore) {
+            return false;
+        }
+    }
+
+    /**
+     * Chequeo de visibilidad puntual (fuera de un bucle) con implicitlyWait=0 propio.
+     * Mismo criterio que isVisibleQuick() (BasePage), pero garantiza que el "miss" no
+     * herede el implicitlyWait=10s ambiente que queda activo en el driver tras
+     * cualquier búsqueda fuzzy/telemetría previa en la misma sesión.
+     */
+    private boolean isVisibleFast(By locator) {
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+        try {
+            return isDisplayedNoWaitManaged(locator);
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
     }
 
@@ -1515,13 +1693,33 @@ public class SelectorPage extends BasePage {
             // inmediatamente en lugar de bloquear hasta 10 s cuando el elemento no existe todavía.
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
 
+            // ─── Check inicial ────────────────────────────────────────────────
             long tCheck = System.currentTimeMillis();
             if (!driver.findElements(locator).isEmpty()) {
                 log.debug("[Scroll-V] Sección ya visible (sin scrolls necesarios)");
-                log.info("[PERF] check inicial: {}ms", System.currentTimeMillis() - tCheck);
+                log.info("[PERF] check inicial: {}ms | total: {}ms",
+                        System.currentTimeMillis() - tCheck, System.currentTimeMillis() - t0);
                 log.info("[Scroll] Producto encontrado | Swipe 0/{} | Tiempo total búsqueda: {}ms",
                         maxVerticalSwipes, System.currentTimeMillis() - t0);
                 return true;
+            }
+
+            // ─── Cachear coordenadas de swipe (no cambian durante la búsqueda) ──
+            // Evita driver.findElement("android:id/content") + getRect() en cada iteración.
+            ensureAppIsInForegroundOrRecover();
+            int swipeX, swipeStartY, swipeEndY;
+            try {
+                WebElement content = driver.findElement(By.id("android:id/content"));
+                org.openqa.selenium.Rectangle r = content.getRect();
+                swipeX      = r.getX() + (int)(r.getWidth()  * 0.46);
+                swipeStartY = r.getY() + (int)(r.getHeight() * 0.90);
+                swipeEndY   = r.getY() + (int)(r.getHeight() * 0.10);
+                if (swipeStartY <= swipeEndY) throw new Exception("rect inválido");
+            } catch (Exception ignored) {
+                org.openqa.selenium.Dimension dim = driver.manage().window().getSize();
+                swipeX      = (int)(dim.width  * 0.46);
+                swipeStartY = (int)(dim.height * 0.88);
+                swipeEndY   = (int)(dim.height * 0.10);
             }
 
             int screenH = driver.manage().window().getSize().getHeight();
@@ -1533,20 +1731,23 @@ public class SelectorPage extends BasePage {
             for (int i = 0; i < maxVerticalSwipes; ++i) {
                 long tIter = System.currentTimeMillis();
 
-                // Pre-swipe check — instantáneo porque implicitlyWait=0
-                tCheck = System.currentTimeMillis();
+                // ── (1) Búsqueda del elemento visible — pre-swipe ─────────────
+                // instantáneo porque implicitlyWait=0
+                long tFind = System.currentTimeMillis();
                 if (!driver.findElements(locator).isEmpty()) {
+                    long msFind = System.currentTimeMillis() - tFind;
                     log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
-                    log.info("[PERF] Swipe {}/{} | pre-check: {}ms | iter: {}ms",
-                            (i + 1), maxVerticalSwipes,
-                            System.currentTimeMillis() - tCheck, System.currentTimeMillis() - tIter);
+                    log.info("[PERF] iter={}/{} | find(pre)={}ms | total={}ms | FOUND",
+                            (i + 1), maxVerticalSwipes, msFind, System.currentTimeMillis() - tIter);
                     log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
                             (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
                     return true;
                 }
-                long checkMs = System.currentTimeMillis() - tCheck;
+                long msFind = System.currentTimeMillis() - tFind;
 
-                // Capturar elemento de referencia para detección de stall (ya en implicitlyWait=0)
+                // ── (2) Captura de referencia para detección de stall ──────────
+                // Último TextView visible ANTES del swipe; se compara su Y después.
+                long tRef = System.currentTimeMillis();
                 WebElement refEl = null;
                 int refY = -1;
                 try {
@@ -1557,24 +1758,54 @@ public class SelectorPage extends BasePage {
                         try { refY = refEl.getLocation().getY(); } catch (Exception ignored) { refEl = null; }
                     }
                 } catch (Exception ignored) {}
+                long msRef = System.currentTimeMillis() - tRef;
 
                 log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
-                long tSwipe = System.currentTimeMillis();
-                this.swipeUpInMainContent(450);
-                swipesDone++;
-                long swipeMs = System.currentTimeMillis() - tSwipe;
 
-                // Detección de fin de catálogo por posición visual
-                int newY = -1;
+                // ── (3) Gesto de swipe — sin Thread.sleep fijo ────────────────
+                // Se llama swipeW3C directamente (coordenadas cacheadas) para medir
+                // el gesto puro por separado de la espera post-swipe.
+                long tGesture = System.currentTimeMillis();
+                swipeW3C(swipeX, swipeStartY, swipeX, swipeEndY, 450);
+                swipesDone++;
+                long msGesture = System.currentTimeMillis() - tGesture;
+
+                // ── (4) Espera inteligente post-swipe ─────────────────────────
+                // Reemplaza Thread.sleep(350) fijo: sale en cuanto el LazyColumn
+                // se estabiliza (Y del último TextView visible deja de cambiar).
+                // Máximo 350 ms — mismo techo que el sleep anterior.
+                long tWait = System.currentTimeMillis();
+                {
+                    int prevBotY = -1, stableCount = 0;
+                    long waitEnd = System.currentTimeMillis() + 350;
+                    while (System.currentTimeMillis() < waitEnd) {
+                        try {
+                            java.util.List<WebElement> els =
+                                    driver.findElements(By.className("android.widget.TextView"));
+                            if (!els.isEmpty()) {
+                                int botY = els.get(els.size() - 1).getLocation().getY();
+                                if (botY == prevBotY) {
+                                    if (++stableCount >= 2) break; // pantalla estabilizada
+                                } else { prevBotY = botY; stableCount = 0; }
+                            }
+                        } catch (Exception ignored) {}
+                        try { Thread.sleep(50); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    }
+                }
+                long msWait = System.currentTimeMillis() - tWait;
+
+                // ── (5) Validación del movimiento (detección de stall) ─────────
+                long tValidate = System.currentTimeMillis();
                 if (refEl != null && refY >= 0) {
                     try {
-                        newY = refEl.getLocation().getY();
+                        int newY = refEl.getLocation().getY();
                         if (Math.abs(newY - refY) < threshold) {
                             stalledCount++;
                             if (stalledCount >= STALL_REQUIRED) {
-                                log.info("[PERF] Swipe {}/{} | pre-check: {}ms | swipe: {}ms | iter: {}ms | STALL {}/{}",
-                                        (i + 1), maxVerticalSwipes, checkMs, swipeMs,
-                                        System.currentTimeMillis() - tIter, stalledCount, STALL_REQUIRED);
+                                long msValidate = System.currentTimeMillis() - tValidate;
+                                log.info("[PERF] iter={}/{} | find={}ms | ref={}ms | gesto={}ms | wait={}ms | stall={}ms | total={}ms | STALL",
+                                        (i + 1), maxVerticalSwipes, msFind, msRef, msGesture, msWait,
+                                        msValidate, System.currentTimeMillis() - tIter);
                                 log.info("[Scroll] Fin de catálogo detectado ({}/{} swipes sin movimiento)",
                                         stalledCount, STALL_REQUIRED);
                                 log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
@@ -1586,27 +1817,27 @@ public class SelectorPage extends BasePage {
                         } else {
                             stalledCount = 0;
                         }
-                    } catch (Exception ignored) {
-                        stalledCount = 0;
-                    }
+                    } catch (Exception ignored) { stalledCount = 0; }
                 }
+                long msValidate = System.currentTimeMillis() - tValidate;
 
-                // Post-swipe check — instantáneo porque implicitlyWait=0
-                tCheck = System.currentTimeMillis();
+                // ── Post-swipe check — instantáneo (implicitlyWait=0) ─────────
+                long tFindPost = System.currentTimeMillis();
                 if (!driver.findElements(locator).isEmpty()) {
-                    log.info("[PERF] Swipe {}/{} | pre-check: {}ms | swipe: {}ms | post-check: {}ms | iter: {}ms",
-                            (i + 1), maxVerticalSwipes, checkMs, swipeMs,
-                            System.currentTimeMillis() - tCheck, System.currentTimeMillis() - tIter);
+                    long msFindPost = System.currentTimeMillis() - tFindPost;
+                    log.info("[PERF] iter={}/{} | find={}ms | ref={}ms | gesto={}ms | wait={}ms | stall={}ms | find(post)={}ms | total={}ms | FOUND",
+                            (i + 1), maxVerticalSwipes, msFind, msRef, msGesture, msWait,
+                            msValidate, msFindPost, System.currentTimeMillis() - tIter);
                     log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
                     log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
                             (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
                     return true;
                 }
-                long postCheckMs = System.currentTimeMillis() - tCheck;
+                long msFindPost = System.currentTimeMillis() - tFindPost;
 
-                log.info("[PERF] Swipe {}/{} | pre-check: {}ms | swipe: {}ms | post-check: {}ms | iter: {}ms",
-                        (i + 1), maxVerticalSwipes, checkMs, swipeMs, postCheckMs,
-                        System.currentTimeMillis() - tIter);
+                log.info("[PERF] iter={}/{} | find={}ms | ref={}ms | gesto={}ms | wait={}ms | stall={}ms | find(post)={}ms | total={}ms",
+                        (i + 1), maxVerticalSwipes, msFind, msRef, msGesture, msWait,
+                        msValidate, msFindPost, System.currentTimeMillis() - tIter);
             }
 
             log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
