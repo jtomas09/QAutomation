@@ -1028,20 +1028,26 @@ public class JobExecutor {
     // waitFor()/exitValue()) o si sigue vivo (recrear el lector y continuar, con
     // reintento de reconexión a Appium de por medio).
 
-    private static final int STREAM_RECOVERY_MAX_ATTEMPTS = 5;
-
     private void consumeProcessOutputResilient(JobDto job, Process process,
             AtomicInteger passed, AtomicInteger failed, AtomicInteger skipped,
             List<TestCaseResult> testCases) {
 
         int consecutiveFailures = 0;
 
-        while (true) {
-            // Antes de (re)crear el lector, confirmar que el proceso sigue vivo.
-            if (!process.isAlive()) {
-                System.out.println("[Executor] Proceso ya no está vivo — fin de la lectura de stdout/stderr.");
-                return;
-            }
+        // ── SIN límite de reintentos ─────────────────────────────────────────────
+        // CAUSA RAÍZ (root cause) del corte prematuro a ~9-10 casos de 50:
+        // la versión anterior abandonaba la lectura DEFINITIVAMENTE tras un EOF con
+        // el proceso vivo (sin reintentar) o tras 5 IOException consecutivas — y a
+        // partir de ahí passed/failed/skipped dejaban de incrementarse para SIEMPRE,
+        // aunque Gradle siguiera ejecutando decenas de tests más en segundo plano.
+        // process.waitFor() (más abajo) seguía esperando correctamente la
+        // terminación REAL del proceso, así que la suite no "moría" — pero se
+        // finalizaba con el conteo congelado en el momento del corte, dando la
+        // apariencia de que la ejecución terminó tras 9-10 casos.
+        // Fix: reintentar indefinidamente CON BACKOFF mientras process.isAlive()
+        // sea true, sin importar cuántos intentos hagan falta ni cuánto dure la
+        // suite. Solo se deja de leer cuando el proceso terminó de verdad.
+        while (process.isAlive()) {
 
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
@@ -1055,55 +1061,55 @@ public class JobExecutor {
                     else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); }
                     else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); }
                 }
-                // readLine() devolvió null → EOF. Puede ser cierre normal (el proceso
-                // terminó) o cierre anticipado del pipe con el proceso aún vivo — en
-                // ambos casos, salir de este método es seguro: si el proceso sigue vivo,
-                // el llamador continúa monitoreándolo vía waitFor()/exitValue(), nunca
-                // por el fin del stream.
-                System.out.println("[Executor] EOF en stdout/stderr — process.isAlive()=" + process.isAlive());
-                return;
+
+                // readLine() devolvió null → EOF.
+                if (!process.isAlive()) {
+                    System.out.println("[Executor] EOF en stdout/stderr tras finalización real del proceso.");
+                    return;
+                }
+                // EOF con el proceso AÚN VIVO: un pipe normal no debería cerrarse así
+                // salvo que el hijo cerrara su propio stdout sin salir (glitch tras
+                // reposo del equipo / desconexión USB). Esto NUNCA se interpreta como
+                // fin de la suite: se recrea el lector y se sigue leyendo mientras el
+                // proceso exista — igual tratamiento que un IOException.
+                consecutiveFailures++;
+                logStreamDisruption(job, "EOF-con-proceso-vivo", null, consecutiveFailures);
+                attemptStreamRecovery(job, consecutiveFailures);
+                // Vuelve al inicio del while: recrea el BufferedReader sobre el mismo
+                // InputStream del proceso (Process expone el mismo stream durante todo
+                // su ciclo de vida) y sigue contando PASS/FAIL/SKIP normalmente.
+
             } catch (IOException ioe) {
-                boolean alive = process.isAlive();
-                if (!alive) {
+                if (!process.isAlive()) {
                     // El cierre del stream es consecuencia de que el proceso terminó,
                     // no la causa de la finalización — no es un error a reportar.
                     System.out.println("[Executor] Stream cerrado tras finalización real del proceso (isAlive=false).");
                     return;
                 }
-
                 consecutiveFailures++;
-                String reason = diagnoseStreamDisruption(job);
-                System.err.printf(
-                        "[Executor] ⚠ Stream de salida interrumpido (%s) | intento=%d/%d | isAlive=%s | %s%n",
-                        ioe.getMessage(), consecutiveFailures, STREAM_RECOVERY_MAX_ATTEMPTS, alive, reason);
-                try {
-                    client.sendLog(job.executionId, "WARN",
-                            "[Runner] Lectura de logs interrumpida (" + reason + ") — el proceso sigue vivo, "
-                            + "la suite continúa. No se finaliza la ejecución por este motivo.");
-                } catch (Exception ignored) {}
-
-                if (consecutiveFailures >= STREAM_RECOVERY_MAX_ATTEMPTS) {
-                    System.err.println("[Executor] Se agotaron los reintentos de recuperación del stream "
-                            + "con el proceso aún vivo (" + reason + "). Se deja de transmitir logs en vivo, "
-                            + "pero la suite NO se finaliza aquí — se sigue esperando la terminación real del proceso.");
-                    try {
-                        client.sendLog(job.executionId, "WARN",
-                                "[Runner] No fue posible restablecer el streaming de logs (" + reason + "). "
-                                + "La ejecución continúa; el resultado se determinará cuando el proceso finalice.");
-                    } catch (Exception ignored) {}
-                    return;
-                }
-
-                // Intento de recuperación antes de reintentar: si Appium dejó de
-                // responder (p.ej. tras suspensión del equipo o pérdida temporal de
-                // USB/red), intentar reconectar/relanzar sin tocar la sesión de test
-                // en curso. Un breve backoff da tiempo a que el equipo/dispositivo
-                // vuelvan a responder tras el reposo.
+                logStreamDisruption(job, diagnoseStreamDisruption(job), ioe.getMessage(), consecutiveFailures);
                 attemptStreamRecovery(job, consecutiveFailures);
-                // Vuelve al inicio del while: valida isAlive() y recrea el BufferedReader
-                // sobre el mismo InputStream del proceso (Process expone el mismo stream
-                // durante todo su ciclo de vida).
             }
+        }
+        System.out.println("[Executor] Proceso ya no está vivo — fin de la lectura de stdout/stderr.");
+    }
+
+    /**
+     * Log local SIEMPRE (para diagnóstico completo); log al backend acotado
+     * (intento 1, luego cada 10) para no saturar el canal de logs durante un
+     * corte largo — la suite puede seguir corriendo horas sin que esto se pierda
+     * ni se convierta en spam.
+     */
+    private void logStreamDisruption(JobDto job, String reason, String detail, int attempt) {
+        System.err.printf(
+                "[Executor] ⚠ Stream de salida interrumpido (%s%s) | intento=%d | proceso vivo — reintentando sin límite%n",
+                reason, detail != null ? (": " + detail) : "", attempt);
+        if (attempt == 1 || attempt % 10 == 0) {
+            try {
+                client.sendLog(job.executionId, "WARN",
+                        "[Runner] Lectura de logs interrumpida (" + reason + ") — intento " + attempt
+                        + ". El proceso sigue vivo; la suite continúa y NO se finaliza por este motivo.");
+            } catch (Exception ignored) {}
         }
     }
 
