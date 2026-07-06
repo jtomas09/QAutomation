@@ -6,6 +6,7 @@ import qa.cinepolis.runner.model.TestCaseResult;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -793,18 +794,7 @@ public class JobExecutor {
             abortWatcher.setDaemon(true);
             abortWatcher.start();
 
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    String level = detectLevel(line);
-                    client.sendLog(job.executionId, level, line);
-                    System.out.println("[" + level + "] " + line);
-                    if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); }
-                    else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); }
-                    else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); }
-                }
-            }
+            consumeProcessOutputResilient(job, process, passed, failed, skipped, testCases);
 
             // ── Resilient waitFor ──────────────────────────────────────────────────
             // process.waitFor() can receive an InterruptedException when the Runner
@@ -881,6 +871,10 @@ public class JobExecutor {
             }
 
             System.out.printf("[Executor] Gradle terminó | exit=%d | %s%n", exitCode, job.executionId);
+            // Diagnóstico completo del proceso antes de transicionar a FINALIZING —
+            // deja constancia de que la finalización se basa en una terminación real
+            // del proceso (isAlive=false) y no en un efecto colateral como Stream closed.
+            logProcessDiagnostics("pre-finalize", job, process, exitCode);
 
             // If Gradle crashed with no test output (e.g. compilation error),
             // record at least one failure so the execution doesn't finish as PASSED.
@@ -1019,6 +1013,180 @@ public class JobExecutor {
                 } catch (Exception ignored) {}
             }
         }
+    }
+
+    // ── Resilient process-output consumption ────────────────────────────────────
+    //
+    // Cuando el equipo host entra en reposo, la pantalla se apaga o el dispositivo
+    // pierde actividad temporalmente, el pipe stdout/stderr del proceso Gradle puede
+    // arrojar "java.io.IOException: Stream closed" en BufferedReader.readLine() aun
+    // cuando el proceso sigue vivo y la suite continúa ejecutándose.  Ese IOException
+    // NUNCA debe propagarse hacia el catch(Exception) de execute() — allí se
+    // interpretaría como un fallo fatal y se finalizaría la ejecución con FAILED,
+    // aunque Gradle siga corriendo.  Este método aísla esa lectura y decide, en cada
+    // interrupción, si el proceso realmente terminó (dejar de leer y avanzar a
+    // waitFor()/exitValue()) o si sigue vivo (recrear el lector y continuar, con
+    // reintento de reconexión a Appium de por medio).
+
+    private static final int STREAM_RECOVERY_MAX_ATTEMPTS = 5;
+
+    private void consumeProcessOutputResilient(JobDto job, Process process,
+            AtomicInteger passed, AtomicInteger failed, AtomicInteger skipped,
+            List<TestCaseResult> testCases) {
+
+        int consecutiveFailures = 0;
+
+        while (true) {
+            // Antes de (re)crear el lector, confirmar que el proceso sigue vivo.
+            if (!process.isAlive()) {
+                System.out.println("[Executor] Proceso ya no está vivo — fin de la lectura de stdout/stderr.");
+                return;
+            }
+
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    consecutiveFailures = 0; // el stream volvió a estar sano
+                    String level = detectLevel(line);
+                    client.sendLog(job.executionId, level, line);
+                    System.out.println("[" + level + "] " + line);
+                    if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); }
+                    else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); }
+                    else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); }
+                }
+                // readLine() devolvió null → EOF. Puede ser cierre normal (el proceso
+                // terminó) o cierre anticipado del pipe con el proceso aún vivo — en
+                // ambos casos, salir de este método es seguro: si el proceso sigue vivo,
+                // el llamador continúa monitoreándolo vía waitFor()/exitValue(), nunca
+                // por el fin del stream.
+                System.out.println("[Executor] EOF en stdout/stderr — process.isAlive()=" + process.isAlive());
+                return;
+            } catch (IOException ioe) {
+                boolean alive = process.isAlive();
+                if (!alive) {
+                    // El cierre del stream es consecuencia de que el proceso terminó,
+                    // no la causa de la finalización — no es un error a reportar.
+                    System.out.println("[Executor] Stream cerrado tras finalización real del proceso (isAlive=false).");
+                    return;
+                }
+
+                consecutiveFailures++;
+                String reason = diagnoseStreamDisruption(job);
+                System.err.printf(
+                        "[Executor] ⚠ Stream de salida interrumpido (%s) | intento=%d/%d | isAlive=%s | %s%n",
+                        ioe.getMessage(), consecutiveFailures, STREAM_RECOVERY_MAX_ATTEMPTS, alive, reason);
+                try {
+                    client.sendLog(job.executionId, "WARN",
+                            "[Runner] Lectura de logs interrumpida (" + reason + ") — el proceso sigue vivo, "
+                            + "la suite continúa. No se finaliza la ejecución por este motivo.");
+                } catch (Exception ignored) {}
+
+                if (consecutiveFailures >= STREAM_RECOVERY_MAX_ATTEMPTS) {
+                    System.err.println("[Executor] Se agotaron los reintentos de recuperación del stream "
+                            + "con el proceso aún vivo (" + reason + "). Se deja de transmitir logs en vivo, "
+                            + "pero la suite NO se finaliza aquí — se sigue esperando la terminación real del proceso.");
+                    try {
+                        client.sendLog(job.executionId, "WARN",
+                                "[Runner] No fue posible restablecer el streaming de logs (" + reason + "). "
+                                + "La ejecución continúa; el resultado se determinará cuando el proceso finalice.");
+                    } catch (Exception ignored) {}
+                    return;
+                }
+
+                // Intento de recuperación antes de reintentar: si Appium dejó de
+                // responder (p.ej. tras suspensión del equipo o pérdida temporal de
+                // USB/red), intentar reconectar/relanzar sin tocar la sesión de test
+                // en curso. Un breve backoff da tiempo a que el equipo/dispositivo
+                // vuelvan a responder tras el reposo.
+                attemptStreamRecovery(job, consecutiveFailures);
+                // Vuelve al inicio del while: valida isAlive() y recrea el BufferedReader
+                // sobre el mismo InputStream del proceso (Process expone el mismo stream
+                // durante todo su ciclo de vida).
+            }
+        }
+    }
+
+    /** Backoff acotado + intento de reconexión a Appium cuando el stream se corta con el proceso vivo. */
+    private void attemptStreamRecovery(JobDto job, int attempt) {
+        long backoffMs = Math.min(2_000L * attempt, 10_000L);
+        try { Thread.sleep(backoffMs); }
+        catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+
+        if (appiumMgr != null && !appiumMgr.isAlive()) {
+            try {
+                client.sendLog(job.executionId, "WARN",
+                        "[Runner] Appium no responde tras interrupción de stream — intentando reconectar...");
+                appiumMgr.ensureRunning();
+                client.sendLog(job.executionId, "INFO",
+                        "[Runner] Appium " + (appiumMgr.isAlive() ? "reconectado ✅" : "sigue sin responder ⚠"));
+            } catch (Exception e) {
+                System.err.println("[Executor] No fue posible reconectar Appium: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Determina la causa más probable de una interrupción de stream con el proceso
+     * aún vivo, en lugar de reportar genéricamente "Stream closed":
+     *   - DeviceDisconnected  → el dispositivo (Android/iOS) ya no responde
+     *   - AppiumDisconnected  → el dispositivo responde pero Appium no
+     *   - ComputerSleep       → dispositivo y Appium responden; el patrón típico
+     *                           de una suspensión momentánea del equipo host
+     */
+    private String diagnoseStreamDisruption(JobDto job) {
+        boolean isAndroid = !"ios".equalsIgnoreCase(nvl(job.platform, ""));
+        String  udid      = nvl(job.udid, "");
+        Boolean deviceConnected = isAndroid ? isAndroidDeviceConnected(udid) : isIosDeviceReachable(udid);
+        boolean appiumOk        = appiumMgr != null && appiumMgr.isAlive();
+
+        if (Boolean.FALSE.equals(deviceConnected)) return "DeviceDisconnected";
+        if (!appiumOk)                             return "AppiumDisconnected";
+        return "ComputerSleep";
+    }
+
+    /** True/false si se pudo determinar el estado del dispositivo Android via ADB; null si no se pudo determinar. */
+    private Boolean isAndroidDeviceConnected(String udid) {
+        if (udid == null || udid.isBlank()) return null;
+        try {
+            Process p = new ProcessBuilder(embeddedAdbPath(), "devices")
+                    .redirectErrorStream(true).start();
+            String output = new String(p.getInputStream().readAllBytes());
+            p.waitFor(5, TimeUnit.SECONDS);
+            return Arrays.stream(output.split("\n"))
+                    .anyMatch(l -> l.startsWith(udid) && l.contains("\tdevice"));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** True/false si el dispositivo iOS respondió a la consulta devicectl; null si no se pudo determinar. */
+    private Boolean isIosDeviceReachable(String udid) {
+        if (udid == null || udid.isBlank()) return null;
+        try {
+            DeviceScreenLockChecker.LockState state = DeviceScreenLockChecker.check(udid);
+            return "devicectl".equals(state.method);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Log detallado del estado del proceso/Appium/dispositivo antes de finalizar una ejecución. */
+    private void logProcessDiagnostics(String stage, JobDto job, Process process, int exitCode) {
+        boolean isAndroid = !"ios".equalsIgnoreCase(nvl(job.platform, ""));
+        String  udid      = nvl(job.udid, "");
+        Boolean deviceConnected = isAndroid ? isAndroidDeviceConnected(udid) : isIosDeviceReachable(udid);
+        String  deviceState = deviceConnected == null ? "DESCONOCIDO"
+                : (deviceConnected ? "CONECTADO" : "DESCONECTADO");
+        boolean appiumOk = appiumMgr != null && appiumMgr.isAlive();
+        String  pid;
+        try { pid = String.valueOf(process.pid()); } catch (Exception e) { pid = "unknown"; }
+
+        String msg = String.format(
+                "[Runner] Diagnóstico de proceso [%s] | isAlive=%s | PID=%s | exitCode=%d | Appium=%s | Dispositivo=%s",
+                stage, process.isAlive(), pid, exitCode, appiumOk ? "OK" : "NO_DISPONIBLE", deviceState);
+        System.out.println(msg);
+        try { client.sendLog(job.executionId, "INFO", msg); } catch (Exception ignored) {}
     }
 
     // ── Gradle command builder ─────────────────────────────────────────────────
