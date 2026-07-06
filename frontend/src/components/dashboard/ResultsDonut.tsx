@@ -1,3 +1,4 @@
+import React from 'react'
 import { motion } from 'framer-motion'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 
@@ -11,7 +12,7 @@ const SERIES = [
 
 const EMPTY_DATA = [{ name: 'Sin datos', value: 1, color: 'rgba(255,255,255,0.07)' }]
 
-export default function ResultsDonut({ passed, failed, skipped, isLive = false }: Props) {
+function ResultsDonut({ passed, failed, skipped, isLive = false }: Props) {
   const total = passed + failed + skipped
   const isEmpty = total === 0
 
@@ -147,3 +148,8 @@ export default function ResultsDonut({ passed, failed, skipped, isLive = false }
     </motion.div>
   )
 }
+
+// aggStats se congela mientras isLive=true, así que passed/failed/skipped no
+// cambian durante una ejecución — sin memo, este gráfico (Recharts) se
+// re-renderiza igualmente en cada línea de log que actualiza el Dashboard padre.
+export default React.memo(ResultsDonut)

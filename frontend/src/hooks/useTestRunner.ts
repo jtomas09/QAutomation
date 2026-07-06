@@ -15,6 +15,18 @@ function extractTestNameFromLog(line: string): string {
   return after || 'unknown'
 }
 
+// Tope del buffer de logs en memoria. Sin este límite, `logs` crece sin fin durante
+// ejecuciones largas (cada línea de Gradle/Appium llega por SSE y se acumula para
+// siempre) — el spread `[...prev.logs, entry]` copia el arreglo completo en cada
+// evento, así que el costo por línea crece linealmente con el historial ya
+// acumulado (O(n) por evento, O(n²) total). En una suite de varias horas esto
+// alcanza cientos de miles de entradas y provoca el crash del renderer de
+// Chromium (Error Code 5) por agotamiento de memoria. 2000 líneas son más que
+// suficientes para inspección en vivo y para "Extraer Log" / "Log Técnico"
+// (que ya solo muestran ventanas recientes en pantalla); las líneas más
+// antiguas se descartan igual que en un buffer de scrollback de terminal.
+const MAX_LOG_ENTRIES = 2000
+
 const initState: RunState = {
   status:        'idle',
   passed:        0,
@@ -52,7 +64,14 @@ export function useTestRunner() {
         if (m) totalExpected = parseInt(m[1], 10)
       }
 
-      return { ...prev, logs: [...prev.logs, entry], passed, failed, skipped, total, totalExpected }
+      // Buffer acotado: conserva las últimas MAX_LOG_ENTRIES líneas (ring buffer).
+      // slice() sobre un arreglo ya acotado a MAX_LOG_ENTRIES es O(MAX_LOG_ENTRIES),
+      // constante — ya no O(n) creciente con la duración de la ejecución.
+      const logs = prev.logs.length >= MAX_LOG_ENTRIES
+        ? [...prev.logs.slice(prev.logs.length - MAX_LOG_ENTRIES + 1), entry]
+        : [...prev.logs, entry]
+
+      return { ...prev, logs, passed, failed, skipped, total, totalExpected }
     })
   }, [])
 

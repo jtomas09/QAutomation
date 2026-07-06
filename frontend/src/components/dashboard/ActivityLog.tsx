@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check, Wrench } from 'lucide-react'
 import type { LogEntry } from '../../types'
@@ -166,12 +166,15 @@ function LogModal({
   )
 }
 
-export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
+function ActivityLog({ logs, onClear, onViewAll }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [showExtract,   setShowExtract]   = useState(false)
   const [showTechModal, setShowTechModal] = useState(false)
 
-  const functionalLogs = logs.filter(isFunctionalLog)
+  // Recalcula solo cuando `logs` realmente cambia — evita re-filtrar el arreglo
+  // completo en cada re-render que no provenga de un nuevo log (p. ej. cuando el
+  // Dashboard padre se re-renderiza por otro estado no relacionado).
+  const functionalLogs = useMemo(() => logs.filter(isFunctionalLog), [logs])
   const hiddenCount    = logs.length - functionalLogs.length
 
   useEffect(() => {
@@ -335,3 +338,8 @@ export default function ActivityLog({ logs, onClear, onViewAll }: Props) {
     </div>
   )
 }
+
+// Evita re-renderizar (y re-filtrar/re-animar) cuando el Dashboard padre se
+// actualiza por un motivo ajeno a esta lista (p. ej. aggStats o suiteMetrics) y
+// `logs`/`onClear`/`onViewAll` siguen siendo los mismos por referencia.
+export default React.memo(ActivityLog)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -36,7 +36,7 @@ function buildDays(executions: ExecutionSummary[]): DayEntry[] {
 
 interface Props { isLive?: boolean }
 
-export default function DailyChart({ isLive = false }: Props) {
+function DailyChart({ isLive = false }: Props) {
   const [data,   setData]   = useState<DayEntry[]>(() => buildDays([]))
   const [hidden, setHidden] = useState<Set<string>>(new Set())
 
@@ -162,3 +162,8 @@ export default function DailyChart({ isLive = false }: Props) {
     </motion.div>
   )
 }
+
+// data/hidden son estado interno propio (congelado mientras isLive=true); sin
+// memo, este gráfico (Recharts) igual se re-renderiza en cada línea de log que
+// actualiza el Dashboard padre, aunque su contenido no haya cambiado.
+export default React.memo(DailyChart)
