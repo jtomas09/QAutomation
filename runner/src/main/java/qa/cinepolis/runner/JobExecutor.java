@@ -794,7 +794,9 @@ public class JobExecutor {
             abortWatcher.setDaemon(true);
             abortWatcher.start();
 
-            consumeProcessOutputResilient(job, process, passed, failed, skipped, testCases);
+            AtomicInteger streamIncidents = new AtomicInteger(0);
+            consumeProcessOutputResilient(job, process, passed, failed, skipped, testCases,
+                    expectedCount, streamIncidents);
 
             // ── Resilient waitFor ──────────────────────────────────────────────────
             // process.waitFor() can receive an InterruptedException when the Runner
@@ -893,16 +895,41 @@ public class JobExecutor {
             //   3. activeDrivers == 0   (Appium sessions cerradas por el framework de tests)
             //   4. activeTestMethods == 0 (proceso Gradle terminó)
             // Las condiciones 2, 3 y 4 se garantizan porque process.waitFor() ya retornó.
-            // La condición 1 requiere que el conteo actual coincida con el esperado,
-            // o bien que ajustemos el expected al real (Gradle puede salir anticipadamente).
             int actualTotal = passed.get() + failed.get() + skipped.get();
+            int incidents   = streamIncidents.get();
+
+            System.out.println("[Runner] Casos planificados: " + (expectedCount > 0 ? expectedCount : "desconocido"));
+            System.out.println("[Runner] Casos ejecutados: " + actualTotal);
+            System.out.println("[Runner] PASSED: " + passed.get());
+            System.out.println("[Runner] FAILED: " + failed.get());
+            System.out.println("[Runner] SKIPPED: " + skipped.get());
+
             if (expectedCount > 0 && actualTotal != expectedCount) {
-                // Gradle terminó antes de ejecutar todos los tests esperados (error de compilación,
-                // fallo de infraestructura, etc.). Sincronizamos TOTAL_ESPERADO con la realidad
-                // para que el frontend muestre 0 tests pendientes antes de recibir FINALIZING.
+                // Discrepancia real entre lo planificado y lo ejecutado/contado. NUNCA se
+                // ajusta esto en silencio: se registra la causa probable de forma explícita
+                // ANTES de sincronizar TOTAL_ESPERADO (necesario para que el Dashboard no
+                // muestre tests pendientes eternamente — su lógica no se modifica, solo se
+                // antepone este diagnóstico).
+                String causaProbable = incidents > 0
+                        ? "posible pérdida de conteo durante " + incidents + " incidente(s) de stream "
+                          + "(reposo/USB/Appium) — ver logs '[Executor] Stream de salida interrumpido' de esta ejecución"
+                        : "Gradle/JVM terminó (exit=" + exitCode + ") antes de completar todos los casos "
+                          + "planificados — sin incidentes de stream registrados; revisar causa en el log de Gradle "
+                          + "(fallo de compilación, crash de la JVM de test, etc.)";
+                String errMsg = String.format(
+                        "[Runner] ⚠ VALIDACIÓN FALLIDA: ejecutados (%d) != planificados (%d) | incidentesStream=%d | causa probable: %s",
+                        actualTotal, expectedCount, incidents, causaProbable);
+                System.err.println(errMsg);
+                try { client.sendLog(job.executionId, "ERROR", errMsg); } catch (Exception ignored) {}
+
+                // Sincroniza TOTAL_ESPERADO con la realidad (comportamiento preexistente,
+                // requerido por el Dashboard) — pero ya quedó registrada la causa explícita
+                // arriba, en vez de ajustar el conteo en silencio.
                 client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + actualTotal);
                 System.out.printf("[Executor] [FINALIZING] Conteo actualizado: %d ejecutados de %d esperados%n",
                         actualTotal, expectedCount);
+            } else if (expectedCount > 0) {
+                System.out.println("[Runner] Validación OK: Total ejecutado coincide con el total planificado.");
             }
             System.out.printf("[Executor] [FINALIZING] Validación: tests=%d workers=0 drivers=0 methods=0 → OK%n",
                     actualTotal);
@@ -1027,39 +1054,63 @@ public class JobExecutor {
     // interrupción, si el proceso realmente terminó (dejar de leer y avanzar a
     // waitFor()/exitValue()) o si sigue vivo (recrear el lector y continuar, con
     // reintento de reconexión a Appium de por medio).
+    //
+    // ── CAUSA RAÍZ REAL del corte a ~9, 10 o 19 casos de 50 (encontrada al auditar
+    // el fix anterior) ──────────────────────────────────────────────────────────
+    // `try (BufferedReader br = new BufferedReader(new InputStreamReader(
+    //      process.getInputStream())))` es un try-with-resources: la especificación
+    // de Java (JLS §14.20.3) garantiza que `br.close()` se invoca SIEMPRE al salir
+    // del bloque try, tanto en el camino normal como cuando una excepción es
+    // atrapada por el catch adjunto. `close()` en un BufferedReader se propaga al
+    // InputStreamReader y de ahí al InputStream subyacente — en este caso, el MISMO
+    // stream que devuelve process.getInputStream() durante TODO el ciclo de vida del
+    // proceso (Process no abre un stream nuevo en cada llamada; siempre retorna la
+    // misma referencia). Es decir: la primera vez que se lanzaba una IOException
+    // (p. ej. por reposo del equipo, USB o Appium) el propio try-with-resources
+    // cerraba PARA SIEMPRE el stream de stdout del proceso Gradle — aunque el
+    // proceso seguía vivo ejecutando el resto de la suite. El "reintento sin
+    // límite" que se agregó antes seguía envolviendo ese MISMO stream ya muerto en
+    // un BufferedReader nuevo en cada vuelta del bucle, así que TODOS los
+    // reintentos fallaban de inmediato con el mismo "Stream closed" — la lectura
+    // jamás se recuperaba y passed/failed/skipped quedaban congelados en el punto
+    // exacto del primer glitch (caso 9, 10, 19… lo que sea que haya coincidido con
+    // el reposo/desconexión), mientras Gradle seguía corriendo en segundo plano
+    // hasta agotar los 50 casos sin que ninguno más se contara.
+    //
+    // FIX: eliminar el try-with-resources. El BufferedReader NUNCA se cierra
+    // explícitamente mientras el proceso esté vivo — solo se descarta la
+    // referencia (se recolecta por GC normalmente; no retiene ningún descriptor
+    // de archivo propio, el pipe pertenece al Process) y se envuelve de nuevo el
+    // MISMO InputStream subyacente, que sigue intacto porque nunca lo cerramos.
 
     private void consumeProcessOutputResilient(JobDto job, Process process,
             AtomicInteger passed, AtomicInteger failed, AtomicInteger skipped,
-            List<TestCaseResult> testCases) {
+            List<TestCaseResult> testCases, int expectedCount, AtomicInteger streamIncidents) {
 
         int consecutiveFailures = 0;
+        BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()));
 
-        // ── SIN límite de reintentos ─────────────────────────────────────────────
-        // CAUSA RAÍZ (root cause) del corte prematuro a ~9-10 casos de 50:
-        // la versión anterior abandonaba la lectura DEFINITIVAMENTE tras un EOF con
-        // el proceso vivo (sin reintentar) o tras 5 IOException consecutivas — y a
-        // partir de ahí passed/failed/skipped dejaban de incrementarse para SIEMPRE,
-        // aunque Gradle siguiera ejecutando decenas de tests más en segundo plano.
-        // process.waitFor() (más abajo) seguía esperando correctamente la
-        // terminación REAL del proceso, así que la suite no "moría" — pero se
-        // finalizaba con el conteo congelado en el momento del corte, dando la
-        // apariencia de que la ejecución terminó tras 9-10 casos.
-        // Fix: reintentar indefinidamente CON BACKOFF mientras process.isAlive()
-        // sea true, sin importar cuántos intentos hagan falta ni cuánto dure la
-        // suite. Solo se deja de leer cuando el proceso terminó de verdad.
+        // Sin límite de reintentos: mientras Gradle siga vivo, se sigue intentando
+        // leer — de lo contrario, cualquier corte temporal dejaría de contar
+        // PASS/FAIL/SKIP para el resto de la suite aunque Gradle siguiera
+        // ejecutando decenas de tests más.
         while (process.isAlive()) {
 
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
+            try {
                 String line;
                 while ((line = br.readLine()) != null) {
                     consecutiveFailures = 0; // el stream volvió a estar sano
                     String level = detectLevel(line);
                     client.sendLog(job.executionId, level, line);
                     System.out.println("[" + level + "] " + line);
-                    if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); }
-                    else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); }
-                    else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); }
+                    boolean isCaseResult = false;
+                    if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); isCaseResult = true; }
+                    else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); isCaseResult = true; }
+                    else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); isCaseResult = true; }
+                    if (isCaseResult) {
+                        logCaseProgress(job, process, passed.get() + failed.get() + skipped.get(),
+                                expectedCount, streamIncidents.get());
+                    }
                 }
 
                 // readLine() devolvió null → EOF.
@@ -1070,14 +1121,14 @@ public class JobExecutor {
                 // EOF con el proceso AÚN VIVO: un pipe normal no debería cerrarse así
                 // salvo que el hijo cerrara su propio stdout sin salir (glitch tras
                 // reposo del equipo / desconexión USB). Esto NUNCA se interpreta como
-                // fin de la suite: se recrea el lector y se sigue leyendo mientras el
-                // proceso exista — igual tratamiento que un IOException.
+                // fin de la suite: se recrea el lector — SIN cerrar el anterior, para
+                // no matar el stream subyacente — y se sigue leyendo mientras el
+                // proceso exista.
                 consecutiveFailures++;
+                streamIncidents.incrementAndGet();
                 logStreamDisruption(job, "EOF-con-proceso-vivo", null, consecutiveFailures);
                 attemptStreamRecovery(job, consecutiveFailures);
-                // Vuelve al inicio del while: recrea el BufferedReader sobre el mismo
-                // InputStream del proceso (Process expone el mismo stream durante todo
-                // su ciclo de vida) y sigue contando PASS/FAIL/SKIP normalmente.
+                br = new BufferedReader(new InputStreamReader(process.getInputStream()));
 
             } catch (IOException ioe) {
                 if (!process.isAlive()) {
@@ -1087,11 +1138,34 @@ public class JobExecutor {
                     return;
                 }
                 consecutiveFailures++;
+                streamIncidents.incrementAndGet();
                 logStreamDisruption(job, diagnoseStreamDisruption(job), ioe.getMessage(), consecutiveFailures);
                 attemptStreamRecovery(job, consecutiveFailures);
+                // IMPORTANTE: NO se llama a br.close() en ningún punto de este método.
+                // Solo se reemplaza la referencia — el InputStream subyacente de
+                // process.getInputStream() nunca se cierra mientras el proceso viva,
+                // así que envolverlo de nuevo aquí SÍ puede seguir leyendo datos reales.
+                br = new BufferedReader(new InputStreamReader(process.getInputStream()));
             }
         }
         System.out.println("[Executor] Proceso ya no está vivo — fin de la lectura de stdout/stderr.");
+    }
+
+    /**
+     * Instrumentación solicitada: progreso caso-por-caso mientras la suite corre.
+     * streamsActivos=false solo mientras el bucle de lectura está en medio de un
+     * reintento tras un incidente — no implica que el proceso ni la suite hayan
+     * terminado.
+     */
+    private void logCaseProgress(JobDto job, Process process, int executed, int expectedCount, int streamIncidents) {
+        int planned   = expectedCount > 0 ? expectedCount : executed; // -1/0 = desconocido, se usa el propio conteo
+        int remaining = Math.max(0, planned - executed);
+        String msg = String.format(
+                "[Runner] Caso actual: %d/%d | Tests restantes: %d | Gradle alive: %s | Streams activos: %s | Workers activos: %d | Estado ejecución: RUNNING%s",
+                executed, planned, remaining, process.isAlive(), streamIncidents == 0,
+                1, streamIncidents > 0 ? " | incidentesStream=" + streamIncidents : "");
+        System.out.println(msg);
+        try { client.sendLog(job.executionId, "DEBUG", msg); } catch (Exception ignored) {}
     }
 
     /**
