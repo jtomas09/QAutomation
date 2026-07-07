@@ -95,6 +95,16 @@ export function useTestRunner() {
       return
     }
 
+    // Defensa contra conexiones SSE simultáneas: si ya hay streams abiertos de una
+    // llamada anterior (el botón Run los bloquea en el flujo normal, pero esto cubre
+    // reintentos programáticos/condiciones de carrera), cerrarlos antes de abrir los
+    // nuevos — de lo contrario quedarían huérfanos, nunca se cerrarían, y seguirían
+    // recibiendo eventos y escribiendo en el estado para siempre.
+    if (closeStreamRef.current) {
+      closeStreamRef.current()
+      closeStreamRef.current = null
+    }
+
     setState(prev => ({
       ...prev,
       status:        'running',

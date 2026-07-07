@@ -83,15 +83,62 @@ function now(): string { return new Date().toISOString() }
 
 class ExecutionTrackingServiceImpl {
 
+  // ── Cache en memoria + persistencia diferida ─────────────────────────────
+  //
+  // CAUSA RAÍZ (hallada tras auditar por qué el Dashboard sigue degradándose
+  // incluso con el buffer de logs acotado): addActivity() se invoca desde
+  // useTestRunner por CADA línea SSE que no es PASS/FAIL/SKIP — es decir, por
+  // la inmensa mayoría del volumen de logs del Runner (INFO/DEBUG/WARN, muy
+  // verboso). Cada llamada pasaba por patch(): load() hacía un
+  // JSON.parse(localStorage) completo y persist() un JSON.stringify +
+  // localStorage.setItem completo, de los ≤50 registros con ≤200 actividades
+  // cada uno (los mensajes de diagnóstico del Runner pueden ser largos, p.
+  // ej. volcados de elementos visibles). En una ejecución de varias horas con
+  // miles de líneas por hora, esto son miles de serializaciones/escrituras
+  // SÍNCRONAS en el hilo principal — no es una fuga de memoria de datos (el
+  // tamaño ya estaba acotado), es saturación sostenida del hilo principal por
+  // I/O síncrono repetido en cada evento, agravada por el CustomEvent
+  // 'qa:exec:updated' que dispara un re-render completo de LiveExecutionPanel
+  // en cada una de esas llamadas.
+  //
+  // Fix: los registros viven en memoria (this.records) durante toda la
+  // sesión — load()/patch() ya no tocan localStorage en cada llamada. La
+  // escritura a localStorage se difiere (debounce de 1s) sin cambiar qué se
+  // persiste ni cuándo se lee — solo CUÁNTAS VECES se serializa. flush() se
+  // ejecuta también al cerrar/ocultar la pestaña para no perder la última
+  // ventana de actividad.
+  private records: ExecutionRecord[] | null = null
+  private persistTimer: ReturnType<typeof setTimeout> | null = null
+
   private load(): ExecutionRecord[] {
-    try { return JSON.parse(localStorage.getItem(KEY) ?? '[]') as ExecutionRecord[] }
-    catch { return [] }
+    if (this.records === null) {
+      try { this.records = JSON.parse(localStorage.getItem(KEY) ?? '[]') as ExecutionRecord[] }
+      catch { this.records = [] }
+    }
+    return this.records;
   }
 
   private persist(records: ExecutionRecord[]): void {
-    // Keep newest MAX_REC records
-    const pruned = records.slice(-MAX_REC)
-    localStorage.setItem(KEY, JSON.stringify(pruned))
+    // Mantiene el mismo contrato (máximo MAX_REC registros) — solo cambia
+    // cuándo se escribe físicamente a localStorage, no qué se guarda.
+    this.records = records.slice(-MAX_REC)
+    if (this.persistTimer) return
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      this.flush()
+    }, 1000)
+  }
+
+  /** Escribe el estado actual a localStorage de inmediato (usado por el debounce y por beforeunload/pagehide). */
+  private flush(): void {
+    if (this.records === null) return
+    try { localStorage.setItem(KEY, JSON.stringify(this.records)) } catch { /* cuota excedida, etc. — no crítico */ }
+  }
+
+  /** Fuerza el flush inmediato de cualquier escritura diferida pendiente (p. ej. antes de cerrar la pestaña). */
+  flushPending(): void {
+    if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = null }
+    this.flush()
   }
 
   private patch(id: string, updater: (r: ExecutionRecord) => ExecutionRecord): ExecutionRecord | null {
@@ -104,9 +151,26 @@ class ExecutionTrackingServiceImpl {
     return records[idx]
   }
 
+  // 'qa:exec:updated' puede dispararse por cada línea de log (potencialmente
+  // decenas por segundo) — LiveExecutionPanel ignora el detail y simplemente
+  // vuelve a leer el estado completo en cada evento, así que coalescer varios
+  // disparos consecutivos en uno solo (máx. ~4/s) no pierde ninguna
+  // actualización: el próximo evento (o 'qa:exec:finished' al terminar)
+  // siempre refleja el estado más reciente. 'created'/'finished' son poco
+  // frecuentes y se despachan sin throttle.
+  private updatedDispatchPending = false
+
   private dispatch(event: string, detail: unknown): void {
+    if (event !== 'qa:exec:updated') {
+      try { window.dispatchEvent(new CustomEvent(event, { detail, bubbles: false })) }
+      catch { /* non-critical */ }
+      return
+    }
+    if (this.updatedDispatchPending) return
+    this.updatedDispatchPending = true
     try { window.dispatchEvent(new CustomEvent(event, { detail, bubbles: false })) }
     catch { /* non-critical */ }
+    setTimeout(() => { this.updatedDispatchPending = false }, 250)
   }
 
   private addActivity(id: string, msg: string, level: ActivityEntry['level'] = 'info'): void {
@@ -379,3 +443,12 @@ class ExecutionTrackingServiceImpl {
 }
 
 export const executionTrackingService = new ExecutionTrackingServiceImpl()
+
+// La persistencia a localStorage está diferida (debounce de 1s) para no serializar
+// en cada línea de log — esto fuerza una escritura final si la pestaña se cierra u
+// oculta con un flush pendiente, para no perder la última ventana de actividad.
+if (typeof window !== 'undefined') {
+  const flushNow = () => executionTrackingService.flushPending()
+  window.addEventListener('pagehide', flushNow)
+  window.addEventListener('beforeunload', flushNow)
+}
