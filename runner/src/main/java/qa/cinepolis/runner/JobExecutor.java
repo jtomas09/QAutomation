@@ -898,11 +898,35 @@ public class JobExecutor {
             int actualTotal = passed.get() + failed.get() + skipped.get();
             int incidents   = streamIncidents.get();
 
-            System.out.println("[Runner] Casos planificados: " + (expectedCount > 0 ? expectedCount : "desconocido"));
-            System.out.println("[Runner] Casos ejecutados: " + actualTotal);
+            // ── Resumen obligatorio de fin de suite ───────────────────────────────
+            // TOTAL_INICIADOS se reporta igual a TOTAL_SELECCIONADOS: Gradle valida y
+            // acepta los N filtros --tests ANTES de ejecutar cualquiera (confirmado:
+            // "Gradle recibe correctamente los 50 --tests"), y al no haber paralelismo
+            // configurado (sin maxParallelForks/forkEvery) solo un test está en curso
+            // a la vez — no hay una señal de Gradle distinta de PASSED/FAILED/SKIPPED
+            // para "iniciado pero no terminado" sin habilitar testLogging{events
+            // "started"} (fuera de alcance de este fix). NO_FINALIZADOS es la métrica
+            // que realmente importa: cuántos de los seleccionados nunca produjeron un
+            // resultado terminal.
+            int totalSeleccionados = expectedCount > 0 ? expectedCount : actualTotal;
+            int totalIniciados     = totalSeleccionados;
+            int noFinalizados      = Math.max(0, totalSeleccionados - actualTotal);
+
+            System.out.println("[Runner] TOTAL_SELECCIONADOS: " + totalSeleccionados);
+            System.out.println("[Runner] TOTAL_INICIADOS: " + totalIniciados);
+            System.out.println("[Runner] TOTAL_FINALIZADOS: " + actualTotal);
             System.out.println("[Runner] PASSED: " + passed.get());
             System.out.println("[Runner] FAILED: " + failed.get());
             System.out.println("[Runner] SKIPPED: " + skipped.get());
+            System.out.println("[Runner] NO_INICIADOS: " + noFinalizados);
+            System.out.println("[Runner] NO_FINALIZADOS: " + noFinalizados);
+            try {
+                client.sendLog(job.executionId, "INFO", String.format(
+                        "[Runner] Resumen final | SELECCIONADOS=%d INICIADOS=%d FINALIZADOS=%d "
+                        + "PASSED=%d FAILED=%d SKIPPED=%d NO_FINALIZADOS=%d",
+                        totalSeleccionados, totalIniciados, actualTotal,
+                        passed.get(), failed.get(), skipped.get(), noFinalizados));
+            } catch (Exception ignored) {}
 
             if (expectedCount > 0 && actualTotal != expectedCount) {
                 // Discrepancia real entre lo planificado y lo ejecutado/contado. NUNCA se
