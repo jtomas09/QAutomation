@@ -467,7 +467,36 @@ public class BaseTest {
             }
 
         } finally {
-            if (REUSE_DRIVER) {
+            // ── CAUSA RAÍZ del corte a ~9/15/19 casos de 50 sin patrón fijo ──────────
+            // @AfterAll es un callback de CICLO DE VIDA DE CLASE: JUnit 5 lo invoca una
+            // vez por cada clase de test, sin importar Lifecycle.PER_CLASS/PER_METHOD —
+            // eso solo determina si puede ser un método de instancia o debe ser static,
+            // NO cuántas veces se ejecuta. Un Smoke de 50 casos selecciona métodos al
+            // azar de VARIAS clases (MenuCoffeTree, MenuVIP, MenuMiCine, MenuAtmosfera,
+            // MenuTradicional, ...) ejecutadas dentro del MISMO proceso Gradle. Con
+            // REUSE_DRIVER=true, este método llamaba a DriverFactory.quitDriver() aquí —
+            // es decir, CADA VEZ que terminaban los casos seleccionados de UNA clase,
+            // se cerraba la sesión de Appium COMPARTIDA, aunque quedaran decenas de
+            // casos pendientes en OTRAS clases dentro de la misma ejecución. El punto
+            // exacto de corte depende de en qué posición del orden aleatorio cae el
+            // primer límite de clase — de ahí que varíe entre 9, 15, 19... sin patrón
+            // fijo. Si la recreación de sesión que sigue (@BeforeEach → getDriver())
+            // falla o resulta inestable en ese momento (recreación de sesión Appium a
+            // mitad de suite, dispositivo/USB, puerto de UiAutomator2, etc.), el
+            // proceso worker de Gradle puede morir, y con él el resto de los casos
+            // planificados — sin que el Runner haga nada mal: Gradle mismo terminó
+            // antes de tiempo.
+            //
+            // FIX: NO cerrar la sesión compartida aquí. REUSE_DRIVER=true significa
+            // "una sola sesión para TODA la suite" — @BeforeEach ya reutiliza el driver
+            // existente entre clases (driverCreatedOnce / driver != null), exactamente
+            // como se documenta en el resto de este archivo. El cierre real al
+            // finalizar la suite ya está garantizado por el shutdown hook de
+            // DriverFactory (Runtime.getRuntime().addShutdownHook), que corre una sola
+            // vez, cuando el JVM de Gradle realmente termina — no en cada límite de
+            // clase. No se elimina ninguna funcionalidad: el driver se sigue cerrando
+            // siempre, solo que en el momento correcto.
+            if (!REUSE_DRIVER) {
                 try { DriverFactory.quitDriver(); } catch (Exception ignored) {}
                 driver = null;
             }
