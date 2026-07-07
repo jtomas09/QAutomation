@@ -985,13 +985,13 @@ public class SelectorPage extends BasePage {
             searchTerms.add(words[0]);
         }
 
-        // UiScrollable(...).scrollIntoView(...) es una operación NATIVA de UiAutomator2:
-        // recorre el catálogo COMPLETO de forma exhaustiva y nunca retrocede. Si ya se
-        // ejecutó una vez para un término y no encontró nada, un segundo/tercer/cuarto
-        // intento con otro término no puede descubrir nada nuevo (no queda catálogo sin
-        // recorrer) — repetirlo es la causa confirmada de los 180-220 s observados en
-        // Búsqueda-Fallback (hasta 4 recorridos completos redundantes del mismo catálogo,
-        // uno por cada término candidato). Se ejecuta como máximo UNA vez por llamada.
+        // El descenso vertical+peek recorre el catálogo COMPLETO de forma exhaustiva y
+        // nunca retrocede. Si ya se ejecutó una vez para un término y no encontró nada,
+        // un segundo/tercer/cuarto intento con otro término no puede descubrir nada
+        // nuevo (no queda catálogo sin recorrer) — repetirlo fue la causa confirmada de
+        // los 180-220 s observados en Búsqueda-Fallback (hasta 4 recorridos completos
+        // redundantes del mismo catálogo, uno por cada término candidato). Se ejecuta
+        // como máximo UNA vez por llamada.
         boolean uia2ScrollExhausted = false;
 
         for (String term : searchTerms) {
@@ -1007,26 +1007,39 @@ public class SelectorPage extends BasePage {
                     targetText, System.currentTimeMillis() - t0);
                 return true;
             }
-            // UiAutomator2 textContains con scroll automático (Android only)
+            // Scroll de catálogo con presupuesto propio (Android only) — reemplaza el
+            // antiguo UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(...):
+            // esa llamada NATIVA de UiAutomator2 delega en el driver tanto la elección
+            // del contenedor scrollable como la dirección de scroll. En una pantalla
+            // Compose con varios carruseles horizontales anidados dentro de la lista
+            // vertical (Helados, Dulces y Chocolates, Promocionales, Destacados,
+            // Combos...), UiAutomator2 puede enganchar un carrusel HORIZONTAL como "el"
+            // contenedor scrollable — produciendo desplazamientos horizontales erráticos
+            // que interrumpen el descenso vertical, vuelven varias veces al mismo
+            // carrusel y nunca llegan a las categorías inferiores.
+            //
+            // oneShotVerticalWithRowPeek() usa exclusivamente nuestros propios swipes
+            // W3C: desciende verticalmente en una única dirección y solo hace un "peek"
+            // horizontal acotado en la fila que está actualmente en pantalla, abandonando
+            // de inmediato si el producto no aparece ahí — nunca vuelve a un carrusel ya
+            // procesado. Mismos presupuestos (20 vertical / 20 horizontal, igual que
+            // Constantes.SWIPES_VERTICAL_MAX/SWIPES_HORIZONTAL_MAX) y mismos tiempos de
+            // swipe que el resto del archivo — no se agrega ningún timeout nuevo.
             if (!isIOS() && !uia2ScrollExhausted) {
                 try {
-                    String cleanTerm = term.replace("\"", "").replace("'", "");
-                    String uiSel = "new UiScrollable(new UiSelector().scrollable(true))" +
-                        ".scrollIntoView(new UiSelector().textContains(\"" + cleanTerm + "\"))";
-                    driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-                    java.util.List<WebElement> found = driver.findElements(AppiumBy.androidUIAutomator(uiSel));
-                    driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-                    if (!found.isEmpty()) {
-                        WebElement el = found.get(0);
-                        log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-uia2-textContains('{}') | Tiempo={}ms | Resultado=ENCONTRADO",
-                            targetText, cleanTerm, System.currentTimeMillis() - t0);
+                    By combined = By.xpath("//*[contains(@text, \"" + safeT + "\") or contains(@content-desc, \"" + safeT + "\")]");
+                    if (oneShotVerticalWithRowPeek(combined, 20, 5)) {
+                        WebElement el = driver.findElement(combined);
+                        log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-vertical+peek('{}') | Tiempo={}ms | Resultado=ENCONTRADO",
+                            targetText, term, System.currentTimeMillis() - t0);
                         tapCenterW3C(el);
                         return true;
                     }
-                    // El scroll nativo ya recorrió TODO el catálogo sin éxito y no puede
-                    // retroceder — omitir para los términos restantes de esta llamada.
+                    // El descenso vertical+peek ya cubrió TODO el catálogo (incluyendo
+                    // cada carrusel encontrado en el camino) sin éxito — repetirlo para
+                    // los términos restantes de esta llamada sería igual de inútil.
                     uia2ScrollExhausted = true;
-                    log.debug("[Fuzzy] uia2-scrollIntoView agotó el catálogo sin éxito ({}ms) — se omite para términos restantes",
+                    log.debug("[Fuzzy] vertical+peek agotó el catálogo sin éxito ({}ms) — se omite para términos restantes",
                         System.currentTimeMillis() - t0);
                 } catch (Exception e) {
                     rethrowIfAborted(e);

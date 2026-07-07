@@ -944,10 +944,11 @@ protected List<WebElement> safeFindElements(By locator) {
     private static final int SCROLL_STALL_THRESHOLD = 2;
 
     protected boolean oneShotVerticalSearch(By locator, int maxDownSwipes) {
+        long tOSV = System.currentTimeMillis();
         int allowed = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
         int stalledCount = 0;
 
-        log.debug("[scroll-v] buscando {} | presupuesto={}", locator, allowed);
+        log.info("[scroll-v] ENTER {} | maxSwipes={} implicitlyWait=10s-por-miss", locator, allowed);
 
         // 'after' de la iteración N es el 'before' de la iteración N+1 — reutilizar evita
         // un round-trip de driver por ciclo (el screen no cambia entre iteraciones sin swipe).
@@ -981,17 +982,19 @@ protected List<WebElement> safeFindElements(By locator) {
         }
 
         boolean found = isVisible(locator);
-        log.debug("[scroll-v] terminado | encontrado={}", found);
+        log.info("[scroll-v] EXIT encontrado={} | total={}ms", found, System.currentTimeMillis() - tOSV);
         return found;
     }
 
     private boolean oneShotHorizontalSearch(By locator, int maxRightSwipes, int[] budgetH) {
+        long tOSH = System.currentTimeMillis();
         int allowed = maxRightSwipes;
         if (budgetH != null) {
             allowed = Math.min(maxRightSwipes, budgetH[0]);
             if (allowed <= 0) return isVisible(locator);
         }
 
+        log.info("[scroll-h] ENTER {} | maxSwipes={}", locator, allowed);
         int stalledCount = 0;
         String cachedFP = null;
 
@@ -1021,44 +1024,83 @@ protected List<WebElement> safeFindElements(By locator) {
                 if (budgetH[0] <= 0) break;
             }
         }
-        return isVisible(locator);
+        boolean foundH = isVisible(locator);
+        log.info("[scroll-h] EXIT encontrado={} | total={}ms", foundH, System.currentTimeMillis() - tOSH);
+        return foundH;
     }
 
     private boolean oneShotVerticalAndHorizontal(By locator, int maxDownSwipes, int maxRightSwipesPerRow) {
-        int allowedV = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
-        int[] budgetH = new int[]{TOTAL_HORIZONTAL_SWIPE_BUDGET};
+        // Delega en la variante con "peek" por fila (misma firma, mismo contrato,
+        // mismos presupuestos TOTAL_VERTICAL_SWIPE_BUDGET / TOTAL_HORIZONTAL_SWIPE_BUDGET).
+        // Antes: fase 1 vertical completa + fase 2 horizontal SOLO en la posición final
+        // — un producto dentro de un carrusel intermedio (p. ej. "Destacados" a media
+        // pantalla) se perdía por completo si no quedaba visible al terminar el descenso.
+        // Ahora: cada fila/carrusel se revisa (con presupuesto acotado) a medida que
+        // aparece en pantalla durante el propio descenso, sin dejar de avanzar hacia
+        // abajo y sin volver jamás a una fila ya procesada.
+        return oneShotVerticalWithRowPeek(locator, maxDownSwipes, maxRightSwipesPerRow);
+    }
+
+    /**
+     * Búsqueda vertical determinista con "peek" horizontal acotado por fila.
+     *
+     * En cada paso del descenso:
+     *   1. ¿El target ya es visible sin tocar ningún carrusel? → listo.
+     *   2. Peek acotado (oneShotHorizontalSearch, con su propio stall-detection y el
+     *      mismo presupuesto horizontal global TOTAL_HORIZONTAL_SWIPE_BUDGET) SOLO en
+     *      la fila/carrusel actualmente en pantalla. Si el producto no aparece ahí, se
+     *      abandona esa fila de inmediato — nunca se vuelve a ella.
+     *   3. Un solo swipe vertical hacia la siguiente sección (mismo slowSwipeUp() y
+     *      mismos tiempos que el resto del archivo) y se repite.
+     *
+     * Garantiza el orden exigido: una única dirección de recorrido (arriba→abajo),
+     * scroll horizontal únicamente para inspeccionar la fila actual, y jamás scroll
+     * horizontal mientras el presupuesto vertical no esté agotado por completo. Los
+     * presupuestos totales (vertical y horizontal) son idénticos a los ya usados por
+     * el resto de los métodos one-shot — no se modifica ningún tiempo de espera.
+     */
+    protected boolean oneShotVerticalWithRowPeek(By locator, int maxDownSwipes, int maxPeekSwipesPerRow) {
+        long t0        = System.currentTimeMillis();
+        int allowedV   = Math.min(maxDownSwipes, TOTAL_VERTICAL_SWIPE_BUDGET);
+        int peekBudget = Math.max(1, maxPeekSwipesPerRow);
+        int[] budgetH  = new int[]{TOTAL_HORIZONTAL_SWIPE_BUDGET};
         int stalledCount = 0;
 
-        log.debug("[scroll-vh] buscando {} | presupuesto v={} h={}", locator, allowedV, TOTAL_HORIZONTAL_SWIPE_BUDGET);
+        log.info("[scroll-v+peek] ENTER {} | maxV={} peekPorFila={} maxH={}",
+                locator, allowedV, peekBudget, TOTAL_HORIZONTAL_SWIPE_BUDGET);
 
-        // ── Fase 1: búsqueda vertical completa ───────────────────────────────────
-        // Recorre toda la pantalla hacia abajo SIN explorar carruseles horizontales.
-        // Prioridad: agotar el scroll vertical (stall / presupuesto) antes de tocar
-        // cualquier carrusel — evita recorrer "Destacados" / "Combos" cuando el ítem
-        // puede estar simplemente más abajo en pantalla.
         String cachedFP = null;
         for (int i = 0; i < allowedV; i++) {
             if (isVisible(locator)) {
-                log.debug("[scroll-vh] encontrado en swipe vertical {}/{}", i + 1, allowedV);
+                log.debug("[scroll-v+peek] encontrado sin scroll horizontal en paso {}/{}", i + 1, allowedV);
                 return true;
             }
 
-            // Reutiliza el fingerprint calculado en la iteración anterior —
-            // el screen no cambia entre checkeos sin swipe intermedio.
+            // Peek acotado en la fila actualmente en pantalla — nunca se repite.
+            if (budgetH[0] > 0) {
+                int rowBudget = Math.min(peekBudget, budgetH[0]);
+                if (oneShotHorizontalSearch(locator, rowBudget, budgetH)) {
+                    log.debug("[scroll-v+peek] encontrado en peek horizontal, fila del paso {}/{}", i + 1, allowedV);
+                    return true;
+                }
+                // El peek movió el carrusel (slowSwipeLeft) — el fingerprint cacheado
+                // ya no refleja la pantalla actual; forzar recálculo antes de comparar.
+                cachedFP = null;
+            }
+
             String before = (cachedFP != null) ? cachedFP : richFingerPrint();
-            log.debug("[scroll-vh] swipe-v {}/{} | antes=[{}] stalled={}", i + 1, allowedV, before, stalledCount);
+            log.debug("[scroll-v+peek] swipe-v {}/{} | antes=[{}] stalled={}", i + 1, allowedV, before, stalledCount);
 
             slowSwipeUp();
 
             String after = richFingerPrint();
             cachedFP = after;
-            log.debug("[scroll-vh] swipe-v {}/{} | despues=[{}]", i + 1, allowedV, after);
+            log.debug("[scroll-v+peek] swipe-v {}/{} | despues=[{}]", i + 1, allowedV, after);
 
             if (after.equals(before)) {
                 stalledCount++;
                 if (stalledCount >= SCROLL_STALL_THRESHOLD) {
-                    log.debug("[scroll-vh] fin real – {} fingerprints iguales en swipe {}/{}",
-                            SCROLL_STALL_THRESHOLD, i + 1, allowedV);
+                    log.debug("[scroll-v+peek] fin real de catálogo en swipe {}/{}", i + 1, allowedV);
                     break;
                 }
             } else {
@@ -1066,48 +1108,59 @@ protected List<WebElement> safeFindElements(By locator) {
             }
         }
 
+        // Última fila alcanzada: chequeo directo + un último peek acotado — cubre la
+        // posición final igual que antes hacía la fase 2, además de cada fila previa.
         if (isVisible(locator)) {
-            log.debug("[scroll-vh] encontrado tras búsqueda vertical completa");
+            log.debug("[scroll-v+peek] encontrado tras descenso vertical completo");
+            return true;
+        }
+        if (budgetH[0] > 0 && oneShotHorizontalSearch(locator, Math.min(peekBudget, budgetH[0]), budgetH)) {
+            log.debug("[scroll-v+peek] encontrado en peek horizontal final");
             return true;
         }
 
-        // ── Fase 2: búsqueda horizontal (carrusel) ───────────────────────────────
-        // Solo se ejecuta después de que la búsqueda vertical terminó por completo.
-        // Nunca se exploran carruseles mientras existan secciones verticales por ver.
-        log.debug("[scroll-vh] vertical exhausto → iniciando búsqueda horizontal en posición final");
-        if (oneShotHorizontalSearch(locator, maxRightSwipesPerRow, budgetH)) return true;
-
         boolean found = isVisible(locator);
-        log.debug("[scroll-vh] terminado | encontrado={}", found);
+        log.info("[scroll-v+peek] EXIT encontrado={} | total={}ms", found, System.currentTimeMillis() - t0);
         return found;
     }
 
     protected void findVisibleOrScrollToXpathAndClick(String xpath, int maxSwipesEachDirection) {
+        long t0 = System.currentTimeMillis();
+        log.info("[BasePage] findVisibleOrScrollToXpathAndClick ENTER maxSwipes={} xpath={}",
+                maxSwipesEachDirection, xpath.length() > 80 ? xpath.substring(0, 80) + "…" : xpath);
         ensureAppIsInForegroundOrRecover();
         By locator = By.xpath(xpath);
 
         if (!clickIfPresent(locator)) {
             boolean found = oneShotVerticalSearch(locator, maxSwipesEachDirection);
             if (!found) {
+                log.warn("[BasePage] findVisibleOrScrollToXpathAndClick EXIT not found ({}ms)", System.currentTimeMillis() - t0);
                 takeScreenshotOnFailure();
                 throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada. XPath: " + xpath);
             }
             click(locator);
         }
+        log.info("[BasePage] findVisibleOrScrollToXpathAndClick EXIT found ({}ms)", System.currentTimeMillis() - t0);
     }
 
     protected void findVisibleOrScrollDownAndRightSlowToXpathAndClick(String xpath, int maxVerticalSwipes, int maxRightSwipesPerRow) {
+        long t0 = System.currentTimeMillis();
+        log.info("[BasePage] findVisibleOrScrollDownAndRight ENTER maxV={} maxH={} xpath={}",
+                maxVerticalSwipes, maxRightSwipesPerRow,
+                xpath.length() > 80 ? xpath.substring(0, 80) + "…" : xpath);
         ensureAppIsInForegroundOrRecover();
         By locator = By.xpath(xpath);
 
         if (!clickIfPresent(locator)) {
             boolean found = oneShotVerticalAndHorizontal(locator, maxVerticalSwipes, maxRightSwipesPerRow);
             if (!found) {
+                log.warn("[BasePage] findVisibleOrScrollDownAndRight EXIT not found ({}ms)", System.currentTimeMillis() - t0);
                 takeScreenshotOnFailure();
                 throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada (V/H). XPath: " + xpath);
             }
             click(locator);
         }
+        log.info("[BasePage] findVisibleOrScrollDownAndRight EXIT found ({}ms)", System.currentTimeMillis() - t0);
     }
 
     // =========================================================
