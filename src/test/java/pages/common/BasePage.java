@@ -336,7 +336,7 @@ public class BasePage {
     protected boolean clickIfPresent(By locator) {
         ensureAppIsInForegroundOrRecover();
         try {
-            List<WebElement> elements = driver.findElements(locator);
+            List<WebElement> elements = findElementsFast(locator);
             if (elements != null && !elements.isEmpty()) {
                 WebElement el = elements.get(0);
                 if (safeDisplayed(el) && el.isEnabled()) {
@@ -351,10 +351,55 @@ public class BasePage {
 
     protected boolean isVisibleQuick(By locator) {
         try {
-            List<WebElement> els = driver.findElements(locator);
+            List<WebElement> els = findElementsFast(locator);
             return els != null && !els.isEmpty() && safeDisplayed(els.get(0));
         } catch (Exception ignore) {
             return false;
+        }
+    }
+
+    /**
+     * driver.findElements() con implicitlyWait=0 forzado durante la consulta —
+     * causa raíz de los minutos observados en scroll vertical, búsqueda de
+     * producto y cambio de cine (ver logs: "scroll-v EXIT ... total=429216ms",
+     * "findVisibleOrScrollToXpathAndClick 898360ms", "Cine configurado
+     * correctamente ... Total=433434ms").
+     *
+     * isVisibleQuick() y clickIfPresent() llamaban a driver.findElements(locator)
+     * SIN forzar implicitlyWait=0. El resto del framework (tryClickByXpathContains,
+     * isVisibleInstantaneamente, CinemasHelper.firstOrNull/isVisibleInstant, etc.)
+     * ya sigue la convención de dejar implicitlyWait=10s como "ambiente" fuera de
+     * sus propios chequeos instantáneos — ese ambiente de 10s se activa desde el
+     * primer chequeo de la suite (p. ej. el primer PromosGuard del @BeforeEach) y
+     * permanece así el resto de la sesión (REUSE_DRIVER=true). isVisibleQuick()/
+     * clickIfPresent() heredaban ese ambiente sin saberlo: cada "miss" (el elemento
+     * buscado aún no está en pantalla — el caso NORMAL en cualquier scroll) bloqueaba
+     * findElements() el implicitlyWait completo antes de poder devolver una lista
+     * vacía.
+     *
+     * isVisibleQuick() es la base de oneShotVerticalSearch / oneShotHorizontalSearch /
+     * oneShotVerticalAndHorizontal / oneShotVerticalWithRowPeek /
+     * scrollSlowDownThenUpUntilVisible — se llama en CADA iteración de CADA scroll,
+     * hasta 20+ veces por búsqueda. clickIfPresent() es el primer intento de
+     * CinemasHelper.pickCinemaFromResults() (hasta 2 veces) antes de
+     * scrollSlowDownThenUpUntilVisible (hasta 24 chequeos más). El costo del "miss"
+     * se multiplicaba linealmente por cada swipe/intento — de ahí los minutos
+     * observados: son la MISMA espera artificial acumulada sobre estos dos métodos
+     * compartidos, alcanzada desde rutas de llamada distintas (búsqueda de producto
+     * vs. selección de cine).
+     *
+     * Un elemento PRESENTE se encuentra igual de rápido sin importar el valor de
+     * implicitlyWait — el wait solo retrasa el caso de "no encontrado". Forzarlo a 0
+     * aquí no cambia qué se puede o no encontrar; solo elimina la espera artificial
+     * cuando el elemento todavía no está en pantalla, que es exactamente cuándo el
+     * propio bucle de scroll ya va a reintentar en la siguiente iteración.
+     */
+    private List<WebElement> findElementsFast(By locator) {
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+        try {
+            return driver.findElements(locator);
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
     }
 
