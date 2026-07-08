@@ -236,8 +236,16 @@ export default function Dashboard({
       />
 
       {/* Row 2+3: (Run panel + Recent / Activity + Donut + Chart) alongside Mirror de Dispositivo + Quick Access */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
-        <div className="flex flex-col gap-4">
+      {/* Altura explícita en el grid (en vez de depender de align-items:stretch implícito
+          a través de una cadena de flex anidados, que no se resolvía igual en todos los
+          navegadores y dejaba el panel Mirror con un desfase respecto a la columna
+          izquierda): 420 (fila 1) + 16 (gap-4) + 380 (fila 2) = 816.
+          minHeight: 0 en ambas columnas es necesario porque el min-height por defecto
+          de un item de grid es "auto" (= al menos su contenido), lo que ignoraba la
+          altura fija de 816 cuando el contenido (Mirror + Quick Access) pedía más
+          espacio y desbordaba sobre la sección de abajo en vez de ajustarse a ella. */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px', height: 816 }}>
+        <div className="flex flex-col gap-4" style={{ height: '100%', minHeight: 0 }}>
           {/* Run panel (fixed width) + Recent executions (flex) */}
           <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
             <RunTestsPanel
@@ -276,7 +284,7 @@ export default function Dashboard({
         </div>
 
         {/* Mirror de Dispositivo + Quick Access */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" style={{ height: '100%', minHeight: 0 }}>
           <div style={{ flex: 1, minHeight: 0 }}>
             <DeviceMirrorPanel device={activeDevice ?? configured[0] ?? null} />
           </div>
