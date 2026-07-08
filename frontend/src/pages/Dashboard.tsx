@@ -283,12 +283,9 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Mirror de Dispositivo + Quick Access */}
-        <div className="flex flex-col gap-4" style={{ height: '100%', minHeight: 0 }}>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <DeviceMirrorPanel device={activeDevice ?? configured[0] ?? null} />
-          </div>
-          <QuickAccess />
+        {/* Mirror de Dispositivo */}
+        <div style={{ height: '100%', minHeight: 0 }}>
+          <DeviceMirrorPanel device={activeDevice ?? configured[0] ?? null} />
         </div>
       </div>
 
@@ -306,65 +303,5 @@ export default function Dashboard({
       </div>
 
     </div>
-  )
-}
-
-// ── Quick Access ─────────────────────────────────────────────────────────────
-
-const QUICK = [
-  { icon: '📊', label: 'Ver Reportes',  sub: 'Allure Reports',  color: '#10b981' },
-  { icon: '📄', label: 'Documentación', sub: 'Guías y API',     color: '#3b82f6' },
-  { icon: '🎬', label: 'Videos',        sub: 'Tutoriales',      color: '#6366f1' },
-  { icon: '💬', label: 'Soporte',       sub: '¿Necesitas ayuda?', color: '#f97316' },
-]
-
-function QuickAccess() {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="overflow-hidden rounded-2xl"
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
-      }}
-    >
-      <div className="px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="text-sm font-bold text-slate-100">Accesos Rápidos</div>
-        <div className="text-xs text-slate-500 mt-0.5">Herramientas y recursos</div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 p-4">
-        {QUICK.map((q, i) => (
-          <motion.button
-            key={q.label}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.07, duration: 0.3 }}
-            whileHover={{ scale: 1.03, transition: { duration: 0.15 } }}
-            whileTap={{ scale: 0.97 }}
-            className="flex flex-col items-center gap-2.5 py-5 px-3 rounded-xl transition-colors"
-            style={{
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.07)',
-              minHeight: 110,
-            }}
-            onMouseEnter={e => ((e.currentTarget as HTMLButtonElement).style.borderColor = `${q.color}44`)}
-            onMouseLeave={e => ((e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.07)')}
-          >
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-              style={{ background: `${q.color}20`, boxShadow: `0 0 14px ${q.color}25` }}
-            >
-              {q.icon}
-            </div>
-            <div className="text-xs font-bold text-slate-200 text-center leading-tight">{q.label}</div>
-            <div className="text-[10px] text-slate-600 text-center">{q.sub}</div>
-          </motion.button>
-        ))}
-      </div>
-    </motion.div>
   )
 }
