@@ -319,24 +319,45 @@ public class DeviceStreamServer {
                 ex.sendResponseHeaders(200, 0);                         // 0 = streaming / unknown length
 
                 MirrorService.registerStream(udid);
+                // Fase 6 — optimización de latencia: un único ImageWriter JPEG vive
+                // durante toda la conexión en vez de buscarse vía SPI en cada frame
+                // (ImageIO.getImageWritersByFormatName recorre los proveedores
+                // registrados cada vez que se llama). No cambia el formato de salida,
+                // solo evita repetir esa búsqueda ~20 veces por segundo.
+                ImageWriter jpegWriter = createJpegWriter();
                 try (OutputStream out = ex.getResponseBody()) {
+                    if (jpegWriter == null) {
+                        System.err.println("[DeviceMirror] No hay ImageWriter JPEG disponible en este JVM.");
+                        return;
+                    }
                     final byte[] crLf = "\r\n".getBytes(StandardCharsets.UTF_8);
                     int missCount = 0;
 
                     while (!Thread.currentThread().isInterrupted()) {
                         long t0 = System.currentTimeMillis();
 
-                        if (!isDeviceConnected(udid)) {
-                            if (++missCount > 12) break; // device gone for ~6 s
-                            Thread.sleep(500);
+                        byte[] png = captureScreenshot(udid);
+                        if (png == null) {
+                            // Fase 6 — optimización de latencia: antes se llamaba a
+                            // isDeviceConnected() (spawns "adb get-state", un proceso +
+                            // roundtrip ADB completo) ANTES de cada captura, sin importar
+                            // si el dispositivo estaba sano — es decir, ~20 veces/segundo.
+                            // La propia falla de captura ya es la señal de que algo anda
+                            // mal; solo entonces vale la pena pagar el costo de verificar
+                            // conectividad real. Se conserva exactamente la misma ventana
+                            // de detección de desconexión (12 intentos ≈ 6 s).
+                            if (!isDeviceConnected(udid)) {
+                                if (++missCount > 12) break; // device gone for ~6 s
+                                Thread.sleep(500);
+                                continue;
+                            }
+                            missCount = 0;
+                            Thread.sleep(80);
                             continue;
                         }
                         missCount = 0;
 
-                        byte[] png = captureScreenshot(udid);
-                        if (png == null) { Thread.sleep(80); continue; }
-
-                        byte[] jpeg = pngToJpeg(png, 0.78f);
+                        byte[] jpeg = pngToJpeg(png, 0.78f, jpegWriter);
                         if (jpeg == null) continue;
 
                         byte[] header = ("--" + BOUNDARY + "\r\n" +
@@ -356,6 +377,7 @@ public class DeviceStreamServer {
                 } catch (Exception ignored) {
                     // Normal: client closed connection or device disconnected
                 } finally {
+                    if (jpegWriter != null) jpegWriter.dispose();
                     MirrorService.deregisterStream(udid);
                     System.out.println("[DeviceMirror] Stream closed: " + udid);
                 }
@@ -368,7 +390,19 @@ public class DeviceStreamServer {
 
     // ── PNG → JPEG conversion ─────────────────────────────────────────────────
 
-    private static byte[] pngToJpeg(byte[] png, float quality) {
+    /** Crea un ImageWriter JPEG nuevo. Llamar UNA vez por conexión de stream, no por frame. */
+    private static ImageWriter createJpegWriter() {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
+        return writers.hasNext() ? writers.next() : null;
+    }
+
+    /**
+     * Convierte PNG a JPEG reutilizando el ImageWriter provisto por el llamador
+     * (ver createJpegWriter) — evita la búsqueda SPI de un writer nuevo en cada
+     * frame. El writer se resetea tras cada uso para poder reutilizarse; el
+     * llamador es responsable de invocar writer.dispose() al cerrar el stream.
+     */
+    private static byte[] pngToJpeg(byte[] png, float quality, ImageWriter writer) {
         try {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(png));
             if (img == null) return null;
@@ -386,9 +420,6 @@ public class DeviceStreamServer {
             }
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream(png.length / 3);
-            Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
-            if (!writers.hasNext()) return null;
-            ImageWriter writer = writers.next();
             ImageWriteParam params = writer.getDefaultWriteParam();
             params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
             params.setCompressionQuality(quality);
@@ -396,10 +427,11 @@ public class DeviceStreamServer {
                 writer.setOutput(ios);
                 writer.write(null, new IIOImage(img, null, null), params);
             }
-            writer.dispose();
             return baos.toByteArray();
         } catch (Exception e) {
             return null;
+        } finally {
+            try { writer.reset(); } catch (Exception ignored) {}
         }
     }
 
