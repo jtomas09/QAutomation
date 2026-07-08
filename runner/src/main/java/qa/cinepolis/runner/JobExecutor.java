@@ -113,10 +113,11 @@ public class JobExecutor {
         SUITE_MAP.put("e2e-ticket-vip",     "tests.México.E2E.FlujosCompraNoLogin.compraTicketVIP");
         SUITE_MAP.put("e2e-mix-vip",        "tests.México.E2E.FlujosCompraNoLogin.compraMixVIP");
         SUITE_MAP.put("e2e-alimento-vip",   "tests.México.E2E.FlujosCompraNoLogin.compraAlimentoVIP");
-        // Individual Atmosphera test methods
-        SUITE_MAP.put("atmos-t1", "tests.México.alimentos.MenuAtmosfera.comprarCrepaDulceFrappe");
-        SUITE_MAP.put("atmos-t2", "tests.México.alimentos.MenuAtmosfera.comprarCrepaDulceFrappesG");
-        SUITE_MAP.put("atmos-t3", "tests.México.alimentos.MenuAtmosfera.comprarCrepaDulceFrappes");
+        // Individual Atmosphera test methods — comprarCrepaDulceFrappe/FrappesG/Frappes
+        // (los 3 métodos que ocupaban estos IDs antes) están comentados en la clase y ya
+        // no existen como @Test reales; los únicos 2 casos activos son estos:
+        SUITE_MAP.put("atmos-t1", "tests.México.alimentos.MenuAtmosfera.comprarTeCalienteManzanillaPatioSantaFe");
+        SUITE_MAP.put("atmos-t2", "tests.México.alimentos.MenuAtmosfera.comprarTeCalienteManzanillaArcosBosques");
         // Individual VIP test methods
         SUITE_MAP.put("vip-t1", "tests.México.alimentos.MenuVIP.comprarPalomitasClasicasMantequilla");
         SUITE_MAP.put("vip-t2", "tests.México.alimentos.MenuVIP.comprarDippinDotsA");
@@ -344,7 +345,10 @@ public class JobExecutor {
         // MenuMiCine:    50 @Test reales, 40 en SUITE_MAP (micine-t01..t40)
         SUITE_FILTER_SIZE.put("tests.México.alimentos.MenuMiCine",     50);
         // MenuTradicional: 50 reales = 50 en SUITE_MAP (trad-t01..t50) — ya correcto
-        // MenuVIP / MenuAtmosfera: 2 reales ≈ entradas en SUITE_MAP — ya correcto
+        // MenuVIP: 2 reales = 2 en SUITE_MAP (vip-t1..t2) — ya correcto
+        // MenuAtmosfera: 2 @Test reales; SUITE_MAP tenía 3 entradas (atmos-t1..t3) apuntando
+        // a métodos comentados/inexistentes — corregido arriba a los 2 métodos reales, así
+        // que ahora se auto-deriva a 2 sin necesitar una entrada explícita aquí.
     }
 
     private final RunnerConfig   config;
@@ -929,11 +933,14 @@ public class JobExecutor {
             } catch (Exception ignored) {}
 
             if (expectedCount > 0 && actualTotal != expectedCount) {
-                // Discrepancia real entre lo planificado y lo ejecutado/contado. NUNCA se
-                // ajusta esto en silencio: se registra la causa probable de forma explícita
-                // ANTES de sincronizar TOTAL_ESPERADO (necesario para que el Dashboard no
-                // muestre tests pendientes eternamente — su lógica no se modifica, solo se
-                // antepone este diagnóstico).
+                // Discrepancia real entre lo planificado y lo ejecutado/contado. Se registra
+                // la causa probable, pero NUNCA se reescribe TOTAL_ESPERADO para que coincida
+                // con actualTotal: hacerlo disfraza una suite incompleta (p. ej. 21 de 50,
+                // detenida por un incidente) como si hubiera terminado al 100% (21/21) en el
+                // Dashboard — que es exactamente el reporte de conteo erróneo que se detectó.
+                // El Dashboard no se queda "esperando eternamente" sin este ajuste: la
+                // finalización de la ejecución la determina el estado (sendFinalizing/
+                // sendResult más abajo), no la igualdad entre total ejecutado y esperado.
                 String causaProbable = incidents > 0
                         ? "posible pérdida de conteo durante " + incidents + " incidente(s) de stream "
                           + "(reposo/USB/Appium) — ver logs '[Executor] Stream de salida interrumpido' de esta ejecución"
@@ -945,13 +952,6 @@ public class JobExecutor {
                         actualTotal, expectedCount, incidents, causaProbable);
                 System.err.println(errMsg);
                 try { client.sendLog(job.executionId, "ERROR", errMsg); } catch (Exception ignored) {}
-
-                // Sincroniza TOTAL_ESPERADO con la realidad (comportamiento preexistente,
-                // requerido por el Dashboard) — pero ya quedó registrada la causa explícita
-                // arriba, en vez de ajustar el conteo en silencio.
-                client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + actualTotal);
-                System.out.printf("[Executor] [FINALIZING] Conteo actualizado: %d ejecutados de %d esperados%n",
-                        actualTotal, expectedCount);
             } else if (expectedCount > 0) {
                 System.out.println("[Runner] Validación OK: Total ejecutado coincide con el total planificado.");
             }

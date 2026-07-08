@@ -172,10 +172,12 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'alimentos-vip',          title: 'Menú VIP',           description: 'Valida combos y productos del menú VIP' },
   ],
 
+  // Los 3 casos que ocupaban estos IDs (combos de Crepa Dulce/Frappé) están comentados
+  // en MenuAtmosfera.java y ya no existen como @Test reales — reemplazados por los 2
+  // únicos casos activos de esa clase.
   'alimentos-atmosfera': [
-    { id: 'atmos-t1', title: 'Crepa Dulce y Frappé de Frutos Rojos',    description: 'Combo Crepa Dulce y Frappé de Frutos Rojos' },
-    { id: 'atmos-t2', title: 'Frappé de Coco y Crepa Dulce con Queso',  description: 'Combo Frappé de Coco y Crepa Dulce con Queso' },
-    { id: 'atmos-t3', title: 'Frappé Sandía Pelonada y Crepa de Fresa', description: 'Combo Frappé Sandía Pelonada y Crepa de Fresa' },
+    { id: 'atmos-t1', title: 'Té Caliente Menta Manzanilla - Patio Santa Fe', description: 'Comprar Té Caliente Menta Manzanilla en Patio Santa Fe' },
+    { id: 'atmos-t2', title: 'Té Caliente Menta Manzanilla - Arcos Bosques', description: 'Comprar Té Caliente Menta Manzanilla en Arcos Bosques' },
   ],
 
   'alimentos-vip': [

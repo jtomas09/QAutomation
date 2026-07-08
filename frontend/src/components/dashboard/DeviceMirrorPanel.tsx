@@ -21,6 +21,7 @@ interface Props {
 type MirrorStatus =
   | 'sin-dispositivo'
   | 'conectando'
+  | 'reconectando'
   | 'disponible'
   | 'ejecutando'
   | 'pausado'
@@ -32,7 +33,12 @@ const MIRROR_STATUS_CFG: Record<MirrorStatus, {
 }> = {
   'sin-dispositivo': { label: 'Sin dispositivo',      color: '#64748b', pulse: false, showsVideo: false, bodyMessage: 'Selecciona un dispositivo para visualizar su pantalla.' },
   'conectando':       { label: 'Conectando',          color: '#60a5fa', pulse: true,  showsVideo: false, bodyMessage: 'Conectando al stream…' },
-  'disponible':       { label: 'Disponible',          color: '#34d399', pulse: false, showsVideo: true,  bodyMessage: '' },
+  // showsVideo:true — el <img> se remonta (nueva key) e intenta reconectar de
+  // inmediato; si se ocultara el video aquí, el <img> nunca llegaría a montarse
+  // y su onLoad (que es lo único que limpia el estado "reconectando") jamás
+  // dispararía hasta el timeout de seguridad.
+  'reconectando':     { label: 'Reconectando Mirror…', color: '#60a5fa', pulse: true,  showsVideo: true,  bodyMessage: '' },
+  'disponible':       { label: 'Conectado',           color: '#34d399', pulse: false, showsVideo: true,  bodyMessage: '' },
   'ejecutando':       { label: 'Ejecución en curso',  color: '#34d399', pulse: true,  showsVideo: true,  bodyMessage: '' },
   'pausado':          { label: 'Pausado',             color: '#f59e0b', pulse: false, showsVideo: false, bodyMessage: 'Mirror en pausa.' },
   'desconectado':     { label: 'Desconectado',        color: '#f87171', pulse: false, showsVideo: false, bodyMessage: 'El dispositivo o el Runner no están disponibles.' },
@@ -45,16 +51,23 @@ function computeMirrorStatus(params: {
   imgError:           boolean
   paused:             boolean
   hasActiveExecution: boolean
+  reconnecting:       boolean
 }): MirrorStatus {
-  const { device, streamState, imgError, paused, hasActiveExecution } = params
+  const { device, streamState, imgError, paused, hasActiveExecution, reconnecting } = params
   if (!device) return 'sin-dispositivo'
   if (paused) return 'pausado'
+  if (reconnecting) return 'reconectando'
   if (streamState === 'connecting') return 'conectando'
   if (streamState === 'error' || imgError) return 'error'
   if (streamState === 'device_disconnected' || streamState === 'runner_offline') return 'desconectado'
   if (streamState === 'available') return hasActiveExecution ? 'ejecutando' : 'disponible'
   return 'desconectado'
 }
+
+// Sin recibir un frame nuevo durante esta ventana, se asume que el stream MJPEG
+// murió en silencio (el <img> no siempre dispara onError cuando el SO mata la
+// conexión durante una suspensión) y se dispara una reconexión automática.
+const STALL_THRESHOLD_MS = 6_000
 
 const EXEC_STATUS_CFG: Partial<Record<ExecStatus, { label: string; color: string; pulse: boolean }>> = {
   queued:       { label: 'En cola',    color: '#94a3b8', pulse: false },
@@ -111,18 +124,24 @@ function IconButton({
 
 export default function DeviceMirrorPanel({ device }: Props) {
   const udid = device?.udid ?? null
-  const { url, state } = useMirrorStream(udid)
+  const { url, state, reconnect: reconnectStream } = useMirrorStream(udid)
 
-  const [imgError, setImgError]   = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
-  const [paused, setPaused]       = useState(false)
-  const [connMs, setConnMs]       = useState<number | null>(null)
-  const [rotation, setRotation]   = useState<0 | 90 | 180 | 270>(0)
+  const [imgError, setImgError]     = useState(false)
+  const [reloadKey, setReloadKey]   = useState(0)
+  const [paused, setPaused]         = useState(false)
+  const [connMs, setConnMs]         = useState<number | null>(null)
+  const [rotation, setRotation]     = useState<0 | 90 | 180 | 270>(0)
+  const [isReconnecting, setIsReconnecting] = useState(false)
 
   const frameRef        = useRef<HTMLDivElement>(null)
   const imgRef          = useRef<HTMLImageElement>(null)
   const connectStartRef = useRef<number | null>(null)
   const retryTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Recuperación automática tras suspensión / pérdida de visibilidad ──────
+  const lastFrameAtRef          = useRef<number>(Date.now())
+  const reconnectingRef         = useRef(false)
+  const reconnectSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Sincronización con la ejecución (Fase 2/3) ─────────────────────────────
   // No se toca useTestRunner/ExecutionTrackingService/Runner: se reutiliza el
@@ -167,12 +186,24 @@ export default function DeviceMirrorPanel({ device }: Props) {
     setImgError(false)
     setPaused(false)
     setRotation(0)
+    lastFrameAtRef.current = Date.now()
+    reconnectingRef.current = false
+    setIsReconnecting(false)
   }, [udid])
 
-  useEffect(() => () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current) }, [])
+  useEffect(() => () => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+    if (reconnectSafetyTimerRef.current) clearTimeout(reconnectSafetyTimerRef.current)
+  }, [])
 
   const handleLoad = useCallback(() => {
+    lastFrameAtRef.current = Date.now()
     setImgError(false)
+    if (reconnectingRef.current) {
+      reconnectingRef.current = false
+      setIsReconnecting(false)
+      if (reconnectSafetyTimerRef.current) { clearTimeout(reconnectSafetyTimerRef.current); reconnectSafetyTimerRef.current = null }
+    }
     if (connectStartRef.current !== null) {
       setConnMs(Math.round(performance.now() - connectStartRef.current))
       connectStartRef.current = null
@@ -193,12 +224,75 @@ export default function DeviceMirrorPanel({ device }: Props) {
     setReloadKey(k => k + 1)
   }, [])
 
-  /** Reconectar: da por perdida la conexión actual y mide una conexión nueva desde cero. */
-  const handleReconnect = useCallback(() => {
+  /**
+   * Reconexión completa de la sesión de streaming — la usan tanto el botón
+   * manual "Reconectar" (Fase 4) como el watchdog automático de abajo.
+   * reconnectingRef garantiza una sola reconexión activa a la vez (varios
+   * eventos de visibilidad pueden llegar casi juntos al volver de suspensión).
+   */
+  const performReconnect = useCallback(() => {
+    if (!udid) return
+    if (reconnectingRef.current) return
+    reconnectingRef.current = true
+    setIsReconnecting(true)
+
+    // Cierra la conexión anterior (retry-timer de error) y arranca una nueva
+    // medición de conexión desde cero.
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
+    setImgError(false)
     connectStartRef.current = performance.now()
     setConnMs(null)
-    setImgError(false)
+
+    // Re-verifica el Runner de inmediato (no espera al siguiente tick del
+    // polling interno) y desmonta/remonta el <img> para abrir una sesión
+    // MJPEG nueva — el dispositivo seleccionado (udid) no cambia.
+    reconnectStream()
     setReloadKey(k => k + 1)
+
+    // Red de seguridad: si nunca llega un frame ni un error tras reconectar,
+    // no dejar el guard bloqueado para siempre.
+    if (reconnectSafetyTimerRef.current) clearTimeout(reconnectSafetyTimerRef.current)
+    reconnectSafetyTimerRef.current = setTimeout(() => {
+      reconnectingRef.current = false
+      setIsReconnecting(false)
+    }, 10_000)
+  }, [udid, reconnectStream])
+
+  /** Botón manual "Reconectar" (Fase 4) — reutiliza el mismo flujo de recuperación. */
+  const handleReconnect = useCallback(() => {
+    performReconnect()
+  }, [performReconnect])
+
+  /**
+   * Se ejecuta cuando la pestaña vuelve a estar activa (visibilitychange,
+   * focus, blur, pageshow — se suscriben los cuatro para cubrir las distintas
+   * formas en que cada navegador/SO señala un bloqueo de pantalla o una
+   * suspensión). Solo reconecta si de verdad no han llegado frames nuevos en
+   * STALL_THRESHOLD_MS; de lo contrario no hace nada.
+   */
+  const attemptAutoRecovery = useCallback(() => {
+    if (!udid || paused) return
+    if (document.visibilityState === 'hidden') return
+    const stale = Date.now() - lastFrameAtRef.current > STALL_THRESHOLD_MS
+    if (!stale) return
+    performReconnect()
+  }, [udid, paused, performReconnect])
+
+  const attemptAutoRecoveryRef = useRef(attemptAutoRecovery)
+  useEffect(() => { attemptAutoRecoveryRef.current = attemptAutoRecovery }, [attemptAutoRecovery])
+
+  useEffect(() => {
+    const onActivity = () => attemptAutoRecoveryRef.current()
+    document.addEventListener('visibilitychange', onActivity)
+    window.addEventListener('focus',    onActivity)
+    window.addEventListener('blur',     onActivity)
+    window.addEventListener('pageshow', onActivity)
+    return () => {
+      document.removeEventListener('visibilitychange', onActivity)
+      window.removeEventListener('focus',    onActivity)
+      window.removeEventListener('blur',     onActivity)
+      window.removeEventListener('pageshow', onActivity)
+    }
   }, [])
 
   const handleScreenshot = useCallback(() => {
@@ -243,7 +337,8 @@ export default function DeviceMirrorPanel({ device }: Props) {
     imgError,
     paused,
     hasActiveExecution: !!execRecord,
-  }), [device, state, imgError, paused, execRecord])
+    reconnecting:       isReconnecting,
+  }), [device, state, imgError, paused, execRecord, isReconnecting])
 
   const statusCfg = MIRROR_STATUS_CFG[mirrorStatus]
   const online    = statusCfg.showsVideo && !!url
@@ -296,7 +391,7 @@ export default function DeviceMirrorPanel({ device }: Props) {
             border:     `1px solid ${statusCfg.color}4d`,
           }}
         >
-          {mirrorStatus === 'conectando' ? (
+          {mirrorStatus === 'conectando' || mirrorStatus === 'reconectando' ? (
             <Loader2 size={9} className="animate-spin" />
           ) : mirrorStatus === 'desconectado' || mirrorStatus === 'error' ? (
             <WifiOff size={9} />
