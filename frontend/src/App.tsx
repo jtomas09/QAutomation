@@ -35,6 +35,7 @@ export default function App() {
   const {
     configured, configuredUdids, toggleDevice: toggleConfigDevice,
     saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
+    activeDevice,
   } = useExecutionDevices()
 
   const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
@@ -81,6 +82,7 @@ export default function App() {
               state={state}
               suite={suite}              env={env}
               configured={configured}
+              activeDevice={activeDevice}
               country={country}
               videoEnabled={videoEnabled}
               saving={savingConfig}

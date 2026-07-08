@@ -23,12 +23,23 @@ export function useExecutionDevices() {
   const [savedUdids,  setSavedUdids]     = useState<string[]>([])
   const [saving,      setSaving]         = useState(false)
 
+  // Dispositivo que el panel Mirror debe reflejar. Se sincroniza con la MISMA
+  // interacción de selección que ya existe (el toggle "Usar dispositivo" en
+  // ConnectedDevices) — no agrega ningún control nuevo en la UI.
+  const [activeDeviceUdid, setActiveDeviceUdidState] = useState<string | null>(null)
+
   // Ref keeps state readable synchronously (avoids stale closure in syncWithLive/saveConfig)
-  const configuredRef = useRef<ConfiguredDevice[]>([])
+  const configuredRef       = useRef<ConfiguredDevice[]>([])
+  const activeDeviceUdidRef = useRef<string | null>(null)
 
   function setConfigured(next: ConfiguredDevice[]) {
     configuredRef.current = next
     setConfiguredState(next)
+  }
+
+  function setActiveDeviceUdid(next: string | null) {
+    activeDeviceUdidRef.current = next
+    setActiveDeviceUdidState(next)
   }
 
   // Load saved config from backend on mount
@@ -43,14 +54,26 @@ export function useExecutionDevices() {
       .catch(() => {})
   }, [])
 
-  /** Toggle a device in/out of the configured set. */
+  /**
+   * Toggle a device in/out of the configured set.
+   * Doubles as the Mirror selection signal: activating a device makes it the
+   * one the Mirror panel follows; deactivating the active one falls back to
+   * another still-configured device (or null if none remain).
+   */
   const toggleDevice = useCallback((device: PhysicalDevice) => {
     const current = configuredRef.current
     const exists  = current.some(d => d.udid === device.udid)
-    setConfigured(exists
-      ? current.filter(d => d.udid !== device.udid)
-      : [...current, toConfigured(device)]
-    )
+
+    if (exists) {
+      const next = current.filter(d => d.udid !== device.udid)
+      setConfigured(next)
+      if (activeDeviceUdidRef.current === device.udid) {
+        setActiveDeviceUdid(next[0]?.udid ?? null)
+      }
+    } else {
+      setConfigured([...current, toConfigured(device)])
+      setActiveDeviceUdid(device.udid)
+    }
   }, [])
 
   /** Persist the current selection to the backend. */
@@ -86,11 +109,18 @@ export function useExecutionDevices() {
       })
 
     setConfigured(kept)
+    if (removed.some(d => d.udid === activeDeviceUdidRef.current)) {
+      setActiveDeviceUdid(kept[0]?.udid ?? null)
+    }
     return removed.map(d => d.name)
   }, [])
 
   const configuredUdids = configured.map(d => d.udid)
   const isDirty = [...configuredUdids].sort().join(',') !== [...savedUdids].sort().join(',')
+  const activeDevice = configured.find(d => d.udid === activeDeviceUdid) ?? null
 
-  return { configured, configuredUdids, toggleDevice, saveConfig, saving, isDirty, syncWithLive }
+  return {
+    configured, configuredUdids, toggleDevice, saveConfig, saving, isDirty, syncWithLive,
+    activeDevice,
+  }
 }

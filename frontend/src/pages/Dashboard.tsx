@@ -12,12 +12,14 @@ import ActivityLog         from '../components/dashboard/ActivityLog'
 import ResultsDonut        from '../components/dashboard/ResultsDonut'
 import DailyChart          from '../components/dashboard/DailyChart'
 import ConnectedDevices    from '../components/dashboard/ConnectedDevices'
+import DeviceMirrorPanel   from '../components/dashboard/DeviceMirrorPanel'
 
 interface Props {
   state:              RunState
   suite:              string
   env:                string
   configured:         ConfiguredDevice[]
+  activeDevice:       ConfiguredDevice | null
   country:            string
   videoEnabled:       boolean
   saving:             boolean
@@ -47,7 +49,7 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, configured, country, videoEnabled,
+  state, suite, env, configured, activeDevice, country, videoEnabled,
   saving, isDirty,
   onSuiteChange, onEnvChange, onCountryChange,
   onVideoToggle, onToggleDevice, onSaveConfig, onSyncLive,
@@ -233,44 +235,57 @@ export default function Dashboard({
         onClear={handleClear}
       />
 
-      {/* Row 2: Run panel (fixed width) + Recent executions (flex) */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
-        <RunTestsPanel
-          suite={suite}                 env={env}
-          configuredDevices={configured}
-          country={country}
-          status={state.status}         executionId={state.executionId ?? null}
-          videoEnabled={videoEnabled}   onVideoToggle={onVideoToggle}
-          onSuiteChange={onSuiteChange} onEnvChange={onEnvChange}
-          onCountryChange={onCountryChange}
-          onRun={onRun}                 onStop={onStop}
-          onConfigureDevices={() => {
-            // Scroll to the ConnectedDevices widget
-            const el = document.getElementById('connected-devices')
-            el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          }}
-          passed={state.passed}
-          failed={state.failed}
-          skipped={state.skipped}
-          totalExpected={state.totalExpected}
-        />
-        <RecentExecutions onViewAll={onViewAll} />
+      {/* Row 2+3: (Run panel + Recent / Activity + Donut + Chart) alongside Mirror de Dispositivo + Quick Access */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
+        <div className="flex flex-col gap-4">
+          {/* Run panel (fixed width) + Recent executions (flex) */}
+          <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
+            <RunTestsPanel
+              suite={suite}                 env={env}
+              configuredDevices={configured}
+              country={country}
+              status={state.status}         executionId={state.executionId ?? null}
+              videoEnabled={videoEnabled}   onVideoToggle={onVideoToggle}
+              onSuiteChange={onSuiteChange} onEnvChange={onEnvChange}
+              onCountryChange={onCountryChange}
+              onRun={onRun}                 onStop={onStop}
+              onConfigureDevices={() => {
+                // Scroll to the ConnectedDevices widget
+                const el = document.getElementById('connected-devices')
+                el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }}
+              passed={state.passed}
+              failed={state.failed}
+              skipped={state.skipped}
+              totalExpected={state.totalExpected}
+            />
+            <RecentExecutions onViewAll={onViewAll} />
+          </div>
+
+          {/* Activity log + Donut + Daily chart */}
+          <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', height: 380 }}>
+            <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
+            <ResultsDonut
+              passed={aggStats.passed}
+              failed={aggStats.failed}
+              skipped={aggStats.skipped}
+              isLive={isLive}
+            />
+            <DailyChart isLive={isLive} />
+          </div>
+        </div>
+
+        {/* Mirror de Dispositivo + Quick Access */}
+        <div className="flex flex-col gap-4">
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <DeviceMirrorPanel device={activeDevice ?? configured[0] ?? null} />
+          </div>
+          <QuickAccess />
+        </div>
       </div>
 
-      {/* Row 3: Activity log + Donut + Daily chart */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', height: 380 }}>
-        <ActivityLog logs={state.logs} onClear={onClearLog} onViewAll={onViewAll} />
-        <ResultsDonut
-          passed={aggStats.passed}
-          failed={aggStats.failed}
-          skipped={aggStats.skipped}
-          isLive={isLive}
-        />
-        <DailyChart isLive={isLive} />
-      </div>
-
-      {/* Row 4: Devices + Quick Access */}
-      <div id="connected-devices" className="grid gap-4" style={{ gridTemplateColumns: '1fr 380px' }}>
+      {/* Row 4: Connected devices (full width) */}
+      <div id="connected-devices">
         <ConnectedDevices
           configured={configured}
           onToggleDevice={onToggleDevice}
@@ -280,7 +295,6 @@ export default function Dashboard({
           onSyncLive={onSyncLive}
           onManage={onManageDevices}
         />
-        <QuickAccess />
       </div>
 
     </div>
