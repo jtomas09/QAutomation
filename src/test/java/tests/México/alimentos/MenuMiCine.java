@@ -58,7 +58,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboMix2() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Doritos();
             page.Siguiente();
@@ -76,7 +76,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboMix3() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Takis();
             page.Siguiente();
@@ -94,7 +94,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboMix4() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.CheetosMix();
             page.Siguiente();
@@ -112,7 +112,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Siguiente(); // Palomitas 2
@@ -131,7 +131,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar2() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Siguiente(); // Palomitas 2
@@ -150,7 +150,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar3() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Siguiente(); // Palomitas 2
@@ -170,7 +170,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar4() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar Jumbo", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Siguiente(); // Palomitas 2
@@ -188,7 +188,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar5() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar Jumbo", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Cheetos();
@@ -207,7 +207,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar10() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar Jumbo", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Takis();
@@ -227,7 +227,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar6() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar Jumbo", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente();
             page.Doritos();
@@ -247,7 +247,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar8() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar Jumbo", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Siguiente(); // Palomitas 2
@@ -267,7 +267,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos Mi Cine")
     void comprarMaxiComboFamiliar7() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar Jumbo", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Cheetos();
             page.Siguiente(); // Palomitas 1
@@ -291,7 +291,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -308,7 +308,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE2() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -325,7 +325,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE3() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -343,7 +343,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE4() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.FrambuesaAzul();
@@ -362,7 +362,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE5() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -379,7 +379,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE6() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -396,7 +396,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICCE7() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -412,7 +412,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combos ICEE con Skwinkles")
     void comprarComboICCE8() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.Siguiente(); // Sabor ICEE 1
@@ -427,7 +427,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Junior")
     void comprarComboJunior() {
         TestSteps.run("Seleccionar y personalizar Combo Junior", () -> {
-            page.clickComboJunior();
+            page.buscarComboJunior();
             page.personalizar();
             page.Siguiente();
             page.Siguiente();
@@ -442,7 +442,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Junior")
     void comprarComboJunior0() {
         TestSteps.run("Seleccionar y personalizar Combo Junior", () -> {
-            page.clickComboJunior();
+            page.buscarComboJunior();
             page.personalizar();
             page.Siguiente(); // Sabor Refresco 1
             page.Sprite();
@@ -461,7 +461,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Junior")
     void comprarComboJunior3() {
         TestSteps.run("Seleccionar y personalizar Combo Junior", () -> {
-            page.clickComboJunior();
+            page.buscarComboJunior();
             page.personalizar();// Palomitas
             page.Caramelo();
             page.Siguiente(); // Sabor Refresco 1
@@ -481,7 +481,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Junior")
     void comprarComboJunior4() {
         TestSteps.run("Seleccionar y personalizar Combo Junior", () -> {
-            page.clickComboJunior();
+            page.buscarComboJunior();
             page.personalizar();// Palomitas
             page.Doritos();
             page.Siguiente(); // Sabor Refresco 1
@@ -501,7 +501,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Junior")
     void comprarComboJunior2() {
         TestSteps.run("Seleccionar y personalizar Combo Junior", () -> {
-            page.clickComboJunior();
+            page.buscarComboJunior();
             page.personalizar();// Palomitas
             page.TakisJr();
             page.Siguiente(); // Sabor Refresco 1
@@ -521,7 +521,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.HieloRegular();
@@ -536,7 +536,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico2() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.PocoHielo();
@@ -551,7 +551,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico3() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.SinHielo();
@@ -566,7 +566,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico4() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Caramelo();
             page.Siguiente();
@@ -582,7 +582,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico5() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Takis();
             page.Siguiente();
@@ -598,7 +598,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico6() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Doritos();
             page.Siguiente();
@@ -614,7 +614,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico7() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.Sprite();
@@ -630,7 +630,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico8() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.Sidral();
@@ -646,7 +646,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico9() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.Sidral();
@@ -662,7 +662,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Combo Clásico")
     void comprarComboClasico10() {
         TestSteps.run("Seleccionar y personalizar Combo Clásico", () -> {
-            page.clickComboClasico();
+            page.buscarComboClasico();
             page.personalizar();// Palomitas
             page.Siguiente();
             page.CocaCola();
@@ -678,7 +678,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Siguiente();
         }, driver);
@@ -690,7 +690,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles2() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Jumbo();
             page.Siguiente();
@@ -703,7 +703,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles3() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Grandes();
             page.Siguiente();
@@ -716,7 +716,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles4() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Medianas();
             page.Siguiente();
@@ -729,7 +729,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles5() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Chicas();
             page.Siguiente();
@@ -742,7 +742,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles6() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Caramelo();
             page.Siguiente();
@@ -755,7 +755,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles7() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Jumbo();
             page.Caramelo();
@@ -769,7 +769,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles8() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Grandes();
             page.Caramelo();
@@ -783,7 +783,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles9() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Medianas();
             page.Caramelo();
@@ -797,7 +797,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles10() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Chicas();
             page.Caramelo();
@@ -811,7 +811,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles11() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Takis();
             page.Siguiente();
@@ -824,7 +824,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles12() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Jumbo();
             page.Takis();
@@ -838,7 +838,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles13() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Grandes();
             page.Takis();
@@ -852,7 +852,7 @@ public class MenuMiCine extends BaseTest {
     @Story("Palomitas Skwinkles")
     void comprarPalomitasSkwinkles14() {
         TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-            page.clickPalomitasSkwinkles();
+            page.buscarPalomitasSkwinkles();
             page.personalizar();// Palomitas
             page.Medianas();
             page.Takis();

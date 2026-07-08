@@ -40,7 +40,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliar() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Takis();
@@ -65,7 +65,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarJ() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente(); // Palomitas 1
             page.Siguiente(); // Palomitas 2
@@ -89,7 +89,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarJU() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Caramelo();
             page.Siguiente(); // Palomitas 1
@@ -115,7 +115,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarT() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Takis();
             page.Siguiente();
@@ -140,7 +140,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarD() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Doritos();
             page.Siguiente();
@@ -165,7 +165,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarM() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente();
             page.Siguiente();
@@ -189,7 +189,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarCT() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Caramelo();
             page.Siguiente();
@@ -215,7 +215,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Familiares")
     void comprarMaxiComboFamiliarMT() {
         TestSteps.run("Seleccionar y personalizar Maxi Combo Familiar", () -> {
-            page.clickMaxiComboFamiliar();
+            page.buscarMaxiComboFamiliar();
             page.personalizar();
             page.Siguiente();
             page.Takis();
@@ -240,7 +240,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEE() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente();
             page.Cereza();
@@ -258,7 +258,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEM() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente();
             page.Mango();
@@ -278,7 +278,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEES() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente();
             page.seleccionarSaborPorContentDesc2("Mango");
@@ -297,7 +297,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEESA() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Caramelo();
             page.Siguiente();
@@ -318,7 +318,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEP() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Doritos();
             page.Siguiente();
@@ -338,7 +338,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEAR() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -357,7 +357,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEECC() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -378,7 +378,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEMM() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Takis();
@@ -400,7 +400,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEFF() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Caramelo();
@@ -420,7 +420,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEPP() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Doritos();
@@ -442,7 +442,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEPM() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Siguiente();
             page.seleccionarSaborPorContentDesc2("Cereza");
@@ -461,7 +461,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEECF() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Takis();
             page.Siguiente();
@@ -481,7 +481,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEJC() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Caramelo();
@@ -502,7 +502,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos ICEE")
     void comprarComboICEEJT() {
         TestSteps.run("Seleccionar y personalizar Combo ICEE Jumbo", () -> {
-            page.clickComboICEE();
+            page.buscarComboICEE();
             page.personalizar();
             page.Jumbo();
             page.Takis();
@@ -523,14 +523,14 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescos() {
         TestSteps.run("Añadir Hot Dog Takis", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.HieloRegular();
             page.Siguiente();
@@ -549,14 +549,14 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosGS() {
         TestSteps.run("Añadir Hot Dog Takis", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Grande", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Grande();
             page.Sidral();
@@ -577,14 +577,14 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosMS() {
         TestSteps.run("Añadir Hot Dog Takis", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Mediano", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Mediano();
             page.Sprite();
@@ -605,14 +605,14 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosCC() {
         TestSteps.run("Añadir Hot Dog Takis", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Chico", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Chico();
             page.CocaColaLigth();
@@ -633,7 +633,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosJJ() {
         TestSteps.run("Añadir Hot Dog Takis Jumbo", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -641,7 +641,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Jumbo", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Jumbo();
             page.FuzeTe();
@@ -662,7 +662,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosJG() {
         TestSteps.run("Añadir Hot Dog Takis Jumbo", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -670,7 +670,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Grande", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Grande();
             page.Fanta();
@@ -691,7 +691,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosJM() {
         TestSteps.run("Añadir Hot Dog Takis Jumbo", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -700,7 +700,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Mediano", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Mediano();
             page.DelValle2();
@@ -721,7 +721,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosJC() {
         TestSteps.run("Añadir Hot Dog Takis Jumbo", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -729,7 +729,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Chico", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Chico();
             page.SinHielo();
@@ -749,7 +749,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosCJ() {
         TestSteps.run("Añadir Hot Dog Takis Chico", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Chico();
             page.Siguiente();
@@ -758,7 +758,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Jumbo", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Jumbo();
             page.Sprite();
@@ -779,7 +779,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Hot Dogs")
     void comprarHotDogRefrescosJJS() {
         TestSteps.run("Añadir Hot Dog Takis Jumbo", () -> {
-            page.clickHotDogTakis();
+            page.buscarHotDogTakis();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -788,7 +788,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Refresco Jumbo", () -> {
-            page.clickRefresco();
+            page.buscarRefresco();
             page.personalizar();
             page.Jumbo();
             page.Sidral();
@@ -809,7 +809,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAgua() {
         TestSteps.run("Añadir Papas Fritas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
@@ -817,14 +817,14 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua Embotellada", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
@@ -842,7 +842,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaN() {
         TestSteps.run("Añadir Papas Fritas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
@@ -850,14 +850,14 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua Embotellada", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Doritos", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.Doritos();
             page.Siguiente();
@@ -876,7 +876,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaA() {
         TestSteps.run("Añadir Papas Adobadas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Adobadas();
             page.Siguiente();
@@ -885,7 +885,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 600ml", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.seismili();
             page.Siguiente();
@@ -893,7 +893,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
@@ -911,7 +911,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaT() {
         TestSteps.run("Añadir Papas Adobadas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Adobadas();
             page.Siguiente();
@@ -920,7 +920,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 600ml", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.seismili();
             page.Siguiente();
@@ -928,7 +928,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Doritos", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.Doritos();
             page.Siguiente();
@@ -947,7 +947,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaD() {
         TestSteps.run("Añadir Papas Adobadas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Adobadas();
             page.Siguiente();
@@ -956,14 +956,14 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 1L", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Tajín", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.NachosTajin();
             page.Siguiente();
@@ -982,7 +982,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaML() {
         TestSteps.run("Añadir Papas Adobadas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Adobadas();
             page.Siguiente();
@@ -991,7 +991,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 600ml", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.seismili();
             page.Siguiente();
@@ -999,7 +999,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Tajín", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.NachosTajin();
             page.Siguiente();
@@ -1018,7 +1018,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaNA() {
         TestSteps.run("Añadir Papas Naturales", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
@@ -1026,7 +1026,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 600ml", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.seismili();
             page.Siguiente();
@@ -1034,7 +1034,7 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Mix Takis Fuego", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.MixTakisFuego();
             page.Siguiente();
@@ -1053,7 +1053,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaCM() {
         TestSteps.run("Añadir Papas Naturales", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
@@ -1061,14 +1061,14 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 1L", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Chicos Mix Takis Fuego", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.NachosChicos();
             page.MixTakisFuego();
@@ -1088,7 +1088,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Snacks")
     void comprarSnacksPapasAguaAC() {
         TestSteps.run("Añadir Papas Adobadas", () -> {
-            page.clickPapasFritas();
+            page.buscarPapasFritas();
             page.personalizar();
             page.Adobadas();
             page.Siguiente();
@@ -1097,14 +1097,14 @@ public class MenuTradicional extends BaseTest {
         }, driver);
 
         TestSteps.run("Regresar y añadir Agua 1L", () -> {
-            page.clickAguaEmbotellada();
+            page.buscarAguaEmbotellada();
             page.personalizar();
             page.Siguiente();
             page.agregarCarrito();
         }, driver);
 
         TestSteps.run("Regresar y añadir Nachos Chicos Mix Doritos", () -> {
-            page.clickNachos();
+            page.buscarNachos();
             page.personalizar();
             page.NachosChicos();
             page.MixDoritos();
@@ -1124,7 +1124,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMix() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Siguiente(); // Palomitas
             page.HieloRegular();
@@ -1145,7 +1145,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixC() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Caramelo();
             page.Siguiente();
@@ -1168,7 +1168,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixT() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Takis();
             page.Siguiente();
@@ -1192,7 +1192,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixM() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix Jumbo", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Jumbo();
             page.Siguiente();
@@ -1217,7 +1217,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixCJ() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix Jumbo", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Jumbo();
             page.Caramelo();
@@ -1241,7 +1241,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixD() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix Jumbo", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Jumbo();
             page.Doritos();
@@ -1266,7 +1266,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixDC() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix Jumbo", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.Jumbo();
             page.CheetosMix();
@@ -1290,7 +1290,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixPC() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.CheetosMix();
             page.Siguiente();
@@ -1312,7 +1312,7 @@ public class MenuTradicional extends BaseTest {
     @Story("Combos Maxicombo")
     void comprarMaxicomboMixPCJ() {
         TestSteps.run("Seleccionar y personalizar Maxicombo Mix", () -> {
-            page.clickMaxiComboMix();
+            page.buscarMaxiComboMix();
             page.personalizar();
             page.CheetosMix();
             page.Siguiente();

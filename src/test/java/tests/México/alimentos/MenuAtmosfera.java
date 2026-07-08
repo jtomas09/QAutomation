@@ -136,7 +136,7 @@ public class MenuAtmosfera extends BaseTest {
     @Story("Combos")
     void comprarCrepaDulceFrappe() {
        new CinemasHelper(driver).ensureCinemaSelectedFromAlimentos("La Perla");
-        TestSteps.run("Seleccionar Crepa Dulce", () -> page.clickCrepasDulces1(), driver);
+        TestSteps.run("Seleccionar Crepa Dulce", () -> page.buscarCrepasDulces1(), driver);
         TestSteps.run("Personalizar Crepa Dulce", () -> {
             page.personalizar();
             page.MermeladaZarzamora();
@@ -145,7 +145,7 @@ public class MenuAtmosfera extends BaseTest {
         }, driver);
         TestSteps.run("Agregar Crepa Dulce al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Seleccionar Frappé de Agua", () -> page.buscarFrappeAgua(), driver);
         TestSteps.run("Personalizar Frappé de Agua Grande", () -> {
             page.personalizar();
             page.Grande();
@@ -164,7 +164,7 @@ public class MenuAtmosfera extends BaseTest {
     @DisplayName("Combo Frappé de Coco y Crepa Dulce con Queso")
     @Story("Combos")
     void comprarCrepaDulceFrappesG() {
-        TestSteps.run("Seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Seleccionar Frappé de Agua", () -> page.buscarFrappeAgua(), driver);
         TestSteps.run("Personalizar Frappé de Agua Grande con Coco", () -> {
             page.personalizar();
             page.Grande();
@@ -173,7 +173,7 @@ public class MenuAtmosfera extends BaseTest {
         }, driver);
         TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Seleccionar Crepa Dulce", () -> page.clickCrepasDulces1(), driver);
+        TestSteps.run("Seleccionar Crepa Dulce", () -> page.buscarCrepasDulces1(), driver);
         TestSteps.run("Personalizar Crepa Dulce con Queso Philadelphia", () -> {
             page.personalizar();
             page.MermeladaZarzamora();
@@ -193,7 +193,7 @@ public class MenuAtmosfera extends BaseTest {
     @DisplayName("Combo Frappé Sandía Pelonada y Crepa de Fresa")
     @Story("Combos")
     void comprarCrepaDulceFrappes() {
-        TestSteps.run("Seleccionar Frappé de Agua", () -> page.clickFrappeAgua(), driver);
+        TestSteps.run("Seleccionar Frappé de Agua", () -> page.buscarFrappeAgua(), driver);
         TestSteps.run("Personalizar Frappé de Agua Grande con Sandía Pelonada", () -> {
             page.personalizar();
             page.Grande();
@@ -202,7 +202,7 @@ public class MenuAtmosfera extends BaseTest {
         }, driver);
         TestSteps.run("Agregar Frappé al carrito", () -> page.agregarCarrito(), driver);
 
-        TestSteps.run("Seleccionar Crepa Dulce", () -> page.clickCrepasDulces1(), driver);
+        TestSteps.run("Seleccionar Crepa Dulce", () -> page.buscarCrepasDulces1(), driver);
         TestSteps.run("Personalizar Crepa Dulce con Mermelada de Fresa", () -> {
             page.personalizar();
             page.MermeladaZarzamora();
@@ -263,7 +263,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromociones() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.FresaCoco();
 //            page.Siguiente();
@@ -279,7 +279,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesN() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.PinaColada();
 //            page.Siguiente();
@@ -295,7 +295,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesC() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.MangoChamoy();
 //            page.Siguiente();
@@ -311,7 +311,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesM() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.JollyRancherRaspberry();
 //            page.Siguiente();
@@ -327,7 +327,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesQ() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.JollyRancherRaspberry();
 //            page.Siguiente();
@@ -343,7 +343,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesMa() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.ManzanaVerde();
 //            page.Siguiente();
@@ -359,7 +359,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesCP() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.ChiclePlatano();
 //            page.Siguiente();
@@ -375,7 +375,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesPR() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.FrutosPelonPeloRico();
 //            page.Siguiente();
@@ -391,7 +391,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesPR2() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.FrutosPelonPeloRico();
 //            page.Siguiente();
@@ -407,7 +407,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesFP() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.MorasMaracuya();
 //            page.Siguiente();
@@ -423,7 +423,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesNT() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.SandiaPelonada();
 //            page.Siguiente();
@@ -439,7 +439,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Destacados")
 //    void comprarPromocionesFPL() {
 //        TestSteps.run("Seleccionar y personalizar Combo Crepa + Frappé", () -> {
-//            page.clickCrepaFrappe();
+//            page.buscarCrepaFrappe();
 //            page.personalizar();
 //            page.FresaPelonada();
 //            page.Siguiente();
@@ -455,7 +455,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarPromocionesCO() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos en Pareja", () -> {
-//            page.clickComboNachosPareja();
+//            page.buscarComboNachosPareja();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Caramelo();
@@ -478,7 +478,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarPromocionesCOA() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos en Pareja", () -> {
-//            page.clickComboNachosPareja();
+//            page.buscarComboNachosPareja();
 //            page.personalizar();
 //            page.Siguiente(); // Avanza en palomitas
 //            page.FuzeTe();
@@ -498,7 +498,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarPromocionesNC() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos en Pareja", () -> {
-//            page.clickComboNachosPareja();
+//            page.buscarComboNachosPareja();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.CheetosMix();
@@ -521,7 +521,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarPromocionesNC2() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos en Pareja", () -> {
-//            page.clickComboNachosPareja();
+//            page.buscarComboNachosPareja();
 //            page.personalizar();
 //            page.Takis();
 //            page.Siguiente();
@@ -542,7 +542,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarPromocionesNC3() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos en Pareja", () -> {
-//            page.clickComboNachosPareja();
+//            page.buscarComboNachosPareja();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Caramelo();
@@ -565,7 +565,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarPromocionesFPE2() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos en Pareja", () -> {
-//            page.clickComboNachosPareja();
+//            page.buscarComboNachosPareja();
 //            page.personalizar();
 //            page.Siguiente(); // Palomitas
 //            page.Siguiente(); // Refresco 1
@@ -585,7 +585,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesFPE3() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.Siguiente(); // Frappe 1
 //            page.Siguiente(); // Frappe 2
@@ -600,7 +600,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesFPE4() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.CarlosV();
 //            page.Siguiente();
@@ -617,7 +617,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesFPV() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.CookiesCream();
 //            page.Siguiente();
@@ -634,7 +634,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesFPE() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.MMs();
 //            page.Siguiente();
@@ -651,7 +651,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesCap() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.Capuccino();
 //            page.Siguiente();
@@ -668,7 +668,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesChoco() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.ChocolateBlanco();
 //            page.Siguiente();
@@ -685,7 +685,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesMoka() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.MokaCaramelo();
 //            page.Siguiente();
@@ -702,7 +702,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesMacchiatoCoco() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.MacchiatoCoco();
 //            page.Siguiente();
@@ -719,7 +719,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesMacchiatoMenta() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.MacchiatoMenta();
 //            page.Siguiente();
@@ -736,7 +736,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Pretzel")
 //    void comprarPromocionesMacchiato() {
 //        TestSteps.run("Seleccionar y personalizar Combo Pretzel", () -> {
-//            page.clickComboPretzelPareja();
+//            page.buscarComboPretzelPareja();
 //            page.personalizar();
 //            page.MacchiatoCremaIrlandesa();
 //            page.Siguiente();
@@ -753,7 +753,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos1() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.Siguiente(); // Palomitas
 //            page.HieloRegular();
@@ -770,7 +770,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos2() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.Caramelo();
 //            page.Siguiente();
@@ -789,7 +789,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos3() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Siguiente();
@@ -808,7 +808,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Caramelo();
@@ -827,7 +827,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos6() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.Takis();
 //            page.Siguiente();
@@ -846,7 +846,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos7() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Doritos();
@@ -865,7 +865,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Combos Nachos")
 //    void comprarComboNachos8() {
 //        TestSteps.run("Seleccionar y personalizar Combo Nachos", () -> {
-//            page.clickComboNachos();
+//            page.buscarComboNachos();
 //            page.personalizar();
 //            page.CheetosMix();
 //            page.Siguiente();
@@ -884,7 +884,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.Siguiente();
 //            page.Nutella();
@@ -898,7 +898,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche2() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.CarlosV();
 //            page.LecheDeslactosada();
@@ -914,7 +914,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche3() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.CookiesCream();
 //            page.LecheAlmendra();
@@ -929,7 +929,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche4() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.MokaCaramelo();
 //            page.Siguiente();
@@ -944,7 +944,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche5() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.ChocolateBlanco();
 //            page.LecheDeslactosada();
@@ -960,7 +960,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche6() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.Capuccino();
 //            page.LecheAlmendra();
@@ -976,7 +976,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche7() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.MacchiatoMenta();
 //            page.Siguiente();
@@ -991,7 +991,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche8() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.MacchiatoCoco();
 //            page.LecheDeslactosada();
@@ -1007,7 +1007,7 @@ public class MenuAtmosfera extends BaseTest {
 //    @Story("Crepa + Frappé Leche")
 //    void comprarCrepaFrappeLeche9() {
 //        TestSteps.run("Seleccionar y personalizar Crepa + Frappé Leche", () -> {
-//            page.clickCrepaFrappeLeche();
+//            page.buscarCrepaFrappeLeche();
 //            page.personalizar();
 //            page.MacchiatoCremaIrlandesa();
 //            page.LecheAlmendra();

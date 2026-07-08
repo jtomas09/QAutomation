@@ -53,32 +53,28 @@ public class SelectorPage extends BasePage {
         }
     }
 
-    public void clickAmericano() {
-        this.clickCardByTextWithFallback("Americano",10);
+    public void buscarDippinDots() {
+        buscarProducto("Dippin Dots");
     }
 
-    public void clickDippinDots() {
-        this.clickCardByTextWithFallback("Dippin Dots",10);
+    public void buscarComboNachosPareja2() {
+        buscarProducto("Combo Nachos en Pareja");
     }
 
-    public void clickComboNachosPareja2() {
-        this.clickCardByTextWithFallback("Combo Nachos en Pareja ",10);
+    public void buscarPalomitasSkinkless() {
+        buscarProducto("Palomitas Skwinkles");
     }
 
-    public void clickPalomitasSkinkless() {
-        this.clickCardByTextWithFallback("Palomitas Skwinkles",10);
+    public void buscarComboNachosPareja() {
+        buscarProducto("Combo Nachos en Pareja");
     }
 
-    public void clickComboNachosPareja() {
-        this.clickCardByTextWithFallback("Combo Nachos en Pareja ",10);
+    public void buscarPinaColada() {
+        buscarProducto("Piña Colada");
     }
 
-    public void clickPinaColada() {
-        this.clickCardByTextWithFallback("Piña Colada",10);
-    }
-
-    public void clickPalomitas() {
-        this.clickCardByTextWithFallback("Palomitas",10);
+    public void buscarPalomitas() {
+        buscarProducto("Palomitas");
     }
 
     public void SinQueso() {
@@ -140,16 +136,12 @@ public class SelectorPage extends BasePage {
         this.clickCardByTextWithFallback("Mango Chamoy",10);
     }
 
-    public void clickPretzel() {
-        this.clickCardByTextWithFallback("Pretzel",10);
-    }
-
     public void SandiaPelonada() {
         this.clickCardByTextWithFallback("Sandía Pelonada",10);
     }
 
-    public void clickSkwinkles() {
-        this.clickCardByTextWithFallback("Skwinkles® Chunks sandia",10);
+    public void buscarSkwinkles() {
+        buscarProducto("Skwinkles® Chunks sandia");
     }
 
     public void EsenciaMenta() {
@@ -236,24 +228,24 @@ public class SelectorPage extends BasePage {
         this.clickCardByTextWithFallback("Crema Irlandesa",10);
     }
 
-    public void clickMM() {
-        this.clickCardByTextWithFallback("M&M's®",10);
+    public void buscarMM() {
+        buscarProducto("M&M's®");
     }
 
-    public void clickCrepasDulces() {
-        this.clickCardByTextWithFallback("Crepas Dulces Premium",10);
+    public void buscarCrepasDulces() {
+        buscarProducto("Crepas Dulces Premium");
     }
 
-    public void clickComboICEE() {
-        this.clickCardByTextWithFallback("Combo ICEE® con Skwinkles®",10);
+    public void buscarComboICEE() {
+        buscarProducto("Combo ICEE® con Skwinkles®");
     }
 
-    public void clickHotDogTakis() {
-        this.clickCardByTextWithFallback("Hot Dog Takis ",10);
+    public void buscarHotDogTakis() {
+        buscarProducto("Hot Dog Takis");
     }
 
-    public void clickRefresco() {
-        this.clickCardByTextWithFallback("Refresco",10);
+    public void buscarRefresco() {
+        buscarProducto("Refresco");
     }
 
     public void Takis() {
@@ -349,148 +341,163 @@ public class SelectorPage extends BasePage {
         this.clickCardByTextWithFallback("Skwinkles® Salsagheti",10);
     }
 
-    public void clickMokaOscuro() {
-        this.clickRightFromAmericanoAnchor("Moka Obscuro");
+    public void buscarCrepaFrappe() {
+        buscarProducto("Crepa dulce + Frappé agua");
     }
 
-    public void clickCrepaFrappe() {
-        this.clickRightFromComboNachosParejaAnchor("Crepa dulce + Frappé agua");
+    public void buscarComboPretzelPareja() {
+        buscarProducto("Combo Pretzel en Pareja");
     }
 
-    public void clickComboPretzelPareja() {
-        this.clickRightFromComboNachosParejaAnchor("Combo Pretzel en Pareja");
+    public void buscarComboNachos() {
+        buscarProducto("Combo Nachos");
     }
 
-    public void clickComboNachos() {
-        this.clickRightFromComboNachosParejaAnchor("Combo Nachos ");
+    public void buscarFrappeAgua() {
+        buscarProducto("Frappé Agua");
     }
 
-    public void clickFrappeAgua() {
-        this.clickRightFromFrappeAnchor("Frappé Agua");
+    public void buscarMaxiComboFamiliarJumbo() {
+        buscarProducto("Maxicombo Familiar Jumbo");
     }
 
-    public void clickMaxiComboFamiliarJumbo() {
-        this.clickRightFromPalomitasLiloAnchor("Maxicombo Familiar Jumbo");
+    public void buscarFrappeLeche() {
+        buscarProducto("Frappé Leche");
+    }
+    public void buscarComboClasico() {
+        buscarProducto("Combo Clásico");
+    }
+    public void buscarComboJunior() {
+        buscarProducto("Combo Junior");
     }
 
-    public void clickFrappeLeche() {
-        this.clickRightFromFrappeAnchor("Frappé Leche");
+    // ── Búsqueda directa vía buscador nativo (estándar único, Fase de refactor) ──
+    //
+    // Reemplaza la estrategia de ancla + scroll horizontal de carrusel
+    // (clickRightFromXXXAnchor, eliminada de este archivo) para TODOS los
+    // productos: es más rápida, estable y no depende del orden del catálogo.
+    // buscarProducto() centraliza el flujo que antes se duplicaba en cada
+    // buscarXxx() individual (abrir lupa → esperar EditText → escribir →
+    // esperar resultados → seleccionar, tolerante a acentos/®/mayúsculas).
+
+    /**
+     * Búsqueda directa de un producto usando la lupa del menú de alimentos.
+     * Flujo: abrir lupa → esperar EditText → escribir nombre → esperar
+     * resultados → seleccionar (exacto, o tolerante a variaciones del
+     * catálogo: acentos, ®, mayúsculas, espaciado, variantes ortográficas
+     * menores). Seleccionar el resultado cierra la búsqueda de forma
+     * implícita al navegar a la pantalla del producto — no hace falta un
+     * paso adicional de cierre.
+     */
+    private void buscarProducto(String nombreProducto) {
+        long t0 = System.currentTimeMillis();
+        log.info("[BuscarProducto] ENTER producto='{}'", nombreProducto);
+
+        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
+        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        this.sleep(600);
+
+        // Foco en el campo de texto y escritura — sin ®/™/© (algunos teclados/campos
+        // no los aceptan bien); el match posterior sí tolera esos caracteres.
+        this.click(By.className("android.widget.EditText"));
+        String consulta = nombreProducto.replaceAll("[®™©]", "").trim();
+        this.driver.executeScript("mobile: type", Map.of("text", consulta));
+        this.sleep(1500);
+
+        By exact = By.xpath("//android.widget.TextView[@text=\"" + escapeXpathValue(nombreProducto) + "\"]");
+        if (isVisibleQuick(exact)) {
+            this.click(exact);
+        } else {
+            WebElement resultado = encontrarResultadoTolerante(nombreProducto);
+            if (resultado != null) {
+                log.info("[BuscarProducto] Nombre en catálogo: '{}' (buscado: '{}')",
+                        resultado.getAttribute("text"), nombreProducto);
+                tapCenterW3C(resultado);
+            } else {
+                this.click(exact); // lanzará excepción clara si no está disponible
+            }
+        }
+        log.info("[BuscarProducto] EXIT producto='{}' | {}ms", nombreProducto, System.currentTimeMillis() - t0);
     }
 
-    public void clickCapuccino() {
-        this.clickRightFromAmericanoAnchor("Capuccino");
-    }
-    public void clickComboClasico() {
-        this.clickRightFromComboClasicoAnchor("Combo Clásico");
-    }
-    public void clickComboJunior() {
-        this.clickRightFromComboClasicoAnchor("Combo Junior");
+    /**
+     * Recorre los resultados de búsqueda visibles y devuelve el primero cuyo texto
+     * coincide con el producto buscado, tolerando las mismas variantes que antes se
+     * resolvían con una regex distinta por producto (Moka Obscuro/Oscuro, Pretzel/
+     * Pretzel®, Cheesecake/Cheese Cake): acentos, ®/™/©, mayúsculas, espaciado, y
+     * pequeñas variantes ortográficas (misma raíz y mismo final de palabra).
+     */
+    private WebElement encontrarResultadoTolerante(String nombreProducto) {
+        String target        = normalizeForSearch(nombreProducto);
+        String targetNoSpace = target.replace(" ", "");
+
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+        try {
+            java.util.List<WebElement> candidatos = driver.findElements(
+                    By.xpath("//android.widget.TextView[string-length(@text) > 0]"));
+            for (WebElement candidato : candidatos) {
+                try {
+                    if (!candidato.isDisplayed()) continue;
+                    String texto = candidato.getAttribute("text");
+                    if (texto == null || texto.isBlank()) continue;
+                    String norm        = normalizeForSearch(texto);
+                    String normNoSpace = norm.replace(" ", "");
+
+                    boolean coincide =
+                            norm.equals(target)
+                         || norm.contains(target) || target.contains(norm)
+                         || normNoSpace.equals(targetNoSpace)
+                         || normNoSpace.contains(targetNoSpace) || targetNoSpace.contains(normNoSpace)
+                         || comparteRaizYFinal(norm, target);
+                    if (coincide) return candidato;
+                } catch (Exception ignored) {}
+            }
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+        return null;
     }
 
-    public void clickTeCaliente() {
-        this.clickRightFromAmericanoAnchor("Té caliente");
+    /**
+     * Tolera variantes ortográficas menores tipo "Obscuro"/"Oscuro": misma primera
+     * palabra y mismo final de palabra (≥3 caracteres), aunque difieran en medio.
+     */
+    private boolean comparteRaizYFinal(String a, String b) {
+        String[] wa = a.split("\\s+");
+        String[] wb = b.split("\\s+");
+        if (wa.length < 2 || wb.length < 2) return false;
+        if (!wa[0].equals(wb[0])) return false;
+        String la = wa[wa.length - 1], lb = wb[wb.length - 1];
+        int n = Math.min(4, Math.min(la.length(), lb.length()));
+        return n >= 3 && la.regionMatches(la.length() - n, lb, lb.length() - n, n);
     }
 
     public void buscarTeCaliente() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "té caliente"));
-        this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Té caliente']"));
+        buscarProducto("Té caliente");
     }
 
-     public void buscarAmericano() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "Americano"));
-        this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Americano']"));
+    public void buscarAmericano() {
+        buscarProducto("Americano");
     }
 
-     public void buscarMokaObscuro() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "Moka Obscuro"));
-        this.sleep(1500);
-        // Tolerante: acepta "Moka Obscuro" o variante del catálogo "Moka Oscuro"
-        By exact = By.xpath("//android.widget.TextView[@text='Moka Obscuro']");
-        By tolerant = By.xpath("//android.widget.TextView[contains(@text,'Moka') and (contains(@text,'scuro') or contains(@text,'Obsc'))]");
-        if (isVisibleQuick(exact)) {
-            this.click(exact);
-        } else if (isVisibleQuick(tolerant)) {
-            WebElement el = driver.findElement(tolerant);
-            log.info("[buscarMokaObscuro] Nombre en catálogo: '{}'", el.getAttribute("text"));
-            tapCenterW3C(el);
-        } else {
-            this.click(exact); // lanzará excepción clara si no está disponible
-        }
+    public void buscarMokaObscuro() {
+        buscarProducto("Moka Obscuro");
     }
 
-       public void buscarCapuccino() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "Capuccino"));
-        this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Capuccino']"));
+    public void buscarCapuccino() {
+        buscarProducto("Capuccino");
     }
-    
-       public void buscarChocolate() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "Chocolate"));
-        this.sleep(1500);
-        this.click(By.xpath("//android.widget.TextView[@text='Chocolate']"));
+
+    public void buscarChocolate() {
+        buscarProducto("Chocolate");
     }
-     public void buscarPretzel() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "Pretzel"));
-        this.sleep(1500);
-        // Tolerante: acepta "Pretzel" o "Pretzel®"
-        By tolerant = By.xpath("//android.widget.TextView[contains(@text,'Pretzel')]");
-        if (isVisibleQuick(tolerant)) {
-            WebElement el = driver.findElement(tolerant);
-            log.info("[buscarPretzel] Nombre en catálogo: '{}'", el.getAttribute("text"));
-            tapCenterW3C(el);
-        } else {
-            this.click(By.xpath("//android.widget.TextView[@text='Pretzel']"));
-        }
+
+    public void buscarPretzel() {
+        buscarProducto("Pretzel");
     }
-       public void buscarCheeseCake() {
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
-        this.sleep(600);
-        // Foco en el campo de texto y escritura
-        this.click(By.className("android.widget.EditText"));
-        this.driver.executeScript("mobile: type", Map.of("text", "Cheesecake"));
-        this.sleep(1500);
-        // Tolerante: acepta "Cheesecake", "Cheese Cake", "CheeseCake"
-        By tolerant = By.xpath("//android.widget.TextView[contains(translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'cheesecake') or contains(translate(@text,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'cheese cake')]");
-        if (isVisibleQuick(tolerant)) {
-            WebElement el = driver.findElement(tolerant);
-            log.info("[buscarCheeseCake] Nombre en catálogo: '{}'", el.getAttribute("text"));
-            tapCenterW3C(el);
-        } else {
-            this.click(By.xpath("//android.widget.TextView[@text='Cheesecake']"));
-        }
+
+    public void buscarCheeseCake() {
+        buscarProducto("Cheesecake");
     }
     public void TeMentaManzanilla() {
         this.clickCardByTextWithFallback("Té Menta Manzanilla", 10);
@@ -500,85 +507,77 @@ public class SelectorPage extends BasePage {
         this.clickCardByTextWithFallback("Continuar", 10);
     }
 
-    public void clickChocolate() {
-        this.clickRightFromAmericanoAnchor("Chocolate");
+    public void buscarCrepaSalada() {
+        buscarProducto("Crepas Saladas Premium");
     }
 
-    public void clickCheeseCake() {
-        this.clickRightFromPretzelAnchor("Cheesecake");
+    public void buscarCrepaDulce2() {
+        buscarProducto("Crepas Dulces 2 ingredientes");
     }
 
-    public void clickCrepaSalada() {
-        this.clickRightFromCrepasDulcesAnchor("Crepas Saladas Premium");
+    public void buscarCrepasDulces1() {
+        buscarProducto("Crepas Dulces 1 ingrediente");
     }
 
-    public void clickCrepaDulce2() {
-        this.clickRightFromCrepasDulcesAnchor("Crepas Dulces 2 ingredientes");
+    public void buscarCrepaSalada1() {
+        buscarProducto("Crepas Saladas 1 Ingrediente");
     }
 
-    public void clickCrepasDulces1() {
-        this.clickRightFromCrepasDulcesAnchor("Crepas Dulces 1 ingrediente");
+    public void buscarCornetto() {
+        buscarProducto("Cornetto®");
     }
 
-    public void clickCrepaSalada1() {
-        this.clickRightFromCrepasDulcesAnchor("Crepas Saladas 1 Ingrediente");
+    public void buscarHersheys() {
+        buscarProducto("Hershey's®");
     }
 
-    public void clickCornetto() {
-        this.clickRightFromPretzelAnchor("Cornetto®");
+    public void buscarSnickers() {
+        buscarProducto("Snickers®");
     }
 
-    public void clickHersheys() {
-        this.clickRightFromSkwinklesAnchor("Hershey's®");
+    public void buscarQuesadilla() {
+        buscarProducto("Quesadilla");
+    }
+    public void buscarPalomitasSkwinkles() {
+        buscarProducto("Palomitas Skwinkles");
+    }
+    public void buscarMaxiComboFamiliar() {
+        buscarProducto("Maxicombo Familiar Jumbo");
     }
 
-    public void clickSnickers() {
-        this.clickRightFromSkwinklesAnchor("Snickers®");
+    public void buscarSnackBoneless() {
+        buscarProducto("Plato Snack Boneless");
+    }
+    public void buscarCrepaFrappeLeche() {
+        buscarProducto("Plato Snack Boneless");
     }
 
-    public void clickQuesadilla() {
-        this.clickRightFromBurgerAnchor("Quesadilla");
-    }
-    public void clickPalomitasSkwinkles() {
-        this.clickRightFromPalomasSkwinklesAnchor("Palomitas Skwinkles");
-    }
-    public void clickMaxiComboFamiliar() {
-        this.clickRightFromMaxiComboFamiliar("Maxicombo Familiar Jumbo");
+    public void buscarMiniDogs() {
+        buscarProducto("Mini Dogs VIP");
     }
 
-    public void clickSnackBoneless() {
-        this.clickRightFromBurgerAnchor("Plato Snack Boneless");
-    }
-    public void clickCrepaFrappeLeche() {
-        this.clickRightFromBurgerAnchor("Plato Snack Boneless");
+    public void buscarPapasCrisscut() {
+        buscarProducto("Papas Crisscut");
     }
 
-    public void clickMiniDogs() {
-        this.clickRightFromBurgerAnchor("Mini Dogs VIP");
+    public void buscarNachosPremium() {
+        buscarProducto("Nachos Premium");
     }
 
-    public void clickPapasCrisscut() {
-        this.clickRightFromBurgerAnchor("Papas Crisscut");
+    public void buscarHotDog() {
+        buscarProducto("Hot Dog");
     }
 
-    public void clickNachosPremium() {
-        this.clickRightFromBurgerAnchor("Nachos Premium");
+    public void buscarHotDogGuacamole() {
+        buscarProducto("Hot Dog Guacamole");
     }
 
-    public void clickHotDog() {
-        this.clickRightFromBurgerAnchor("Hot Dog");
+    public void buscarTexasDog() {
+        buscarProducto("Texas Dog");
     }
 
-    public void clickHotDogGuacamole() {
-        this.clickRightFromBurgerAnchor("Hot Dog Guacamole");
-    }
-
-    public void clickTexasDog() {
-        this.clickRightFromBurgerAnchor("Texas Dog");
-    }
-
-    public void clickPapasFritas() {
-        this.clickRightFromBurgerAnchor("Papas Fritas");
+    public void buscarPapasFritas() {
+        buscarProducto("Papas Fritas");
     }
 
     public void cerrarPantalla() {
@@ -1433,196 +1432,9 @@ public class SelectorPage extends BasePage {
             throw e;
         }
     }
-    // ─── Estado del carrusel: permite omitir el reset cuando la sección no cambia ───
-    private String  lastAnchorXpath  = null;
-
-    /**
-     * Busca y clica un producto dentro del carrusel horizontal de una sección.
-     *
-     * OPTIMIZACIONES v2:
-     *  1. implicitlyWait=0 en el bucle  → elimina ~10 s de espera por swipe infructuoso
-     *  2. swipeRightInAnchorY reducido   → 350 ms + 80 ms = 430 ms (era 1100 ms, −61 %)
-     *  3. Reset carrusel opcional        → se omite si la sección ya es la misma
-     *  4. Métricas completas en log      → swipe N/total + tiempo total + producto
-     *
-     * ROBUSTEZ v3:
-     *  5. Fallback automático cuando el ancla no está visible →
-     *     intenta localizar el producto directamente con clickCardByTextWithFallback
-     *     antes de lanzar SKIP, eliminando la dependencia rígida de categorías ancla.
-     *
-     * La lógica funcional (forzarClic, verificarYAbortarSiAgotado, SKIP) se mantiene intacta.
-     */
-    private void clickRightFromAnchorOneTry(String anchorXpath, String targetXpath) {
-        // 1. Extraer nombre del producto
-        String extractedText = targetXpath.replaceAll(".*@text=['\"]", "").replaceAll("['\"].*", "");
-
-        final int ANCHOR_SCROLL_MAX   = 10;
-        final int RESET_SWIPES        = 3;
-        final int MAX_CAROUSEL_SWIPES = 20;
-
-        long t0 = System.currentTimeMillis();
-        log.info("[Búsqueda] Producto: \"{}\"", extractedText);
-
-        // ─── Intento 1: ancla visible → navegación por carrusel (camino original) ────
-        boolean anclaVisible = this.ensureVisibleByXpathNoClick(anchorXpath, ANCHOR_SCROLL_MAX);
-
-        if (anclaVisible) {
-            WebElement anchorEl = this.driver.findElement(By.xpath(anchorXpath));
-            int anchorY = anchorEl.getLocation().getY() + (anchorEl.getSize().getHeight() / 2);
-
-            // Reset del carrusel — omitido si estamos en la misma sección
-            if (!anchorXpath.equals(lastAnchorXpath)) {
-                this.resetCarouselFromAnchorY(anchorY, RESET_SWIPES);
-                lastAnchorXpath = anchorXpath;
-            } else {
-                log.debug("[Búsqueda] Misma sección — reset de carrusel omitido");
-            }
-
-            String targetComposeXpath = "//*[@text='" + extractedText
-                    + "' or @content-desc='" + extractedText + "']";
-            By target = By.xpath(targetComposeXpath);
-
-            long tBucle = System.currentTimeMillis();
-            try {
-                // implicitlyWait=0 → findElements() retorna inmediatamente
-                driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-
-                for (int i = 0; i < MAX_CAROUSEL_SWIPES; i++) {
-                    if (isVisibleInstantaneamente(target)) {
-                        log.info("[Búsqueda] \"{}\" encontrado en swipe {} | Tiempo búsqueda: {} ms",
-                                extractedText, i, (System.currentTimeMillis() - tBucle));
-
-                        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-                        this.verificarYAbortarSiAgotado(extractedText);
-                        try {
-                            this.forzarClic(target);
-                            log.info("[Búsqueda] Clic exitoso | Tiempo total: {} ms",
-                                    (System.currentTimeMillis() - t0));
-                            return;
-                        } catch (Exception e) {
-                            this.verificarYAbortarSiAgotado(extractedText);
-                            throw e;
-                        }
-                    }
-                    log.debug("[Búsqueda] Swipe {}/{} → \"{}\"",
-                            (i + 1), MAX_CAROUSEL_SWIPES, extractedText);
-                    this.swipeRightInAnchorY(anchorY);
-                }
-            } finally {
-                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-            }
-
-            long elapsed = System.currentTimeMillis() - tBucle;
-            log.warn("[Búsqueda] \"{}\" NO en carrusel | Swipes: {} | Tiempo: {} ms | Activando fallback...",
-                    extractedText, MAX_CAROUSEL_SWIPES, elapsed);
-
-        } else {
-            log.warn("[Búsqueda] Ancla \"{}\" no visible tras {} scrolls | Activando fallback directo para \"{}\"",
-                    anchorXpath, ANCHOR_SCROLL_MAX, extractedText);
-        }
-
-        // ─── Intento 2: fast-path directo a fuzzy ────────────────────────────────────
-        // PROBLEMA ORIGINAL: clickCardByTextWithFallback(15) re-ejecutaba pasos 3-6 completos
-        // (vertical ×2 + V/H ×2 + swipes manuales ×15) con implicitlyWait=10s por llamada,
-        // acumulando 15-34 minutos antes de alcanzar el fuzzy (paso 7, 2-3 s).
-        //
-        // CAUSA: isVisibleQuick / clickIfPresent usan driver.findElements con implicitlyWait=10s.
-        // Cada llamada bloquea 10s cuando el elemento NO está en el DOM. Los pasos 3-6 suman
-        // ~100 de esas llamadas → 15-34 min de bloqueo innecesario.
-        //
-        // FIX: el ancla ya recorrió la pantalla verticalmente (ANCHOR_SCROLL_MAX swipes) y
-        // el carrusel horizontalmente (MAX_CAROUSEL_SWIPES swipes). Repetir esos recorridos
-        // es redundante. Se pasa DIRECTAMENTE a:
-        //   (a) check visible instantáneo (implicitlyWait=0) — si ya está en pantalla, clic
-        //   (b) tryFuzzyClick                                — 2-3 s, tolerante a variaciones
-        //   (c) 5 scrolls mínimos + retry fuzzy             — cobertura para posición media
-        log.info("[Búsqueda-Fallback] ENTER fast-path para '{}' | t={}ms",
-                extractedText, System.currentTimeMillis() - t0);
-        long tFallback = System.currentTimeMillis();
-        try {
-            // (a) Check visible instantáneo ───────────────────────────────────────────────
-            By targetFallback = By.xpath("//*[@text=\"" + escapeXpathValue(extractedText)
-                    + "\" or @content-desc=\"" + escapeXpathValue(extractedText) + "\"]");
-            long tCheck = System.currentTimeMillis();
-            boolean yaVisible;
-            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            try {
-                yaVisible = !driver.findElements(targetFallback).isEmpty();
-            } finally {
-                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-            }
-            log.info("[Búsqueda-Fallback] (a) check instantáneo: visible={} ({}ms)",
-                    yaVisible, System.currentTimeMillis() - tCheck);
-            if (yaVisible) {
-                this.verificarYAbortarSiAgotado(extractedText);
-                this.forzarClic(targetFallback);
-                log.info("[Búsqueda-Fallback] EXIT clic directo | fallback={}ms | total={}ms",
-                        System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
-                return;
-            }
-
-            // (b) Fuzzy directo ────────────────────────────────────────────────────────────
-            log.info("[Búsqueda-Fallback] (b) fuzzy directo ENTER | t={}ms",
-                    System.currentTimeMillis() - tFallback);
-            if (tryFuzzyClick(extractedText)) {
-                log.info("[Búsqueda-Fallback] EXIT fuzzy ok | fallback={}ms | total={}ms",
-                        System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
-                return;
-            }
-            log.info("[Búsqueda-Fallback] (b) fuzzy directo EXIT no encontrado | t={}ms",
-                    System.currentTimeMillis() - tFallback);
-
-            // (c) 5 scrolls mínimos + retry fuzzy ─────────────────────────────────────────
-            log.info("[Búsqueda-Fallback] (c) fuzzy+scroll ENTER | t={}ms",
-                    System.currentTimeMillis() - tFallback);
-            for (int fi = 0; fi < 5; fi++) {
-                slowSwipeUp();
-                if (tryFuzzyClick(extractedText)) {
-                    log.info("[Búsqueda-Fallback] EXIT fuzzy+scroll({}) ok | fallback={}ms | total={}ms",
-                            (fi + 1), System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
-                    return;
-                }
-            }
-            log.warn("[Búsqueda-Fallback] EXIT no encontrado tras fast-path | fallback={}ms | total={}ms",
-                    System.currentTimeMillis() - tFallback, System.currentTimeMillis() - t0);
-
-        } catch (org.opentest4j.TestAbortedException aborted) {
-            throw aborted; // propagar SKIP (producto agotado)
-        } catch (Exception fallbackEx) {
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-            log.warn("[Búsqueda-Fallback] ERROR: {} | fallback={}ms",
-                    fallbackEx.getMessage(), System.currentTimeMillis() - tFallback);
-        }
-
-        // ─── No localizado tras ancla + fallback → SKIP ───────────────────────────────
-        log.warn("[Búsqueda] \"{}\" NO localizado tras ancla + fallback | Tiempo total: {}ms",
-                extractedText, System.currentTimeMillis() - t0);
-        throw new org.opentest4j.TestAbortedException(
-                "El alimento \"" + extractedText + "\" no fue localizado o está agotado.");
-    }
-
-    /**
-     * Verifica si un elemento está presente en pantalla SIN esperar.
-     * Requiere que implicitlyWait esté en 0 (lo establece el caller).
-     * Método privado — solo usar dentro de clickRightFromAnchorOneTry.
-     * No reemplaza isVisibleQuick; coexisten para contextos distintos.
-     *
-     * Usa !isEmpty() en lugar de safeDisplayed() (private en BasePage)
-     * porque con wait=0 un elemento encontrado está necesariamente en el DOM
-     * actual — la verificación de isDisplayed() es redundante aquí.
-     */
-    private boolean isVisibleInstantaneamente(By locator) {
-        try {
-            return !driver.findElements(locator).isEmpty();
-        } catch (Exception ignore) {
-            return false;
-        }
-    }
-
     /**
      * Mismo criterio de "visible" que isVisibleQuick() (BasePage) — requiere que el
-     * primer elemento encontrado esté además isDisplayed() == true, a diferencia de
-     * isVisibleInstantaneamente() que solo exige presencia en el DOM — pero SIN
+     * primer elemento encontrado esté además isDisplayed() == true, pero SIN
      * gestionar implicitlyWait: asume que el llamador ya lo dejó en 0.
      *
      * Existe para poder envolver un bloque completo (p. ej. un bucle de swipes) en
@@ -1654,30 +1466,6 @@ public class SelectorPage extends BasePage {
         }
     }
 
-    /**
-     * Swipe horizontal optimizado: 350 ms gesto + 80 ms pausa = 430 ms total.
-     * Reducción respecto a versión anterior (600 ms + 500 ms = 1100 ms): −61 %.
-     * El gesto de 350 ms es suficiente para que Compose detecte el scroll de carrusel
-     * manteniendo estabilidad en Galaxy A56 5G / Android 15.
-     */
-    protected void swipeRightInAnchorY(int anchorY) {
-        int screenWidth = driver.manage().window().getSize().width;
-        int startX = (int) (screenWidth * 0.8);
-        int endX   = (int) (screenWidth * 0.2);
-
-        PointerInput finger = new PointerInput(PointerInput.Kind.TOUCH, "finger");
-        Sequence swipe = new Sequence(finger, 1);
-        swipe.addAction(finger.createPointerMove(Duration.ZERO,
-                PointerInput.Origin.viewport(), startX, anchorY));
-        swipe.addAction(finger.createPointerDown(PointerInput.MouseButton.LEFT.asArg()));
-        swipe.addAction(finger.createPointerMove(Duration.ofMillis(350),
-                PointerInput.Origin.viewport(), endX, anchorY));
-        swipe.addAction(finger.createPointerUp(PointerInput.MouseButton.LEFT.asArg()));
-        driver.perform(Collections.singletonList(swipe));
-
-        // 80 ms: suficiente para que el carrusel de Compose complete la animación
-        try { Thread.sleep(80); } catch (InterruptedException ignored) {}
-    }
     protected boolean tryClickIfAlreadyVisible(By locator, int timeoutSeconds) {
         try {
             this.ensureAppIsInForegroundOrRecover();
@@ -1697,307 +1485,32 @@ public class SelectorPage extends BasePage {
         }
     }
 
-    protected boolean ensureVisibleByXpathNoClick(String xpath, int maxVerticalSwipes) {
-        long t0 = System.currentTimeMillis();
-        By locator = By.xpath(xpath);
-
-        try {
-            // implicitlyWait=0 para toda la búsqueda vertical — findElements() retorna
-            // inmediatamente en lugar de bloquear hasta 10 s cuando el elemento no existe todavía.
-            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-
-            // ─── Check inicial ────────────────────────────────────────────────
-            long tCheck = System.currentTimeMillis();
-            if (!driver.findElements(locator).isEmpty()) {
-                log.debug("[Scroll-V] Sección ya visible (sin scrolls necesarios)");
-                log.info("[PERF] check inicial: {}ms | total: {}ms",
-                        System.currentTimeMillis() - tCheck, System.currentTimeMillis() - t0);
-                log.info("[Scroll] Producto encontrado | Swipe 0/{} | Tiempo total búsqueda: {}ms",
-                        maxVerticalSwipes, System.currentTimeMillis() - t0);
-                return true;
-            }
-
-            // ─── Cachear coordenadas de swipe (no cambian durante la búsqueda) ──
-            // Evita driver.findElement("android:id/content") + getRect() en cada iteración.
-            ensureAppIsInForegroundOrRecover();
-            int swipeX, swipeStartY, swipeEndY;
-            try {
-                WebElement content = driver.findElement(By.id("android:id/content"));
-                org.openqa.selenium.Rectangle r = content.getRect();
-                swipeX      = r.getX() + (int)(r.getWidth()  * 0.46);
-                swipeStartY = r.getY() + (int)(r.getHeight() * 0.90);
-                swipeEndY   = r.getY() + (int)(r.getHeight() * 0.10);
-                if (swipeStartY <= swipeEndY) throw new Exception("rect inválido");
-            } catch (Exception ignored) {
-                org.openqa.selenium.Dimension dim = driver.manage().window().getSize();
-                swipeX      = (int)(dim.width  * 0.46);
-                swipeStartY = (int)(dim.height * 0.88);
-                swipeEndY   = (int)(dim.height * 0.10);
-            }
-
-            int screenH = driver.manage().window().getSize().getHeight();
-            int threshold = Math.max(15, screenH / 40);
-            int stalledCount = 0;
-            final int STALL_REQUIRED = 2;
-            int swipesDone = 0;
-
-            for (int i = 0; i < maxVerticalSwipes; ++i) {
-                long tIter = System.currentTimeMillis();
-
-                // ── (1) Búsqueda del elemento visible — pre-swipe ─────────────
-                // instantáneo porque implicitlyWait=0
-                long tFind = System.currentTimeMillis();
-                if (!driver.findElements(locator).isEmpty()) {
-                    long msFind = System.currentTimeMillis() - tFind;
-                    log.info("[Scroll-V] Sección encontrada en scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
-                    log.info("[PERF] iter={}/{} | find(pre)={}ms | total={}ms | FOUND",
-                            (i + 1), maxVerticalSwipes, msFind, System.currentTimeMillis() - tIter);
-                    log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
-                            (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
-                    return true;
-                }
-                long msFind = System.currentTimeMillis() - tFind;
-
-                // ── (2) Captura de referencia para detección de stall ──────────
-                // Último TextView visible ANTES del swipe; se compara su Y después.
-                long tRef = System.currentTimeMillis();
-                WebElement refEl = null;
-                int refY = -1;
-                try {
-                    java.util.List<WebElement> candidates =
-                            driver.findElements(By.className("android.widget.TextView"));
-                    if (!candidates.isEmpty()) {
-                        refEl = candidates.get(candidates.size() - 1);
-                        try { refY = refEl.getLocation().getY(); } catch (Exception ignored) { refEl = null; }
-                    }
-                } catch (Exception ignored) {}
-                long msRef = System.currentTimeMillis() - tRef;
-
-                log.debug("[Scroll-V] Scroll vertical {}/{} — sección no visible aún", (i + 1), maxVerticalSwipes);
-
-                // ── (3) Gesto de swipe — sin Thread.sleep fijo ────────────────
-                // Se llama swipeW3C directamente (coordenadas cacheadas) para medir
-                // el gesto puro por separado de la espera post-swipe.
-                long tGesture = System.currentTimeMillis();
-                swipeW3C(swipeX, swipeStartY, swipeX, swipeEndY, 450);
-                swipesDone++;
-                long msGesture = System.currentTimeMillis() - tGesture;
-
-                // ── (4) Espera inteligente post-swipe ─────────────────────────
-                // Reemplaza Thread.sleep(350) fijo: sale en cuanto el LazyColumn
-                // se estabiliza (Y del último TextView visible deja de cambiar).
-                // Máximo 350 ms — mismo techo que el sleep anterior.
-                long tWait = System.currentTimeMillis();
-                {
-                    int prevBotY = -1, stableCount = 0;
-                    long waitEnd = System.currentTimeMillis() + 350;
-                    while (System.currentTimeMillis() < waitEnd) {
-                        try {
-                            java.util.List<WebElement> els =
-                                    driver.findElements(By.className("android.widget.TextView"));
-                            if (!els.isEmpty()) {
-                                int botY = els.get(els.size() - 1).getLocation().getY();
-                                if (botY == prevBotY) {
-                                    if (++stableCount >= 2) break; // pantalla estabilizada
-                                } else { prevBotY = botY; stableCount = 0; }
-                            }
-                        } catch (Exception ignored) {}
-                        try { Thread.sleep(50); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                    }
-                }
-                long msWait = System.currentTimeMillis() - tWait;
-
-                // ── (5) Validación del movimiento (detección de stall) ─────────
-                long tValidate = System.currentTimeMillis();
-                if (refEl != null && refY >= 0) {
-                    try {
-                        int newY = refEl.getLocation().getY();
-                        if (Math.abs(newY - refY) < threshold) {
-                            stalledCount++;
-                            if (stalledCount >= STALL_REQUIRED) {
-                                long msValidate = System.currentTimeMillis() - tValidate;
-                                log.info("[PERF] iter={}/{} | find={}ms | ref={}ms | gesto={}ms | wait={}ms | stall={}ms | total={}ms | STALL",
-                                        (i + 1), maxVerticalSwipes, msFind, msRef, msGesture, msWait,
-                                        msValidate, System.currentTimeMillis() - tIter);
-                                log.info("[Scroll] Fin de catálogo detectado ({}/{} swipes sin movimiento)",
-                                        stalledCount, STALL_REQUIRED);
-                                log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
-                                        swipesDone, System.currentTimeMillis() - t0);
-                                break;
-                            }
-                            log.debug("[Scroll-V] Swipe sin movimiento ({}/{}), continuando...",
-                                    stalledCount, STALL_REQUIRED);
-                        } else {
-                            stalledCount = 0;
-                        }
-                    } catch (Exception ignored) { stalledCount = 0; }
-                }
-                long msValidate = System.currentTimeMillis() - tValidate;
-
-                // ── Post-swipe check — instantáneo (implicitlyWait=0) ─────────
-                long tFindPost = System.currentTimeMillis();
-                if (!driver.findElements(locator).isEmpty()) {
-                    long msFindPost = System.currentTimeMillis() - tFindPost;
-                    log.info("[PERF] iter={}/{} | find={}ms | ref={}ms | gesto={}ms | wait={}ms | stall={}ms | find(post)={}ms | total={}ms | FOUND",
-                            (i + 1), maxVerticalSwipes, msFind, msRef, msGesture, msWait,
-                            msValidate, msFindPost, System.currentTimeMillis() - tIter);
-                    log.info("[Scroll-V] Sección encontrada tras scroll vertical {}/{}", (i + 1), maxVerticalSwipes);
-                    log.info("[Scroll] Producto encontrado | Swipe {}/{} | Tiempo total búsqueda: {}ms",
-                            (i + 1), maxVerticalSwipes, System.currentTimeMillis() - t0);
-                    return true;
-                }
-                long msFindPost = System.currentTimeMillis() - tFindPost;
-
-                log.info("[PERF] iter={}/{} | find={}ms | ref={}ms | gesto={}ms | wait={}ms | stall={}ms | find(post)={}ms | total={}ms",
-                        (i + 1), maxVerticalSwipes, msFind, msRef, msGesture, msWait,
-                        msValidate, msFindPost, System.currentTimeMillis() - tIter);
-            }
-
-            log.warn("[Scroll-V] Sección NO encontrada tras {} scrolls verticales", maxVerticalSwipes);
-            log.info("[Scroll] Swipes realizados: {} | Tiempo total búsqueda: {}ms",
-                    swipesDone, System.currentTimeMillis() - t0);
-            return !driver.findElements(locator).isEmpty();
-
-        } finally {
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
-        }
+    public void buscarAguaEmbotellada() {
+        buscarProducto("Agua Embotellada");
     }
 
-//    private void clickRightFromAnchorOneTry(String anchorXpath, String targetXpath, int verticalSwipes) {
-//        boolean anchorVisible = this.ensureVisibleByXpathNoClick(anchorXpath, verticalSwipes);
-//        if (!anchorVisible) {
-//            throw new RuntimeException("No se encontró ancla en 1 intento: " + anchorXpath);
-//        } else {
-//            WebElement anchorEl = this.driver.findElement(By.xpath(anchorXpath));
-//            int anchorY = anchorEl.getLocation().getY() + anchorEl.getSize().getHeight() / 2;
-//            this.resetCarouselFromAnchorY(anchorY, 3);
-//            By target = By.xpath(targetXpath);
-//            if (this.sweepCatalogRightFromAnchorY(target, anchorY, 6)) {
-//                this.click(target);
-//            } else {
-//                By targetParent = By.xpath(targetXpath + "/..");
-//                if (this.sweepCatalogRightFromAnchorY(targetParent, anchorY, 6)) {
-//                    this.click(targetParent);
-//                } else {
-//                    throw new RuntimeException("No se encontró target en 1 intento: " + targetXpath);
-//                }
-//            }
-//        }
-//    }
-
-    private void clickRightFromAmericanoAnchor(String targetText) {
-        // Flexible: acepta "Americano" o variante del catálogo "Café Americano"
-        String anchorXpath = "//android.widget.TextView[@text=\"Americano\" or contains(@text,\"Americano\") or @content-desc=\"Americano\" or contains(@content-desc,\"Americano\")]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-    private void clickRightFromPalomasSkwinklesAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Combo Nachos en Pareja \"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
+    public void buscarMaxiComboMix() {
+        buscarProducto("Maxicombo Mix");
     }
 
-    private void clickRightFromPalomitasLiloAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Palomitas Lilo & Stitch\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-    private void clickRightFromMaxiComboFamiliar(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Combo Nachos en Pareja \"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-    private void clickRightFromComboClasicoAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Combo Nachos Refresco Jumbo Pal Jumbo\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
+    public void buscarNachos() {
+        buscarProducto("Nachos");
     }
 
-    private void clickRightFromComboNachosParejaAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Combo Nachos en Pareja \"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
+    public void buscarMojito() {
+        buscarProducto("Mojito");
     }
 
-    private void clickRightFromFrappeAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Malteadas Sencillas\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
+    public void buscarCarajillo() {
+        buscarProducto("Carajillo");
     }
 
-    private void clickRightCreppaDulceFrappeAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Combo Nachos en Pareja \"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
+    public void buscarCerveza() {
+        buscarProducto("Cerveza Clásica");
     }
 
-    private void clickRightFromPretzelAnchor(String targetText) {
-        // Flexible: acepta "Pretzel" o variante "Pretzel®"
-        String anchorXpath = "//android.widget.TextView[@text=\"Pretzel\" or @text=\"Pretzel®\" or contains(@text,\"Pretzel\")]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    private void clickRightFromCrepasDulcesAnchor(String targetText) {
-        // Flexible: acepta "Crepas Dulces Premium" o cualquier variante que contenga "Crepas Dulces"
-        String anchorXpath = "//android.widget.TextView[@text=\"Crepas Dulces Premium\" or contains(@text,\"Crepas Dulces\")]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    private void clickRightFromSkwinklesAnchor(String targetText) {
-        // Flexible: acepta "Skwinkles® Chunks sandia" o variante con acento "Sandía"
-        String anchorXpath = "//android.widget.TextView[@text=\"Skwinkles® Chunks sandia\" or (contains(@text,\"Skwinkles\") and contains(@text,\"andia\"))]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    private void clickRightFromBurgerAnchor(String targetText) {
-        String anchorXpath = "//android.widget.TextView[@text=\"Boneless Mix\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"" + targetText + "\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickAguaEmbotellada() {
-        String anchorXpath = "//android.widget.TextView[@text='Palomitas']";
-        String targetXpath = "//android.widget.TextView[@text=\"Agua Embotellada\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickMaxiComboMix() {
-        String anchorXpath = "//android.widget.TextView[@text=\"Maxicombo Familiar Jumbo\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"Maxicombo Mix\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickNachos() {
-        String anchorXpath = "//android.widget.TextView[@text='Palomitas']";
-        String targetXpath = "//android.widget.TextView[@text=\"Nachos\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickMojito() {
-        String anchorXpath = "//android.widget.TextView[@text=\"Mezcalada\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"Mojito\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickCarajillo() {
-        String anchorXpath = "//android.widget.TextView[@text=\"Mezcalada\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"Carajillo\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickCerveza() {
-        String anchorXpath = "//android.widget.TextView[@text=\"Mezcalada\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"Cerveza Clásica\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
-    }
-
-    public void clickNegraModelo() {
-        String anchorXpath = "//android.widget.TextView[@text=\"Mezcalada\"]";
-        String targetXpath = "//android.widget.TextView[@text=\"Negra Modelo\"]";
-        this.clickRightFromAnchorOneTry(anchorXpath, targetXpath);
+    public void buscarNegraModelo() {
+        buscarProducto("Negra Modelo");
     }
 
     public void seleccionarSaborPorContentDesc(String contentDesc, int index) {

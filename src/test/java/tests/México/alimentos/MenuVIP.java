@@ -40,7 +40,7 @@ public class MenuVIP extends BaseTest {
     @Story("Palomitas")
     void comprarPalomitasClasicasMantequilla() {
         TestSteps.run("Seleccionar y personalizar Palomitas", () -> {
-            page.clickPalomitas();
+            page.buscarPalomitas();
             page.personalizar();
             page.PLlevar();
             page.Siguiente();
@@ -54,7 +54,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasClasicas2() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas", () -> {
-//            page.clickPalomitas();
+//            page.buscarPalomitas();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Caramelo();
@@ -69,7 +69,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasClasicasGTakis() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas", () -> {
-//            page.clickPalomitas();
+//            page.buscarPalomitas();
 //            page.personalizar();
 //            page.Grandes();
 //            page.Takis();
@@ -84,7 +84,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasClasicasMDoritos() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas", () -> {
-//            page.clickPalomitas();
+//            page.buscarPalomitas();
 //            page.personalizar();
 //            page.Medianas();
 //            page.Doritos();
@@ -99,7 +99,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasClasicasCCheetos() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas", () -> {
-//            page.clickPalomitas();
+//            page.buscarPalomitas();
 //            page.personalizar();
 //            page.Chicas();
 //            page.Cheetos();
@@ -114,7 +114,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Nachos")
 //    void comprarNachos() {
 //        TestSteps.run("Seleccionar y personalizar Nachos", () -> {
-//            page.clickNachos();
+//            page.buscarNachos();
 //            page.personalizar();
 //            page.Grandes();
 //            page.Siguiente();
@@ -128,7 +128,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Nachos")
 //    void comprarNachosChicos() {
 //        TestSteps.run("Seleccionar y personalizar Nachos", () -> {
-//            page.clickNachos();
+//            page.buscarNachos();
 //            page.personalizar();
 //            page.Chicas2();
 //            page.Doritos();
@@ -144,7 +144,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarQuesadilla() {
 //        TestSteps.run("Seleccionar y personalizar Quesadilla", () -> {
-//            page.clickQuesadilla();
+//            page.buscarQuesadilla();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -157,7 +157,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarQuesadillaR() {
 //        TestSteps.run("Seleccionar y personalizar Quesadilla", () -> {
-//            page.clickQuesadilla();
+//            page.buscarQuesadilla();
 //            page.personalizar();
 //            page.Res();
 //            page.Siguiente();
@@ -171,7 +171,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarQuesadillaB() {
 //        TestSteps.run("Seleccionar y personalizar Quesadilla", () -> {
-//            page.clickQuesadilla();
+//            page.buscarQuesadilla();
 //            page.personalizar();
 //            page.Boneless();
 //            page.Siguiente();
@@ -185,7 +185,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarBoneless() {
 //        TestSteps.run("Seleccionar Plato Snack Boneless", () -> {
-//            page.clickSnackBoneless();
+//            page.buscarSnackBoneless();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -198,7 +198,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarMiniDogs() {
 //        TestSteps.run("Seleccionar Mini Dogs VIP", () -> {
-//            page.clickMiniDogs();
+//            page.buscarMiniDogs();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -211,7 +211,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarPapasCrisscut() {
 //        TestSteps.run("Seleccionar Papas Crisscut", () -> {
-//            page.clickPapasCrisscut();
+//            page.buscarPapasCrisscut();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -224,7 +224,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Snacks")
 //    void comprarPapasCrisscut6z() {
 //        TestSteps.run("Seleccionar y personalizar Papas Crisscut", () -> {
-//            page.clickPapasCrisscut();
+//            page.buscarPapasCrisscut();
 //            page.personalizar();
 //            page.seisoz();
 //            page.Siguiente();
@@ -238,7 +238,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Nachos")
 //    void comprarNachosPremium() {
 //        TestSteps.run("Seleccionar Nachos Premium", () -> {
-//            page.clickNachosPremium();
+//            page.buscarNachosPremium();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -251,7 +251,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Nachos")
 //    void comprarNachosPremiumB() {
 //        TestSteps.run("Seleccionar y personalizar Nachos Premium", () -> {
-//            page.clickNachosPremium();
+//            page.buscarNachosPremium();
 //            page.personalizar();
 //            page.nachosBoneless();
 //            page.Doritos();
@@ -266,7 +266,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Nachos")
 //    void comprarNachosPremiumBr() {
 //        TestSteps.run("Seleccionar y personalizar Nachos Premium", () -> {
-//            page.clickNachosPremium();
+//            page.buscarNachosPremium();
 //            page.personalizar();
 //            page.nachosBrisquet();
 //            page.Doritos();
@@ -281,7 +281,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Hot Dogs")
 //    void comprarHotdogJumbo() {
 //        TestSteps.run("Seleccionar y personalizar Hot Dog", () -> {
-//            page.clickHotDog();
+//            page.buscarHotDog();
 //            page.personalizar();
 //            page.ExtraQueso();
 //            page.Siguiente();
@@ -295,7 +295,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Hot Dogs")
 //    void comprarHotdogChico() {
 //        TestSteps.run("Seleccionar y personalizar Hot Dog", () -> {
-//            page.clickHotDog();
+//            page.buscarHotDog();
 //            page.personalizar();
 //            page.Chico();
 //            page.ExtraQueso();
@@ -310,7 +310,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Hot Dogs")
 //    void comprarHotdogGuacamole() {
 //        TestSteps.run("Seleccionar y personalizar Hot Dog Guacamole", () -> {
-//            page.clickHotDogGuacamole();
+//            page.buscarHotDogGuacamole();
 //            page.personalizar();
 //            page.ExtraQueso();
 //            page.Siguiente();
@@ -324,7 +324,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Hot Dogs")
 //    void comprarHotdogGuacamole2() {
 //        TestSteps.run("Seleccionar y personalizar Hot Dog Guacamole", () -> {
-//            page.clickHotDogGuacamole();
+//            page.buscarHotDogGuacamole();
 //            page.personalizar();
 //            page.Guacamole();
 //            page.ExtraQueso();
@@ -339,7 +339,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinkless() {
 //        TestSteps.run("Seleccionar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -352,7 +352,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinklessT() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Takis();
 //            page.Siguiente();
@@ -366,7 +366,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinklessC() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Cheetos();
 //            page.Siguiente();
@@ -380,7 +380,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinklessCa() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Caramelo();
@@ -395,7 +395,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinklessD() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.Doritos();
@@ -410,7 +410,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinklessG() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Grandes();
 //            page.Siguiente();
@@ -424,7 +424,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Palomitas")
 //    void comprarPalomitasSkwinklessGC() {
 //        TestSteps.run("Seleccionar y personalizar Palomitas Skwinkles", () -> {
-//            page.clickPalomitasSkinkless();
+//            page.buscarPalomitasSkinkless();
 //            page.personalizar();
 //            page.Grandes();
 //            page.Cheetos();
@@ -439,7 +439,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bebidas")
 //    void comprarRefresco() {
 //        TestSteps.run("Seleccionar Refresco", () -> {
-//            page.clickRefresco();
+//            page.buscarRefresco();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -452,7 +452,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bebidas")
 //    void comprarRefrescoG() {
 //        TestSteps.run("Seleccionar y personalizar Refresco", () -> {
-//            page.clickRefresco();
+//            page.buscarRefresco();
 //            page.personalizar();
 //            page.Grande();
 //            page.Sidral();
@@ -468,7 +468,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bebidas")
 //    void comprarRefrescoM() {
 //        TestSteps.run("Seleccionar y personalizar Refresco", () -> {
-//            page.clickRefresco();
+//            page.buscarRefresco();
 //            page.personalizar();
 //            page.Mediano();
 //            page.FuzeTe();
@@ -484,7 +484,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bebidas")
 //    void comprarRefrescoC() {
 //        TestSteps.run("Seleccionar y personalizar Refresco", () -> {
-//            page.clickRefresco();
+//            page.buscarRefresco();
 //            page.personalizar();
 //            page.Chico();
 //            page.Fanta();
@@ -500,7 +500,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Hot Dogs")
 //    void comprarTexasDog() {
 //        TestSteps.run("Seleccionar y personalizar Texas Dog", () -> {
-//            page.clickTexasDog();
+//            page.buscarTexasDog();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.ExtraQueso();
@@ -515,7 +515,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Hot Dogs")
 //    void comprarTexasDogJ() {
 //        TestSteps.run("Seleccionar y personalizar Texas Dog", () -> {
-//            page.clickTexasDog();
+//            page.buscarTexasDog();
 //            page.personalizar();
 //            page.TexasDog();
 //            page.ExtraQueso();
@@ -530,7 +530,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarPinaColada() {
 //        TestSteps.run("Seleccionar Piña Colada", () -> {
-//            page.clickPinaColada();
+//            page.buscarPinaColada();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -543,7 +543,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarPinaColadaA() {
 //        TestSteps.run("Seleccionar y personalizar Piña Colada", () -> {
-//            page.clickPinaColada();
+//            page.buscarPinaColada();
 //            page.personalizar();
 //            page.Amareto();
 //            page.Siguiente();
@@ -557,7 +557,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarPinaColadaM() {
 //        TestSteps.run("Seleccionar y personalizar Piña Colada", () -> {
-//            page.clickPinaColada();
+//            page.buscarPinaColada();
 //            page.personalizar();
 //            page.Midori();
 //            page.Siguiente();
@@ -571,7 +571,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarPinaColadaK() {
 //        TestSteps.run("Seleccionar y personalizar Piña Colada", () -> {
-//            page.clickPinaColada();
+//            page.buscarPinaColada();
 //            page.personalizar();
 //            page.kahlua();
 //            page.Siguiente();
@@ -585,7 +585,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarMojito() {
 //        TestSteps.run("Seleccionar Mojito", () -> {
-//            page.clickMojito();
+//            page.buscarMojito();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -598,7 +598,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarMojitoP() {
 //        TestSteps.run("Seleccionar y personalizar Mojito", () -> {
-//            page.clickMojito();
+//            page.buscarMojito();
 //            page.personalizar();
 //            page.Pepino();
 //            page.Siguiente();
@@ -612,7 +612,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarMojitoM() {
 //        TestSteps.run("Seleccionar y personalizar Mojito", () -> {
-//            page.clickMojito();
+//            page.buscarMojito();
 //            page.personalizar();
 //            page.Manzana();
 //            page.Siguiente();
@@ -626,7 +626,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Bar")
 //    void comprarMojitoC() {
 //        TestSteps.run("Seleccionar y personalizar Mojito", () -> {
-//            page.clickMojito();
+//            page.buscarMojito();
 //            page.personalizar();
 //            page.Cereza();
 //            page.Siguiente();
@@ -640,7 +640,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Combos VIP")
 //    void comprarBarSnacks() {
 //        TestSteps.run("Añadir Mojito de Cereza", () -> {
-//            page.clickMojito();
+//            page.buscarMojito();
 //            page.personalizar();
 //            page.Cereza();
 //            page.Siguiente();
@@ -648,7 +648,7 @@ public class MenuVIP extends BaseTest {
 //        }, driver);
 //
 //        TestSteps.run("Regresar y añadir Texas Dog", () -> {
-//            page.clickTexasDog();
+//            page.buscarTexasDog();
 //            page.personalizar();
 //            page.TexasDog();
 //            page.ExtraQueso();
@@ -668,7 +668,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Combos VIP")
 //    void comprarBarSnacksP() {
 //        TestSteps.run("Añadir Piña Colada con Midori", () -> {
-//            page.clickPinaColada();
+//            page.buscarPinaColada();
 //            page.personalizar();
 //            page.Midori();
 //            page.Siguiente();
@@ -676,7 +676,7 @@ public class MenuVIP extends BaseTest {
 //        }, driver);
 //
 //        TestSteps.run("Regresar y añadir Hot Dog Guacamole", () -> {
-//            page.clickHotDogGuacamole();
+//            page.buscarHotDogGuacamole();
 //            page.personalizar();
 //            page.Jumbo();
 //            page.ExtraQueso();
@@ -696,14 +696,14 @@ public class MenuVIP extends BaseTest {
 //    @Story("Combos VIP")
 //    void comprarBarSnacksPN() {
 //        TestSteps.run("Añadir Piña Colada", () -> {
-//            page.clickPinaColada();
+//            page.buscarPinaColada();
 //            page.personalizar();
 //            page.Siguiente();
 //            page.agregarCarrito();
 //        }, driver);
 //
 //        TestSteps.run("Regresar y añadir Nachos Premium de Res", () -> {
-//            page.clickNachosPremium();
+//            page.buscarNachosPremium();
 //            page.personalizar();
 //            page.Doritos();
 //            page.Siguiente();
@@ -722,12 +722,12 @@ public class MenuVIP extends BaseTest {
 //    @Story("Combos VIP")
 //    void comprarCarajilloPapas() {
 //        TestSteps.run("Añadir Carajillo", () -> {
-//            page.clickCarajillo();
+//            page.buscarCarajillo();
 //            page.agregarCarrito();
 //        }, driver);
 //
 //        TestSteps.run("Regresar y añadir Papas Crisscut", () -> {
-//            page.clickPapasCrisscut();
+//            page.buscarPapasCrisscut();
 //            page.personalizar();
 //            page.Siguiente();
 //            page.agregarCarrito();
@@ -745,14 +745,14 @@ public class MenuVIP extends BaseTest {
 //    @Story("Combos VIP")
 //    void comprarCervezaQ() {
 //        TestSteps.run("Añadir Cerveza", () -> {
-//            page.clickCerveza();
+//            page.buscarCerveza();
 //            page.personalizar();
 //            page.Siguiente();
 //            page.agregarCarrito();
 //        }, driver);
 //
 //        TestSteps.run("Regresar y añadir Quesadilla", () -> {
-//            page.clickQuesadilla();
+//            page.buscarQuesadilla();
 //            page.personalizar();
 //            page.Siguiente();
 //            page.agregarCarrito();
@@ -770,12 +770,12 @@ public class MenuVIP extends BaseTest {
 //    @Story("Combos VIP")
 //    void comprarNegraModeloQ() {
 //        TestSteps.run("Añadir Negra Modelo", () -> {
-//            page.clickNegraModelo();
+//            page.buscarNegraModelo();
 //            page.agregarCarrito();
 //        }, driver);
 //
 //        TestSteps.run("Regresar y añadir Quesadilla", () -> {
-//            page.clickQuesadilla();
+//            page.buscarQuesadilla();
 //            page.personalizar();
 //            page.Siguiente();
 //            page.agregarCarrito();
@@ -793,7 +793,7 @@ public class MenuVIP extends BaseTest {
 //    @Story("Nuevos Lanzamientos")
 //    void comprarDippinDots() {
 //        TestSteps.run("Seleccionar Dippin Dots", () -> {
-//            page.clickDippinDots();
+//            page.buscarDippinDots();
 //            page.personalizar();
 //            page.Siguiente();
 //        }, driver);
@@ -806,7 +806,7 @@ public class MenuVIP extends BaseTest {
     @Story("Nuevos Lanzamientos")
     void comprarDippinDotsA() {
         TestSteps.run("Seleccionar y personalizar Dippin Dots", () -> {
-            page.clickDippinDots();
+            page.buscarDippinDots();
             page.personalizar();
             page.Algodon();
             page.Siguiente();
