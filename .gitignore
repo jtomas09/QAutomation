@@ -18,6 +18,11 @@ Thumbs.db
 *secrets*
 smtp-config.json
 **/smtp-config.json
+config/smtp-config.json
+
+# Configuración persistida en disco generada en tiempo de ejecución (backend)
+backend/data/
+/data/
 
 # Configuración local con credenciales — usar variables de entorno en Railway/CI
 appium.properties

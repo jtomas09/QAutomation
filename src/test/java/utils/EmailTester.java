@@ -20,30 +20,29 @@ public class EmailTester {
         System.out.println("  TEST DE CORREO — Diagnóstico SMTP");
         System.out.println("====================================================");
 
-        // 1. Leer configuración
-        SmtpConfig cfg;
-        try {
-            cfg = ConfigLoader.getSmtpConfig();
-            System.out.println("[OK] smtp-config.json leído correctamente");
-        } catch (Exception e) {
-            System.out.println("[ERROR] No se pudo leer smtp-config.json: " + e.getMessage());
-            System.exit(1);
-            return;
-        }
+        // 1. Leer configuración — ConfigLoader ya no lanza excepciones; imprime en
+        // su propio log [SMTP] de dónde vino la config o qué falta configurar.
+        SmtpConfig cfg = ConfigLoader.getSmtpConfig();
 
         String smtpHost = safe(cfg.smtp.host, "email-smtp.us-east-1.amazonaws.com");
         String smtpPort = safe(cfg.smtp.port, "587");
         String smtpUser = safe(cfg.smtp.user, "");
         String smtpPass = safe(cfg.smtp.pass, "");
-        String from     = safe(cfg.mail.from, "automation_android@ia.com.mx");
+        String from     = safe(cfg.resolvedFrom(), "automation_android@ia.com.mx");
 
-        // Destinatario: MAIL_TO env var > primer destinatario en config > from
+        if (!cfg.isValid()) {
+            System.out.println("[ERROR] No hay una configuración SMTP válida (host/user/pass/from incompletos).");
+            System.out.println("        Defina las variables de entorno SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM");
+            System.out.println("        o complete config/smtp-config.json.");
+        }
+
+        // Destinatario: MAIL_TO env var > primer destinatario en config (legacy mail.to) > from
         String mailToEnv = System.getenv("MAIL_TO");
         String to;
         if (mailToEnv != null && !mailToEnv.isBlank()) {
             to = mailToEnv.trim();
             System.out.println("[INFO] Usando MAIL_TO env var: " + to);
-        } else if (cfg.mail.to != null && !cfg.mail.to.isEmpty()) {
+        } else if (cfg.mail != null && cfg.mail.to != null && !cfg.mail.to.isEmpty()) {
             to = cfg.mail.to.get(0).trim();
             System.out.println("[INFO] Usando primer destinatario de config: " + to);
         } else {

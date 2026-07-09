@@ -914,12 +914,21 @@ public class SelectorPage extends BasePage {
 
     // ── Búsqueda tolerante (fuzzy matching) ──────────────────────────────────
 
+    /**
+     * Normalización usada ÚNICAMENTE para comparar el texto buscado contra los
+     * resultados que devuelve la app — nunca para el texto que se escribe en el
+     * buscador (buscarProducto() sigue escribiendo exactamente lo solicitado).
+     * Ignora símbolos comerciales (®™©), ampersand/apóstrofos/comillas (rectas y
+     * tipográficas), acentos, mayúsculas y espacios múltiples, para que variantes
+     * de catálogo como "Cornetto®", "M&M's®" o "Skwinkles®" se reconozcan como el
+     * mismo producto que "Cornetto", "MM's" o "Skwinkles".
+     */
     private static String normalizeForSearch(String text) {
         if (text == null) return "";
         String s = text.toLowerCase(Locale.ROOT);
         s = Normalizer.normalize(s, Normalizer.Form.NFD);
         s = s.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
-        s = s.replaceAll("[®™©°]", "");
+        s = s.replaceAll("[®™©°&'’‘`´\"“”]", "");
         s = s.replaceAll("\\s+", " ").trim();
         return s;
     }

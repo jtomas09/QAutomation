@@ -64,11 +64,46 @@ public class AllureReportSender {
     private static final Path FINAL_MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
     private static final Path MAIL_LOCK = Paths.get("build", "suite-mail.sent.lock");
 
+    // Marca de esta JVM: cualquier candado escrito por una JVM ANTERIOR (timestamp
+    // menor) se considera obsoleto y se ignora/borra automáticamente. Esto garantiza
+    // "nunca bloquee ejecuciones posteriores" incluso si resetMailLock() no llegó a
+    // ejecutarse (crash, kill -9, listener no registrado) — no depende de que ese
+    // reset explícito se ejecute siempre.
+    private static final long JVM_RUN_ID = System.currentTimeMillis();
+
     private static final Object PDF_GENERATION_LOCK = new Object();
     private static volatile Path cachedAllurePdf = null;
 
+    static {
+        // Red de seguridad adicional: liberar el candado al finalizar la JVM por
+        // cualquier vía (éxito, fallo, excepción no capturada) para que no quede
+        // ocupando espacio entre ejecuciones más de lo necesario. La detección de
+        // candados obsoletos por JVM_RUN_ID ya garantiza que nunca bloquea el
+        // siguiente run aunque este hook no llegue a correr (p. ej. kill -9).
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try { Files.deleteIfExists(FINAL_MAIL_LOCK); } catch (Exception ignored) {}
+        }, "smtp-mail-lock-cleanup"));
+    }
+
     private static boolean isFinalMailAlreadySent() {
-        return Files.exists(FINAL_MAIL_LOCK);
+        if (!Files.exists(FINAL_MAIL_LOCK)) return false;
+        try {
+            long lockedByRun = Long.parseLong(Files.readString(FINAL_MAIL_LOCK, StandardCharsets.UTF_8).trim());
+            if (lockedByRun < JVM_RUN_ID) {
+                log.warn("[AllureReportSender] Candado de correo obsoleto (de una ejecución anterior) — "
+                        + "ignorado y eliminado: {}", FINAL_MAIL_LOCK.toAbsolutePath());
+                Files.deleteIfExists(FINAL_MAIL_LOCK);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            // Formato inesperado (candado de una versión anterior sin timestamp, o
+            // corrupto) — se trata como obsoleto en vez de bloquear indefinidamente.
+            log.warn("[AllureReportSender] Candado de correo con formato inesperado — tratado como obsoleto: {}",
+                    e.getMessage());
+            try { Files.deleteIfExists(FINAL_MAIL_LOCK); } catch (Exception ignored) {}
+            return false;
+        }
     }
 
     /**
@@ -88,12 +123,9 @@ public class AllureReportSender {
     private static void markFinalMailSent() {
         try {
             Files.createDirectories(FINAL_MAIL_LOCK.getParent());
-            if (!Files.exists(FINAL_MAIL_LOCK)) {
-                Files.writeString(FINAL_MAIL_LOCK, "sent", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-            }
+            Files.writeString(FINAL_MAIL_LOCK, String.valueOf(JVM_RUN_ID), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             log.info("[AllureReportSender] Mail lock written: {}", FINAL_MAIL_LOCK.toAbsolutePath());
-        } catch (FileAlreadyExistsException e) {
-            log.debug("[AllureReportSender] Mail lock already exists: {}", FINAL_MAIL_LOCK.toAbsolutePath());
         } catch (Exception e) {
             log.warn("[AllureReportSender] Could not write mail lock: {}", e.getMessage());
         }
@@ -193,21 +225,9 @@ public class AllureReportSender {
             return;
         }
 
-        // Omitir email si es una ejecución de Atmosfera SIN fallos reales.
-        // Doble verificación: contador pasado (ya corregido en AllureMailListener) +
-        // lectura directa de allure-results por si el contador viniera en 0 por otro caller.
-        boolean isAtmosfera =
-                (suiteName != null && suiteName.toLowerCase().contains("atmosfera")) ||
-                (executedTests != null && executedTests.contains("MenuAtmosfera"));
-
-        if (isAtmosfera) {
-            boolean hasFailures = failedTests > 0 || hasMenuAtmosferaFailuresInResults();
-            if (!hasFailures) {
-                log.info("[AllureReportSender] MenuAtmosfera suite — sin fallos detectados — email omitido.");
-                return;
-            }
-            log.info("[AllureReportSender] MenuAtmosfera suite falló (failedTests={}) — enviando correo.", failedTests);
-        }
+        // Comportamiento unificado: todas las suites (incluida Atmosfera) envían
+        // correo bajo las mismas reglas cuando el envío está habilitado — sin
+        // excepciones especiales por nombre de suite.
 
         if (isFinalMailAlreadySent()) {
             log.info("[AllureReportSender] Skipping: mail lock already exists at {}",
@@ -274,23 +294,22 @@ public class AllureReportSender {
             allurePdf = null;
         }
 
-        SmtpConfig cfg;
-        try {
-            cfg = ConfigLoader.getSmtpConfig();
-        } catch (Exception e) {
-            log.error("[AllureReportSender] Failed to read smtp-config.json: {}", e.getMessage());
-            return false;
-        }
+        // ConfigLoader.getSmtpConfig() ya no lanza excepciones — siempre devuelve una
+        // config (posiblemente vacía) y deja registrado un [SMTP] explícito con la
+        // fuente usada o el motivo por el que no hay una configuración válida.
+        SmtpConfig cfg = ConfigLoader.getSmtpConfig();
 
-        String smtpHost = safe(cfg.smtp.host, "email-smtp.us-east-1.amazonaws.com");
+        String smtpHost = safe(cfg.smtp.host, "");
         String smtpPort = safe(cfg.smtp.port, "587");
         String smtpUser = safe(cfg.smtp.user, "");
         String smtpPass = safe(cfg.smtp.pass, "");
-        String from = safe(cfg.mail.from, "automation_android@ia.com.mx");
+        String from     = safe(cfg.resolvedFrom(), "automation_android@ia.com.mx");
+        boolean useTls  = cfg.smtp.tls == null || cfg.smtp.tls; // default true
+        boolean useSsl  = cfg.smtp.ssl != null && cfg.smtp.ssl; // default false
 
         String to = "";
         try {
-            if (cfg.mail.to != null && !cfg.mail.to.isEmpty()) {
+            if (cfg.mail != null && cfg.mail.to != null && !cfg.mail.to.isEmpty()) {
                 to = cfg.mail.to.stream()
                         .map(String::trim)
                         .filter(s -> !s.isEmpty())
@@ -315,21 +334,26 @@ public class AllureReportSender {
             }
         }
 
-        if (smtpPass.isBlank()) {
-            log.error("[AllureReportSender] smtp.pass is missing in smtp-config.json; email will not be sent.");
+        if (smtpHost.isBlank() || smtpUser.isBlank() || smtpPass.isBlank()) {
+            log.error("[SMTP] No existe configuración SMTP válida (host/user/pass incompletos) — "
+                    + "el envío de correo será omitido. Configure las variables de entorno "
+                    + "SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM o complete config/smtp-config.json.");
             return false;
         }
         if (to.isBlank()) {
-            log.error("[AllureReportSender] No recipients configured (smtp-config.json mail.to ni MAIL_TO env).");
+            log.error("[SMTP] No hay destinatarios configurados (ReportEmailStore/MAIL_TO ni mail.recipients) — "
+                    + "el envío de correo será omitido.");
             return false;
         }
 
-        log.info("[AllureReportSender] Sending via SMTP. host={} port={} from={} to={}", smtpHost, smtpPort, from, to);
+        log.info("[AllureReportSender] Sending via SMTP. host={} port={} from={} to={} tls={} ssl={}",
+                smtpHost, smtpPort, from, to, useTls, useSsl);
         log.info("[AllureReportSender] PDF adjunto: {}", allurePdf != null ? allurePdf.toAbsolutePath() : "ninguno");
         log.info("[AllureReportSender] Interactive link: {}", reportUrl);
 
         Properties props = new Properties();
-        props.put("mail.smtp.starttls.enable", "true");
+        props.put("mail.smtp.starttls.enable", String.valueOf(useTls));
+        props.put("mail.smtp.ssl.enable", String.valueOf(useSsl));
         props.put("mail.smtp.host", smtpHost);
         props.put("mail.smtp.port", smtpPort);
         props.put("mail.smtp.auth", "true");
@@ -910,75 +934,6 @@ public class AllureReportSender {
             return m.length() > 120 ? m.substring(0, 120) + "…" : m;
         }
         return "Error durante la ejecución del test";
-    }
-
-    private static boolean hasMenuAtmosferaFailuresInResults() {
-        Path resultsDir = Paths.get("build", "allure-results");
-        if (!Files.exists(resultsDir)) return false;
-        ObjectMapper mapper = new ObjectMapper();
-        try {
-            return Files.walk(resultsDir, 1)
-                    .filter(p -> p.getFileName().toString().endsWith("-result.json"))
-                    .anyMatch(p -> {
-                        try {
-                            JsonNode root = mapper.readTree(p.toFile());
-                            String status = root.path("status").asText("");
-                            if (!status.equals("failed") && !status.equals("broken")) return false;
-
-                            String fullName = root.path("fullName").asText("");
-                            if (fullName.contains("MenuAtmosfera")
-                                    || fullName.toLowerCase().contains("atmosfera")) return true;
-
-                            JsonNode labels = root.path("labels");
-                            if (labels.isArray()) {
-                                for (JsonNode lbl : labels) {
-                                    String lblName  = lbl.path("name").asText("");
-                                    String lblValue = lbl.path("value").asText("");
-                                    if (("testClass".equals(lblName) || "suite".equals(lblName)
-                                            || "feature".equals(lblName))
-                                            && (lblValue.contains("MenuAtmosfera")
-                                                || lblValue.toLowerCase().contains("atmosfera"))) {
-                                        return true;
-                                    }
-                                }
-                            }
-                            return false;
-                        } catch (Exception e) {
-                            return false;
-                        }
-                    });
-        } catch (Exception e) {
-            log.warn("[AllureReportSender] Error revisando allure-results para fallos Atmosfera: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    private static int countAllureResultFailures(long runStartMs) {
-        Path resultsDir = Paths.get("build", "allure-results");
-        if (!Files.exists(resultsDir)) return 0;
-        ObjectMapper mapper = new ObjectMapper();
-        try (var stream = Files.list(resultsDir)) {
-            return (int) stream
-                    .filter(p -> p.getFileName().toString().endsWith("-result.json"))
-                    .filter(p -> {
-                        try {
-                            JsonNode root = mapper.readTree(p.toFile());
-                            // Filtrar por el campo "start" del JSON de Allure:
-                            // es el timestamp real de inicio del test, escrito por Allure mismo.
-                            // Mucho más fiable que lastModified del filesystem (impreciso en Windows).
-                            if (runStartMs > 0) {
-                                long testStart = root.path("start").asLong(0);
-                                if (testStart > 0 && testStart < runStartMs) return false;
-                            }
-                            String status = root.path("status").asText("");
-                            return "failed".equals(status) || "broken".equals(status);
-                        } catch (Exception ignored) { return false; }
-                    })
-                    .count();
-        } catch (Exception e) {
-            log.warn("[AllureReportSender] No se pudieron contar fallos en allure-results: {}", e.getMessage());
-            return 0;
-        }
     }
 
     private static List<FailureInfo> readAllureFailures(long runStartMs,
