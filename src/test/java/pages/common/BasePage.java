@@ -261,6 +261,53 @@ public class BasePage {
         }
     }
 
+    // ── Diálogo "producto no disponible en el cine" (post-selección) ───────────
+    // Aparece justo después de seleccionar un producto desde el buscador cuando
+    // el artículo no existe para el cine configurado. Debe tratarse como SKIPPED
+    // (nunca FAILED) y la suite debe continuar con el siguiente caso — mismo
+    // mecanismo (TestAbortedException) que "producto agotado" arriba.
+    private static final By PRODUCTO_NO_DISPONIBLE_DIALOG = By.xpath(
+            "//*[contains(@text,'no está disponible en el cine') "
+          + "or contains(@text,'no esta disponible en el cine') "
+          + "or contains(@text,'elige otro artículo') "
+          + "or contains(@text,'elige otro articulo')]");
+
+    /**
+     * Si el diálogo "Este producto actualmente no está disponible en el cine.
+     * Por favor, elige otro artículo." está visible, lo cierra presionando
+     * Aceptar, registra el motivo (log + Allure) y lanza TestAbortedException
+     * para que el caso se reporte como SKIPPED — nunca FAILED — sin detener el
+     * resto de la suite. Si el diálogo no está presente, no hace nada (no-op).
+     *
+     * Centralizado en BasePage para que todas las pruebas de alimentos lo
+     * hereden automáticamente, sin duplicar lógica ni tocar SelectorPage/tests.
+     * Se invoca reactivamente desde click() cuando el elemento esperado no
+     * aparece — que es justo lo que ocurre cuando este diálogo cubre la
+     * pantalla e impide continuar con el flujo normal (personalizar, etc.).
+     */
+    protected void abortSiProductoNoDisponibleDialog() {
+        if (!isVisibleQuick(PRODUCTO_NO_DISPONIBLE_DIALOG)) return;
+
+        log.info("[Producto] Producto no disponible para el cine seleccionado.");
+        log.info("[Producto] Caso marcado como SKIPPED.");
+        try {
+            Allure.step("Producto no disponible para el cine seleccionado — caso omitido (SKIPPED)");
+        } catch (Exception ignored) {}
+
+        // Cerrar el diálogo — best-effort: el SKIPPED se reporta igual aunque
+        // el botón no se encuentre o el tap falle.
+        try {
+            By aceptar = By.xpath("//*[@text='Aceptar' or @text='ACEPTAR' or @text='OK']");
+            if (isVisibleQuick(aceptar)) {
+                WebElement btn = driver.findElement(aceptar);
+                try { btn.click(); } catch (Exception e) { tapCenterW3C(btn); }
+            }
+        } catch (Exception ignored) {}
+
+        throw new org.opentest4j.TestAbortedException(
+                "Producto no disponible para el cine seleccionado — diálogo detectado y cerrado automáticamente.");
+    }
+
     public void validarElementoVisible(By locator) {
         try {
             waitForVisibility(locator);
@@ -328,9 +375,19 @@ public class BasePage {
     }
     protected void click(By locator) {
         ensureAppIsInForegroundOrRecover();
-        WebElement el = waitAndGet(locator);
-        el.click();
-        takeScreenshot();
+        try {
+            WebElement el = waitAndGet(locator);
+            el.click();
+            takeScreenshot();
+        } catch (org.opentest4j.TestAbortedException aborted) {
+            throw aborted; // ya es un SKIPPED explícito — no interceptar
+        } catch (RuntimeException e) {
+            // El elemento esperado no apareció — antes de reportar el fallo tal cual,
+            // se descarta la causa más común y benigna: el diálogo de "producto no
+            // disponible" cubriendo la pantalla. Si no es eso, se relanza intacto.
+            abortSiProductoNoDisponibleDialog();
+            throw e;
+        }
     }
 
     protected boolean clickIfPresent(By locator) {
