@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<ExecutionStatus, string> = {
   SKIPPED:             'Skipped',
   COMPLETED:           'Completado',
   ABORTED:             'Abortado',
+  INCOMPLETE:          'Incompleto',
 }
 
 const STATUS_CLASS: Record<ExecutionStatus, string> = {
@@ -31,6 +32,7 @@ const STATUS_CLASS: Record<ExecutionStatus, string> = {
   SKIPPED:             s.skipped,
   COMPLETED:           s.completed,
   ABORTED:             s.aborted,
+  INCOMPLETE:          s.incomplete,
 }
 
 function duration(start: string, end: string | null): string {

@@ -66,7 +66,7 @@ export default function Dashboard({
 
   // Only terminal executions contribute to global stats. RUNNING / FINALIZING / ABORTING / QUEUED
   // are never included so an in-progress run never pollutes historical metrics.
-  const TERMINAL_STATUSES = ['PASSED', 'COMPLETED', 'FAILED', 'ABORTED']
+  const TERMINAL_STATUSES = ['PASSED', 'COMPLETED', 'FAILED', 'ABORTED', 'INCOMPLETE']
 
   useEffect(() => {
     const aggregate = async () => {

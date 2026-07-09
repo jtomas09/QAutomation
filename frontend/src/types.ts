@@ -47,7 +47,7 @@ export interface RunState {
 export type ExecutionStatus =
   | 'PENDING' | 'QUEUED' | 'STARTING' | 'RUNNING' | 'FINALIZING' | 'ABORTING'
   | 'PASSED'  | 'FAILED' | 'FAILED_FINALIZATION' | 'SKIPPED'
-  | 'COMPLETED' | 'ABORTED'
+  | 'COMPLETED' | 'ABORTED' | 'INCOMPLETE'
 
 export interface DeviceConfig {
   id:              string
@@ -167,6 +167,8 @@ export interface ExecutionSummary {
   failed: number;
   skipped: number;
   total: number;
+  /** Planificado por el Runner; 0 = desconocido. Menor que total => status INCOMPLETE. */
+  expectedCount?: number;
   allureUrl: string | null;
   testCases?: TestCaseResult[];
 }

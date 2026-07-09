@@ -372,11 +372,14 @@ public class JobExecutor {
      * que el valor enviado al dashboard coincide exactamente con lo que se ejecutará.
      *
      *  - Smoke / múltiples --tests individuales → número de flags --tests (1 por método)
-     *  - Suite de clase (1 flag --tests ClassName) → lookup en SUITE_FILTER_SIZE
+     *  - Suite de clase (1 flag --tests ClassName) → se CUENTAN los @Test activos en
+     *    el .java fuente real de esa clase (nunca un número hardcodeado que pueda
+     *    desincronizarse si alguien agrega/comenta casos) — SUITE_FILTER_SIZE queda
+     *    solo como respaldo si el archivo fuente no se puede localizar/leer.
      *  - Wildcard (1 flag --tests pkg.*) → lookup en SUITE_FILTER_SIZE
      *  - Desconocido → -1 (sin barra de progreso)
      */
-    private int resolveExpectedCountFromCommand(JobDto job, List<String> cmd) {
+    private int resolveExpectedCountFromCommand(JobDto job, List<String> cmd, File projectDir) {
         String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
 
         // Contar cuántos flags --tests tiene el comando
@@ -392,6 +395,17 @@ public class JobExecutor {
             int idx = cmd.indexOf("--tests");
             if (idx >= 0 && idx + 1 < cmd.size()) {
                 String filter = cmd.get(idx + 1);
+
+                // Clase completa (exactamente 3 puntos, sin ".*") → contar los @Test
+                // reales en el archivo fuente. "Los casos que realmente son": si la
+                // clase tiene 50 @Test activos hoy, el esperado es 50; si mañana solo
+                // tiene 8 (por comentar/eliminar casos), el esperado pasa a ser 8 —
+                // nunca un número desactualizado copiado a mano en SUITE_FILTER_SIZE.
+                if (filter.chars().filter(c -> c == '.').count() == 3 && !filter.endsWith(".*")) {
+                    Integer real = countRealTestMethodsInSource(projectDir, filter);
+                    if (real != null) return real;
+                }
+
                 Integer count = SUITE_FILTER_SIZE.get(filter);
                 if (count != null) return count;
                 // 4+ puntos sin .* = selector de método → 1 test
@@ -401,6 +415,41 @@ public class JobExecutor {
         }
 
         return -1;
+    }
+
+    /**
+     * Cuenta los @Test activos (no comentados, ni en línea ni en bloque) en el .java
+     * fuente real de la clase — la fuente de verdad para "cuántos casos tiene esta
+     * suite" en vez de un número mantenido a mano que puede quedar desactualizado
+     * (ya ocurrió: MenuCoffeTree, MenuMiCine y MenuAtmosfera tuvieron mapas
+     * desincronizados del conteo real de @Test en algún momento).
+     *
+     * @return el conteo real, o null si el archivo no existe/no se pudo leer — en
+     *         ese caso el llamador cae de vuelta a SUITE_FILTER_SIZE como respaldo
+     *         (p. ej. ejecutable empaquetado sin el árbol de fuentes disponible).
+     */
+    private static Integer countRealTestMethodsInSource(File projectDir, String classFqn) {
+        try {
+            String relative = classFqn.replace('.', File.separatorChar) + ".java";
+            File source = new File(projectDir,
+                    "src" + File.separator + "test" + File.separator + "java" + File.separator + relative);
+            if (!source.isFile()) return null;
+
+            String content = new String(
+                    java.nio.file.Files.readAllBytes(source.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            // Quita comentarios de bloque /* ... */ (incluye los @Test comentados así)
+            content = content.replaceAll("(?s)/\\*.*?\\*/", "");
+
+            int count = 0;
+            for (String line : content.split("\n", -1)) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("//")) continue; // línea comentada con //
+                if (trimmed.equals("@Test")) count++;
+            }
+            return count;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -498,6 +547,10 @@ public class JobExecutor {
         final AtomicBoolean wasAborted = new AtomicBoolean(false);
         // Guards against duplicate sendResult() and enables the finally safety-net
         final AtomicBoolean resultSent = new AtomicBoolean(false);
+        // Hoisted para que sendResult() pueda reportarlo al backend incluso si el resultado
+        // se envía desde el catch/finally (fuera del bloque try donde se calcula su valor
+        // real); -1 hasta que resolveExpectedCountFromCommand() lo determine más abajo.
+        final AtomicInteger expectedCountHolder = new AtomicInteger(-1);
 
         try {
             client.sendLog(job.executionId, "INFO",
@@ -686,9 +739,11 @@ public class JobExecutor {
 
             // Notificar TOTAL_ESPERADO DESPUÉS de construir el comando para usar
             // el conteo real: para smoke = número de --tests flags seleccionados;
-            // para clases = lookup en SUITE_FILTER_SIZE. Esto garantiza que
-            // la barra de progreso siempre coincide con lo que realmente se ejecuta.
-            int expectedCount = resolveExpectedCountFromCommand(job, cmd);
+            // para clases = @Test reales en el .java fuente (con SUITE_FILTER_SIZE como
+            // respaldo si el archivo no se puede leer). Esto garantiza que la barra de
+            // progreso siempre coincide con lo que realmente se ejecuta.
+            int expectedCount = resolveExpectedCountFromCommand(job, cmd, projectDir);
+            expectedCountHolder.set(expectedCount);
             if (expectedCount > 0) {
                 client.sendLog(job.executionId, "INFO", "⚡ TOTAL_ESPERADO:" + expectedCount);
                 client.sendLog(job.executionId, "INFO", "📊 Casos seleccionados: " + expectedCount);
@@ -1015,7 +1070,8 @@ public class JobExecutor {
             // [POST-5] Envío de resultado final al Backend (obligatorio)
             System.out.println("[Executor] [POST-5] Enviando resultado final al Backend…");
             client.sendResult(job.executionId,
-                    passed.get(), failed.get(), skipped.get(), allureUrl, testCases);
+                    passed.get(), failed.get(), skipped.get(), allureUrl, testCases,
+                    Math.max(expectedCountHolder.get(), 0));
             resultSent.set(true);
             System.out.println("[Executor] ✓ Finalizado correctamente: " + job.executionId
                     + " — " + summary);
@@ -1038,7 +1094,8 @@ public class JobExecutor {
                     + "\n" + stackTrace.lines().limit(10).reduce("", (a, b) -> a + b + "\n")); } catch (Exception ignored) {}
             try {
                 client.sendResult(job.executionId,
-                        passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
+                        passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases,
+                        Math.max(expectedCountHolder.get(), 0));
                 resultSent.set(true);
             } catch (Exception ignored) {}
         } finally {
@@ -1060,7 +1117,8 @@ public class JobExecutor {
                     client.sendLog(job.executionId, "ERROR",
                             "⚠ Ejecución finalizada por safety-net del runner. Revise los logs para más detalles.");
                     client.sendResult(job.executionId,
-                            passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases);
+                            passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases,
+                            Math.max(expectedCountHolder.get(), 0));
                 } catch (Exception ignored) {}
             }
         }

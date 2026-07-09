@@ -18,6 +18,7 @@ const STATUS_LABEL: Record<ExecutionStatus, string> = {
   SKIPPED:             'Skipped',
   COMPLETED:           'Completado',
   ABORTED:             'Abortado',
+  INCOMPLETE:          'Incompleto',
 }
 const STATUS_COLOR: Record<ExecutionStatus, string> = {
   PENDING:             '#facc15',
@@ -32,6 +33,7 @@ const STATUS_COLOR: Record<ExecutionStatus, string> = {
   SKIPPED:             '#eab308',
   COMPLETED:           '#10b981',
   ABORTED:             '#94a3b8',
+  INCOMPLETE:          '#f59e0b',
 }
 const STATUS_BG: Record<ExecutionStatus, string> = {
   PENDING:             'rgba(250,204,21,0.10)',
@@ -46,6 +48,7 @@ const STATUS_BG: Record<ExecutionStatus, string> = {
   SKIPPED:             'rgba(234,179,8,0.10)',
   COMPLETED:           'rgba(16,185,129,0.12)',
   ABORTED:             'rgba(148,163,184,0.10)',
+  INCOMPLETE:          'rgba(245,158,11,0.12)',
 }
 
 const IOS_UDID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}$/

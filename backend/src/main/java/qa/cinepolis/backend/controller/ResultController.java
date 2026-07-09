@@ -28,7 +28,8 @@ public class ResultController {
                 payload.failed(),
                 payload.skipped(),
                 payload.allureUrl(),
-                payload.testCases()
+                payload.testCases(),
+                payload.expectedCount()
         );
         return Map.of("result", "ok", "executionId", payload.executionId());
     }

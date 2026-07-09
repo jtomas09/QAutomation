@@ -11,5 +11,7 @@ public enum ExecutionStatus {
     FAILED_FINALIZATION, // Post-procesamiento falló — la ejecución no pudo completarse limpiamente
     SKIPPED,
     ABORTED,
-    COMPLETED           // Ejecución terminada correctamente; FAILED si algún test falló
+    COMPLETED,          // Ejecución terminada correctamente; FAILED si algún test falló
+    INCOMPLETE          // Terminó con menos casos ejecutados que los planificados (expectedCount) —
+                         // independientemente de si los que sí corrieron pasaron o fallaron
 }

@@ -18,6 +18,7 @@ public class Execution {
     private int             failed;
     private int             skipped;
     private int             total;
+    private int             expectedCount; // planificado por el Runner; 0 = desconocido
     private List<LogEvent>       logs      = new CopyOnWriteArrayList<>();
     private List<TestCaseResult> testCases = new CopyOnWriteArrayList<>();
     private String               allureUrl;
@@ -51,6 +52,8 @@ public class Execution {
     public void            setSkipped(int v)             { this.skipped = v; }
     public int             getTotal()                    { return total; }
     public void            setTotal(int v)               { this.total = v; }
+    public int             getExpectedCount()            { return expectedCount; }
+    public void            setExpectedCount(int v)       { this.expectedCount = v; }
     public List<LogEvent>       getLogs()                          { return logs; }
     public void                 setLogs(List<LogEvent> v)          { this.logs = v; }
     public List<TestCaseResult> getTestCases()                     { return testCases; }

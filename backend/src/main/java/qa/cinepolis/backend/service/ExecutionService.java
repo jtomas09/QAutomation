@@ -78,17 +78,34 @@ public class ExecutionService {
     }
 
     public void complete(String executionId, int passed, int failed, int skipped, String allureUrl) {
-        complete(executionId, passed, failed, skipped, allureUrl, null);
+        complete(executionId, passed, failed, skipped, allureUrl, null, 0);
     }
 
     public void complete(String executionId, int passed, int failed, int skipped,
                          String allureUrl, List<qa.cinepolis.backend.model.TestCaseResult> testCases) {
+        complete(executionId, passed, failed, skipped, allureUrl, testCases, 0);
+    }
+
+    public void complete(String executionId, int passed, int failed, int skipped,
+                         String allureUrl, List<qa.cinepolis.backend.model.TestCaseResult> testCases,
+                         int expectedCount) {
         store.findById(executionId).ifPresent(e -> {
             e.setPassed(passed);
             e.setFailed(failed);
             e.setSkipped(skipped);
-            e.setTotal(passed + failed + skipped);
-            e.setStatus(failed == 0 ? ExecutionStatus.COMPLETED : ExecutionStatus.FAILED);
+            int total = passed + failed + skipped;
+            e.setTotal(total);
+            e.setExpectedCount(expectedCount);
+
+            // INCOMPLETE tiene prioridad sobre COMPLETED/FAILED: una suite que terminó con
+            // menos casos de los planificados (Gradle/JVM terminó antes de tiempo, incidente
+            // de stream, etc.) nunca debe verse como "Completado" solo porque los pocos casos
+            // que sí corrieron pasaron — expectedCount=0 (Runner no lo pudo calcular) preserva
+            // el comportamiento anterior (failed==0 ? COMPLETED : FAILED).
+            ExecutionStatus status = (expectedCount > 0 && total < expectedCount)
+                    ? ExecutionStatus.INCOMPLETE
+                    : (failed == 0 ? ExecutionStatus.COMPLETED : ExecutionStatus.FAILED);
+            e.setStatus(status);
             e.setEndTime(Instant.now());
             if (allureUrl  != null && !allureUrl.isBlank())  e.setAllureUrl(allureUrl);
             if (testCases  != null && !testCases.isEmpty())  e.setTestCases(testCases);

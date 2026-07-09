@@ -9,7 +9,7 @@ import type { ExecutionSummary } from '../../types'
 
 interface DayEntry { day: string; Exitosas: number; Fallidas: number; Omitidas: number }
 
-const TERMINAL_STATUSES = ['PASSED', 'COMPLETED', 'FAILED', 'ABORTED']
+const TERMINAL_STATUSES = ['PASSED', 'COMPLETED', 'FAILED', 'ABORTED', 'INCOMPLETE']
 
 const SERIES = [
   { key: 'Exitosas' as const, color: '#10b981' },

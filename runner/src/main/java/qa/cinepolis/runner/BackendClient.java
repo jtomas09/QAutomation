@@ -407,11 +407,27 @@ public class BackendClient {
 
     public void sendResult(String executionId, int passed, int failed, int skipped,
                            String allureUrl, List<TestCaseResult> testCases) throws Exception {
+        sendResult(executionId, passed, failed, skipped, allureUrl, testCases, 0);
+    }
+
+    /**
+     * @param expectedCount Total de casos planificados para la suite (calculado por el
+     *                       Runner antes de lanzar Gradle). 0 = desconocido — el backend
+     *                       conserva el criterio anterior (failed==0 ? COMPLETED : FAILED)
+     *                       en ese caso. Si expectedCount &gt; 0 y el total ejecutado es
+     *                       menor, el backend marca la ejecución como INCOMPLETE en vez de
+     *                       COMPLETED, para que una suite cortada a mitad de camino no se
+     *                       vea como "terminada correctamente" solo porque los pocos casos
+     *                       que sí corrieron pasaron.
+     */
+    public void sendResult(String executionId, int passed, int failed, int skipped,
+                           String allureUrl, List<TestCaseResult> testCases, int expectedCount) throws Exception {
         Map<String, Object> payload = new HashMap<>();
-        payload.put("executionId", executionId);
-        payload.put("passed",      passed);
-        payload.put("failed",      failed);
-        payload.put("skipped",     skipped);
+        payload.put("executionId",   executionId);
+        payload.put("passed",        passed);
+        payload.put("failed",        failed);
+        payload.put("skipped",       skipped);
+        payload.put("expectedCount", expectedCount);
         if (allureUrl  != null)                         payload.put("allureUrl",  allureUrl);
         if (testCases  != null && !testCases.isEmpty()) payload.put("testCases",  testCases);
         String body = json.writeValueAsString(payload);
