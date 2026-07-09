@@ -404,8 +404,11 @@ public class SelectorPage extends BasePage {
         this.driver.executeScript("mobile: type", Map.of("text", consulta));
         this.sleep(1500);
 
+        // Tier 1: coincidencia exacta del texto tal cual lo pidió el test — la más
+        // barata y la más frecuente en la práctica; sin overhead adicional.
         By exact = By.xpath("//android.widget.TextView[@text=\"" + escapeXpathValue(nombreProducto) + "\"]");
         if (isVisibleQuick(exact)) {
+            log.info("[BUSQUEDA] Producto encontrado: SI | Coincidencia exacta: SI ('{}')", nombreProducto);
             this.click(exact);
         } else {
             WebElement resultado = encontrarResultadoTolerante(nombreProducto);
@@ -414,18 +417,42 @@ public class SelectorPage extends BasePage {
                         resultado.getAttribute("text"), nombreProducto);
                 tapCenterW3C(resultado);
             } else {
-                this.click(exact); // lanzará excepción clara si no está disponible
+                log.warn("[BUSQUEDA] Producto encontrado: NO");
+                log.warn("[BUSQUEDA] Coincidencia exacta: NO");
+                log.warn("[BUSQUEDA] Coincidencia normalizada: NO");
+                log.warn("[BUSQUEDA] Coincidencia fuzzy válida: NO");
+                // No se selecciona ningún producto — el clic sobre el xpath exacto
+                // original no encontrará nada y lanzará una excepción clara (el
+                // flujo existente decide qué hacer con eso, p. ej. SKIPPED si
+                // corresponde al guard de "producto no disponible").
+                this.click(exact);
             }
         }
         log.info("[BuscarProducto] EXIT producto='{}' | {}ms", nombreProducto, System.currentTimeMillis() - t0);
     }
 
+    // Umbral mínimo de similitud fuzzy para aceptar un candidato (0-100). Separado con
+    // margen amplio de los casos reales medidos: variantes legítimas como "Obscuro"/
+    // "Oscuro" superan el 90%, mientras que productos distintos de la misma familia
+    // ("Maxicombo Mix" vs "Maxicombo Familiar", "Moka Oscuro" vs "Moka Blanco") no
+    // pasan de ~65% — no es "el primer parecido", es "el más parecido, y solo si de
+    // verdad se parece".
+    private static final double SIMILITUD_MINIMA_FUZZY = 90.0;
+
     /**
-     * Recorre los resultados de búsqueda visibles y devuelve el primero cuyo texto
-     * coincide con el producto buscado, tolerando las mismas variantes que antes se
-     * resolvían con una regex distinta por producto (Moka Obscuro/Oscuro, Pretzel/
-     * Pretzel®, Cheesecake/Cheese Cake): acentos, ®/™/©, mayúsculas, espaciado, y
-     * pequeñas variantes ortográficas (misma raíz y mismo final de palabra).
+     * Selecciona el producto en los resultados visibles, en orden ESTRICTO de
+     * prioridad (nunca "el primer parecido"):
+     *   1. (ya resuelto en buscarProducto(): coincidencia exacta del texto tal cual)
+     *   2. Coincidencia EXACTA tras normalizar (®/™/©, apóstrofes/comillas rectas y
+     *      tipográficas, acentos, mayúsculas, espacios múltiples) — por IGUALDAD,
+     *      nunca por "contains": "MM's", "MM's®", "MMs", "MM´s" son el mismo texto
+     *      normalizado, pero "Maxicombo Mix" NO debe considerarse "contenido en"
+     *      "Maxicombo Familiar Jumbo" solo porque comparten el prefijo "Maxicombo".
+     *   3. Solo si ninguna de las anteriores aplica: fuzzy real — se calcula la
+     *      similitud (distancia de Levenshtein normalizada) contra TODOS los
+     *      candidatos visibles y se elige el de MAYOR similitud, únicamente si
+     *      supera SIMILITUD_MINIMA_FUZZY. Si el mejor candidato no alcanza el
+     *      umbral, no se selecciona nada.
      */
     private WebElement encontrarResultadoTolerante(String nombreProducto) {
         String target        = normalizeForSearch(nombreProducto);
@@ -435,6 +462,8 @@ public class SelectorPage extends BasePage {
         try {
             java.util.List<WebElement> candidatos = driver.findElements(
                     By.xpath("//android.widget.TextView[string-length(@text) > 0]"));
+
+            // ── Tier 2: coincidencia exacta normalizada (igualdad, no "contains") ──
             for (WebElement candidato : candidatos) {
                 try {
                     if (!candidato.isDisplayed()) continue;
@@ -442,15 +471,39 @@ public class SelectorPage extends BasePage {
                     if (texto == null || texto.isBlank()) continue;
                     String norm        = normalizeForSearch(texto);
                     String normNoSpace = norm.replace(" ", "");
-
-                    boolean coincide =
-                            norm.equals(target)
-                         || norm.contains(target) || target.contains(norm)
-                         || normNoSpace.equals(targetNoSpace)
-                         || normNoSpace.contains(targetNoSpace) || targetNoSpace.contains(normNoSpace)
-                         || comparteRaizYFinal(norm, target);
-                    if (coincide) return candidato;
+                    if (norm.equals(target) || normNoSpace.equals(targetNoSpace)) {
+                        log.info("[BUSQUEDA] Coincidencia normalizada: SI ('{}')", texto);
+                        return candidato;
+                    }
                 } catch (Exception ignored) {}
+            }
+
+            // ── Tier 3: fuzzy — mejor similitud entre TODOS los candidatos, con umbral ──
+            WebElement mejorCandidato = null;
+            String     mejorTexto     = null;
+            double     mejorSimilitud = -1;
+            for (WebElement candidato : candidatos) {
+                try {
+                    if (!candidato.isDisplayed()) continue;
+                    String texto = candidato.getAttribute("text");
+                    if (texto == null || texto.isBlank()) continue;
+                    double similitud = similitudPorcentual(target, normalizeForSearch(texto));
+                    if (similitud > mejorSimilitud) {
+                        mejorSimilitud = similitud;
+                        mejorCandidato = candidato;
+                        mejorTexto     = texto;
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            if (mejorCandidato != null && mejorSimilitud >= SIMILITUD_MINIMA_FUZZY) {
+                log.info("[BUSQUEDA] Coincidencia fuzzy válida: SI ('{}', similitud={}%)",
+                        mejorTexto, Math.round(mejorSimilitud));
+                return mejorCandidato;
+            }
+            if (mejorCandidato != null) {
+                log.info("[BUSQUEDA] Mejor candidato fuzzy insuficiente: '{}' (similitud={}% < mínimo {}%) — descartado",
+                        mejorTexto, Math.round(mejorSimilitud), Math.round(SIMILITUD_MINIMA_FUZZY));
             }
         } finally {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
@@ -458,18 +511,29 @@ public class SelectorPage extends BasePage {
         return null;
     }
 
-    /**
-     * Tolera variantes ortográficas menores tipo "Obscuro"/"Oscuro": misma primera
-     * palabra y mismo final de palabra (≥3 caracteres), aunque difieran en medio.
-     */
-    private boolean comparteRaizYFinal(String a, String b) {
-        String[] wa = a.split("\\s+");
-        String[] wb = b.split("\\s+");
-        if (wa.length < 2 || wb.length < 2) return false;
-        if (!wa[0].equals(wb[0])) return false;
-        String la = wa[wa.length - 1], lb = wb[wb.length - 1];
-        int n = Math.min(4, Math.min(la.length(), lb.length()));
-        return n >= 3 && la.regionMatches(la.length() - n, lb, lb.length() - n, n);
+    /** Similitud porcentual (0-100) basada en distancia de Levenshtein normalizada. */
+    private static double similitudPorcentual(String a, String b) {
+        if (a.isEmpty() && b.isEmpty()) return 100;
+        int maxLen = Math.max(a.length(), b.length());
+        if (maxLen == 0) return 100;
+        int distancia = distanciaLevenshtein(a, b);
+        return (1.0 - ((double) distancia / maxLen)) * 100.0;
+    }
+
+    /** Distancia de Levenshtein clásica (mínimo de inserciones/borrados/sustituciones). */
+    private static int distanciaLevenshtein(String a, String b) {
+        int[] prev = new int[b.length() + 1];
+        int[] curr = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) prev[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            curr[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int costo = (a.charAt(i - 1) == b.charAt(j - 1)) ? 0 : 1;
+                curr[j] = Math.min(Math.min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + costo);
+            }
+            int[] tmp = prev; prev = curr; curr = tmp;
+        }
+        return prev[b.length()];
     }
 
     public void buscarTeCaliente() {
