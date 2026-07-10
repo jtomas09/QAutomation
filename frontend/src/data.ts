@@ -172,12 +172,56 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
     { id: 'alimentos-vip',          title: 'Menú VIP',           description: 'Valida combos y productos del menú VIP' },
   ],
 
-  // Los 3 casos que ocupaban estos IDs (combos de Crepa Dulce/Frappé) están comentados
-  // en MenuAtmosfera.java y ya no existen como @Test reales — reemplazados por los 2
-  // únicos casos activos de esa clase.
+  // Reactivados: MenuAtmosfera.java pasó de 2 a 47 @Test activos (Té Caliente Menta
+  // Manzanilla Patio Santa Fe/Arcos Bosques quedaron comentados; estos 47 son los reales).
   'alimentos-atmosfera': [
-    { id: 'atmos-t1', title: 'Té Caliente Menta Manzanilla - Patio Santa Fe', description: 'Comprar Té Caliente Menta Manzanilla en Patio Santa Fe' },
-    { id: 'atmos-t2', title: 'Té Caliente Menta Manzanilla - Arcos Bosques', description: 'Comprar Té Caliente Menta Manzanilla en Arcos Bosques' },
+    { id: 'atmos-t01', title: "Té de Manzanilla", description: "Té de Manzanilla" },
+    { id: 'atmos-t02', title: "Combo Frappé de Coco y Crepa Dulce con Queso", description: "Combo Frappé de Coco y Crepa Dulce con Queso" },
+    { id: 'atmos-t03', title: "Combo Frappé Sandía Pelonada y Crepa de Fresa", description: "Combo Frappé Sandía Pelonada y Crepa de Fresa" },
+    { id: 'atmos-t04', title: "Combo Crepa de Nutella y Frappé Fresa-Coco", description: "Combo Crepa de Nutella y Frappé Fresa-Coco" },
+    { id: 'atmos-t05', title: "Combo Crepa de Nuez y Frappé Piña Colada", description: "Combo Crepa de Nuez y Frappé Piña Colada" },
+    { id: 'atmos-t06', title: "Combo Crepa de Cajeta y Frappé Mango-Chamoy", description: "Combo Crepa de Cajeta y Frappé Mango-Chamoy" },
+    { id: 'atmos-t07', title: "Combo Crepa de Fresa y Frappé Jolly Rancher", description: "Combo Crepa de Fresa y Frappé Jolly Rancher" },
+    { id: 'atmos-t08', title: "Combo Crepa de Queso y Frappé Jolly Rancher", description: "Combo Crepa de Queso y Frappé Jolly Rancher" },
+    { id: 'atmos-t09', title: "Combo Crepa de Nutella y Frappé Manzana Verde", description: "Combo Crepa de Nutella y Frappé Manzana Verde" },
+    { id: 'atmos-t10', title: "Combo Crepa de Nuez y Frappé Chicle-Plátano", description: "Combo Crepa de Nuez y Frappé Chicle-Plátano" },
+    { id: 'atmos-t11', title: "Combo Crepa de Cajeta y Frappé Frutos Pelon", description: "Combo Crepa de Cajeta y Frappé Frutos Pelon" },
+    { id: 'atmos-t12', title: "Combo Crepa de Fresa y Frappé Frutos Pelon", description: "Combo Crepa de Fresa y Frappé Frutos Pelon" },
+    { id: 'atmos-t13', title: "Combo Crepa de Queso y Frappé Moras", description: "Combo Crepa de Queso y Frappé Moras" },
+    { id: 'atmos-t14', title: "Combo Crepa de Nutella y Frappé Sandía Pelonada", description: "Combo Crepa de Nutella y Frappé Sandía Pelonada" },
+    { id: 'atmos-t15', title: "Combo Crepa de Nuez y Frappé Fresa Pelonada", description: "Combo Crepa de Nuez y Frappé Fresa Pelonada" },
+    { id: 'atmos-t16', title: "Comprar Combo Nachos en Pareja Completo 1", description: "Comprar Combo Nachos en Pareja Completo 1" },
+    { id: 'atmos-t17', title: "Comprar Combo Nachos en Pareja Completo 2", description: "Comprar Combo Nachos en Pareja Completo 2" },
+    { id: 'atmos-t18', title: "Comprar Combo Nachos en Pareja Completo 3", description: "Comprar Combo Nachos en Pareja Completo 3" },
+    { id: 'atmos-t19', title: "Comprar Combo Nachos en Pareja Completo 4", description: "Comprar Combo Nachos en Pareja Completo 4" },
+    { id: 'atmos-t20', title: "Comprar Combo Nachos en Pareja Completo 5", description: "Comprar Combo Nachos en Pareja Completo 5" },
+    { id: 'atmos-t21', title: "Comprar Combo Nachos en Pareja Completo 6", description: "Comprar Combo Nachos en Pareja Completo 6" },
+    { id: 'atmos-t22', title: "Comprar Combo Pretzel en Pareja con Frappé Cajeta", description: "Comprar Combo Pretzel en Pareja con Frappé Cajeta" },
+    { id: 'atmos-t23', title: "Comprar Combo Pretzel en Pareja con Frappé Carlos V", description: "Comprar Combo Pretzel en Pareja con Frappé Carlos V" },
+    { id: 'atmos-t24', title: "Comprar Combo Pretzel en Pareja con Frappé Cookies & Cream", description: "Comprar Combo Pretzel en Pareja con Frappé Cookies & Cream" },
+    { id: 'atmos-t25', title: "Comprar Combo Pretzel en Pareja con Frappé M&M's", description: "Comprar Combo Pretzel en Pareja con Frappé M&M's" },
+    { id: 'atmos-t26', title: "Comprar Combo Pretzel en Pareja con Frappé Capuccino", description: "Comprar Combo Pretzel en Pareja con Frappé Capuccino" },
+    { id: 'atmos-t27', title: "Comprar Combo Pretzel en Pareja con Frappé Chocolate Blanco", description: "Comprar Combo Pretzel en Pareja con Frappé Chocolate Blanco" },
+    { id: 'atmos-t28', title: "Comprar Combo Pretzel en Pareja con Frappé Moka Caramelo", description: "Comprar Combo Pretzel en Pareja con Frappé Moka Caramelo" },
+    { id: 'atmos-t29', title: "Comprar Combo Pretzel en Pareja con Frappé Macchiato Coco", description: "Comprar Combo Pretzel en Pareja con Frappé Macchiato Coco" },
+    { id: 'atmos-t30', title: "Comprar Combo Pretzel en Pareja con Frappé Macchiato Menta", description: "Comprar Combo Pretzel en Pareja con Frappé Macchiato Menta" },
+    { id: 'atmos-t31', title: "Comprar Combo Pretzel en Pareja con Frappé Crema Irlandesa", description: "Comprar Combo Pretzel en Pareja con Frappé Crema Irlandesa" },
+    { id: 'atmos-t32', title: "Comprar Combo Nachos simple 1", description: "Comprar Combo Nachos simple 1" },
+    { id: 'atmos-t33', title: "Comprar Combo Nachos simple 2", description: "Comprar Combo Nachos simple 2" },
+    { id: 'atmos-t34', title: "Comprar Combo Nachos simple 3", description: "Comprar Combo Nachos simple 3" },
+    { id: 'atmos-t35', title: "Comprar Combo Nachos simple 4", description: "Comprar Combo Nachos simple 4" },
+    { id: 'atmos-t36', title: "Comprar Combo Nachos simple 5", description: "Comprar Combo Nachos simple 5" },
+    { id: 'atmos-t37', title: "Comprar Combo Nachos: Palomitas:Jumbo - Doritos Nachos - Refresco: Delvalle Frut - Hielo Regular - Nachos:Chicos - Doritos Nachos", description: "Comprar Combo Nachos: Palomitas:Jumbo - Doritos Nachos - Refresco: Delvalle Frut - Hielo Regular - Nachos:Chicos - Doritos Nachos" },
+    { id: 'atmos-t38', title: "Comprar Combo Nachos: Palomitas:Para Llevar - Cheetos Mix - Refresco: Fuze tea sin Azúcar - Poco Hielo - Nachos:Grandes - Nachos Tajín", description: "Comprar Combo Nachos: Palomitas:Para Llevar - Cheetos Mix - Refresco: Fuze tea sin Azúcar - Poco Hielo - Nachos:Grandes - Nachos Tajín" },
+    { id: 'atmos-t39', title: "Comprar Crepa + Frappé Leche: Sabor Cajeta - Leche Entera - Crepa: Nutella", description: "Comprar Crepa + Frappé Leche: Sabor Cajeta - Leche Entera - Crepa: Nutella" },
+    { id: 'atmos-t40', title: "Comprar Crepa + Frappé Leche: Sabor Carlos V - Leche Deslactosada - Crepa: Queso Philadelphia", description: "Comprar Crepa + Frappé Leche: Sabor Carlos V - Leche Deslactosada - Crepa: Queso Philadelphia" },
+    { id: 'atmos-t41', title: "Comprar Crepa + Frappé Leche: Sabor Cookies & Cream - Leche de Almendra - Crepa: Nuez", description: "Comprar Crepa + Frappé Leche: Sabor Cookies & Cream - Leche de Almendra - Crepa: Nuez" },
+    { id: 'atmos-t42', title: "Comprar Crepa + Frappé Leche: Sabor Moka Caramelo - Leche Entera - Crepa: Cajeta", description: "Comprar Crepa + Frappé Leche: Sabor Moka Caramelo - Leche Entera - Crepa: Cajeta" },
+    { id: 'atmos-t43', title: "Comprar Crepa + Frappé Leche: Sabor Chocolate Blanco - Leche Deslactosada - Crepa: Nutella", description: "Comprar Crepa + Frappé Leche: Sabor Chocolate Blanco - Leche Deslactosada - Crepa: Nutella" },
+    { id: 'atmos-t44', title: "Comprar Crepa + Frappé Leche: Sabor Cappuccino - Leche de Almendra - Crepa: Queso Philadelphia", description: "Comprar Crepa + Frappé Leche: Sabor Cappuccino - Leche de Almendra - Crepa: Queso Philadelphia" },
+    { id: 'atmos-t45', title: "Comprar Crepa + Frappé Leche: Sabor Macchiato Menta - Leche Entera - Crepa: Queso Philadelphia", description: "Comprar Crepa + Frappé Leche: Sabor Macchiato Menta - Leche Entera - Crepa: Queso Philadelphia" },
+    { id: 'atmos-t46', title: "Comprar Crepa + Frappé Leche: Sabor Macchiato Coco - Leche Deslactosada - Crepa: Nutella", description: "Comprar Crepa + Frappé Leche: Sabor Macchiato Coco - Leche Deslactosada - Crepa: Nutella" },
+    { id: 'atmos-t47', title: "Comprar Crepa + Frappé Leche: Sabor Macchiato Crema Irlandesa - Leche de Almendra - Crepa: Nuez", description: "Comprar Crepa + Frappé Leche: Sabor Macchiato Crema Irlandesa - Leche de Almendra - Crepa: Nuez" },
   ],
 
   'alimentos-vip': [
@@ -374,7 +418,7 @@ export const SUITE_TESTS: Record<string, IndividualTest[]> = {
   ],
 };
 
-// ── Smoke Test — pool de 152 casos individuales para selección aleatoria ──────
+// ── Smoke Test — pool de 197 casos individuales para selección aleatoria ──────
 const SMOKE_POOL: IndividualTest[] = [
   ...SUITE_TESTS['asientos'],
   ...SUITE_TESTS['flujo-completo'],

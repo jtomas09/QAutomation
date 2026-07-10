@@ -113,11 +113,56 @@ public class JobExecutor {
         SUITE_MAP.put("e2e-ticket-vip",     "tests.México.E2E.FlujosCompraNoLogin.compraTicketVIP");
         SUITE_MAP.put("e2e-mix-vip",        "tests.México.E2E.FlujosCompraNoLogin.compraMixVIP");
         SUITE_MAP.put("e2e-alimento-vip",   "tests.México.E2E.FlujosCompraNoLogin.compraAlimentoVIP");
-        // Individual Atmosphera test methods — comprarCrepaDulceFrappe/FrappesG/Frappes
-        // (los 3 métodos que ocupaban estos IDs antes) están comentados en la clase y ya
-        // no existen como @Test reales; los únicos 2 casos activos son estos:
-        SUITE_MAP.put("atmos-t1", "tests.México.alimentos.MenuAtmosfera.comprarTeCalienteManzanillaPatioSantaFe");
-        SUITE_MAP.put("atmos-t2", "tests.México.alimentos.MenuAtmosfera.comprarTeCalienteManzanillaArcosBosques");
+        // Individual Atmosphera test methods — reactivados: la clase pasó de 2 a 47 @Test
+        // activos (comprarTeCalienteManzanillaPatioSantaFe/ArcosBosques quedaron comentados;
+        // Combos Destacados/Nachos/Pretzel/Crepa+Frappé Leche pasaron a ser los reales).
+        SUITE_MAP.put("atmos-t01", "tests.México.alimentos.MenuAtmosfera.comprarCrepaDulceFrappe");
+        SUITE_MAP.put("atmos-t02", "tests.México.alimentos.MenuAtmosfera.comprarCrepaDulceFrappesG");
+        SUITE_MAP.put("atmos-t03", "tests.México.alimentos.MenuAtmosfera.comprarCrepaDulceFrappes");
+        SUITE_MAP.put("atmos-t04", "tests.México.alimentos.MenuAtmosfera.comprarPromociones");
+        SUITE_MAP.put("atmos-t05", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesN");
+        SUITE_MAP.put("atmos-t06", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesC");
+        SUITE_MAP.put("atmos-t07", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesM");
+        SUITE_MAP.put("atmos-t08", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesQ");
+        SUITE_MAP.put("atmos-t09", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesMa");
+        SUITE_MAP.put("atmos-t10", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesCP");
+        SUITE_MAP.put("atmos-t11", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesPR");
+        SUITE_MAP.put("atmos-t12", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesPR2");
+        SUITE_MAP.put("atmos-t13", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFP");
+        SUITE_MAP.put("atmos-t14", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesNT");
+        SUITE_MAP.put("atmos-t15", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFPL");
+        SUITE_MAP.put("atmos-t16", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesCO");
+        SUITE_MAP.put("atmos-t17", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesCOA");
+        SUITE_MAP.put("atmos-t18", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesNC");
+        SUITE_MAP.put("atmos-t19", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesNC2");
+        SUITE_MAP.put("atmos-t20", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesNC3");
+        SUITE_MAP.put("atmos-t21", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFPE2");
+        SUITE_MAP.put("atmos-t22", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFPE3");
+        SUITE_MAP.put("atmos-t23", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFPE4");
+        SUITE_MAP.put("atmos-t24", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFPV");
+        SUITE_MAP.put("atmos-t25", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesFPE");
+        SUITE_MAP.put("atmos-t26", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesCap");
+        SUITE_MAP.put("atmos-t27", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesChoco");
+        SUITE_MAP.put("atmos-t28", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesMoka");
+        SUITE_MAP.put("atmos-t29", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesMacchiatoCoco");
+        SUITE_MAP.put("atmos-t30", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesMacchiatoMenta");
+        SUITE_MAP.put("atmos-t31", "tests.México.alimentos.MenuAtmosfera.comprarPromocionesMacchiato");
+        SUITE_MAP.put("atmos-t32", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos1");
+        SUITE_MAP.put("atmos-t33", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos2");
+        SUITE_MAP.put("atmos-t34", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos3");
+        SUITE_MAP.put("atmos-t35", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos");
+        SUITE_MAP.put("atmos-t36", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos6");
+        SUITE_MAP.put("atmos-t37", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos7");
+        SUITE_MAP.put("atmos-t38", "tests.México.alimentos.MenuAtmosfera.comprarComboNachos8");
+        SUITE_MAP.put("atmos-t39", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche");
+        SUITE_MAP.put("atmos-t40", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche2");
+        SUITE_MAP.put("atmos-t41", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche3");
+        SUITE_MAP.put("atmos-t42", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche4");
+        SUITE_MAP.put("atmos-t43", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche5");
+        SUITE_MAP.put("atmos-t44", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche6");
+        SUITE_MAP.put("atmos-t45", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche7");
+        SUITE_MAP.put("atmos-t46", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche8");
+        SUITE_MAP.put("atmos-t47", "tests.México.alimentos.MenuAtmosfera.comprarCrepaFrappeLeche9");
         // Individual VIP test methods
         SUITE_MAP.put("vip-t1", "tests.México.alimentos.MenuVIP.comprarPalomitasClasicasMantequilla");
         SUITE_MAP.put("vip-t2", "tests.México.alimentos.MenuVIP.comprarDippinDotsA");
@@ -345,10 +390,10 @@ public class JobExecutor {
         // MenuMiCine:    50 @Test reales, 40 en SUITE_MAP (micine-t01..t40)
         SUITE_FILTER_SIZE.put("tests.México.alimentos.MenuMiCine",     50);
         // MenuTradicional: 50 reales = 50 en SUITE_MAP (trad-t01..t50) — ya correcto
-        // MenuVIP: 2 reales = 2 en SUITE_MAP (vip-t1..t2) — ya correcto
-        // MenuAtmosfera: 2 @Test reales; SUITE_MAP tenía 3 entradas (atmos-t1..t3) apuntando
-        // a métodos comentados/inexistentes — corregido arriba a los 2 métodos reales, así
-        // que ahora se auto-deriva a 2 sin necesitar una entrada explícita aquí.
+        // MenuVIP: 50 reales; vip-t1..t2 (los 2 originales) siguen activos — selección
+        // individual parcial, mismo patrón que MenuCoffeTree/MenuMiCine arriba.
+        // MenuAtmosfera: 47 reales = 47 en SUITE_MAP (atmos-t01..t47) — ya correcto,
+        // auto-derivado sin necesitar una entrada explícita aquí.
     }
 
     private final RunnerConfig   config;
