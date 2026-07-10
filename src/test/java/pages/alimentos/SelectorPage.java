@@ -404,111 +404,115 @@ public class SelectorPage extends BasePage {
         this.driver.executeScript("mobile: type", Map.of("text", consulta));
         this.sleep(1500);
 
-        // Tier 1: coincidencia exacta del texto tal cual lo pidió el test — la más
-        // barata y la más frecuente en la práctica; sin overhead adicional.
+        // Selección: exacto literal → exacto normalizado → fuzzy validado por tokens
+        // (ver encontrarResultadoTolerante). "exacta" (el booleano) es la ÚNICA señal
+        // que decide si se hace clic — nunca se hace clic si el log dice NO.
         By exact = By.xpath("//android.widget.TextView[@text=\"" + escapeXpathValue(nombreProducto) + "\"]");
+        WebElement resultado;
+        boolean exacta;
+        String textoEncontrado;
+
         if (isVisibleQuick(exact)) {
-            log.info("[BUSQUEDA] Producto encontrado: SI | Coincidencia exacta: SI ('{}')", nombreProducto);
-            this.click(exact);
+            resultado       = null; // ya visible por locator directo, no hace falta el WebElement
+            exacta          = true;
+            textoEncontrado = nombreProducto;
         } else {
-            WebElement resultado = encontrarResultadoTolerante(nombreProducto);
-            if (resultado != null) {
-                log.info("[BuscarProducto] Nombre en catálogo: '{}' (buscado: '{}')",
-                        resultado.getAttribute("text"), nombreProducto);
-                tapCenterW3C(resultado);
-            } else {
-                log.warn("[BUSQUEDA] Producto encontrado: NO");
-                log.warn("[BUSQUEDA] Coincidencia exacta: NO");
-                log.warn("[BUSQUEDA] Coincidencia normalizada: NO");
-                log.warn("[BUSQUEDA] Coincidencia fuzzy válida: NO");
-                // No se selecciona ningún producto — el clic sobre el xpath exacto
-                // original no encontrará nada y lanzará una excepción clara (el
-                // flujo existente decide qué hacer con eso, p. ej. SKIPPED si
-                // corresponde al guard de "producto no disponible").
-                this.click(exact);
-            }
+            resultado       = encontrarResultadoTolerante(nombreProducto);
+            exacta          = resultado != null;
+            textoEncontrado = resultado != null ? resultado.getAttribute("text") : "(ninguno)";
+        }
+
+        log.info("[BUSQUEDA] Producto solicitado: {}", nombreProducto);
+        log.info("[BUSQUEDA] Producto encontrado: {}", textoEncontrado);
+        log.info("[BUSQUEDA] Coincidencia exacta: {}", exacta ? "SI" : "NO");
+
+        if (exacta) {
+            if (resultado != null) tapCenterW3C(resultado);
+            else this.click(exact);
+        } else {
+            // No se selecciona ningún producto — el clic sobre el xpath exacto original
+            // no encontrará nada y lanzará una excepción clara (el flujo existente decide
+            // qué hacer con eso, p. ej. SKIPPED si corresponde al guard de "producto no
+            // disponible").
+            this.click(exact);
         }
         log.info("[BuscarProducto] EXIT producto='{}' | {}ms", nombreProducto, System.currentTimeMillis() - t0);
     }
 
-    // Umbral mínimo de similitud fuzzy para aceptar un candidato (0-100). Separado con
-    // margen amplio de los casos reales medidos: variantes legítimas como "Obscuro"/
-    // "Oscuro" superan el 90%, mientras que productos distintos de la misma familia
-    // ("Maxicombo Mix" vs "Maxicombo Familiar", "Moka Oscuro" vs "Moka Blanco") no
-    // pasan de ~65% — no es "el primer parecido", es "el más parecido, y solo si de
-    // verdad se parece".
-    private static final double SIMILITUD_MINIMA_FUZZY = 90.0;
+    // Similitud mínima POR TOKEN (0-100) para el fallback fuzzy — solo se aplica cuando
+    // ambos nombres tienen el MISMO número de tokens y cada token ocupa la MISMA
+    // posición; nunca decide por similitud global de la cadena completa. Calibrado
+    // contra el caso real "Oscuro"/"Obscuro" (85.7% por token) para que siga
+    // aceptándose, mientras cualquier token realmente distinto ("Mix" vs "Familiar",
+    // ~12%) queda muy por debajo.
+    private static final double SIMILITUD_MINIMA_TOKEN = 80.0;
 
     /**
      * Selecciona el producto en los resultados visibles, en orden ESTRICTO de
-     * prioridad (nunca "el primer parecido"):
+     * prioridad (nunca "el primer parecido", nunca "el de mayor similitud global"):
      *   1. (ya resuelto en buscarProducto(): coincidencia exacta del texto tal cual)
      *   2. Coincidencia EXACTA tras normalizar (®/™/©, apóstrofes/comillas rectas y
-     *      tipográficas, acentos, mayúsculas, espacios múltiples) — por IGUALDAD,
-     *      nunca por "contains": "MM's", "MM's®", "MMs", "MM´s" son el mismo texto
-     *      normalizado, pero "Maxicombo Mix" NO debe considerarse "contenido en"
-     *      "Maxicombo Familiar Jumbo" solo porque comparten el prefijo "Maxicombo".
-     *   3. Solo si ninguna de las anteriores aplica: fuzzy real — se calcula la
-     *      similitud (distancia de Levenshtein normalizada) contra TODOS los
-     *      candidatos visibles y se elige el de MAYOR similitud, únicamente si
-     *      supera SIMILITUD_MINIMA_FUZZY. Si el mejor candidato no alcanza el
-     *      umbral, no se selecciona nada.
+     *      tipográficas, acentos, mayúsculas, espacios múltiples) — por IGUALDAD de
+     *      la cadena completa, nunca por "contains": "MM's", "MM's®", "MMs", "MM´s"
+     *      son el mismo texto normalizado, pero "Maxicombo Mix" NO se considera
+     *      "contenido en" "Maxicombo Familiar Jumbo" solo por compartir el prefijo.
+     *   3. Solo si NINGÚN candidato coincide exacto: fuzzy validado por tokens —
+     *      candidato y producto buscado deben tener el MISMO NÚMERO de tokens
+     *      (separados por espacio) y CADA token debe superar SIMILITUD_MINIMA_TOKEN
+     *      contra el token de la MISMA posición. Esto es deliberadamente más
+     *      estricto que un puntaje de similitud sobre la cadena completa: "Maxicombo
+     *      Mix" (2 tokens) nunca puede validar contra "Maxicombo Micha Mix" (3
+     *      tokens) sin importar cuán "parecidas" luzcan las cadenas completas,
+     *      porque el conteo de tokens ya no coincide.
      */
     private WebElement encontrarResultadoTolerante(String nombreProducto) {
-        String target        = normalizeForSearch(nombreProducto);
-        String targetNoSpace = target.replace(" ", "");
+        String target = normalizeForSearch(nombreProducto);
 
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
             java.util.List<WebElement> candidatos = driver.findElements(
                     By.xpath("//android.widget.TextView[string-length(@text) > 0]"));
 
-            // ── Tier 2: coincidencia exacta normalizada (igualdad, no "contains") ──
+            // ── Tier 2: coincidencia exacta normalizada (igualdad de cadena completa) ──
             for (WebElement candidato : candidatos) {
                 try {
                     if (!candidato.isDisplayed()) continue;
                     String texto = candidato.getAttribute("text");
                     if (texto == null || texto.isBlank()) continue;
-                    String norm        = normalizeForSearch(texto);
-                    String normNoSpace = norm.replace(" ", "");
-                    if (norm.equals(target) || normNoSpace.equals(targetNoSpace)) {
-                        log.info("[BUSQUEDA] Coincidencia normalizada: SI ('{}')", texto);
-                        return candidato;
-                    }
+                    if (normalizeForSearch(texto).equals(target)) return candidato;
                 } catch (Exception ignored) {}
             }
 
-            // ── Tier 3: fuzzy — mejor similitud entre TODOS los candidatos, con umbral ──
-            WebElement mejorCandidato = null;
-            String     mejorTexto     = null;
-            double     mejorSimilitud = -1;
+            // ── Tier 3: fuzzy validado por tokens (mismo conteo + misma posición) ──
+            String[] targetTokens = target.split("\\s+");
             for (WebElement candidato : candidatos) {
                 try {
                     if (!candidato.isDisplayed()) continue;
                     String texto = candidato.getAttribute("text");
                     if (texto == null || texto.isBlank()) continue;
-                    double similitud = similitudPorcentual(target, normalizeForSearch(texto));
-                    if (similitud > mejorSimilitud) {
-                        mejorSimilitud = similitud;
-                        mejorCandidato = candidato;
-                        mejorTexto     = texto;
-                    }
+                    String[] candidatoTokens = normalizeForSearch(texto).split("\\s+");
+                    if (coincidenTokensValidados(targetTokens, candidatoTokens)) return candidato;
                 } catch (Exception ignored) {}
-            }
-
-            if (mejorCandidato != null && mejorSimilitud >= SIMILITUD_MINIMA_FUZZY) {
-                log.info("[BUSQUEDA] Coincidencia fuzzy válida: SI ('{}', similitud={}%)",
-                        mejorTexto, Math.round(mejorSimilitud));
-                return mejorCandidato;
-            }
-            if (mejorCandidato != null) {
-                log.info("[BUSQUEDA] Mejor candidato fuzzy insuficiente: '{}' (similitud={}% < mínimo {}%) — descartado",
-                        mejorTexto, Math.round(mejorSimilitud), Math.round(SIMILITUD_MINIMA_FUZZY));
             }
         } finally {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
         return null;
+    }
+
+    /**
+     * true solo si ambos arreglos tienen la MISMA longitud y cada token en la
+     * posición i supera SIMILITUD_MINIMA_TOKEN contra el token i del otro arreglo —
+     * "todos los tokens principales presentes y en el mismo orden", nunca una
+     * cadena adicional/faltante en medio (eso es exactamente lo que distingue
+     * "Maxicombo Mix" de "Maxicombo Micha Mix": 2 tokens vs 3).
+     */
+    private static boolean coincidenTokensValidados(String[] targetTokens, String[] candidatoTokens) {
+        if (targetTokens.length != candidatoTokens.length) return false;
+        for (int i = 0; i < targetTokens.length; i++) {
+            if (similitudPorcentual(targetTokens[i], candidatoTokens[i]) < SIMILITUD_MINIMA_TOKEN) return false;
+        }
+        return true;
     }
 
     /** Similitud porcentual (0-100) basada en distancia de Levenshtein normalizada. */
