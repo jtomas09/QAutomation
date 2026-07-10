@@ -1,0 +1,43 @@
+.card {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  text-align: left;
+  width: 100%;
+}
+.card:hover  { background: var(--bg-hover); }
+.selected {
+  border-color: var(--accent-indigo);
+  background: rgba(99,102,241,.08);
+}
+
+.icon {
+  width: 40px; height: 40px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 19px; border-radius: 10px;
+  background: rgba(99,102,241,.12);
+}
+
+.body { flex: 1; min-width: 0; }
+.name {
+  font-size: 13px; font-weight: 700; color: var(--text-pri);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.meta {
+  display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text-dim);
+}
+.dot { opacity: .5; }
+
+.badge {
+  display: inline-block;
+  margin-top: 7px;
+  padding: 3px 9px; border-radius: 12px;
+  font-size: 10px; font-weight: 700; letter-spacing: .03em;
+}
+
+.chevron { flex-shrink: 0; color: var(--text-dim); margin-top: 12px; }

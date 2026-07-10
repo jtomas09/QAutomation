@@ -4,9 +4,13 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import qa.cinepolis.backend.model.VideoQueryResult;
 import qa.cinepolis.backend.model.VideoRecord;
+import qa.cinepolis.backend.model.VideoSuiteSummary;
 import qa.cinepolis.backend.store.VideoStore;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -36,10 +40,33 @@ public class VideoController {
         return ResponseEntity.ok(rec);
     }
 
-    /** GET /api/videos — list all videos, newest first */
+    /** GET /api/videos/suites — resumen por suite (pantalla "Nivel 1"), más reciente primero */
+    @GetMapping("/videos/suites")
+    public List<VideoSuiteSummary> listSuites() {
+        return videoStore.getSuiteSummaries();
+    }
+
+    /**
+     * GET /api/videos — videos de UNA suite, filtrados y paginados (pantalla "Nivel 2").
+     * suite es requerido para navegación normal; se omite para listar todo (compatibilidad/debug).
+     */
     @GetMapping("/videos")
-    public List<VideoRecord> listAll() {
-        return videoStore.findAll();
+    public VideoQueryResult listVideos(
+            @RequestParam(required = false) String suite,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String device,
+            @RequestParam(required = false) String env,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "24") int pageSize) {
+        return videoStore.query(suite, q, status, device, env, page, pageSize);
+    }
+
+    /** DELETE /api/videos/suite/{suiteName} — elimina TODOS los videos de una suite */
+    @DeleteMapping("/videos/suite/{suiteName}")
+    public ResponseEntity<Void> deleteSuite(@PathVariable String suiteName) throws Exception {
+        videoStore.deleteSuite(URLDecoder.decode(suiteName, StandardCharsets.UTF_8));
+        return ResponseEntity.noContent().build();
     }
 
     /**

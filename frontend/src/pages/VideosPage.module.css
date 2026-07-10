@@ -1,0 +1,36 @@
+.layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  height: calc(100vh - 220px);
+  min-height: 480px;
+}
+
+.suiteList {
+  background: var(--bg-card);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-card);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.suiteListHeader {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
+}
+.suiteSearch {
+  width: 100%;
+  padding: 7px 10px; border-radius: 8px;
+  background: var(--input-bg); border: 1px solid var(--input-border); color: var(--text-pri);
+  font-size: 12px;
+}
+.suiteListBody {
+  flex: 1; overflow-y: auto; padding: 10px; min-height: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.emptySelection {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100%; gap: 10px; color: var(--text-dim); font-size: 13px;
+  background: var(--bg-card); border: 1px solid var(--panel-border); border-radius: var(--radius-card);
+}

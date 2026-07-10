@@ -18,7 +18,7 @@
  *   POST   /api/results           → finalize execution (runner)
  */
 
-import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice, DeviceAppConfig } from './types'
+import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice, DeviceAppConfig, VideoSuiteSummary, VideoQueryResult } from './types'
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 
@@ -402,4 +402,49 @@ export async function saveRunnerConfig(
   projectName: string,
 ): Promise<void> {
   await httpPost<unknown>('/api/runner/config', { repositoryUrl, branch, projectName })
+}
+
+// ─── Videos ───────────────────────────────────────────────────────────────────
+
+/** GET /api/videos/suites — resumen agrupado por suite, más reciente primero */
+export async function getVideoSuites(): Promise<VideoSuiteSummary[]> {
+  return httpGet<VideoSuiteSummary[]>('/api/videos/suites')
+}
+
+export interface VideoQueryParams {
+  suite:    string
+  q?:       string
+  status?:  string
+  device?:  string
+  env?:     string
+  page?:    number
+  pageSize?: number
+}
+
+/** GET /api/videos?suite=...&q=...&status=...&device=...&env=...&page=...&pageSize=... */
+export async function getVideos(params: VideoQueryParams): Promise<VideoQueryResult> {
+  const qs = new URLSearchParams()
+  qs.set('suite', params.suite)
+  if (params.q)        qs.set('q', params.q)
+  if (params.status)   qs.set('status', params.status)
+  if (params.device)   qs.set('device', params.device)
+  if (params.env)      qs.set('env', params.env)
+  qs.set('page', String(params.page ?? 0))
+  qs.set('pageSize', String(params.pageSize ?? 24))
+  return httpGet<VideoQueryResult>(`/api/videos?${qs.toString()}`)
+}
+
+/** DELETE /api/videos/{id} — remove a single video */
+export async function deleteVideo(id: string): Promise<void> {
+  await httpDelete(`/api/videos/${encodeURIComponent(id)}`)
+}
+
+/** DELETE /api/videos/suite/{suiteName} — remove all videos in a suite */
+export async function deleteVideoSuite(suiteName: string): Promise<void> {
+  await httpDelete(`/api/videos/suite/${encodeURIComponent(suiteName)}`)
+}
+
+/** Absolute URL to stream/download a video file. */
+export function getVideoFileUrl(id: string, download = false): string {
+  return `${API_URL}/api/videos/${encodeURIComponent(id)}/file?download=${download}`
 }

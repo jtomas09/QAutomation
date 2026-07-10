@@ -154,6 +154,38 @@ export interface DeviceAppConfig {
   source:     string
 }
 
+// ─── Videos ───────────────────────────────────────────────────────────────────
+
+export type VideoStatus = 'PASS' | 'FAIL' | 'SKIP' | 'UNKNOWN'
+
+export interface VideoRecord {
+  id:           string
+  executionId:  string
+  suiteName:    string
+  testName:     string
+  originalName: string
+  sizeBytes:    number
+  createdAt:    string
+  status:       VideoStatus | null
+  device:       string | null
+  env:          string | null
+}
+
+export interface VideoSuiteSummary {
+  suiteName:        string
+  videoCount:       number
+  lastExecutionAt:  string | null
+  totalSizeBytes:   number
+  overallStatus:    'PASSED' | 'FAILED' | 'MIXED' | 'UNKNOWN'
+}
+
+export interface VideoQueryResult {
+  items:    VideoRecord[]
+  total:    number
+  page:     number
+  pageSize: number
+}
+
 export interface ExecutionSummary {
   executionId: string;
   suite: string;

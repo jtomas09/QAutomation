@@ -73,4 +73,5 @@ runner/dependency-reduced-pom.xml
 backend/src/main/resources/installers/cinepolis-runner.jar
 
 # Videos generados en backend (datos de ejecución local)
-videos/
+/videos/
+backend/videos/
