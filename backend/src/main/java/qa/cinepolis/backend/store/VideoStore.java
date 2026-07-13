@@ -96,7 +96,32 @@ public class VideoStore {
         }
         rec.setDevice(exec.getDevice());
         rec.setEnv(exec.getEnv());
+        // El Runner sube los videos ANTES de reportar resultados finales (sendResult),
+        // así que testCases suele venir vacío en este punto — status queda en UNKNOWN
+        // y se re-resuelve perezosamente en refreshStatusIfUnknown() en cada lectura.
         rec.setStatus(resolveTestStatus(exec.getTestCases(), testName));
+    }
+
+    /** Re-resuelve el status contra la Execution actual si todavía no se conocía. */
+    private boolean refreshStatusIfUnknown(VideoRecord rec) {
+        if (rec.getStatus() != null && !"UNKNOWN".equalsIgnoreCase(rec.getStatus())) return false;
+        Execution exec = executionStore.findById(rec.getExecutionId()).orElse(null);
+        if (exec == null) return false;
+        boolean changed = false;
+        String resolved = resolveTestStatus(exec.getTestCases(), rec.getTestName());
+        if (!"UNKNOWN".equalsIgnoreCase(resolved)) { rec.setStatus(resolved); changed = true; }
+        if (rec.getDevice() == null && exec.getDevice() != null) { rec.setDevice(exec.getDevice()); changed = true; }
+        if (rec.getEnv() == null && exec.getEnv() != null)       { rec.setEnv(exec.getEnv());       changed = true; }
+        return changed;
+    }
+
+    /** Se llama antes de servir cualquier lectura — autocura los status que quedaron UNKNOWN al subir. */
+    private void refreshAllStatuses() {
+        boolean any = false;
+        for (VideoRecord rec : map.values()) {
+            if (refreshStatusIfUnknown(rec)) any = true;
+        }
+        if (any) persist();
     }
 
     private String resolveTestStatus(List<TestCaseResult> testCases, String testName) {
@@ -128,12 +153,14 @@ public class VideoStore {
     }
 
     public List<VideoRecord> findAll() {
+        refreshAllStatuses();
         return map.values().stream()
                 .sorted(Comparator.comparing(VideoRecord::getCreatedAt).reversed())
                 .collect(Collectors.toList());
     }
 
     public List<VideoSuiteSummary> getSuiteSummaries() {
+        refreshAllStatuses();
         Map<String, List<VideoRecord>> bySuite = map.values().stream()
                 .collect(Collectors.groupingBy(v ->
                         (v.getSuiteName() != null && !v.getSuiteName().isBlank()) ? v.getSuiteName() : "Sin Suite"));
@@ -167,6 +194,7 @@ public class VideoStore {
     /** Lista filtrada y paginada de videos de UNA suite (pantalla "Nivel 2"). */
     public VideoQueryResult query(String suite, String q, String status, String device, String env,
                                   int page, int pageSize) {
+        refreshAllStatuses();
         List<VideoRecord> filtered = map.values().stream()
                 .filter(v -> suite == null || suite.isBlank()
                         || suite.equalsIgnoreCase(v.getSuiteName() != null ? v.getSuiteName() : "Sin Suite"))
