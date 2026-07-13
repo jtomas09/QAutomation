@@ -94,6 +94,10 @@ public class IosPreflightManager {
     public static IosPreflightResult runPreflight(
             BackendClient client, String executionId, String udid) {
 
+        // Señala a IOSMirrorProvider que una ejecución real es dueña del ciclo de vida
+        // de WDA a partir de aquí — ver WdaManager.markTestExecutionStart().
+        WdaManager.markTestExecutionStart();
+
         client.sendLog(executionId, "INFO",
                 "🍎 ══════════════ iOS Pre-flight ══════════════");
 

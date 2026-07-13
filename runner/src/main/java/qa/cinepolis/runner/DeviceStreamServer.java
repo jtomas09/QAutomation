@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import qa.cinepolis.runner.mirror.DeviceMirrorProvider;
+import qa.cinepolis.runner.mirror.MirrorProviderRegistry;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -27,36 +29,39 @@ import javax.imageio.stream.ImageOutputStream;
  * Architecture is designed to evolve from PNG polling → MJPEG → H264/scrcpy
  * without modifying the Backend or Frontend contracts.
  *
- * CURRENT MODE: Live Preview — one PNG per request via ADB screencap
- * FUTURE MODE:  Device Mirror — replace captureScreenshot() with MJPEG/scrcpy stream
+ * CURRENT MODE: Live Preview + Device Mirror — un frame por captura, vía la
+ * abstracción DeviceMirrorProvider (ver paquete qa.cinepolis.runner.mirror).
+ * MirrorProviderRegistry elige el provider correcto (ADB para Android, WDA
+ * para iOS) según la forma del UDID — este servidor no conoce ni le importa
+ * QUÉ herramienta produjo cada frame, solo que llega como PNG.
  *
  * Security:
- *   - UDID validated against [a-zA-Z0-9\-_.] before ADB invocation
- *   - Per-device Semaphore prevents concurrent ADB capture on the same device
- *   - Device existence verified before capture (adb get-state)
+ *   - UDID validated against [a-zA-Z0-9\-_.] before delegating a la captura
+ *   - Cada provider gestiona su propia concurrencia por dispositivo
+ *   - Device existence verificado antes de capturar (provider.isDeviceConnected)
  */
 public class DeviceStreamServer {
 
     private static final String PATH_PREFIX       = "/api/device-stream/";
     private static final String PATH_MIRROR       = "/api/device-mirror/";
-    private static final int    CAPTURE_TIMEOUT_S = 5;
-    private static final int    MIN_PNG_BYTES      = 1_024;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final int             port;
-    private final String          adbPath;
-    private final RecordingEngine recordingEngine;
+    private final int                    port;
+    private final RecordingEngine        recordingEngine;
+    private final MirrorProviderRegistry providers;
 
     private HttpServer server;
 
-    /** One semaphore per device — prevents concurrent ADB screencap on the same device. */
-    private final ConcurrentHashMap<String, Semaphore> locks = new ConcurrentHashMap<>();
-
     public DeviceStreamServer(int port, String adbPath) {
         this.port            = port;
-        this.adbPath         = adbPath;
         this.recordingEngine = new RecordingEngine(adbPath);
+        this.providers       = new MirrorProviderRegistry(adbPath);
+    }
+
+    /** Resuelve el provider de captura para este UDID, o null si su plataforma no está soportada en este host. */
+    private DeviceMirrorProvider resolveProvider(String udid) {
+        return providers.resolve(udid);
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -96,7 +101,8 @@ public class DeviceStreamServer {
                     }
                 }
             }
-            boolean connected = !udid.isBlank() && isDeviceConnected(udid);
+            DeviceMirrorProvider statusProvider = !udid.isBlank() ? resolveProvider(udid) : null;
+            boolean connected = statusProvider != null && statusProvider.isDeviceConnected(udid);
             MirrorService.DeviceMirrorState state = MirrorService.getState(udid, connected);
             String json = String.format(
                 "{\"connected\":%b,\"deviceId\":\"%s\",\"isStreaming\":%b,\"resolution\":\"auto\",\"fps\":%d}",
@@ -170,15 +176,17 @@ public class DeviceStreamServer {
                 System.out.println("[DeviceStream][AUDIT] Preview request for UDID: " + udid
                         + " | from: " + ex.getRemoteAddress());
 
-                boolean connected = isDeviceConnected(udid);
-                System.out.println("[DeviceStream][AUDIT] Device connected: " + connected + " | UDID: " + udid);
+                DeviceMirrorProvider provider = resolveProvider(udid);
+                boolean connected = provider != null && provider.isDeviceConnected(udid);
+                System.out.println("[DeviceStream][AUDIT] Device connected: " + connected
+                        + " | provider: " + (provider != null ? provider.name() : "none") + " | UDID: " + udid);
                 if (!connected) {
                     sendText(ex, 404, "Device not connected: " + udid);
                     return;
                 }
 
                 long t0  = System.currentTimeMillis();
-                byte[] png = captureScreenshot(udid);
+                byte[] png = provider.captureFrame(udid);
                 long ms  = System.currentTimeMillis() - t0;
 
                 if (png == null) {
@@ -202,75 +210,6 @@ public class DeviceStreamServer {
                 System.err.println("[DeviceStream] Handler error: " + e.getMessage());
                 try { sendText(ex, 500, "Internal error"); } catch (Exception ignored) {}
             }
-        }
-    }
-
-    // ── ADB helpers ───────────────────────────────────────────────────────────
-
-    /** Verify device is still authorized and connected. */
-    private boolean isDeviceConnected(String udid) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(adbPath, "-s", udid, "get-state");
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            boolean done = p.waitFor(3, TimeUnit.SECONDS);
-            String  out  = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-            p.destroyForcibly();
-            return done && "device".equalsIgnoreCase(out);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /**
-     * Capture a PNG screenshot entirely in memory.
-     * Runs: adb -s {udid} exec-out screencap -p
-     *
-     * Design note: this method is intentionally synchronous and blocking.
-     * Callers run on a daemon thread from the cached thread pool.
-     * The per-device Semaphore ensures only one screencap runs per device at a time.
-     *
-     * Future evolution: replace this method body with MJPEG/H264 frame extraction
-     * without changing any caller or interface.
-     */
-    private byte[] captureScreenshot(String udid) {
-        Semaphore lock = locks.computeIfAbsent(udid, k -> new Semaphore(1));
-        if (!lock.tryAcquire()) {
-            return null; // Another capture already in progress
-        }
-        try {
-            ProcessBuilder pb = new ProcessBuilder(adbPath, "-s", udid, "exec-out", "screencap", "-p");
-            pb.redirectErrorStream(false);
-            Process proc = pb.start();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream(1 << 20); // 1 MB initial
-            byte[] buf  = new byte[8_192];
-            int    read;
-            long   deadline = System.currentTimeMillis() + (CAPTURE_TIMEOUT_S * 1_000L);
-
-            try (InputStream in = proc.getInputStream()) {
-                while ((read = in.read(buf)) != -1) {
-                    baos.write(buf, 0, read);
-                    if (System.currentTimeMillis() > deadline) {
-                        proc.destroyForcibly();
-                        return null;
-                    }
-                }
-            }
-
-            boolean finished = proc.waitFor(1, TimeUnit.SECONDS);
-            proc.destroyForcibly();
-
-            if (!finished || proc.exitValue() != 0) return null;
-
-            byte[] data = baos.toByteArray();
-            return data.length >= MIN_PNG_BYTES ? data : null;
-
-        } catch (Exception e) {
-            System.err.println("[DeviceStream] ADB capture error [" + udid + "]: " + e.getMessage());
-            return null;
-        } finally {
-            lock.release();
         }
     }
 
@@ -308,7 +247,11 @@ public class DeviceStreamServer {
                     return;
                 }
 
+                DeviceMirrorProvider provider = resolveProvider(udid);
+                if (provider != null) provider.start(udid);
+
                 System.out.println("[DeviceMirror] Stream opened: " + udid
+                        + " | provider: " + (provider != null ? provider.name() : "none")
                         + " | client: " + ex.getRemoteAddress());
 
                 ex.getResponseHeaders().set("Content-Type",       "multipart/x-mixed-replace; boundary=" + BOUNDARY);
@@ -336,17 +279,20 @@ public class DeviceStreamServer {
                     while (!Thread.currentThread().isInterrupted()) {
                         long t0 = System.currentTimeMillis();
 
-                        byte[] png = captureScreenshot(udid);
+                        byte[] png = provider != null ? provider.captureFrame(udid) : null;
                         if (png == null) {
                             // Fase 6 — optimización de latencia: antes se llamaba a
-                            // isDeviceConnected() (spawns "adb get-state", un proceso +
-                            // roundtrip ADB completo) ANTES de cada captura, sin importar
-                            // si el dispositivo estaba sano — es decir, ~20 veces/segundo.
+                            // isDeviceConnected() (spawns un proceso/HTTP roundtrip
+                            // completo) ANTES de cada captura, sin importar si el
+                            // dispositivo estaba sano — es decir, ~20 veces/segundo.
                             // La propia falla de captura ya es la señal de que algo anda
                             // mal; solo entonces vale la pena pagar el costo de verificar
                             // conectividad real. Se conserva exactamente la misma ventana
-                            // de detección de desconexión (12 intentos ≈ 6 s).
-                            if (!isDeviceConnected(udid)) {
+                            // de detección de desconexión (12 intentos ≈ 6 s). Si no hay
+                            // provider soportado para este UDID (p.ej. iOS en un Runner
+                            // no-macOS), esto se cumple de inmediato y el stream cierra
+                            // tras el mismo margen, sin caso especial.
+                            if (provider == null || !provider.isDeviceConnected(udid)) {
                                 if (++missCount > 12) break; // device gone for ~6 s
                                 Thread.sleep(500);
                                 continue;
@@ -378,6 +324,7 @@ public class DeviceStreamServer {
                     // Normal: client closed connection or device disconnected
                 } finally {
                     if (jpegWriter != null) jpegWriter.dispose();
+                    if (provider != null) provider.stop(udid);
                     MirrorService.deregisterStream(udid);
                     System.out.println("[DeviceMirror] Stream closed: " + udid);
                 }

@@ -79,6 +79,12 @@ public final class IOSExecutionCleanupManager {
                     + "  Si el banner 'Automation Running' persiste, mantén presionados"
                     + " los botones de volumen para forzar la detención.");
         }
+
+        // Cierra la ventana abierta en IosPreflightManager.runPreflight() — a partir de
+        // aquí IOSMirrorProvider puede volver a lanzar WDA bajo demanda si hace falta.
+        // Se llama siempre, incluso si el dispositivo quedó "OCUPADO" arriba: el intento
+        // de esta ejecución terminó de cualquier forma.
+        WdaManager.markTestExecutionEnd();
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────

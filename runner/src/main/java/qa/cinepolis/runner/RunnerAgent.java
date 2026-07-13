@@ -51,6 +51,9 @@ public class RunnerAgent {
     private static PlatformToolsManager     platformTools;
     private static UpdateManager            updateMgr;
 
+    /** Cliente autenticado compartido — reutilizado por IOSMirrorProvider para el lanzamiento on-demand de WDA. */
+    public static BackendClient getClient() { return client; }
+
     // ── Short-lived components (created on START, nulled on STOP) ─────────────
 
     private static volatile AppiumManager               appiumMgr;
