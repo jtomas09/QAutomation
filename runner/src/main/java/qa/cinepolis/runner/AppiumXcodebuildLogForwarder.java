@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * ventana temporal de la ejecución actual (delimitada por
  * WdaManager.markTestExecutionStart()/markTestExecutionEnd()).
  */
-final class AppiumXcodebuildLogForwarder {
+public final class AppiumXcodebuildLogForwarder {
 
     private static final long MAX_TAIL_BYTES = 4L * 1024 * 1024; // 4 MB — de sobra para una sesión
 
@@ -66,9 +66,7 @@ final class AppiumXcodebuildLogForwarder {
             return;
         }
 
-        int    forwarded = 0;
-        String realError = null;
-
+        int forwarded = 0;
         for (String line : tail.split("\n", -1)) {
             if (line.isBlank()) continue;
 
@@ -78,20 +76,58 @@ final class AppiumXcodebuildLogForwarder {
 
             client.sendTechLog(executionId, "[xcodebuild] " + line.trim());
             forwarded++;
-
-            // La línea de error REAL de Xcode (no el resumen que arma Appium/el driver)
-            // se destaca aparte para que no quede enterrada entre Logs Técnicos.
-            if (realError == null && line.contains("[Xcode]") && line.toLowerCase().contains("error:")) {
-                realError = line.substring(line.indexOf("[Xcode]") + "[Xcode]".length()).trim();
-            }
         }
 
         if (forwarded == 0) {
             client.sendTechLog(executionId, "[xcodebuild] Sin líneas de xcodebuild en esta ejecución.");
-        } else if (realError != null) {
+            return;
+        }
+
+        String realError = findRealXcodeError(sinceEpochMs);
+        if (realError != null) {
             client.sendLog(executionId, "ERROR",
                     "🔴 [xcodebuild] Causa raíz real (vía appium.log, showXcodeLog): " + realError);
         }
+    }
+
+    /**
+     * Busca en appium.log, dentro de la ventana [sinceEpochMs, ahora], la línea de error
+     * REAL que Xcode imprime (no el resumen genérico que arma Appium/el driver, tipo
+     * "xcodebuild failed with code 65..."). Usada tanto por forwardSince() (ejecuciones
+     * reales, vía IOSExecutionCleanupManager) como por IOSMirrorProvider (lanzamiento
+     * on-demand de WDA para el Mirror) para poblar un motivo de error legible.
+     *
+     * @return la línea de error real, un resumen genérico de fallback, o null si no hay
+     *         evidencia de fallo alguno en la ventana dada.
+     */
+    public static String findRealXcodeError(long sinceEpochMs) {
+        Path logFile = AppiumManager.resolveLogFile();
+        if (!Files.isRegularFile(logFile) || sinceEpochMs <= 0) return null;
+
+        String tail = readTail(logFile, MAX_TAIL_BYTES);
+        if (tail == null) return null;
+
+        String realError = null;
+        String fallbackSummary = null;
+
+        for (String line : tail.split("\n", -1)) {
+            if (line.isBlank()) continue;
+            Long ts = parseTimestampEpochMs(line);
+            if (ts != null && ts < sinceEpochMs) continue;
+
+            // Prioridad 1: la línea "[Xcode] ... error: ..." — la causa real que imprime Xcode.
+            if (realError == null && line.contains("[Xcode]") && line.toLowerCase().contains("error:")) {
+                realError = line.substring(line.indexOf("[Xcode]") + "[Xcode]".length()).trim();
+            }
+            // Fallback: el resumen genérico del driver ("xcodebuild failed with code 65...")
+            // — se usa solo si nunca aparece una línea [Xcode] con "error:" explícito.
+            if (fallbackSummary == null && line.toLowerCase().contains("xcodebuild failed with code")) {
+                int idx = line.indexOf("xcodebuild failed with code");
+                fallbackSummary = line.substring(idx).trim();
+            }
+        }
+
+        return realError != null ? realError : fallbackSummary;
     }
 
     private static boolean isXcodebuildRelevant(String line) {

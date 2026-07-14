@@ -18,12 +18,24 @@
 export const RUNNER_STREAM_PORT = parseInt(import.meta.env.VITE_RUNNER_STREAM_PORT ?? '8082', 10)
 export const RUNNER_STREAM_HOST = import.meta.env.VITE_RUNNER_STREAM_HOST ?? 'localhost'
 
+/** Fase observable del ciclo de vida de WDA — ver IOSMirrorStateTracker (Runner). */
+export type MirrorPhase =
+  | 'DEVICE_DISCONNECTED'
+  | 'DEVICE_DETECTED'
+  | 'INITIALIZING_WDA'
+  | 'MIRROR_ACTIVE'
+  | 'ERROR'
+
 export interface DeviceMirrorState {
   connected:   boolean
   deviceId:    string
   isStreaming: boolean
   resolution:  string
   fps:         number
+  /** Para Android siempre es MIRROR_ACTIVE (conectado) o DEVICE_DISCONNECTED — no tiene fases WDA. */
+  mirrorPhase: MirrorPhase
+  /** Motivo real del fallo cuando mirrorPhase === 'ERROR' (p.ej. "xcodebuild failed with code 65"). */
+  reason: string | null
 }
 
 /** Returns the MJPEG URL for a device. Pass directly to <img src>. */

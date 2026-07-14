@@ -2,6 +2,7 @@ package qa.cinepolis.runner.mirror;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import qa.cinepolis.runner.AppiumXcodebuildLogForwarder;
 import qa.cinepolis.runner.BackendClient;
 import qa.cinepolis.runner.IosPreflightManager;
 import qa.cinepolis.runner.RunnerAgent;
@@ -77,17 +78,22 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
     @Override
     public boolean start(String udid) {
-        if (WdaManager.isWdaRunning()) return true;
+        if (WdaManager.isWdaRunning()) {
+            // Ya arriba — captureFrame() promoverá a MIRROR_ACTIVE en el primer frame real.
+            return true;
+        }
 
         if (WdaManager.isTestExecutionActive()) {
             // Una ejecución de test real ya está usando/levantando WDA — el mirror
             // no debe competir. Las capturas fallarán hasta que ese WDA quede
             // arriba; el reintento del frontend recogerá los frames en cuanto exista.
+            IOSMirrorStateTracker.markInitializing(udid);
             System.out.println("[IOSMirrorProvider] WDA no activo y hay una ejecución de test en curso — "
                     + "el mirror esperará en vez de lanzar WDA por su cuenta. UDID: " + udid);
             return false;
         }
 
+        IOSMirrorStateTracker.markInitializing(udid);
         triggerOnDemandLaunch(udid);
         // El stream se abre igual — los frames empezarán a llegar cuando WDA esté listo.
         return true;
@@ -97,23 +103,41 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
         if (!launchInProgress.compareAndSet(false, true)) {
             return; // ya hay un intento on-demand en curso para este Runner
         }
+        long attemptStartedAtMs = System.currentTimeMillis();
         Thread t = new Thread(() -> {
             try {
                 BackendClient client = RunnerAgent.getClient();
                 if (client == null) {
-                    System.err.println("[IOSMirrorProvider] BackendClient no disponible todavía — "
-                            + "no se puede lanzar WDA on-demand para " + udid);
+                    String reason = "BackendClient no disponible todavía — no se pudo lanzar WDA.";
+                    System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
+                    IOSMirrorStateTracker.markError(udid, reason);
                     return;
                 }
                 String mirrorExecutionId = "mirror-" + udid;
                 System.out.println("[IOSMirrorProvider] WDA no activo — lanzando bajo demanda "
                         + "(puede tardar varios minutos la primera vez) para " + udid + "...");
-                IosPreflightManager.runPreflight(client, mirrorExecutionId, udid);
+                IosPreflightManager.IosPreflightResult result =
+                        IosPreflightManager.runPreflight(client, mirrorExecutionId, udid);
+
+                boolean wdaUp = result.wdaReady || WdaManager.isWdaRunning();
                 System.out.println("[IOSMirrorProvider] Preflight on-demand terminado para " + udid
-                        + " — WDA activo: " + WdaManager.isWdaRunning());
+                        + " — WDA activo: " + wdaUp);
+
+                if (!wdaUp) {
+                    String realError = AppiumXcodebuildLogForwarder.findRealXcodeError(attemptStartedAtMs);
+                    String reason = realError != null
+                            ? realError
+                            : "WebDriverAgent no pudo iniciarse (motivo no capturado en appium.log).";
+                    IOSMirrorStateTracker.markError(udid, reason);
+                    System.err.println("[IOSMirrorProvider] WDA on-demand falló para " + udid + ": " + reason);
+                }
+                // Si wdaUp==true, se deja el estado en INITIALIZING_WDA — captureFrame()
+                // promueve a MIRROR_ACTIVE en cuanto de verdad llegue un frame, evitando
+                // reportar "activo" antes de que realmente haya imagen.
             } catch (Exception e) {
-                System.err.println("[IOSMirrorProvider] Error en lanzamiento on-demand [" + udid + "]: "
-                        + e.getMessage());
+                String reason = "Error inesperado lanzando WDA: " + e.getMessage();
+                System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
+                IOSMirrorStateTracker.markError(udid, reason);
             } finally {
                 launchInProgress.set(false);
             }
@@ -144,7 +168,10 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             String   base64 = root.path("value").asText(null);
             if (base64 == null || base64.isBlank()) return null;
 
-            return Base64.getDecoder().decode(base64);
+            byte[] frame = Base64.getDecoder().decode(base64);
+            // Prueba real de que el Mirror funciona — un frame de verdad llegó.
+            IOSMirrorStateTracker.markActive(udid);
+            return frame;
         } catch (Exception e) {
             System.err.println("[IOSMirrorProvider] WDA screenshot error [" + udid + "]: " + e.getMessage());
             return null;

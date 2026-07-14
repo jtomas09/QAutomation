@@ -4,6 +4,7 @@ import {
   Smartphone, Camera, RefreshCw, Maximize2, Power, WifiOff, RotateCw, Wifi, Loader2,
 } from 'lucide-react'
 import { useMirrorStream } from '../../hooks/useMirrorStream'
+import type { MirrorPhase } from '../../hooks/useMirrorStream'
 import type { StreamState } from '../../services/deviceStream'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
 import { executionTrackingService } from '../../services/ExecutionTrackingService'
@@ -27,6 +28,13 @@ type MirrorStatus =
   | 'pausado'
   | 'desconectado'
   | 'error'
+  // ── Fases WDA (iOS) — desacopladas de "el Runner responde" ────────────────
+  // Antes, cualquiera de estas tres situaciones se mostraba como 'disponible'
+  // (verde, "Conectado") con el video en negro, sin explicación. Ahora cada
+  // una tiene su propio estado visual — ver IOSMirrorStateTracker (Runner).
+  | 'ios-esperando-appium'
+  | 'ios-iniciando-wda'
+  | 'ios-error-wda'
 
 const MIRROR_STATUS_CFG: Record<MirrorStatus, {
   label: string; color: string; pulse: boolean; bodyMessage: string; showsVideo: boolean
@@ -43,6 +51,26 @@ const MIRROR_STATUS_CFG: Record<MirrorStatus, {
   'pausado':          { label: 'Pausado',             color: '#f59e0b', pulse: false, showsVideo: false, bodyMessage: 'Mirror en pausa.' },
   'desconectado':     { label: 'Desconectado',        color: '#f87171', pulse: false, showsVideo: false, bodyMessage: 'El dispositivo o el Runner no están disponibles.' },
   'error':            { label: 'Error',               color: '#f87171', pulse: false, showsVideo: false, bodyMessage: 'No fue posible establecer el stream.' },
+  'ios-esperando-appium': {
+    label: 'Dispositivo conectado', color: '#60a5fa', pulse: false, showsVideo: false,
+    bodyMessage: 'Esperando inicio de sesión Appium…',
+  },
+  'ios-iniciando-wda': {
+    label: 'Iniciando WDA', color: '#f59e0b', pulse: true, showsVideo: false,
+    bodyMessage: 'Iniciando WebDriverAgent…',
+  },
+  'ios-error-wda': {
+    label: 'Error de WDA', color: '#f87171', pulse: false, showsVideo: false,
+    // Mensaje genérico — computeErrorBodyMessage() lo sobreescribe con el motivo real
+    // reportado por IOSMirrorStateTracker cuando está disponible.
+    bodyMessage: 'No fue posible iniciar el Mirror.\n\nMotivo:\nWebDriverAgent no pudo iniciarse.',
+  },
+}
+
+/** Construye el mensaje de error con el motivo REAL (p.ej. "xcodebuild failed with code 65"). */
+function computeErrorBodyMessage(reason: string | null): string {
+  const base = 'No fue posible iniciar el Mirror.\n\nMotivo:\nWebDriverAgent no pudo iniciarse.'
+  return reason ? `${base}\n\nError:\n${reason}` : base
 }
 
 function computeMirrorStatus(params: {
@@ -52,14 +80,26 @@ function computeMirrorStatus(params: {
   paused:             boolean
   hasActiveExecution: boolean
   reconnecting:       boolean
+  mirrorPhase:        MirrorPhase | null
 }): MirrorStatus {
-  const { device, streamState, imgError, paused, hasActiveExecution, reconnecting } = params
+  const { device, streamState, imgError, paused, hasActiveExecution, reconnecting, mirrorPhase } = params
   if (!device) return 'sin-dispositivo'
   if (paused) return 'pausado'
   if (reconnecting) return 'reconectando'
   if (streamState === 'connecting') return 'conectando'
   if (streamState === 'error' || imgError) return 'error'
   if (streamState === 'device_disconnected' || streamState === 'runner_offline') return 'desconectado'
+
+  // A partir de aquí el Runner responde (streamState === 'available'), pero eso
+  // por sí solo no significa que WDA esté realmente produciendo frames — de ahí
+  // la fase reportada por el Runner (IOSMirrorStateTracker). Para Android,
+  // mirrorPhase siempre es MIRROR_ACTIVE (conectado) o DEVICE_DISCONNECTED, así
+  // que este bloque no cambia su comportamiento existente.
+  if (mirrorPhase === 'DEVICE_DISCONNECTED') return 'desconectado'
+  if (mirrorPhase === 'ERROR') return 'ios-error-wda'
+  if (mirrorPhase === 'INITIALIZING_WDA') return 'ios-iniciando-wda'
+  if (mirrorPhase === 'DEVICE_DETECTED') return 'ios-esperando-appium'
+
   if (streamState === 'available') return hasActiveExecution ? 'ejecutando' : 'disponible'
   return 'desconectado'
 }
@@ -124,7 +164,7 @@ function IconButton({
 
 export default function DeviceMirrorPanel({ device }: Props) {
   const udid = device?.udid ?? null
-  const { url, state, reconnect: reconnectStream } = useMirrorStream(udid)
+  const { url, state, reconnect: reconnectStream, mirrorPhase, mirrorReason } = useMirrorStream(udid)
 
   const [imgError, setImgError]     = useState(false)
   const [reloadKey, setReloadKey]   = useState(0)
@@ -338,9 +378,13 @@ export default function DeviceMirrorPanel({ device }: Props) {
     paused,
     hasActiveExecution: !!execRecord,
     reconnecting:       isReconnecting,
-  }), [device, state, imgError, paused, execRecord, isReconnecting])
+    mirrorPhase,
+  }), [device, state, imgError, paused, execRecord, isReconnecting, mirrorPhase])
 
   const statusCfg = MIRROR_STATUS_CFG[mirrorStatus]
+  const bodyMessage = mirrorStatus === 'ios-error-wda'
+    ? computeErrorBodyMessage(mirrorReason)
+    : statusCfg.bodyMessage
   const online    = statusCfg.showsVideo && !!url
   const isLandscape = rotation === 90 || rotation === 270
 
@@ -391,9 +435,9 @@ export default function DeviceMirrorPanel({ device }: Props) {
             border:     `1px solid ${statusCfg.color}4d`,
           }}
         >
-          {mirrorStatus === 'conectando' || mirrorStatus === 'reconectando' ? (
+          {mirrorStatus === 'conectando' || mirrorStatus === 'reconectando' || mirrorStatus === 'ios-iniciando-wda' ? (
             <Loader2 size={9} className="animate-spin" />
-          ) : mirrorStatus === 'desconectado' || mirrorStatus === 'error' ? (
+          ) : mirrorStatus === 'desconectado' || mirrorStatus === 'error' || mirrorStatus === 'ios-error-wda' ? (
             <WifiOff size={9} />
           ) : statusCfg.pulse ? (
             <motion.span
@@ -520,8 +564,11 @@ export default function DeviceMirrorPanel({ device }: Props) {
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-2.5 px-4 text-center">
               <Smartphone size={26} className="opacity-25 text-slate-500" />
-              <span className="text-[10px] text-slate-600 leading-relaxed">
-                {statusCfg.bodyMessage}
+              <span
+                className="text-[10px] text-slate-600 leading-relaxed"
+                style={{ whiteSpace: 'pre-line' }}
+              >
+                {bodyMessage}
               </span>
             </div>
           )}

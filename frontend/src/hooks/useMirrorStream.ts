@@ -10,9 +10,12 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getMirrorStreamUrl, checkRunnerStreamReachable } from '../services/mirrorService'
+import { getMirrorStreamUrl, checkRunnerStreamReachable, getDeviceMirrorStatus } from '../services/mirrorService'
+import type { MirrorPhase } from '../services/mirrorService'
 import type { StreamState } from '../services/deviceStream'
 import type { DeviceStreamData } from './useDeviceStream'
+
+export type { MirrorPhase }
 
 export type MirrorStreamData = DeviceStreamData & {
   /**
@@ -22,10 +25,20 @@ export type MirrorStreamData = DeviceStreamData & {
    * el watchdog de recuperación automática de DeviceMirrorPanel.
    */
   reconnect: () => void
+  /**
+   * Fase real del ciclo de vida de WDA para este UDID (null mientras no se ha
+   * resuelto ninguna consulta todavía). Desacopla "el Runner responde" de "WDA
+   * realmente produce frames" — ver IOSMirrorStateTracker en el Runner.
+   */
+  mirrorPhase: MirrorPhase | null
+  /** Motivo real del fallo cuando mirrorPhase === 'ERROR'. */
+  mirrorReason: string | null
 }
 
 const NOOP = () => {}
-const IDLE: MirrorStreamData        = { url: null, state: 'idle', lastUpdated: 0, reconnect: NOOP }
+const IDLE: MirrorStreamData        = {
+  url: null, state: 'idle', lastUpdated: 0, reconnect: NOOP, mirrorPhase: null, mirrorReason: null,
+}
 const RECHECK_INTERVAL_MS = 4_000   // how often to ping Runner when already connected
 const RETRY_INTERVAL_MS   = 3_000   // how often to retry when Runner is offline
 
@@ -33,6 +46,8 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
   const [reachable, setReachable] = useState(false)
   const [state, setState]         = useState<StreamState>('idle')
   const [lastUpdated, setLastUpdated] = useState(0)
+  const [mirrorPhase, setMirrorPhase]   = useState<MirrorPhase | null>(null)
+  const [mirrorReason, setMirrorReason] = useState<string | null>(null)
   const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null)
   const prevReachRef = useRef(false)
   const reachableRef = useRef(false)
@@ -41,7 +56,11 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
   useEffect(() => { udidRef.current = udid }, [udid])
 
   const check = useCallback(async () => {
-    const ok = await checkRunnerStreamReachable()
+    const currentUdid = udidRef.current
+    const [ok, mirrorState] = await Promise.all([
+      checkRunnerStreamReachable(),
+      currentUdid ? getDeviceMirrorStatus(currentUdid) : Promise.resolve(null),
+    ])
     if (ok !== prevReachRef.current) {
       prevReachRef.current = ok
       setLastUpdated(Date.now())
@@ -49,6 +68,8 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
     reachableRef.current = ok
     setReachable(ok)
     setState(ok ? 'available' : 'runner_offline')
+    setMirrorPhase(mirrorState?.mirrorPhase ?? null)
+    setMirrorReason(mirrorState?.reason ?? null)
   }, [])
 
   useEffect(() => {
@@ -56,6 +77,8 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
       setReachable(false)
       setState('idle')
       setLastUpdated(0)
+      setMirrorPhase(null)
+      setMirrorReason(null)
       prevReachRef.current = false
       reachableRef.current = false
       if (timerRef.current) clearInterval(timerRef.current)
@@ -88,5 +111,7 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
     state,
     lastUpdated,
     reconnect,
+    mirrorPhase,
+    mirrorReason,
   }
 }

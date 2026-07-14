@@ -104,9 +104,19 @@ public class DeviceStreamServer {
             DeviceMirrorProvider statusProvider = !udid.isBlank() ? resolveProvider(udid) : null;
             boolean connected = statusProvider != null && statusProvider.isDeviceConnected(udid);
             MirrorService.DeviceMirrorState state = MirrorService.getState(udid, connected);
+
+            // Fase observable del Mirror — desacoplada de "connected" (que solo dice si el
+            // dispositivo responde, no si WDA realmente produce frames). Android no tiene
+            // fases WDA: "WDA" es el nombre exclusivo de IOSMirrorProvider.
+            boolean iosDevice = statusProvider != null && "WDA".equals(statusProvider.name());
+            qa.cinepolis.runner.mirror.IOSMirrorStateTracker.Snapshot snapshot =
+                    qa.cinepolis.runner.mirror.IOSMirrorStateTracker.get(udid, connected, iosDevice);
+
             String json = String.format(
-                "{\"connected\":%b,\"deviceId\":\"%s\",\"isStreaming\":%b,\"resolution\":\"auto\",\"fps\":%d}",
-                state.connected(), state.deviceId(), state.isStreaming(), state.fps()
+                "{\"connected\":%b,\"deviceId\":\"%s\",\"isStreaming\":%b,\"resolution\":\"auto\",\"fps\":%d,"
+                + "\"mirrorPhase\":\"%s\",\"reason\":%s}",
+                state.connected(), state.deviceId(), state.isStreaming(), state.fps(),
+                snapshot.phase().name(), jsonStringOrNull(snapshot.reason())
             );
             byte[] body = json.getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().set("Content-Type", "application/json");
@@ -383,6 +393,16 @@ public class DeviceStreamServer {
     }
 
     // ── Response helpers ──────────────────────────────────────────────────────
+
+    /** Serializa un String como literal JSON (comillas + escapado) o el literal "null" si es null. */
+    private static String jsonStringOrNull(String value) {
+        if (value == null) return "null";
+        try {
+            return MAPPER.writeValueAsString(value);
+        } catch (Exception e) {
+            return "null";
+        }
+    }
 
     private static void addCorsHeaders(HttpExchange ex) {
         ex.getResponseHeaders().set("Access-Control-Allow-Origin",  "*");
