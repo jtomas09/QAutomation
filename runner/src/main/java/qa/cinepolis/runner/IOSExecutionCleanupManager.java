@@ -47,8 +47,19 @@ public final class IOSExecutionCleanupManager {
         //    AppiumXcodebuildLogForwarder. Antes de esto, esa salida existía en disco
         //    pero nunca llegaba al Dashboard; el usuario solo veía el resumen
         //    ("xcodebuild failed with code 65...") sin la causa real de Xcode.
-        AppiumXcodebuildLogForwarder.forwardSince(
+        String realXcodeError = AppiumXcodebuildLogForwarder.forwardSince(
                 WdaManager.getTestExecutionStartedAtMs(), client, executionId);
+
+        // Publica hacia el Mirror el MISMO evento que publicaría un lanzamiento
+        // on-demand fallido (WdaEventBus es el único canal — ver su javadoc). Antes,
+        // un fallo de xcodebuild durante una ejecución real nunca llegaba al Mirror;
+        // este es el punto que cierra esa brecha. Se publica de inmediato, sin
+        // esperar al cierre de sesión/kill de WDA de abajo (que puede tardar
+        // varios segundos) — igual que forwardSince() ya prioriza el mensaje real.
+        if (realXcodeError != null) {
+            qa.cinepolis.runner.mirror.WdaEventBus.publish(
+                    udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.ERROR, realXcodeError);
+        }
 
         // 2. Close Appium session via HTTP — Appium stops WDA gracefully on session delete
         closeAppiumSession(client, executionId, appiumHubBase, udid);
@@ -57,6 +68,16 @@ public final class IOSExecutionCleanupManager {
         //    WdaManager.cleanup() waits after SIGTERM, probes /status, escalates to SIGKILL
         //    if needed, and logs the honest result.
         WdaManager.cleanup(client, executionId, udid);
+
+        // Sin error detectado — WDA terminó su ciclo de vida normalmente para esta
+        // ejecución (éxito, o un fallo ajeno a WDA). El Mirror vuelve al estado
+        // neutral (dispositivo detectado) en vez de quedar congelado en
+        // "Iniciando WebDriverAgent…" para siempre — la causa raíz original del
+        // bug que motivó este mecanismo.
+        if (realXcodeError == null) {
+            qa.cinepolis.runner.mirror.WdaEventBus.publish(
+                    udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.STOPPED);
+        }
 
         // 4. Final state checks
         boolean wdaDown  = !WdaManager.isWdaRunning();

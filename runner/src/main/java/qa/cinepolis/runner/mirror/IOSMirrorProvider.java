@@ -87,17 +87,18 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
         if (WdaManager.isTestExecutionActive()) {
             // Una ejecución de test real ya está usando/levantando WDA — el mirror
-            // no debe competir. Las capturas fallarán hasta que ese WDA quede
-            // arriba; el reintento del frontend recogerá los frames en cuanto exista.
-            IOSMirrorStateTracker.markInitializing(udid);
+            // no debe competir. La fase INITIALIZING ya la publicó esa ejecución
+            // real vía IosPreflightManager.runPreflight() (WdaEventBus es el único
+            // publicador — ver su javadoc); este método no publica nada, solo
+            // decide no competir por el ciclo de vida de WDA.
             System.out.println("[IOSMirrorProvider] WDA no activo y hay una ejecución de test en curso — "
                     + "el mirror esperará en vez de lanzar WDA por su cuenta. UDID: " + udid);
             return false;
         }
 
-        IOSMirrorStateTracker.markInitializing(udid);
         triggerOnDemandLaunch(udid);
         // El stream se abre igual — los frames empezarán a llegar cuando WDA esté listo.
+        // triggerOnDemandLaunch() → runPreflight() publicará INITIALIZING en breve.
         return true;
     }
 
@@ -112,7 +113,7 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
                 if (client == null) {
                     String reason = "BackendClient no disponible todavía — no se pudo lanzar WDA.";
                     System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
-                    IOSMirrorStateTracker.markError(udid, reason);
+                    WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
                     return;
                 }
                 String mirrorExecutionId = "mirror-" + udid;
@@ -130,7 +131,7 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
                     String reason = realError != null
                             ? realError
                             : "WebDriverAgent no pudo iniciarse (motivo no capturado en appium.log).";
-                    IOSMirrorStateTracker.markError(udid, reason);
+                    WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
                     System.err.println("[IOSMirrorProvider] WDA on-demand falló para " + udid + ": " + reason);
                 }
                 // Si wdaUp==true, se deja el estado en INITIALIZING_WDA — captureFrame()
@@ -139,7 +140,7 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             } catch (Exception e) {
                 String reason = "Error inesperado lanzando WDA: " + e.getMessage();
                 System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
-                IOSMirrorStateTracker.markError(udid, reason);
+                WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
             } finally {
                 launchInProgress.set(false);
             }
@@ -172,7 +173,9 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
             byte[] frame = Base64.getDecoder().decode(base64);
             // Prueba real de que el Mirror funciona — un frame de verdad llegó.
-            IOSMirrorStateTracker.markActive(udid);
+            // Agnóstico al origen: no importa si WDA lo levantó el propio Mirror
+            // o una ejecución real vía Appium — este probe HTTP directo es el mismo.
+            WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ACTIVE);
             return frame;
         } catch (Exception e) {
             System.err.println("[IOSMirrorProvider] WDA screenshot error [" + udid + "]: " + e.getMessage());

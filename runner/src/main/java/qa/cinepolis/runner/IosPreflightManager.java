@@ -106,6 +106,13 @@ public class IosPreflightManager {
         // de WDA a partir de aquí — ver WdaManager.markTestExecutionStart().
         WdaManager.markTestExecutionStart();
 
+        // Único punto de publicación de "WDA inicializando" para AMBOS flujos —
+        // este método lo invoca tanto una ejecución real (JobExecutor) como el
+        // lanzamiento on-demand del Mirror (IOSMirrorProvider.triggerOnDemandLaunch).
+        // Ver WdaEventBus — no duplicar esta llamada en ninguno de los dos flujos.
+        qa.cinepolis.runner.mirror.WdaEventBus.publish(
+                udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.INITIALIZING);
+
         client.sendLog(executionId, "INFO",
                 "🍎 ══════════════ iOS Pre-flight ══════════════");
 

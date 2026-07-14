@@ -48,22 +48,27 @@ public final class AppiumXcodebuildLogForwarder {
      * WebDriverAgent, y las reenvía íntegras al backend (Logs Técnicos).
      * Si encuentra la línea de error real de Xcode, la destaca también en el
      * log principal para que no quede oculta.
+     *
+     * @return la causa raíz real detectada (misma que ya se envía al Dashboard),
+     *         o null si no hay evidencia de fallo en la ventana — para que el
+     *         llamador (IOSExecutionCleanupManager) pueda publicar el evento
+     *         WDA correspondiente sin recalcular esta detección.
      */
-    static void forwardSince(long sinceEpochMs, BackendClient client, String executionId) {
+    static String forwardSince(long sinceEpochMs, BackendClient client, String executionId) {
         Path logFile = AppiumManager.resolveLogFile();
         if (!Files.isRegularFile(logFile)) {
             client.sendTechLog(executionId, "[xcodebuild] appium.log no existe todavía — nada que reenviar.");
-            return;
+            return null;
         }
         if (sinceEpochMs <= 0) {
             client.sendTechLog(executionId, "[xcodebuild] Sin ventana de ejecución registrada — se omite el reenvío.");
-            return;
+            return null;
         }
 
         String tail = readTail(logFile, MAX_TAIL_BYTES);
         if (tail == null) {
             client.sendTechLog(executionId, "[xcodebuild] No se pudo leer appium.log.");
-            return;
+            return null;
         }
 
         // La causa raíz se calcula y envía PRIMERO — nunca debe quedar atrapada detrás
@@ -92,6 +97,8 @@ public final class AppiumXcodebuildLogForwarder {
         if (forwarded == 0) {
             client.sendTechLog(executionId, "[xcodebuild] Sin líneas de xcodebuild en esta ejecución.");
         }
+
+        return realError;
     }
 
     /**

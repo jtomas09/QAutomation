@@ -38,23 +38,29 @@ public final class IOSMirrorStateTracker {
 
     private IOSMirrorStateTracker() {}
 
-    public static void markInitializing(String udid) {
+    // Mutadores package-private: WdaEventBus es la ÚNICA clase autorizada a
+    // publicar cambios de estado — cualquier otra clase (incluso dentro de
+    // este mismo paquete) debe pasar por WdaEventBus.publish(), nunca llamar
+    // estos métodos directamente. Esto es lo que garantiza que un fallo de
+    // WDA durante una ejecución real produzca el mismo efecto que uno on-demand.
+
+    static void markInitializing(String udid) {
         STATES.put(udid, new Snapshot(Phase.INITIALIZING_WDA, null, System.currentTimeMillis()));
     }
 
     /** Idempotente — evita escrituras redundantes una vez que ya está activo. */
-    public static void markActive(String udid) {
+    static void markActive(String udid) {
         Snapshot current = STATES.get(udid);
         if (current != null && current.phase() == Phase.MIRROR_ACTIVE) return;
         STATES.put(udid, new Snapshot(Phase.MIRROR_ACTIVE, null, System.currentTimeMillis()));
     }
 
-    public static void markError(String udid, String reason) {
+    static void markError(String udid, String reason) {
         STATES.put(udid, new Snapshot(Phase.ERROR, reason, System.currentTimeMillis()));
     }
 
-    /** Limpia el estado rastreado (p.ej. cuando el dispositivo se desconecta). */
-    public static void clear(String udid) {
+    /** Limpia el estado rastreado (desconexión física, o fin normal del ciclo de vida de WDA). */
+    static void clear(String udid) {
         STATES.remove(udid);
     }
 
