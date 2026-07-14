@@ -578,6 +578,18 @@ public class DriverFactory {
             String signingId = prop("xcodeSigningId", "Apple Development");
             o.setCapability("xcodeSigningId", signingId);
             log.info("[DriverFactory] 🔑 xcodeOrgId={}  xcodeSigningId={}", teamId, signingId);
+
+            // allowProvisioningDeviceRegistration=true — permite que xcodebuild autogenere
+            // el provisioning profile de WebDriverAgentRunner (agrega -allowProvisioningUpdates
+            // -allowProvisioningDeviceRegistration) en la primera compilación con una cuenta
+            // Apple Personal Team. Sin esto, xcodebuild falla con "Automatic signing is
+            // disabled and unable to generate a profile" (code 65) porque nunca se le da
+            // permiso de red para pedirle un perfil al portal de desarrolladores — Xcode
+            // pide este flag explícitamente en su propio mensaje de error.
+            // Solo se activa cuando hay xcodeOrgId (dispositivo físico real): no afecta
+            // Android ni simuladores, y es inofensivo para cuentas Apple Developer de pago
+            // (Xcode reutiliza el perfil válido existente en vez de regenerarlo).
+            o.setCapability("allowProvisioningDeviceRegistration", true);
         } else {
             log.warn("[DriverFactory] ⚠️  xcodeOrgId no configurado — xcodebuild no podrá firmar WDA.");
             log.warn("[DriverFactory]    Solución: Xcode → Settings → Accounts → agrega tu Apple ID.");
@@ -931,8 +943,14 @@ public class DriverFactory {
                      + "  - UDID físico incorrecto (verifica con: xcrun xctrace list devices)\n"
                      + "  - Se usó CoreDevice UUID (8-4-4-4-12) en lugar del UDID físico (hex 25+ chars)\n"
                      + "  - webDriverAgentUrl no configurado cuando WDA ya está corriendo";
-        } else if (msg.contains("xcuitest") || msg.contains("driver not found")
+        } else if (msg.contains("driver not found")
                 || msg.contains("no driver") || msg.contains("cannot find module")) {
+            // NOTA: antes también se comprobaba msg.contains("xcuitest"), pero Appium
+            // incluye SIEMPRE un link a "appium-xcuitest-driver" en el mensaje de
+            // cualquier fallo de lanzamiento de WDA (p.ej. "xcodebuild failed with
+            // code 65..."), así que esa condición daba falso positivo en TODO fallo
+            // de build/firma real, clasificándolo como driver faltante aunque
+            // 'appium driver list --installed' confirme que sí está instalado.
             category = IOSDeviceSynchronizationManager.SyncCategory.XCUITEST_DRIVER_NOT_INSTALLED;
             detail   = "XCUITest driver no instalado o versión incompatible.\n"
                      + "  → Instala con: appium driver install xcuitest";

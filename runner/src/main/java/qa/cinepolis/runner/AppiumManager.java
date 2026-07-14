@@ -406,12 +406,23 @@ public class AppiumManager {
 
     // ── Start ─────────────────────────────────────────────────────────────
 
+    /**
+     * Ruta del log del SERVIDOR Appium (proceso Node.js de larga duración,
+     * separado del proceso Gradle/JUnit que el Runner reenvía al backend).
+     * Con showXcodeLog=true, Appium escribe aquí la salida CRUDA de xcodebuild
+     * — ver AppiumXcodebuildLogForwarder, que lee este mismo archivo para
+     * reenviar esa salida al backend sin tocar el flujo de JobExecutor.
+     */
+    static Path resolveLogFile() {
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR",
+                System.getProperty("user.home") + "/.automationqa");
+        return Path.of(agentDataDir, "logs", "appium.log");
+    }
+
     private void startAppium(String entryPoint) throws IOException, InterruptedException {
         System.out.println("[AppiumValidator] Iniciando: node " + entryPoint + " --port " + PORT);
 
-        String agentDataDir = System.getProperty("AGENT_DATA_DIR",
-                System.getProperty("user.home") + "/.automationqa");
-        Path logFile = Path.of(agentDataDir, "logs", "appium.log");
+        Path logFile = resolveLogFile();
         Files.createDirectories(logFile.getParent());
 
         ProcessBuilder pb = withAppiumHome(

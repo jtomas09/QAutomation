@@ -131,9 +131,15 @@ public final class WdaManager {
         return lastLaunchWasAttempted;
     }
 
+    // Momento (epoch ms) en que arrancó la ventana actual — usado por
+    // AppiumXcodebuildLogForwarder para saber desde dónde reenviar appium.log
+    // sin tener que tocar el flujo de JobExecutor para pasar este dato.
+    private static volatile long testExecutionStartedAtMs = 0L;
+
     /** Marca el inicio de la ventana en la que una ejecución de test real es dueña de WDA. */
     public static void markTestExecutionStart() {
         testExecutionActive.set(true);
+        testExecutionStartedAtMs = System.currentTimeMillis();
     }
 
     /** Marca el fin de esa ventana — llamar siempre desde cleanup, incluso si algo falló. */
@@ -144,6 +150,11 @@ public final class WdaManager {
     /** ¿Hay una ejecución de test real usando/levantando WDA en este momento? */
     public static boolean isTestExecutionActive() {
         return testExecutionActive.get();
+    }
+
+    /** Epoch ms del último markTestExecutionStart() — 0 si nunca se llamó en este proceso. */
+    public static long getTestExecutionStartedAtMs() {
+        return testExecutionStartedAtMs;
     }
 
     /**

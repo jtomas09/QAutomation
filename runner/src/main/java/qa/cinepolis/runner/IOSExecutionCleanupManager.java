@@ -42,20 +42,28 @@ public final class IOSExecutionCleanupManager {
     public static void cleanup(BackendClient client, String executionId,
                                 String udid,          String appiumHubBase) {
 
-        // 1. Close Appium session via HTTP — Appium stops WDA gracefully on session delete
+        // 1. Reenviar al backend la salida CRUDA de xcodebuild que Appium ya capturó
+        //    en su propio log de servidor (appium.log) durante esta ejecución — ver
+        //    AppiumXcodebuildLogForwarder. Antes de esto, esa salida existía en disco
+        //    pero nunca llegaba al Dashboard; el usuario solo veía el resumen
+        //    ("xcodebuild failed with code 65...") sin la causa real de Xcode.
+        AppiumXcodebuildLogForwarder.forwardSince(
+                WdaManager.getTestExecutionStartedAtMs(), client, executionId);
+
+        // 2. Close Appium session via HTTP — Appium stops WDA gracefully on session delete
         closeAppiumSession(client, executionId, appiumHubBase, udid);
 
-        // 2. Kill Mac-side xcodebuild + terminate WDA on device + verify
+        // 3. Kill Mac-side xcodebuild + terminate WDA on device + verify
         //    WdaManager.cleanup() waits after SIGTERM, probes /status, escalates to SIGKILL
         //    if needed, and logs the honest result.
         WdaManager.cleanup(client, executionId, udid);
 
-        // 3. Final state checks
+        // 4. Final state checks
         boolean wdaDown  = !WdaManager.isWdaRunning();
         boolean appiumOk = !hasOpenAppiumSession(appiumHubBase, udid);
         boolean deviceOk = wdaDown;
 
-        // 4. Structured state summary — always visible
+        // 5. Structured state summary — always visible
         String sessionState = appiumOk ? "CERRADA ✓"  : "ACTIVA ⚠";
         String wdaState     = wdaDown  ? "DETENIDO ✓" : "ACTIVO ⚠";
         String autoState    = wdaDown  ? "NO ✓"       : "SÍ ⚠";
