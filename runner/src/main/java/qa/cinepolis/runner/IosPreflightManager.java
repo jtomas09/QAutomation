@@ -3,7 +3,15 @@ package qa.cinepolis.runner;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Comparator;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -127,19 +135,42 @@ public class IosPreflightManager {
         // 5. Developer Mode (warn only, non-blocking)
         checkDeveloperMode(client, executionId, udid);
 
-        // 6. WDA cache — invalidated if iOS version changed
+        // 6. WDA cache — invalidada si cambió la versión de iOS, o si la validación
+        //    completa (perfil/certificado/equipo/bundle/dispositivo) falla.
         Properties cache  = loadWdaCache(udid, iosVersion, client, executionId);
         String  wdaBundleId;
         boolean wdaCached;
         if (cache != null) {
             wdaBundleId = cache.getProperty("bundleId", generateWdaBundleId(udid));
-            wdaCached   = true;
-            client.sendLog(executionId, "INFO",
-                    "✅ WebDriverAgent precompilado detectado — saltando compilación.");
-            client.sendTechLog(executionId,
-                    "[WDA caché] bundle: " + wdaBundleId
-                    + " | iOS: " + cache.getProperty("iosVersion", "?")
-                    + " | built: " + cache.getProperty("builtAt", "?"));
+            WdaCacheValidation validation = validateCachedWda(udid, teamId, wdaBundleId, client, executionId);
+
+            if (validation.valid) {
+                wdaCached = true;
+                client.sendLog(executionId, "INFO",
+                        "✅ WebDriverAgent precompilado y validado — saltando recompilación.");
+                client.sendLog(executionId, "INFO",
+                        "🔎 [WDA validación] Team: " + validation.profileTeamId
+                        + " | Certificado: " + shortSha(validation.certSha1)
+                        + " | Expira: " + validation.expirationDate);
+                client.sendTechLog(executionId,
+                        "[WDA caché] bundle: " + wdaBundleId
+                        + " | iOS: " + cache.getProperty("iosVersion", "?")
+                        + " | built: " + cache.getProperty("builtAt", "?"));
+            } else {
+                // ── Autocorrección: cache inválido → limpiar todo y forzar recompilación ──
+                // Nunca se pide intervención manual: se borra el cache, el DerivedData de
+                // WebDriverAgent, y se fuerza wdaCached=false para que Appium reconstruya,
+                // refirme e reinstale WDA por su cuenta en la sesión que sigue.
+                client.sendLog(executionId, "WARN",
+                        "♻️  [WDA] Caché inválido — motivo: " + validation.reason);
+                invalidateWdaCache(udid);
+                cleanupStaleDerivedData(client, executionId);
+                wdaCached = false;
+                client.sendLog(executionId, "INFO",
+                        "🔨 [WDA] Recompilación automática — motivo: " + validation.reason + "\n"
+                        + "   DerivedData de WebDriverAgent eliminado. Appium recompilará, "
+                        + "refirmará e reinstalará WDA en la próxima sesión sin intervención manual.");
+            }
         } else {
             wdaBundleId = generateWdaBundleId(udid);
             wdaCached   = false;
@@ -268,47 +299,42 @@ public class IosPreflightManager {
 
     // ── 2. Apple Developer Team — detección multi-estrategia ─────────────────
     //
-    // Apple Team IDs are always 10 uppercase alphanumeric characters (e.g. 5TQQL22JSV).
-    // They appear in multiple places on the system; we try them all in order and log
-    // each attempt so failures are diagnosable even when find-identity returns empty.
-
-    /** Apple Team ID pattern: exactly 10 uppercase letters and digits. */
-    private static final Pattern TEAM_ID = Pattern.compile("[A-Z0-9]{10}");
+    // Apple Team IDs son siempre 10 caracteres alfanuméricos en mayúsculas
+    // (p.ej. C32VD96Q84). IMPORTANTE: el Team ID NUNCA se lee del Common Name
+    // (CN) de un certificado — el CN de "Apple Development: email (XXXXXXXXXX)"
+    // contiene un identificador de cuenta/persona, NO el Team ID. El campo
+    // autoritativo es:
+    //   - TeamIdentifier   dentro de un provisioning profile real (fuente más confiable), o
+    //   - OU (Organizational Unit) del subject X.509 del certificado.
+    // Se prueban en orden de confiabilidad y se registra cada intento para que
+    // los fallos sean diagnosticables.
 
     public static String detectAppleTeamId(BackendClient client, String executionId) {
-        client.sendTechLog(executionId, "[TeamID] Buscando Apple Developer Team ID...");
+        client.sendTechLog(executionId,
+                "[TeamID] Buscando Apple Developer Team ID (OU del certificado / TeamIdentifier del perfil — nunca el CN)...");
 
         String id;
 
-        // ── Estrategia 1: security find-identity -v -p codesigning ────────────
-        client.sendTechLog(executionId, "[TeamID] [1/6] security find-identity -v -p codesigning");
-        id = strategy1FindIdentity(client, executionId);
-        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 1");
+        // ── Estrategia 1: TeamIdentifier de un provisioning profile real en disco ──
+        // Es la fuente más autoritativa: es literalmente el campo que Apple firmó.
+        client.sendTechLog(executionId, "[TeamID] [1/4] TeamIdentifier de provisioning profiles en disco");
+        id = strategyProvisioningProfiles(client, executionId);
+        if (!id.isBlank()) return reportFound(client, executionId, id, "TeamIdentifier de provisioning profile");
 
-        // ── Estrategia 2: security find-certificate -c "Apple Development" -Z ──
-        client.sendTechLog(executionId, "[TeamID] [2/6] security find-certificate -c \"Apple Development\" -Z");
-        id = strategy2FindCertByLabel(client, executionId, "Apple Development");
-        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 2");
+        // ── Estrategia 2: OU del certificado "Apple Development" ─────────────
+        client.sendTechLog(executionId, "[TeamID] [2/4] OU del certificado \"Apple Development\"");
+        id = strategyCertificateOU(client, executionId, "Apple Development");
+        if (!id.isBlank()) return reportFound(client, executionId, id, "OU del certificado Apple Development");
 
-        // ── Estrategia 3: X.509 OU field vía openssl ──────────────────────────
-        client.sendTechLog(executionId, "[TeamID] [3/6] security find-certificate -p | openssl x509 -subject");
-        id = strategy3OpensslSubject(client, executionId, "Apple Development");
-        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 3");
+        // ── Estrategia 3: OU del certificado "iPhone Developer" (legado) ─────
+        client.sendTechLog(executionId, "[TeamID] [3/4] OU del certificado \"iPhone Developer\" (legado)");
+        id = strategyCertificateOU(client, executionId, "iPhone Developer");
+        if (!id.isBlank()) return reportFound(client, executionId, id, "OU del certificado iPhone Developer (legado)");
 
-        // ── Estrategia 4: legacy "iPhone Developer" certificate name ─────────
-        client.sendTechLog(executionId, "[TeamID] [4/6] security find-certificate -c \"iPhone Developer\" -Z");
-        id = strategy2FindCertByLabel(client, executionId, "iPhone Developer");
-        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 4 (iPhone Developer)");
-
-        // ── Estrategia 5: perfiles de provisioning instalados ─────────────────
-        client.sendTechLog(executionId, "[TeamID] [5/6] ~/Library/MobileDevice/Provisioning Profiles/*.mobileprovision");
-        id = strategy5ProvisioningProfiles(client, executionId);
-        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 5 (provisioning profile)");
-
-        // ── Estrategia 6: security find-certificate -a (todos los certificados) ─
-        client.sendTechLog(executionId, "[TeamID] [6/6] security find-certificate -a (keychain completo)");
-        id = strategy6AllCertificates(client, executionId);
-        if (!id.isBlank()) return reportFound(client, executionId, id, "estrategia 6 (keychain scan)");
+        // ── Estrategia 4: escanear TODOS los certificados del keychain por su OU ──
+        client.sendTechLog(executionId, "[TeamID] [4/4] OU de cualquier certificado del keychain");
+        id = strategyAnyCertificateOU(client, executionId);
+        if (!id.isBlank()) return reportFound(client, executionId, id, "OU de certificado en keychain (escaneo completo)");
 
         // All strategies exhausted
         client.sendLog(executionId, "WARN",
@@ -326,79 +352,70 @@ public class IosPreflightManager {
         return id;
     }
 
-    // ── Estrategia 1: find-identity ───────────────────────────────────────────
+    // ── Estrategia 1: TeamIdentifier de provisioning profiles ────────────────
 
-    private static String strategy1FindIdentity(BackendClient client, String executionId) {
-        try {
-            Process p = new ProcessBuilder("security", "find-identity", "-v", "-p", "codesigning")
-                    .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor(10, TimeUnit.SECONDS);
-
-            // "Apple Development: Name (TEAMID)" in double-quoted label
-            Pattern pat = Pattern.compile(
-                    "\"(?:Apple Development|iPhone Developer):[^(]+\\(([A-Z0-9]{10})\\)\"");
-            Matcher m = pat.matcher(out);
-            if (m.find()) return m.group(1);
-
-            // Any line containing a 10-char alphanum in parens after an Apple cert prefix
-            Pattern loose = Pattern.compile(
-                    "Apple(?:\\s+Development|\\s+Developer|\\s+Distribution)[^(]*\\(([A-Z0-9]{10})\\)");
-            Matcher ml = loose.matcher(out);
-            if (ml.find()) return ml.group(1);
-
-            if (!out.isBlank())
+    /**
+     * Fuente más específica y confiable: el provisioning profile embebido en el
+     * ÚLTIMO build de WebDriverAgent (no un perfil cualquiera del sistema — un Mac
+     * puede tener perfiles de otros proyectos/equipos personales que NO aplican aquí).
+     *
+     * Si WDA nunca se compiló en este dispositivo (primera vez), cae a buscar entre
+     * los perfiles instalados SOLO los que correspondan a un bundle de este proyecto
+     * (io.qautomation.wda.*) — nunca acepta un perfil de otro proyecto sin relación.
+     */
+    private static String strategyProvisioningProfiles(BackendClient client, String executionId) {
+        File wdaProfile = findLatestWdaEmbeddedProfile();
+        if (wdaProfile != null) {
+            String plist = decodeProfilePlist(wdaProfile);
+            String teamId = plist != null ? extractPlistArrayFirstString(plist, "TeamIdentifier") : null;
+            if (teamId != null) {
                 client.sendTechLog(executionId,
-                        "[TeamID] Sin coincidencia: "
-                        + out.substring(0, Math.min(120, out.length())).replace("\n", " | "));
-        } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] Error estrategia 1: " + e.getMessage());
-        }
-        return "";
-    }
-
-    // ── Estrategia 2: find-certificate por nombre ─────────────────────────────
-
-    private static String strategy2FindCertByLabel(BackendClient client, String executionId,
-                                                    String certName) {
-        try {
-            Process p = new ProcessBuilder("security", "find-certificate",
-                    "-c", certName, "-Z")
-                    .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor(10, TimeUnit.SECONDS);
-
-            if (out.isBlank()) {
-                client.sendTechLog(executionId, "[TeamID] Certificado \"" + certName + "\" no encontrado.");
-                return "";
+                        "[TeamID] TeamIdentifier leído del perfil embebido de WebDriverAgent ("
+                        + wdaProfile.getParentFile().getName() + "): " + teamId);
+                return teamId;
             }
-
-            // "labl"<blob>="Apple Development: Name (TEAMID)" — preferred
-            Pattern labelled = Pattern.compile(
-                    "\"(?:Apple Development|iPhone Developer):[^(]+\\(([A-Z0-9]{10})\\)\"");
-            Matcher m = labelled.matcher(out);
-            if (m.find()) return m.group(1);
-
-            // Fallback: any (TEAMID) pattern in the output
-            Pattern paren = Pattern.compile("\\(([A-Z0-9]{10})\\)");
-            Matcher mp = paren.matcher(out);
-            if (mp.find()) return mp.group(1);
-
-            client.sendTechLog(executionId,
-                    "[TeamID] Certificado encontrado pero sin Team ID extraíble: "
-                    + out.substring(0, Math.min(120, out.length())).replace("\n", " | "));
-        } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] Error estrategia 2: " + e.getMessage());
         }
+
+        File[] dirs = {
+            new File(System.getProperty("user.home") + "/Library/MobileDevice/Provisioning Profiles"),
+            new File(System.getProperty("user.home") + "/Library/Developer/Xcode/UserData/Provisioning Profiles"),
+        };
+        for (File dir : dirs) {
+            if (!dir.isDirectory()) continue;
+            File[] profiles = dir.listFiles((d, n) -> n.endsWith(".mobileprovision"));
+            if (profiles == null || profiles.length == 0) continue;
+
+            // Perfil más reciente primero — más probable que refleje la config actual.
+            Arrays.sort(profiles, Comparator.comparingLong(File::lastModified).reversed());
+            client.sendTechLog(executionId,
+                    "[TeamID] Sin build previo de WDA — analizando " + profiles.length
+                    + " perfil(es) en " + dir.getAbsolutePath() + " (solo io.qautomation.wda.*)...");
+
+            for (File f : profiles) {
+                try {
+                    String plist = decodeProfilePlist(f);
+                    if (plist == null) continue;
+                    // Nunca aceptar un perfil de un proyecto sin relación (p.ej. otra app
+                    // de prueba personal) solo porque exista en el sistema.
+                    String appId = extractPlistArrayFirstString(plist, "application-identifier");
+                    if (appId == null || !appId.contains("io.qautomation.wda")) continue;
+                    String teamId = extractPlistArrayFirstString(plist, "TeamIdentifier");
+                    if (teamId != null) {
+                        client.sendTechLog(executionId, "[TeamID] TeamIdentifier leído de " + f.getName() + ": " + teamId);
+                        return teamId;
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+        client.sendTechLog(executionId,
+                "[TeamID] Sin perfil de WebDriverAgent existente ni perfil io.qautomation.wda.* instalado.");
         return "";
     }
 
-    // ── Estrategia 3: openssl X.509 subject OU/UID ────────────────────────────
+    // ── Estrategia 2/3: OU del certificado (nunca el CN) ──────────────────────
 
-    private static String strategy3OpensslSubject(BackendClient client, String executionId,
-                                                   String certName) {
+    private static String strategyCertificateOU(BackendClient client, String executionId, String certName) {
         try {
-            // Shell pipe: security outputs PEM → openssl reads subject
             String cmd = "security find-certificate -c '" + certName + "' -p 2>/dev/null"
                        + " | openssl x509 -noout -subject 2>/dev/null";
             Process p = new ProcessBuilder("/bin/sh", "-c", cmd).start();
@@ -406,101 +423,60 @@ public class IosPreflightManager {
             p.waitFor(10, TimeUnit.SECONDS);
 
             if (out.isBlank()) {
-                client.sendTechLog(executionId, "[TeamID] Sin output de openssl.");
+                client.sendTechLog(executionId, "[TeamID] Certificado \"" + certName + "\" no encontrado.");
                 return "";
             }
-
-            // subject=UID=5TQQL22JSV, CN=Apple Development: ..., OU=5TQQL22JSV, O=..., C=US
-            Pattern ouUid = Pattern.compile("(?:OU|UID)\\s*=\\s*([A-Z0-9]{10})(?:[,\\s/]|$)");
-            Matcher m = ouUid.matcher(out);
-            if (m.find()) return m.group(1);
-
-            // openssl legacy format: /OU=TEAMID/
-            Pattern slash = Pattern.compile("/(?:OU|UID)=([A-Z0-9]{10})(?:/|$)");
-            Matcher ms = slash.matcher(out);
-            if (ms.find()) return ms.group(1);
-
-            client.sendTechLog(executionId,
-                    "[TeamID] Subject sin OU/UID de 10 chars: " + out.substring(0, Math.min(120, out.length())));
+            String ou = extractOuFromSubject(out);
+            if (ou == null) {
+                client.sendTechLog(executionId,
+                        "[TeamID] Certificado \"" + certName + "\" encontrado pero sin OU extraíble: "
+                        + out.substring(0, Math.min(120, out.length())));
+                return "";
+            }
+            return ou;
         } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] openssl no disponible: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] Error leyendo OU de \"" + certName + "\": " + e.getMessage());
+            return "";
         }
-        return "";
     }
 
-    // ── Estrategia 5: perfiles de provisioning ────────────────────────────────
+    // ── Estrategia 4: OU de cualquier certificado del keychain ───────────────
 
-    private static String strategy5ProvisioningProfiles(BackendClient client, String executionId) {
+    private static String strategyAnyCertificateOU(BackendClient client, String executionId) {
         try {
-            File dir = new File(System.getProperty("user.home")
-                    + "/Library/MobileDevice/Provisioning Profiles");
-            if (!dir.exists()) {
-                client.sendTechLog(executionId, "[TeamID] Directorio de perfiles no existe.");
-                return "";
-            }
-            File[] profiles = dir.listFiles((d, n) -> n.endsWith(".mobileprovision"));
-            if (profiles == null || profiles.length == 0) {
-                client.sendTechLog(executionId, "[TeamID] Sin perfiles de provisioning instalados.");
-                return "";
-            }
-
-            client.sendTechLog(executionId, "[TeamID] Analizando " + profiles.length + " perfil(es)...");
-
-            for (File f : profiles) {
-                try {
-                    // Decode CMS-signed plist to readable XML
-                    Process p = new ProcessBuilder("security", "cms", "-D", "-i", f.getAbsolutePath())
-                            .redirectErrorStream(false).start();
-                    String plist = new String(p.getInputStream().readAllBytes());
-                    p.waitFor(10, TimeUnit.SECONDS);
-
-                    // <key>TeamIdentifier</key><array><string>5TQQL22JSV</string></array>
-                    int keyIdx = plist.indexOf("TeamIdentifier");
-                    if (keyIdx < 0) continue;
-                    String region = plist.substring(keyIdx,
-                            Math.min(plist.length(), keyIdx + 300));
-                    Pattern sp = Pattern.compile("<string>([A-Z0-9]{10})</string>");
-                    Matcher sm = sp.matcher(region);
-                    if (sm.find()) {
-                        client.sendTechLog(executionId, "[TeamID] Encontrado en perfil: " + f.getName());
-                        return sm.group(1);
-                    }
-                } catch (Exception ignored) {}
-            }
-            client.sendTechLog(executionId, "[TeamID] Team ID no encontrado en ningún perfil.");
-        } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] Error estrategia 5: " + e.getMessage());
-        }
-        return "";
-    }
-
-    // ── Estrategia 6: todos los certificados del keychain ────────────────────
-
-    private static String strategy6AllCertificates(BackendClient client, String executionId) {
-        try {
-            Process p = new ProcessBuilder("security", "find-certificate", "-a", "-Z")
-                    .redirectErrorStream(true).start();
+            String cmd = "security find-certificate -a -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null";
+            Process p = new ProcessBuilder("/bin/sh", "-c", cmd).start();
             String out = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor(20, TimeUnit.SECONDS);
-
-            // Look for Apple Development / iPhone Developer labels in the full dump
-            Pattern labeled = Pattern.compile(
-                    "\"(?:Apple Development|iPhone Developer|Apple Worldwide Developer):"
-                    + "[^(]+\\(([A-Z0-9]{10})\\)\"");
-            Matcher m = labeled.matcher(out);
-            if (m.find()) return m.group(1);
-
-            // Fallback: scan for any (TEAMID) pattern near the word "Development"
-            Pattern nearDev = Pattern.compile(
-                    "(?:Development|Developer)[^(]{0,60}\\(([A-Z0-9]{10})\\)");
-            Matcher mn = nearDev.matcher(out);
-            if (mn.find()) return mn.group(1);
-
-            client.sendTechLog(executionId, "[TeamID] Sin certificados Apple Development en ningún keychain.");
+            p.waitFor(15, TimeUnit.SECONDS);
+            if (out.isBlank()) return "";
+            String ou = extractOuFromSubject(out);
+            if (ou != null) return ou;
+            client.sendTechLog(executionId, "[TeamID] Sin OU extraíble en ningún certificado del keychain.");
         } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] Error estrategia 6: " + e.getMessage());
+            client.sendTechLog(executionId, "[TeamID] Error escaneando certificados del keychain: " + e.getMessage());
         }
         return "";
+    }
+
+    /**
+     * Extrae ÚNICAMENTE el campo OU (Organizational Unit) de un subject X.509 —
+     * jamás el CN, jamás el UID. Ambos formatos de openssl son soportados:
+     *   legado (LibreSSL/macOS):  /UID=.../CN=.../OU=TEAMID/O=.../C=US
+     *   RFC2253 (orden inverso):  CN=...,OU=TEAMID,O=...,C=US,UID=...
+     * El ancla explícita a "OU=" (nunca "UID=") es lo que evita el bug original,
+     * donde una alternancia (?:OU|UID) emparejaba el UID por aparecer primero
+     * en el subject legado.
+     */
+    private static String extractOuFromSubject(String subject) {
+        Pattern slashOu = Pattern.compile("/OU=([A-Z0-9]{10})(?:/|$)");
+        Matcher m = slashOu.matcher(subject);
+        if (m.find()) return m.group(1);
+
+        Pattern commaOu = Pattern.compile("(?:^|,\\s*)OU=([A-Z0-9]{10})(?:,|$)");
+        Matcher mc = commaOu.matcher(subject);
+        if (mc.find()) return mc.group(1);
+
+        return null;
     }
 
     // ── 3. iOS Version ────────────────────────────────────────────────────────
@@ -682,5 +658,260 @@ public class IosPreflightManager {
     private static File cacheFile(String udid) {
         String safe = udid.replaceAll("[^a-zA-Z0-9_-]", "_");
         return new File(CACHE_DIR, safe + ".properties");
+    }
+
+    // ── Validación de WDA cacheado ────────────────────────────────────────────
+    //
+    // Antes de decirle a Appium "reutiliza el WDA ya instalado" (wdaCached=true),
+    // se valida el provisioning profile REAL embebido en el .app compilado —
+    // nunca se confía ciegamente en el archivo de caché (~/.qautomation/wda/*.properties),
+    // que solo registra intención, no el estado real de firma en disco.
+
+    /** Resultado de validar el WDA cacheado contra el provisioning profile real en disco. */
+    static final class WdaCacheValidation {
+        final boolean valid;
+        final String  reason;         // motivo de invalidación (o "OK" si valid=true)
+        final String  certSha1;       // SHA1 del certificado embebido, o null
+        final String  profileTeamId;  // TeamIdentifier del perfil, o null
+        final String  expirationDate; // ExpirationDate del perfil, texto legible
+
+        private WdaCacheValidation(boolean valid, String reason, String certSha1,
+                                    String profileTeamId, String expirationDate) {
+            this.valid          = valid;
+            this.reason         = reason;
+            this.certSha1       = certSha1;
+            this.profileTeamId  = profileTeamId;
+            this.expirationDate = expirationDate;
+        }
+
+        static WdaCacheValidation invalid(String reason) {
+            return new WdaCacheValidation(false, reason, null, null, "desconocida");
+        }
+    }
+
+    /**
+     * Valida el WDA ya compilado/instalado contra su provisioning profile REAL
+     * (el embedded.mobileprovision dentro de WebDriverAgentRunner-Runner.app en
+     * DerivedData) antes de permitir que se reutilice. Verifica, en orden:
+     *   1. Que exista el .app compilado con su perfil embebido.
+     *   2. Que el perfil no haya expirado (ExpirationDate vs ahora).
+     *   3. Que el TeamIdentifier del perfil coincida con el Team ID detectado.
+     *   4. Que el Bundle Identifier coincida con el esperado.
+     *   5. Que el UDID esté en ProvisionedDevices.
+     *   6. Que el certificado embebido siga siendo una identidad válida del keychain.
+     */
+    static WdaCacheValidation validateCachedWda(String udid, String expectedTeamId, String expectedBundleId,
+                                                 BackendClient client, String executionId) {
+        File profileFile = findLatestWdaEmbeddedProfile();
+        if (profileFile == null) {
+            return WdaCacheValidation.invalid(
+                    "No se encontró WebDriverAgentRunner-Runner.app compilado en DerivedData");
+        }
+
+        String plist = decodeProfilePlist(profileFile);
+        if (plist == null) {
+            return WdaCacheValidation.invalid(
+                    "No se pudo decodificar el provisioning profile embebido (" + profileFile.getName() + ")");
+        }
+
+        // 1. Bundle ID (se valida antes que nada — un profile de OTRO proyecto no cuenta)
+        String appId = extractPlistArrayFirstString(plist, "application-identifier");
+        if (appId == null || (expectedBundleId != null && !appId.contains(expectedBundleId))) {
+            return new WdaCacheValidation(false,
+                    "Bundle ID del perfil (" + appId + ") no coincide con el esperado (" + expectedBundleId + ")",
+                    null, null, "desconocida");
+        }
+
+        // 2. Expiración
+        Instant expiration = extractExpirationDate(plist);
+        String  expirationStr = expiration != null ? expiration.toString() : "desconocida";
+        if (expiration == null) {
+            return WdaCacheValidation.invalid("El perfil no tiene ExpirationDate legible");
+        }
+        if (Instant.now().isAfter(expiration)) {
+            return new WdaCacheValidation(false,
+                    "Provisioning profile EXPIRADO el " + expirationStr + " (hoy: " + Instant.now() + ")",
+                    null, null, expirationStr);
+        }
+
+        // 3. Team ID — el mismo Team ID robusto que detectAppleTeamId() calcula ahora
+        String profileTeamId = extractPlistArrayFirstString(plist, "TeamIdentifier");
+        if (profileTeamId == null) {
+            return new WdaCacheValidation(false, "El perfil no tiene TeamIdentifier legible",
+                    null, null, expirationStr);
+        }
+        if (expectedTeamId != null && !expectedTeamId.isBlank() && !expectedTeamId.equals(profileTeamId)) {
+            return new WdaCacheValidation(false,
+                    "Team ID del perfil (" + profileTeamId + ") no coincide con el detectado (" + expectedTeamId + ")",
+                    null, profileTeamId, expirationStr);
+        }
+
+        // 4. Dispositivo incluido
+        if (!containsProvisionedDevice(plist, udid)) {
+            return new WdaCacheValidation(false,
+                    "El dispositivo " + udid + " no está en ProvisionedDevices del perfil",
+                    null, profileTeamId, expirationStr);
+        }
+
+        // 5. Certificado embebido sigue siendo una identidad válida del keychain
+        String certSha1 = extractFirstDeveloperCertificateSha1(plist);
+        if (certSha1 == null) {
+            return new WdaCacheValidation(false, "No se pudo leer el certificado embebido en el perfil",
+                    null, profileTeamId, expirationStr);
+        }
+        if (!isCertificateCurrentlyValid(certSha1)) {
+            return new WdaCacheValidation(false,
+                    "El certificado embebido (" + shortSha(certSha1) + ") ya no es una identidad válida en el keychain",
+                    certSha1, profileTeamId, expirationStr);
+        }
+
+        return new WdaCacheValidation(true, "OK", certSha1, profileTeamId, expirationStr);
+    }
+
+    /** Busca el embedded.mobileprovision más reciente entre los builds de WebDriverAgent en DerivedData. */
+    private static File findLatestWdaEmbeddedProfile() {
+        File derivedDataRoot = new File(System.getProperty("user.home") + "/Library/Developer/Xcode/DerivedData");
+        File[] wdaDirs = derivedDataRoot.listFiles(f -> f.isDirectory() && f.getName().startsWith("WebDriverAgent-"));
+        if (wdaDirs == null || wdaDirs.length == 0) return null;
+
+        File latest = null;
+        for (File wdaDir : wdaDirs) {
+            File productsDir = new File(wdaDir, "Build/Products");
+            if (!productsDir.isDirectory()) continue;
+            File[] suiteDirs = productsDir.listFiles(f -> f.isDirectory() && f.getName().startsWith("Debug-iphoneos"));
+            if (suiteDirs == null) continue;
+            for (File suiteDir : suiteDirs) {
+                File profile = new File(suiteDir, "WebDriverAgentRunner-Runner.app/embedded.mobileprovision");
+                if (profile.isFile() && (latest == null || profile.lastModified() > latest.lastModified())) {
+                    latest = profile;
+                }
+            }
+        }
+        return latest;
+    }
+
+    /** Decodifica un .mobileprovision (CMS-signed) a su plist XML en texto plano. */
+    private static String decodeProfilePlist(File profile) {
+        try {
+            Process p = new ProcessBuilder("security", "cms", "-D", "-i", profile.getAbsolutePath())
+                    .redirectErrorStream(false).start();
+            String plist = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            boolean done = p.waitFor(10, TimeUnit.SECONDS);
+            return (done && !plist.isBlank()) ? plist : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Devuelve el primer &lt;string&gt; que sigue a &lt;key&gt;{key}&lt;/key&gt; — sirve tanto para
+     *  valores planos (application-identifier) como para el primer elemento de un &lt;array&gt;
+     *  (TeamIdentifier). */
+    private static String extractPlistArrayFirstString(String plist, String key) {
+        String marker = "<key>" + key + "</key>";
+        int keyIdx = plist.indexOf(marker);
+        if (keyIdx < 0) return null;
+        int from = keyIdx + marker.length();
+        int to   = Math.min(plist.length(), from + 500);
+        Matcher m = Pattern.compile("<string>([^<]+)</string>").matcher(plist.substring(from, to));
+        return m.find() ? m.group(1).trim() : null;
+    }
+
+    private static Instant extractExpirationDate(String plist) {
+        String marker = "<key>ExpirationDate</key>";
+        int keyIdx = plist.indexOf(marker);
+        if (keyIdx < 0) return null;
+        int from = keyIdx + marker.length();
+        int to   = Math.min(plist.length(), from + 200);
+        Matcher m = Pattern.compile("<date>([^<]+)</date>").matcher(plist.substring(from, to));
+        if (!m.find()) return null;
+        try {
+            return Instant.parse(m.group(1).trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean containsProvisionedDevice(String plist, String udid) {
+        int keyIdx = plist.indexOf("<key>ProvisionedDevices</key>");
+        if (keyIdx < 0) return false;
+        int endIdx = plist.indexOf("</array>", keyIdx);
+        if (endIdx < 0) endIdx = plist.length();
+        return plist.substring(keyIdx, Math.min(plist.length(), endIdx)).contains(udid);
+    }
+
+    /** SHA1 (hex, mayúsculas) del primer certificado embebido en DeveloperCertificates. */
+    private static String extractFirstDeveloperCertificateSha1(String plist) {
+        int keyIdx = plist.indexOf("<key>DeveloperCertificates</key>");
+        if (keyIdx < 0) return null;
+        int dataStart = plist.indexOf("<data>", keyIdx);
+        if (dataStart < 0) return null;
+        int dataEnd = plist.indexOf("</data>", dataStart);
+        if (dataEnd < 0) return null;
+        String base64 = plist.substring(dataStart + "<data>".length(), dataEnd).replaceAll("\\s+", "");
+        try {
+            byte[] der  = Base64.getDecoder().decode(base64);
+            byte[] hash = MessageDigest.getInstance("SHA-1").digest(der);
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) sb.append(String.format("%02X", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** ¿Sigue esta huella SHA1 entre las identidades de firma válidas del keychain? */
+    private static boolean isCertificateCurrentlyValid(String sha1) {
+        try {
+            Process p = new ProcessBuilder("security", "find-identity", "-v", "-p", "codesigning")
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            p.waitFor(10, TimeUnit.SECONDS);
+            return out.toUpperCase().contains(sha1.toUpperCase());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String shortSha(String sha1) {
+        if (sha1 == null || sha1.isBlank()) return "desconocido";
+        return sha1.substring(0, Math.min(12, sha1.length())) + "...";
+    }
+
+    // ── Limpieza automática de DerivedData ────────────────────────────────────
+
+    /**
+     * Elimina TODO el DerivedData de WebDriverAgent (todas las carpetas
+     * WebDriverAgent-* en ~/Library/Developer/Xcode/DerivedData) para forzar una
+     * recompilación completamente limpia — sin intervención manual, sin abrir Xcode.
+     * Se invoca únicamente cuando validateCachedWda() determina que el binario
+     * cacheado ya no es válido.
+     */
+    private static void cleanupStaleDerivedData(BackendClient client, String executionId) {
+        File derivedDataRoot = new File(System.getProperty("user.home") + "/Library/Developer/Xcode/DerivedData");
+        File[] wdaDirs = derivedDataRoot.listFiles(f -> f.isDirectory() && f.getName().startsWith("WebDriverAgent-"));
+        if (wdaDirs == null || wdaDirs.length == 0) {
+            client.sendTechLog(executionId, "[WDA cache] Sin DerivedData de WebDriverAgent que limpiar.");
+            return;
+        }
+        for (File dir : wdaDirs) {
+            try {
+                deleteRecursive(dir.toPath());
+                client.sendTechLog(executionId, "[WDA cache] DerivedData eliminado: " + dir.getName());
+            } catch (Exception e) {
+                client.sendTechLog(executionId,
+                        "[WDA cache] No se pudo eliminar " + dir.getName() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private static void deleteRecursive(java.nio.file.Path path) throws IOException {
+        if (Files.isDirectory(path)) {
+            try (var stream = Files.list(path)) {
+                for (java.nio.file.Path child : (Iterable<java.nio.file.Path>) stream::iterator) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        Files.deleteIfExists(path);
     }
 }
