@@ -37,35 +37,48 @@ type MirrorStatus =
   | 'ios-error-wda'
 
 const MIRROR_STATUS_CFG: Record<MirrorStatus, {
-  label: string; color: string; pulse: boolean; bodyMessage: string; showsVideo: boolean
+  label: string; color: string; pulse: boolean; bodyMessage: string
 }> = {
-  'sin-dispositivo': { label: 'Sin dispositivo',      color: '#64748b', pulse: false, showsVideo: false, bodyMessage: 'Selecciona un dispositivo para visualizar su pantalla.' },
-  'conectando':       { label: 'Conectando',          color: '#60a5fa', pulse: true,  showsVideo: false, bodyMessage: 'Conectando al stream…' },
-  // showsVideo:true — el <img> se remonta (nueva key) e intenta reconectar de
-  // inmediato; si se ocultara el video aquí, el <img> nunca llegaría a montarse
-  // y su onLoad (que es lo único que limpia el estado "reconectando") jamás
-  // dispararía hasta el timeout de seguridad.
-  'reconectando':     { label: 'Reconectando Mirror…', color: '#60a5fa', pulse: true,  showsVideo: true,  bodyMessage: '' },
-  'disponible':       { label: 'Conectado',           color: '#34d399', pulse: false, showsVideo: true,  bodyMessage: '' },
-  'ejecutando':       { label: 'Ejecución en curso',  color: '#34d399', pulse: true,  showsVideo: true,  bodyMessage: '' },
-  'pausado':          { label: 'Pausado',             color: '#f59e0b', pulse: false, showsVideo: false, bodyMessage: 'Mirror en pausa.' },
-  'desconectado':     { label: 'Desconectado',        color: '#f87171', pulse: false, showsVideo: false, bodyMessage: 'El dispositivo o el Runner no están disponibles.' },
-  'error':            { label: 'Error',               color: '#f87171', pulse: false, showsVideo: false, bodyMessage: 'No fue posible establecer el stream.' },
+  'sin-dispositivo': { label: 'Sin dispositivo',      color: '#64748b', pulse: false, bodyMessage: 'Selecciona un dispositivo para visualizar su pantalla.' },
+  'conectando':       { label: 'Conectando',          color: '#60a5fa', pulse: true,  bodyMessage: 'Conectando al stream…' },
+  'reconectando':     { label: 'Reconectando Mirror…', color: '#60a5fa', pulse: true,  bodyMessage: '' },
+  'disponible':       { label: 'Conectado',           color: '#34d399', pulse: false, bodyMessage: '' },
+  'ejecutando':       { label: 'Ejecución en curso',  color: '#34d399', pulse: true,  bodyMessage: '' },
+  'pausado':          { label: 'Pausado',             color: '#f59e0b', pulse: false, bodyMessage: 'Mirror en pausa.' },
+  'desconectado':     { label: 'Desconectado',        color: '#f87171', pulse: false, bodyMessage: 'El dispositivo o el Runner no están disponibles.' },
+  'error':            { label: 'Error',               color: '#f87171', pulse: false, bodyMessage: 'No fue posible establecer el stream.' },
   'ios-esperando-appium': {
-    label: 'Dispositivo conectado', color: '#60a5fa', pulse: false, showsVideo: false,
+    label: 'Dispositivo conectado', color: '#60a5fa', pulse: false,
     bodyMessage: 'Esperando inicio de sesión Appium…',
   },
   'ios-iniciando-wda': {
-    label: 'Iniciando WDA', color: '#f59e0b', pulse: true, showsVideo: false,
+    label: 'Iniciando WDA', color: '#f59e0b', pulse: true,
     bodyMessage: 'Iniciando WebDriverAgent…',
   },
   'ios-error-wda': {
-    label: 'Error de WDA', color: '#f87171', pulse: false, showsVideo: false,
+    label: 'Error de WDA', color: '#f87171', pulse: false,
     // Mensaje genérico — computeErrorBodyMessage() lo sobreescribe con el motivo real
     // reportado por IOSMirrorStateTracker cuando está disponible.
     bodyMessage: 'No fue posible iniciar el Mirror.\n\nMotivo:\nWebDriverAgent no pudo iniciarse.',
   },
 }
+
+// ── Stream vs. overlay — desacoplados (arquitectura permanente) ─────────────
+// Antes, "¿existe el <img>?" y "¿qué fase reporta el Runner?" eran la MISMA
+// señal (showsVideo por-status) — eso creaba un ciclo: MIRROR_ACTIVE exigía un
+// frame real, pero un frame real exigía que el <img> ya estuviera montado, que
+// a su vez exigía... MIRROR_ACTIVE. El stream ahora existe con la única
+// condición real (UDID + Runner + dispositivo presente, ver streamMounted más
+// abajo); la fase deja de decidir si se intenta capturar y pasa a decidir
+// solo qué overlay se dibuja ENCIMA del stream — nunca si el stream existe.
+//
+// 'pausado' es la única fase que sigue desmontando el stream: es una acción
+// deliberada del usuario para dejar de consumir la conexión, no una espera de
+// capability — no forma parte del problema de la dependencia circular.
+const NO_STREAM_STATUSES: ReadonlySet<MirrorStatus> = new Set(['sin-dispositivo', 'desconectado', 'pausado'])
+// 'reconectando' se mantiene sin overlay (igual que antes) para no tapar el
+// último frame válido mientras se reabre la conexión.
+const NO_OVERLAY_STATUSES: ReadonlySet<MirrorStatus> = new Set(['disponible', 'ejecutando', 'reconectando'])
 
 /** Construye el mensaje de error con el motivo REAL (p.ej. "xcodebuild failed with code 65"). */
 function computeErrorBodyMessage(reason: string | null): string {
@@ -385,7 +398,16 @@ export default function DeviceMirrorPanel({ device }: Props) {
   const bodyMessage = mirrorStatus === 'ios-error-wda'
     ? computeErrorBodyMessage(mirrorReason)
     : statusCfg.bodyMessage
-  const online    = statusCfg.showsVideo && !!url
+
+  // El stream se monta con la única condición real: UDID válido + Runner
+  // alcanzable (ambos ya encapsulados en `url`, ver useMirrorStream.ts:110) y
+  // sin pausa manual. Nunca depende de mirrorPhase — ver el comentario junto
+  // a NO_STREAM_STATUSES arriba.
+  const streamMounted = !!url && !NO_STREAM_STATUSES.has(mirrorStatus)
+  const hasOverlay    = !NO_OVERLAY_STATUSES.has(mirrorStatus)
+  // "Realmente activo" (habilita acciones que necesitan un frame real: refresh,
+  // pantalla completa, captura) — distinto de "el stream existe".
+  const online       = streamMounted && !hasOverlay
   const isLandscape = rotation === 90 || rotation === 270
 
   // Overlay de ejecución (Fase 3) — solo datos ya existentes en ExecutionRecord,
@@ -538,7 +560,7 @@ export default function DeviceMirrorPanel({ device }: Props) {
                 }
           }
         >
-          {online ? (
+          {streamMounted && (
             <img
               key={reloadKey}
               ref={imgRef}
@@ -561,8 +583,14 @@ export default function DeviceMirrorPanel({ device }: Props) {
                     }
               }
             />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-2.5 px-4 text-center">
+          )}
+          {hasOverlay && (
+            // Encima del stream (montado o no) — nunca decide si existe la
+            // conexión, solo qué mensaje mostrar sobre ella.
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center h-full gap-2.5 px-4 text-center"
+              style={{ background: '#05070d' }}
+            >
               <Smartphone size={26} className="opacity-25 text-slate-500" />
               <span
                 className="text-[10px] text-slate-600 leading-relaxed"
