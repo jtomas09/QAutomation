@@ -66,6 +66,17 @@ public final class AppiumXcodebuildLogForwarder {
             return;
         }
 
+        // La causa raíz se calcula y envía PRIMERO — nunca debe quedar atrapada detrás
+        // del volcado completo de abajo. Ese volcado puede implicar cientos de líneas
+        // (cada una un POST HTTP síncrono sin timeout — ver BackendClient.post()); si
+        // una de esas llamadas se cuelga por una red inestable, el mensaje con la causa
+        // real nunca llegaría a tiempo — o nunca — al Dashboard.
+        String realError = findRealXcodeError(sinceEpochMs);
+        if (realError != null) {
+            client.sendLog(executionId, "ERROR",
+                    "🔴 [xcodebuild] Causa raíz real (vía appium.log, showXcodeLog): " + realError);
+        }
+
         int forwarded = 0;
         for (String line : tail.split("\n", -1)) {
             if (line.isBlank()) continue;
@@ -80,13 +91,6 @@ public final class AppiumXcodebuildLogForwarder {
 
         if (forwarded == 0) {
             client.sendTechLog(executionId, "[xcodebuild] Sin líneas de xcodebuild en esta ejecución.");
-            return;
-        }
-
-        String realError = findRealXcodeError(sinceEpochMs);
-        if (realError != null) {
-            client.sendLog(executionId, "ERROR",
-                    "🔴 [xcodebuild] Causa raíz real (vía appium.log, showXcodeLog): " + realError);
         }
     }
 
@@ -130,11 +134,18 @@ public final class AppiumXcodebuildLogForwarder {
         return realError != null ? realError : fallbackSummary;
     }
 
+    /**
+     * Appium re-etiqueta CADA línea de la salida cruda de xcodebuild con "[Xcode]"
+     * al proxearla a appium.log (confirmado línea por línea en un log real). Antes
+     * este filtro también hacía match por "xcodebuild"/"webdriveragent"/"codesign"/
+     * "provisioning" como substrings sueltos — eso capturaba además el tráfico HTTP
+     * y de debug del PROPIO driver de Appium (capabilities, "Using WDA path", etc.),
+     * que solo MENCIONA esas palabras sin ser salida real de xcodebuild. En una
+     * ejecución real esto llegó a inflar el reenvío a 664 líneas, de las cuales 72
+     * no tenían nada que ver con xcodebuild — solo ruido del propio driver.
+     */
     private static boolean isXcodebuildRelevant(String line) {
-        String lower = line.toLowerCase();
-        return lower.contains("[xcode]") || lower.contains("xcodebuild")
-                || lower.contains("webdriveragent") || lower.contains("build failed")
-                || lower.contains("codesign") || lower.contains("provisioning");
+        return line.contains("[Xcode]");
     }
 
     private static Long parseTimestampEpochMs(String line) {
