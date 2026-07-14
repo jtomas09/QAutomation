@@ -3,11 +3,15 @@ package qa.cinepolis.runner;
 import java.io.*;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Full Appium lifecycle manager + AppiumValidator.
@@ -419,8 +423,92 @@ public class AppiumManager {
         return Path.of(agentDataDir, "logs", "appium.log");
     }
 
+    // ── Reglas de entorno específicas por plataforma ─────────────────────────
+    //
+    // Punto único de decisión: cada variable de entorno que solo debe aplicarse
+    // bajo ciertas condiciones de plataforma se modela como un PlatformEnvRule.
+    // Agregar una nueva variable futura = agregar una nueva implementación aquí
+    // y sumarla a PLATFORM_ENV_RULES — startAppium() no necesita condicionales
+    // adicionales dispersos.
+    //
+    // Limitación arquitectónica honesta: Appium corre como UN proceso Node.js
+    // persistente, arrancado una sola vez (ensureRunning() se llama una única
+    // vez al iniciar el Runner — ver RunnerAgent.java). Las variables de entorno
+    // de un proceso solo pueden fijarse al arrancarlo, así que estas reglas se
+    // evalúan una vez por arranque de Appium (no por cada ejecución individual).
+    // El contexto ("¿este Runner tiene capacidad iOS?") es lo más cercano a
+    // "plataforma objetivo" que se puede determinar sin reiniciar Appium por
+    // job — que requeriría que JobExecutor llamara a AppiumManager antes de
+    // cada ejecución, fuera del alcance de este cambio.
+
+    /** Contexto de plataforma usado para evaluar las reglas de entorno de Appium. */
+    private record AppiumEnvironmentContext(String runnerOs, boolean iosCapable) {
+        String detectedPlatformLabel() {
+            return switch (runnerOs) {
+                case "MACOS"   -> "🍎 macOS";
+                case "WINDOWS" -> "🖥 Windows";
+                case "LINUX"   -> "🐧 Linux";
+                default        -> "❓ " + runnerOs;
+            };
+        }
+        String targetPlatformLabel() {
+            return iosCapable ? "📱 iOS" : "🤖 Android";
+        }
+    }
+
+    /** Contrato de una regla de entorno específica por plataforma para el proceso Appium. */
+    private interface PlatformEnvRule {
+        String variableName();
+        String valueWhenApplies();
+        boolean appliesTo(AppiumEnvironmentContext ctx);
+        String rationale();
+    }
+
+    /**
+     * APPIUM_XCUITEST_PREFER_DEVICECTL=1 — solo cuando el Runner es macOS Y tiene
+     * capacidad iOS (driver xcuitest instalado). Nunca se activa en Windows/Linux
+     * ni en un Runner que nunca aprovisionó iOS.
+     *
+     * Qué cambia exactamente cuando aplica: dentro de appium-xcuitest-driver,
+     * ConnectedDevicesClient.listLegacyUdids() (connected-devices-client.ts) usa
+     * esta variable para decidir cómo listar UDIDs de dispositivos reales cuando
+     * el registro de túneles RemoteXPC no está disponible ("Tunnel registry port
+     * not found"): en vez de usbmuxd (appium-ios-device), usa
+     * `xcrun devicectl list devices --json-output` (node-devicectl) — el mismo
+     * comando que ya usa el Runner (IOSDeviceScanner/CoreDeviceTunnelManager)
+     * para detectar el dispositivo.
+     */
+    private static final class PreferDevicectlRule implements PlatformEnvRule {
+        static final String VAR = "APPIUM_XCUITEST_PREFER_DEVICECTL";
+        @Override public String variableName() { return VAR; }
+        @Override public String valueWhenApplies() { return "1"; }
+        @Override public boolean appliesTo(AppiumEnvironmentContext ctx) {
+            return "MACOS".equals(ctx.runnerOs()) && ctx.iosCapable();
+        }
+        @Override public String rationale() {
+            return "listado de dispositivos usará xcrun devicectl en vez de usbmuxd";
+        }
+    }
+
+    /** Reglas activas — agregar futuras variables de entorno específicas por plataforma aquí. */
+    private static final List<PlatformEnvRule> PLATFORM_ENV_RULES = List.of(new PreferDevicectlRule());
+
+    /** Alias retrocompatible usado por el resto de la clase (diagnóstico, validación de herencia). */
+    private static final String PREFER_DEVICECTL_VAR = PreferDevicectlRule.VAR;
+
+    /**
+     * Determina si este Runner tiene capacidad iOS: macOS Y el driver xcuitest
+     * instalado. En Windows/Linux se evita por completo la llamada a
+     * getInstalledDriverList() (cortocircuito de &&) — no hace falta consultar
+     * nada para saber que no aplica.
+     */
+    private boolean detectIosCapability() {
+        return "MACOS".equals(os) && xcuitestIsInstalled(getInstalledDriverList());
+    }
+
     private void startAppium(String entryPoint) throws IOException, InterruptedException {
-        System.out.println("[AppiumValidator] Iniciando: node " + entryPoint + " --port " + PORT);
+        System.out.println("[AppiumValidator] 🚀 Iniciando Appium...");
+        System.out.println("[AppiumValidator] Comando: node " + entryPoint + " --port " + PORT);
 
         Path logFile = resolveLogFile();
         Files.createDirectories(logFile.getParent());
@@ -431,23 +519,174 @@ public class AppiumManager {
                         .redirectErrorStream(true)
                         .redirectOutput(logFile.toFile()));
 
+        // ── Decisión centralizada de entorno por plataforma ──────────────────
+        AppiumEnvironmentContext ctx = new AppiumEnvironmentContext(os, detectIosCapability());
+        System.out.println("[AppiumValidator] " + ctx.detectedPlatformLabel() + " Plataforma detectada: " + os);
+        System.out.println("[AppiumValidator] " + ctx.targetPlatformLabel() + " Plataforma objetivo: "
+                + (ctx.iosCapable() ? "iOS" : "Android"));
+
+        for (PlatformEnvRule rule : PLATFORM_ENV_RULES) {
+            if (rule.appliesTo(ctx)) {
+                pb.environment().put(rule.variableName(), rule.valueWhenApplies());
+                System.out.println("[AppiumValidator] ✅ " + rule.variableName() + "=" + rule.valueWhenApplies()
+                        + " habilitado — " + rule.rationale());
+            } else {
+                System.out.println("[AppiumValidator] ℹ " + rule.variableName() + " no aplica para esta ejecución.");
+            }
+        }
+
         appiumProcess = pb.start();
         managedByUs   = true;
-        System.out.println("[AppiumValidator] Proceso iniciado (PID " + appiumProcess.pid() +
-                "). Esperando /status en puerto " + PORT + "...");
+        long pid = appiumProcess.pid();
+
+        // Bloque de diagnóstico completo — se escribe tanto al log técnico (System.out,
+        // reenviado al backend) como directamente a appium.log. Se genera DESPUÉS de
+        // pb.start(): ProcessBuilder.redirectOutput(file) trunca el archivo al abrirlo,
+        // así que escribir antes se perdería.
+        String diagnosticBlock = buildAppiumEnvironmentDiagnostic(pb, pid, entryPoint);
+        System.out.println(diagnosticBlock);
+        appendToAppiumLog(logFile, diagnosticBlock);
+
+        System.out.println("[AppiumValidator] Esperando /status en puerto " + PORT + "...");
         System.out.println("[AppiumValidator] Log: " + logFile);
 
+        boolean started = false;
         for (int i = 0; i < STARTUP_WAIT; i++) {
             Thread.sleep(1000);
             if (isAlive()) {
-                System.out.println("[AppiumValidator] StatusEndpoint=OK (/status ready:true)");
-                return;
+                started = true;
+                break;
             }
             if (!appiumProcess.isAlive()) {
                 throw new IOException("Appium salio prematuramente. Ver log: " + logFile);
             }
         }
-        throw new IOException("Appium no respondio en " + STARTUP_WAIT + "s. Ver log: " + logFile);
+        if (!started) {
+            throw new IOException("Appium no respondio en " + STARTUP_WAIT + "s. Ver log: " + logFile);
+        }
+
+        System.out.println("[AppiumValidator] ✓ Appium iniciado correctamente (StatusEndpoint OK, ready:true)");
+        appendToAppiumLog(logFile, "[AppiumValidator] ✓ Appium iniciado correctamente (PID " + pid + ")");
+
+        // Validación inmediata — confirma que el proceso REALMENTE heredó la variable
+        // cuando la regla decidió aplicarla, en vez de asumirlo solo por haberla puesto
+        // en pb.environment(). Cualquier fallo en la propia verificación se reporta como
+        // ERROR explícito, nunca como éxito. Cuando la regla NO aplica (Android/Windows/
+        // Linux/sin capacidad iOS), no hay nada que verificar — se informa y se sale.
+        verifyPreferDevicectlInheritance(pid, logFile, new PreferDevicectlRule().appliesTo(ctx));
+    }
+
+    /** Construye el bloque de diagnóstico de entorno solicitado — no asume nada, lee valores reales. */
+    private String buildAppiumEnvironmentDiagnostic(ProcessBuilder pb, long pid, String entryPoint) {
+        Map<String, String> env = pb.environment();
+        String appiumVersion   = getAppiumVersion();
+        String xcuitestVersion = "MACOS".equals(os)
+                ? extractXcuitestVersion(getInstalledDriverList())
+                : "N/A (plataforma no-macOS)";
+        String workDir = pb.directory() != null
+                ? pb.directory().getAbsolutePath()
+                : System.getProperty("user.dir");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[AppiumValidator] 🔧 Appium Environment\n");
+        sb.append("[AppiumValidator]   ").append(PREFER_DEVICECTL_VAR).append(" = ")
+                .append(nvl(env.get(PREFER_DEVICECTL_VAR))).append('\n');
+        sb.append("[AppiumValidator]   JAVA_HOME    = ").append(nvl(System.getenv("JAVA_HOME"))).append('\n');
+        sb.append("[AppiumValidator]   NODE_HOME    = ").append(nvl(resolveNodeBin())).append('\n');
+        sb.append("[AppiumValidator]   ANDROID_HOME = ")
+                .append(nvl(env.getOrDefault("ANDROID_HOME", System.getenv("ANDROID_HOME")))).append('\n');
+        sb.append("[AppiumValidator]   APPIUM_HOME  = ").append(nvl(env.get("APPIUM_HOME"))).append('\n');
+        sb.append("[AppiumValidator]   PATH         = ").append(nvl(env.get("PATH"))).append('\n');
+        sb.append("[AppiumValidator] Appium version        : ").append(appiumVersion).append('\n');
+        sb.append("[AppiumValidator] XCUITest driver       : ").append(xcuitestVersion).append('\n');
+        sb.append("[AppiumValidator] Puerto                : ").append(PORT).append('\n');
+        sb.append("[AppiumValidator] PID                   : ").append(pid).append('\n');
+        sb.append("[AppiumValidator] Directorio de trabajo : ").append(workDir).append('\n');
+        sb.append("[AppiumValidator] Entry point           : ").append(entryPoint);
+        return sb.toString();
+    }
+
+    /** Extrae la versión instalada del driver xcuitest de la salida de 'driver list --installed'. */
+    private String extractXcuitestVersion(String driverListOutput) {
+        if (driverListOutput == null) return "no detectado";
+        Matcher m = Pattern.compile("xcuitest[@\\s]([\\d][\\w.\\-]*)", Pattern.CASE_INSENSITIVE)
+                .matcher(driverListOutput);
+        return m.find() ? m.group(1) : "no detectado";
+    }
+
+    private static String nvl(String v) {
+        return (v == null || v.isBlank()) ? "(no establecida)" : v;
+    }
+
+    /** Agrega una línea/bloque con timestamp directamente a appium.log — no interfiere con lo que Appium mismo escribe. */
+    private void appendToAppiumLog(Path logFile, String block) {
+        try {
+            String stamped = "[" + Instant.now() + "] " + block.replace("\n", "\n[" + Instant.now() + "] ") + "\n";
+            Files.writeString(logFile, stamped, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception e) {
+            System.err.println("[AppiumValidator] No se pudo escribir el diagnostico en appium.log: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Verifica que el proceso Appium REALMENTE heredó APPIUM_XCUITEST_PREFER_DEVICECTL=1,
+     * leyendo el entorno real del proceso vía 'ps eww {pid}' (macOS) — nunca asume éxito
+     * solo por haberla puesto en ProcessBuilder.environment(). Cualquier fallo de la
+     * propia verificación se reporta como ERROR explícito, para no producir falsos
+     * positivos.
+     *
+     * @param expectedApplied si la regla decidió que esta variable debía activarse para
+     *                        esta plataforma — si es false (Android/Windows/Linux/sin
+     *                        capacidad iOS), no hay nada que verificar.
+     */
+    private void verifyPreferDevicectlInheritance(long pid, Path logFile, boolean expectedApplied) {
+        if (!expectedApplied) {
+            System.out.println("[AppiumValidator] Verificación de herencia omitida — "
+                    + PREFER_DEVICECTL_VAR + " no aplica para esta plataforma/ejecución.");
+            return;
+        }
+        if (!"MACOS".equals(os)) {
+            System.out.println("[AppiumValidator] Verificación de herencia de entorno omitida (solo aplica en macOS).");
+            return;
+        }
+        try {
+            Process p = new ProcessBuilder("ps", "eww", String.valueOf(pid))
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            boolean done = p.waitFor(5, TimeUnit.SECONDS);
+            if (!done) {
+                p.destroyForcibly();
+                String msg = "[AppiumValidator] ERROR: no se pudo verificar el entorno real del proceso Appium "
+                        + "('ps eww " + pid + "' no respondió a tiempo) — NO se puede confirmar si "
+                        + PREFER_DEVICECTL_VAR + " fue heredada. No se asume éxito.";
+                System.err.println(msg);
+                appendToAppiumLog(logFile, msg);
+                return;
+            }
+
+            boolean inherited = out.contains(PREFER_DEVICECTL_VAR + "=1");
+            if (inherited) {
+                System.out.println("[AppiumValidator] ✓ Variable heredada por el proceso "
+                        + "(confirmado leyendo el entorno real vía 'ps eww " + pid + "')");
+                System.out.println("[AppiumValidator] ✓ Entorno cargado correctamente");
+                appendToAppiumLog(logFile, "[AppiumValidator] ✓ " + PREFER_DEVICECTL_VAR
+                        + " confirmada en el entorno real del proceso (PID " + pid + ")");
+            } else {
+                String msg = "[AppiumValidator] ERROR: " + PREFER_DEVICECTL_VAR + " NO aparece en el entorno "
+                        + "real del proceso Appium (PID " + pid + "). Se estableció en "
+                        + "ProcessBuilder.environment() pero 'ps eww' no la muestra heredada — el listado "
+                        + "de dispositivos usará usbmuxd (comportamiento anterior), no xcrun devicectl. "
+                        + "Revisa si algo está reemplazando el entorno del proceso.";
+                System.err.println(msg);
+                appendToAppiumLog(logFile, msg);
+            }
+        } catch (Exception e) {
+            String msg = "[AppiumValidator] ERROR: fallo al verificar herencia de entorno: " + e.getMessage()
+                    + " — no se puede confirmar " + PREFER_DEVICECTL_VAR + ". No se asume éxito.";
+            System.err.println(msg);
+            appendToAppiumLog(logFile, msg);
+        }
     }
 
     // ── Install ───────────────────────────────────────────────────────────
