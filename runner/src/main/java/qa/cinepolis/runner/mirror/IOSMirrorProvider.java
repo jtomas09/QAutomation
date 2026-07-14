@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import qa.cinepolis.runner.AppiumXcodebuildLogForwarder;
 import qa.cinepolis.runner.BackendClient;
+import qa.cinepolis.runner.IOSDeviceRegistry;
 import qa.cinepolis.runner.IosPreflightManager;
 import qa.cinepolis.runner.RunnerAgent;
 import qa.cinepolis.runner.WdaManager;
@@ -70,10 +71,11 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
     @Override
     public boolean isDeviceConnected(String udid) {
-        // WdaManager administra un único proceso WDA global (ver su javadoc) —
-        // es la misma señal de "listo" que usa el resto del Runner antes de
-        // crear una sesión Appium para iOS.
-        return WdaManager.isWdaRunning();
+        // Presencia física real (misma fuente que readyForExecution) — NUNCA
+        // WdaManager.isWdaRunning(). Conectado y "WDA arriba" son conceptos
+        // distintos: un fallo de WDA no debe reportarse como dispositivo
+        // desconectado (ver IOSMirrorStateTracker).
+        return IOSDeviceRegistry.isPresent(udid);
     }
 
     @Override

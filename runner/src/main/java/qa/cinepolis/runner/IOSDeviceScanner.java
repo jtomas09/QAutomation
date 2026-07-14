@@ -82,6 +82,12 @@ public class IOSDeviceScanner {
      * devicectl --json-output; if resolution fails, xctrace is used as fallback.
      */
     public static List<Map<String, String>> scan() {
+        List<Map<String, String>> result = scanInternal();
+        IOSDeviceRegistry.update(result);
+        return result;
+    }
+
+    private static List<Map<String, String>> scanInternal() {
         List<Map<String, String>> devicectlResult = scanWithDevicectl();
 
         // All devices have physical UDIDs (CoreDevice UUIDs were resolved) — preferred path

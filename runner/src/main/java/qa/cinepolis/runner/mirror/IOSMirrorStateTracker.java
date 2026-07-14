@@ -67,6 +67,11 @@ public final class IOSMirrorStateTracker {
      */
     public static Snapshot get(String udid, boolean connected, boolean iosDevice) {
         if (!connected) {
+            // Desconexión física real (connected ya viene de IOSDeviceRegistry, no de
+            // WdaManager) — cualquier fase de WDA/Mirror rastreada queda obsoleta;
+            // se limpia para que una futura reconexión arranque en DEVICE_DETECTED
+            // en vez de heredar un ERROR/INITIALIZING_WDA de la sesión anterior.
+            clear(udid);
             return new Snapshot(Phase.DEVICE_DISCONNECTED, null, System.currentTimeMillis());
         }
         if (!iosDevice) {
