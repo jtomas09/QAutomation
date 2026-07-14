@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Manages the local git workspace for the automation project.
@@ -95,30 +96,58 @@ public class WorkspaceManager {
 
     // ── Git operations ────────────────────────────────────────────────────────
 
+    /** Network-bound git ops (clone/fetch) get a bounded retry — a single transient
+     *  reset/EOF (observed in practice on unstable connections) should not force a
+     *  whole job to fail and the workspace to be wiped for nothing. */
+    private static final int    NETWORK_OP_MAX_ATTEMPTS = 3;
+    private static final long[] NETWORK_OP_BACKOFF_MS   = {5_000, 15_000};
+
     private boolean cloneRepo(String executionId) {
-        try {
-            workspaceDir.getParentFile().mkdirs();
-            List<String> cmd = List.of(
-                    "git", "clone",
-                    "--branch", repoBranch,
-                    repoUrl,
-                    workspaceDir.getAbsolutePath());
-            return runGit(cmd, workspaceDir.getParentFile(), executionId, 600);
-        } catch (Exception e) {
-            client.sendLog(executionId, "ERROR", "❌ Error al clonar repositorio: " + e.getMessage());
-            return false;
+        for (int attempt = 1; attempt <= NETWORK_OP_MAX_ATTEMPTS; attempt++) {
+            try {
+                workspaceDir.getParentFile().mkdirs();
+                // Clean up any partial checkout left by a previous failed attempt —
+                // `git clone` refuses to clone into a non-empty existing directory.
+                if (workspaceDir.exists()) deleteDirectory(workspaceDir);
+
+                List<String> cmd = List.of(
+                        "git", "clone", "--progress",
+                        "--branch", repoBranch,
+                        repoUrl,
+                        workspaceDir.getAbsolutePath());
+                if (runGit(cmd, workspaceDir.getParentFile(), executionId, 600)) return true;
+            } catch (Exception e) {
+                client.sendLog(executionId, "ERROR",
+                        "❌ Error al clonar repositorio (intento " + attempt + "/" + NETWORK_OP_MAX_ATTEMPTS
+                                + "): " + e.getMessage());
+            }
+            if (attempt < NETWORK_OP_MAX_ATTEMPTS) retryBackoff(executionId, attempt);
         }
+        return false;
     }
 
     private boolean updateRepo(String executionId) {
-        try {
-            // Fetch latest from remote
-            boolean fetched = runGit(
-                    List.of("git", "fetch", "origin"),
-                    workspaceDir, executionId, 120);
-            if (!fetched) return false;
+        boolean fetched = false;
+        for (int attempt = 1; attempt <= NETWORK_OP_MAX_ATTEMPTS; attempt++) {
+            try {
+                // Fetch latest from remote
+                if (runGit(List.of("git", "fetch", "--progress", "origin"),
+                        workspaceDir, executionId, 120)) {
+                    fetched = true;
+                    break;
+                }
+            } catch (Exception e) {
+                client.sendLog(executionId, "WARN",
+                        "⚠️ Error actualizando repositorio (intento " + attempt + "/" + NETWORK_OP_MAX_ATTEMPTS
+                                + "): " + e.getMessage());
+            }
+            if (attempt < NETWORK_OP_MAX_ATTEMPTS) retryBackoff(executionId, attempt);
+        }
+        if (!fetched) return false;
 
-            // Reset to remote branch — discards any local changes (runner should never modify)
+        try {
+            // Reset to remote branch — discards any local changes (runner should never modify).
+            // Purely local/fast — no retry needed here.
             return runGit(
                     List.of("git", "reset", "--hard", "origin/" + repoBranch),
                     workspaceDir, executionId, 30);
@@ -128,6 +157,21 @@ public class WorkspaceManager {
         }
     }
 
+    private void retryBackoff(String executionId, int attemptJustFailed) {
+        long waitMs = NETWORK_OP_BACKOFF_MS[Math.min(attemptJustFailed - 1, NETWORK_OP_BACKOFF_MS.length - 1)];
+        client.sendLog(executionId, "WARN",
+                "⚠ Reintentando en " + (waitMs / 1000) + "s (intento "
+                        + (attemptJustFailed + 1) + "/" + NETWORK_OP_MAX_ATTEMPTS + ")…");
+        try { Thread.sleep(waitMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    // Matches git's own --progress lines (e.g. "Receiving objects:  42% (123/456)",
+    // "Resolving deltas: 100% (78/78)") — these repeat rapidly during an active
+    // transfer and are throttled below so a slow clone doesn't flood the backend
+    // with one HTTP POST per percentage tick.
+    private static final Pattern PROGRESS_LINE = Pattern.compile(".*\\d{1,3}%.*");
+    private static final long    PROGRESS_FORWARD_THROTTLE_MS = 3_000;
+
     private boolean runGit(List<String> cmd, File workingDir, String executionId,
                            int timeoutSeconds) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -135,11 +179,18 @@ public class WorkspaceManager {
         pb.redirectErrorStream(true);
         Process p = pb.start();
 
+        long lastProgressForwardMs = 0L;
         try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
             String line;
             while ((line = br.readLine()) != null) {
-                client.sendLog(executionId, "INFO", "[git] " + line);
-                System.out.println("[git] " + line);
+                System.out.println("[git] " + line); // full detail always kept in the local Runner log
+
+                boolean isProgress = PROGRESS_LINE.matcher(line).matches();
+                long now = System.currentTimeMillis();
+                if (!isProgress || now - lastProgressForwardMs >= PROGRESS_FORWARD_THROTTLE_MS) {
+                    client.sendLog(executionId, "INFO", "[git] " + line);
+                    if (isProgress) lastProgressForwardMs = now;
+                }
             }
         }
 

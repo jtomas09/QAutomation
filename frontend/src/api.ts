@@ -132,6 +132,14 @@ export async function postRun(req: RunRequest): Promise<ExecutionStarted> {
 /**
  * GET /api/run/{id}/stream — subscribes to live SSE logs for an execution.
  * Returns an unsubscribe function; call it to close the EventSource.
+ *
+ * Reconnection: EventSource.onerror fires for any transport-level failure
+ * (network blip, proxy idle-timeout, transient 502/504) with no way to
+ * inspect the actual cause. Instead of treating every error as fatal, this
+ * retries with exponential backoff and only escalates to `onError` once the
+ * attempt budget is exhausted — so a brief disconnect (e.g. a proxy cutting
+ * an idle connection during a long silent gap in the Runner's logs) recovers
+ * transparently instead of aborting the execution tracking client-side.
  */
 export function streamExecution(
   executionId: string,
@@ -140,43 +148,99 @@ export function streamExecution(
   onError:     (message: string)   => void,
 ): () => void {
   const url = `${API_URL}/api/run/${executionId}/stream`
-  const es  = new EventSource(url)
+
+  const MAX_RECONNECT_ATTEMPTS = 6
+  const BASE_DELAY_MS = 2000
+  const MAX_DELAY_MS  = 20000
+
+  // A connection only "earns back" a fresh retry budget once it has proven
+  // stable for a while — otherwise a proxy that accepts the connection and
+  // kills it within milliseconds (rapid flapping) would reset the counter on
+  // every onopen and retry forever instead of ever reporting a fatal error.
+  const STABLE_CONNECTION_MS = 5000
 
   let passed = 0, failed = 0, skipped = 0, total = 0
+  let es: EventSource | null = null
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectAttempts = 0
+  let stopped  = false // true once done/onDone or unsubscribe() has run
+  let hadOpenedOnce = false
+  let openedAtMs = 0
 
-  es.addEventListener('log', (e: MessageEvent) => {
-    try {
-      const { level, message } = JSON.parse(e.data) as { level: LogLevel; message: string }
-      addLog(level, message)
-      if (level === 'PASS') { passed++; total++ }
-      if (level === 'FAIL') { failed++; total++ }
-      if (level === 'SKIP') { skipped++; total++ }
-    } catch {
-      addLog('WARN', `Unexpected SSE event: ${e.data}`)
+  function connect() {
+    es = new EventSource(url)
+
+    es.onopen = () => {
+      if (reconnectAttempts > 0) {
+        addLog('INFO', `✅ Reconexión SSE exitosa (intento ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}).`)
+      }
+      hadOpenedOnce = true
+      openedAtMs    = Date.now()
     }
-  })
 
-  es.addEventListener('status', (e: MessageEvent) => {
-    try {
-      const { status } = JSON.parse(e.data) as { status: string }
-      if (status === 'FINALIZING') addLog('INFO', '⏳ Post-procesamiento activo — limpiando dispositivo, generando reporte…')
-      if (status === 'ABORTING')   addLog('WARN', '⛔ Abortando ejecución…')
-    } catch { /* ignore malformed events */ }
-  })
+    es.addEventListener('log', (e: MessageEvent) => {
+      try {
+        const { level, message } = JSON.parse(e.data) as { level: LogLevel; message: string }
+        addLog(level, message)
+        if (level === 'PASS') { passed++; total++ }
+        if (level === 'FAIL') { failed++; total++ }
+        if (level === 'SKIP') { skipped++; total++ }
+      } catch {
+        addLog('WARN', `Unexpected SSE event: ${e.data}`)
+      }
+    })
 
-  es.addEventListener('done', () => {
-    const icon = failed > 0 ? '❌' : '✅'
-    addLog('INFO', `${icon} Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)
-    es.close()
-    onDone({ passed, failed, skipped, total })
-  })
+    es.addEventListener('status', (e: MessageEvent) => {
+      try {
+        const { status } = JSON.parse(e.data) as { status: string }
+        if (status === 'FINALIZING') addLog('INFO', '⏳ Post-procesamiento activo — limpiando dispositivo, generando reporte…')
+        if (status === 'ABORTING')   addLog('WARN', '⛔ Abortando ejecución…')
+      } catch { /* ignore malformed events */ }
+    })
 
-  es.onerror = () => {
-    es.close()
-    onError(`❌ SSE connection lost with backend. Verify Railway is active.`)
+    es.addEventListener('done', () => {
+      const icon = failed > 0 ? '❌' : '✅'
+      addLog('INFO', `${icon} Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)
+      stopped = true
+      es?.close()
+      onDone({ passed, failed, skipped, total })
+    })
+
+    es.onerror = () => {
+      if (stopped) return
+      es?.close()
+
+      // A connection that stayed open (and presumably useful) for a while
+      // before dying gets a fresh retry budget — this is the expected path
+      // for a proxy idle-timeout after a long silent gap. A connection that
+      // never opens, or dies immediately after opening, keeps accumulating
+      // toward the cap so a genuinely down backend still surfaces as fatal.
+      if (openedAtMs > 0 && Date.now() - openedAtMs >= STABLE_CONNECTION_MS) {
+        reconnectAttempts = 0
+      }
+      reconnectAttempts++
+      if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+        addLog('ERROR', `❌ SSE: se agotaron ${MAX_RECONNECT_ATTEMPTS} intentos de reconexión.`)
+        stopped = true
+        onError(`❌ SSE connection lost with backend. Verify Railway is active.`)
+        return
+      }
+
+      const delay = Math.min(BASE_DELAY_MS * 2 ** (reconnectAttempts - 1), MAX_DELAY_MS)
+      addLog('WARN',
+        `⚠️ Conexión SSE interrumpida${hadOpenedOnce ? '' : ' (nunca llegó a abrir)'} — ` +
+        `reintentando en ${Math.round(delay / 1000)}s (intento ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})…`)
+      reconnectTimer = setTimeout(connect, delay)
+    }
   }
 
-  return () => es.close()
+  connect()
+
+  return () => {
+    stopped = true
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    es?.close()
+  }
 }
 
 /** DELETE /api/run/{id} — aborts an execution. */
