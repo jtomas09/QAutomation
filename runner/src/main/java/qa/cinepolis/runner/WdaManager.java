@@ -14,27 +14,29 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * WDA (WebDriverAgent) lifecycle manager for iOS testing.
+ * WDA (WebDriverAgent) process MECHANISM for iOS testing — no launch/orchestration
+ * decisions live here anymore (ver WdaLaunchService, la única puerta de entrada que
+ * decide CUÁNDO construir/arrancar/verificar WDA). Esta clase solo sabe CÓMO hacerlo.
  *
- * WDA is the iOS test automation bridge used by Appium's XCUITest driver.
- * In Xcode 16+/Xcode 26 with CoreDevice, WDA may bind to a device-specific IP
- * (e.g. http://192.168.1.13:8100) rather than localhost:8100. The URL is announced
- * in xcodebuild stdout as "ServerURLHere->URL<-ServerURLHere".
+ * WDA es el puente de automatización que usa el driver XCUITest de Appium. En Xcode
+ * 16+/26 con CoreDevice, WDA puede enlazar a una IP específica del dispositivo (p.ej.
+ * http://192.168.1.13:8100) en vez de localhost:8100. La URL se anuncia en el stdout
+ * de xcodebuild como "ServerURLHere->URL<-ServerURLHere".
  *
- * This class detects that URL in real time, stores it, and probes it to confirm
- * WDA is truly ready before signalling the rest of the preflight chain.
- *
- * Responsibilities:
- *  1. Detect if WDA is already running   → isWdaRunning()
- *  2. Pre-start WDA before tests begin   → ensureWdaRunning()
- *  3. Stream xcodebuild output, detect URL pattern in real time
- *  4. Wait for WDA /status to respond    → waitForWdaReady()
- *  5. Expose detected URL to JobExecutor → getDetectedWdaUrl()
- *  6. Produce actionable failure reports → diagnoseWdaFailure()
+ * Responsabilidades (mecanismo puro, sin decidir "cuándo"):
+ *  1. Detectar si WDA ya está corriendo        → isWdaRunning()
+ *  2. Invocar xcodebuild (dos estrategias)      → tryStartFromDerivedData()/tryStartFromProject()
+ *  3. Reenviar TODA la salida relevante de xcodebuild al Dashboard, sin perder
+ *     información (codesign, provisioning, CompileSwift, Ld, PhaseScript, error:,
+ *     warning:, no solo BUILD SUCCEEDED/FAILED) → streamBuildOutput()
+ *  4. Esperar a que /status responda            → waitForWdaReady()
+ *  5. Exponer la URL detectada                  → getDetectedWdaUrl()
+ *  6. Producir diagnósticos accionables          → diagnoseWdaFailure()
  *
  * Android logic is NOT touched anywhere in this class.
  */
@@ -54,11 +56,6 @@ public final class WdaManager {
 
     // The xcodebuild controller process (Mac side). WDA itself runs on the device.
     private static volatile Process wdaProcess = null;
-
-    // True when ensureWdaRunning() actually started an xcodebuild process.
-    // False when WDA launch was skipped (Appium will handle it).
-    // Used by IosPreflightManager to avoid invalidating cache on "no xcodeproj" paths.
-    private static volatile boolean lastLaunchWasAttempted = false;
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
@@ -113,111 +110,15 @@ public final class WdaManager {
         return "http://localhost:" + WDA_PORT;
     }
 
-    /**
-     * Returns true if the last ensureWdaRunning() call actually started an xcodebuild process.
-     * False when the call fell through to "Appium will handle it" without attempting a launch.
-     * Used by IosPreflightManager to avoid cache invalidation on the "no xcodeproj" code path.
-     */
-    public static boolean wasLastLaunchAttempted() {
-        return lastLaunchWasAttempted;
+    /** Limpia la URL detectada de una sesión previa — llamar al inicio de cada nuevo intento. */
+    static void resetDetectedUrl() {
+        detectedWdaUrl = null;
     }
 
     // La propiedad "¿quién tiene derecho a lanzar/gestionar WDA ahora mismo?"
-    // (ejecución real vs. Mirror on-demand) vive en WdaLaunchCoordinator, no aquí —
-    // ver su javadoc para el porqué de la separación (SRP: WdaManager gestiona el
-    // PROCESO de WDA; WdaLaunchCoordinator arbitra quién tiene derecho a tocarlo).
-
-    /**
-     * Main entry point: verifies WDA is running and starts it if needed.
-     *
-     * If wdaCached=true  → WDA was previously compiled and is installed on the device.
-     *                       A fast start (~15-30 s) via test-without-building is attempted.
-     *                       Falls back to full xcodebuild test if DerivedData is stale.
-     *
-     * If wdaCached=false → WDA needs full compilation. This class does not attempt it;
-     *                       Appium XCUITest driver handles it when the session is created.
-     *
-     * @return true if WDA is confirmed ready, false if Appium must handle it
-     */
-    public static synchronized boolean ensureWdaRunning(BackendClient client, String executionId,
-                                            String udid, String teamId,
-                                            String wdaBundleId, boolean wdaCached) {
-
-        // Reset any URL detected in a prior session so stale data isn't forwarded.
-        detectedWdaUrl = null;
-        lastLaunchWasAttempted = false;
-
-        client.sendTechLog(executionId,
-                "[WDA] Verificando WebDriverAgent en localhost:" + WDA_PORT + "...");
-
-        // Fast path: WDA is already running (kept alive from a previous run)
-        if (isWdaRunning()) {
-            String active = detectedWdaUrl != null ? detectedWdaUrl : "http://localhost:" + WDA_PORT;
-            client.sendLog(executionId, "INFO",
-                    "✅ [WDA] WebDriverAgent ya está activo en " + active
-                    + " — sesión Appium será instantánea.");
-            return true;
-        }
-
-        if (!wdaCached) {
-            client.sendLog(executionId, "INFO",
-                    "ℹ️  [WDA] Primera ejecución en este dispositivo.\n"
-                    + "   🔨 WDA será compilado e instalado automáticamente por Appium.\n"
-                    + "   ⏱  Tiempo estimado: 5-10 minutos (solo la primera vez).\n"
-                    + "   💡 Ejecuciones posteriores usarán el binario precompilado (~15-30 s).");
-            return false;
-        }
-
-        // WDA was compiled before — attempt fast start
-        client.sendTechLog(executionId,
-                "[WDA] WDA precompilado detectado. Iniciando en dispositivo " + udid + "...");
-
-        // Attempt A: test-without-building (uses existing DerivedData, fastest)
-        boolean launchAttempted = tryStartFromDerivedData(client, executionId, udid);
-
-        // Attempt B: full xcodebuild test from WDA project (slower but more reliable)
-        if (!launchAttempted) {
-            String projectPath = findWdaProjectPath();
-            if (projectPath != null) {
-                launchAttempted = tryStartFromProject(
-                        client, executionId, udid, teamId, wdaBundleId, projectPath);
-            } else {
-                client.sendLog(executionId, "WARN",
-                        "⚠️  [WDA] Proyecto WebDriverAgent.xcodeproj no encontrado.\n"
-                        + "   Appium intentará iniciar WDA durante la creación de sesión.");
-            }
-        }
-
-        if (!launchAttempted) {
-            client.sendLog(executionId, "WARN",
-                    "⚠️  [WDA] No se pudo iniciar WDA directamente.\n"
-                    + "   Appium lo iniciará durante la creación de sesión (puede tardar 1-2 min).");
-            // lastLaunchWasAttempted stays false — no xcodebuild was started.
-            // IosPreflightManager will NOT invalidate the WDA cache because of this.
-            return false;
-        }
-
-        lastLaunchWasAttempted = true;
-
-        client.sendTechLog(executionId,
-                "[WDA] Proceso WebDriverAgent iniciado. Esperando que el servidor HTTP arranque...");
-
-        // Wait for WDA to respond on /status (probes both localhost and detected URL)
-        boolean ready = waitForWdaReady(client, executionId, 180);
-
-        if (!ready) {
-            String detectedUrl = detectedWdaUrl;
-            String cause = (detectedUrl == null || detectedUrl.isBlank())
-                    ? "❌ [WDA] No apareció ServerURLHere en 180s — WDA nunca inició."
-                    + "\n   Causa: error al compilar WDA, firma incorrecta, o dispositivo no responde."
-                    : "❌ [WDA] WDA inició (URL: " + detectedUrl + ") pero /status no respondió en 180s."
-                    + "\n   Causa: WDA compiló pero falló al arrancar el servidor HTTP en el dispositivo.";
-            client.sendLog(executionId, "ERROR", cause
-                    + "\n" + diagnoseWdaFailure(udid, teamId));
-        }
-
-        return ready;
-    }
+    // (ejecución real vs. Mirror on-demand) vive en WdaLaunchCoordinator; CUÁNDO
+    // construir/arrancar/verificar vive en WdaLaunchService. Esta clase (WdaManager)
+    // solo ofrece el mecanismo — ver su javadoc de clase para el porqué de la separación.
 
     /**
      * Polls WDA /status every 3 s until it responds or the timeout elapses.
@@ -421,20 +322,42 @@ public final class WdaManager {
         return pids;
     }
 
+    // ── Resultado de un intento de build ──────────────────────────────────────
+
+    /**
+     * Resultado de UN intento de arrancar WDA — nunca se comparte entre intentos.
+     * {@code capturedError} lo actualiza en tiempo real {@link #streamBuildOutput}
+     * con la línea "error:" más específica vista en ESTE proceso — WdaLaunchService
+     * la lee después de que {@link #waitForWdaReady} agota su plazo, garantizando
+     * que el motivo mostrado en el Mirror pertenece siempre a este mismo intento,
+     * nunca a appium.log ni a ningún otro proceso.
+     */
+    static final class BuildOutcome {
+        final boolean started;
+        final AtomicReference<String> capturedError = new AtomicReference<>();
+
+        private BuildOutcome(boolean started) { this.started = started; }
+
+        static BuildOutcome started()    { return new BuildOutcome(true); }
+        static BuildOutcome notStarted() { return new BuildOutcome(false); }
+
+        String capturedError() { return capturedError.get(); }
+    }
+
     // ── Start attempt A: test-without-building ────────────────────────────────
 
     /**
      * Looks for a pre-built WebDriverAgentRunner .xctestrun in Xcode DerivedData and
-     * launches xcodebuild test-without-building. Returns true if the process started.
+     * launches xcodebuild test-without-building.
      */
-    static boolean tryStartFromDerivedData(BackendClient client, String executionId, String udid) {
+    static BuildOutcome tryStartFromDerivedData(BackendClient client, String executionId, String udid) {
         File derivedDataRoot = new File(
                 System.getProperty("user.home") + "/Library/Developer/Xcode/DerivedData");
-        if (!derivedDataRoot.isDirectory()) return false;
+        if (!derivedDataRoot.isDirectory()) return BuildOutcome.notStarted();
 
         File[] wdaDirs = derivedDataRoot.listFiles(
                 f -> f.isDirectory() && f.getName().startsWith("WebDriverAgent-"));
-        if (wdaDirs == null || wdaDirs.length == 0) return false;
+        if (wdaDirs == null || wdaDirs.length == 0) return BuildOutcome.notStarted();
 
         for (File wdaDir : wdaDirs) {
             File productsDir = new File(wdaDir, "Build/Products");
@@ -461,26 +384,29 @@ public final class WdaManager {
                             .redirectErrorStream(true)
                             .start();
                     wdaProcess = p;
-                    drainProcessOutput(p, "[WDA-fast]", client, executionId);
-                    return true;
+                    BuildOutcome outcome = BuildOutcome.started();
+                    streamBuildOutput(p, "[WDA-fast]", client, executionId, outcome.capturedError);
+                    return outcome;
                 } catch (Exception e) {
                     client.sendLog(executionId, "WARN",
                             "   [WDA] test-without-building no pudo iniciarse: " + e.getMessage());
                 }
             }
         }
-        return false;
+        return BuildOutcome.notStarted();
     }
 
     // ── Start attempt B: full xcodebuild test ─────────────────────────────────
 
     /**
      * Starts WDA via full xcodebuild test from the WebDriverAgent.xcodeproj.
-     * Slower but works even when DerivedData is stale or missing.
+     * Compila desde cero — funciona incluso sin DerivedData previo (primera vez
+     * en un dispositivo/Mac limpios). Más lento, pero es el único camino que NO
+     * depende de que algo haya compilado WDA antes.
      */
-    static boolean tryStartFromProject(BackendClient client, String executionId,
-                                        String udid, String teamId,
-                                        String wdaBundleId, String projectPath) {
+    static BuildOutcome tryStartFromProject(BackendClient client, String executionId,
+                                             String udid, String teamId,
+                                             String wdaBundleId, String projectPath) {
         client.sendLog(executionId, "INFO",
                 "   [WDA] Iniciando desde proyecto: " + projectPath);
         try {
@@ -503,12 +429,13 @@ public final class WdaManager {
                     .redirectErrorStream(true)
                     .start();
             wdaProcess = p;
-            drainProcessOutput(p, "[WDA-build]", client, executionId);
-            return true;
+            BuildOutcome outcome = BuildOutcome.started();
+            streamBuildOutput(p, "[WDA-build]", client, executionId, outcome.capturedError);
+            return outcome;
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
                     "   [WDA] xcodebuild test no pudo iniciarse: " + e.getMessage());
-            return false;
+            return BuildOutcome.notStarted();
         }
     }
 
@@ -579,26 +506,42 @@ public final class WdaManager {
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
+    // Líneas que SIEMPRE deben llegar completas al Dashboard — categorías pedidas
+    // explícitamente: codesign, provisioning, compilación, link, phase scripts,
+    // errores y warnings. No es un filtro de qué se reenvía (se reenvía TODO,
+    // ver streamBuildOutput) — solo decide qué línea puntual dispara una alerta
+    // INFO/ERROR inmediata en vez de esperar al siguiente flush por lotes.
+    private static final Pattern IMMEDIATE_SIGNAL = Pattern.compile(
+            "(?i)error:|codesign|provisioning profile|requires a provisioning profile");
+
+    private static final long BUILD_LOG_FLUSH_MS    = 1_000L;
+    private static final int  BUILD_LOG_FLUSH_CHARS = 6_000;
+
     /**
-     * Starts a daemon thread that streams xcodebuild stdout line by line.
+     * Hilo daemon que reenvía TODA la salida de xcodebuild al Dashboard — no
+     * únicamente BUILD SUCCEEDED/FAILED. Se agrupa en lotes (cada ~1s o ~6000
+     * caracteres) para no convertir un build de cientos de líneas en cientos de
+     * peticiones HTTP individuales, pero ninguna línea se descarta.
      *
-     * Detects key events in real time:
-     *  - "ServerURLHere->URL<-ServerURLHere" → stores URL in detectedWdaUrl, logs it
-     *  - "BUILD SUCCEEDED" → logs "WebDriverAgent compilado"
-     *  - "BUILD FAILED"    → logs the failure signal
-     *
-     * This prevents the process from blocking when its output buffer fills.
+     * Además:
+     *  - Detecta "ServerURLHere->URL<-ServerURLHere" → guarda la URL, log INFO inmediato.
+     *  - Detecta BUILD SUCCEEDED/FAILED → log INFO/ERROR inmediato (además del lote).
+     *  - Captura en {@code capturedError} la línea "error:" más específica vista —
+     *    WdaLaunchService la usa como motivo real si el intento termina fallando,
+     *    en vez de un mensaje genérico o de contenido de otro proceso.
      */
-    private static void drainProcessOutput(Process p, String prefix,
-                                            BackendClient client, String executionId) {
+    private static void streamBuildOutput(Process p, String prefix, BackendClient client,
+                                           String executionId, AtomicReference<String> capturedError) {
         Thread t = new Thread(() -> {
+            StringBuilder batch = new StringBuilder();
+            long lastFlush = System.currentTimeMillis();
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(p.getInputStream()))) {
                 String line;
                 while ((line = br.readLine()) != null) {
                     System.out.println(prefix + " " + line);
+                    batch.append(line).append('\n');
 
-                    // Detect WDA server URL announcement
                     Matcher urlMatcher = SERVER_URL_PAT.matcher(line);
                     if (urlMatcher.find()) {
                         String url = urlMatcher.group(1).trim();
@@ -611,7 +554,6 @@ public final class WdaManager {
                         }
                     }
 
-                    // Detect build completion
                     String upper = line.toUpperCase();
                     if (upper.contains("BUILD SUCCEEDED")) {
                         if (client != null && executionId != null) {
@@ -621,15 +563,39 @@ public final class WdaManager {
                     } else if (upper.contains("BUILD FAILED")) {
                         if (client != null && executionId != null) {
                             client.sendLog(executionId, "ERROR",
-                                    "❌ [WDA] Error compilando WDA — BUILD FAILED."
-                                    + "\n   Revisa el log de xcodebuild para el error específico.");
+                                    "❌ [WDA] Error compilando WDA — BUILD FAILED.");
                         }
                     }
+
+                    // Captura la PRIMERA línea "error:" de ESTE intento — la causa raíz
+                    // real suele aparecer antes que los resúmenes genéricos que xcodebuild
+                    // imprime al final (p.ej. "xcodebuild: error: Failed to build workspace
+                    // ..."). Nunca se sobreescribe con contenido de otro proceso (appium.log).
+                    if (line.toLowerCase().contains("error:")) {
+                        capturedError.compareAndSet(null, line.trim());
+                    }
+
+                    long now = System.currentTimeMillis();
+                    boolean dueByTime  = now - lastFlush >= BUILD_LOG_FLUSH_MS;
+                    boolean dueBySize  = batch.length() >= BUILD_LOG_FLUSH_CHARS;
+                    boolean immediate  = IMMEDIATE_SIGNAL.matcher(line).find();
+                    if (batch.length() > 0 && (dueByTime || dueBySize || immediate)) {
+                        flushBatch(client, executionId, prefix, batch);
+                        lastFlush = now;
+                    }
                 }
+                if (batch.length() > 0) flushBatch(client, executionId, prefix, batch);
             } catch (Exception ignored) {}
         }, "wda-drain");
         t.setDaemon(true);
         t.start();
+    }
+
+    private static void flushBatch(BackendClient client, String executionId, String prefix, StringBuilder batch) {
+        if (client != null && executionId != null) {
+            client.sendTechLog(executionId, prefix + "\n" + batch);
+        }
+        batch.setLength(0);
     }
 
     /**

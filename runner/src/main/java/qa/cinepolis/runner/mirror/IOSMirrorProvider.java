@@ -2,12 +2,12 @@ package qa.cinepolis.runner.mirror;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import qa.cinepolis.runner.AppiumXcodebuildLogForwarder;
 import qa.cinepolis.runner.BackendClient;
 import qa.cinepolis.runner.IOSDeviceRegistry;
 import qa.cinepolis.runner.IosPreflightManager;
 import qa.cinepolis.runner.RunnerAgent;
 import qa.cinepolis.runner.WdaLaunchCoordinator;
+import qa.cinepolis.runner.WdaLaunchService;
 import qa.cinepolis.runner.WdaManager;
 
 import java.net.URI;
@@ -107,6 +107,16 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             return false;
         }
 
+        if (WdaLaunchService.isTerminalError(udid)) {
+            // Estado absorbente (ver WdaLaunchService) — el último intento on-demand
+            // falló de forma terminal. NO se reintenta automáticamente sin importar
+            // cuántas veces el frontend reconecte el stream (watchdog de staleness,
+            // cambios de pestaña/foco, etc.) — esto es exactamente lo que elimina el
+            // retry infinito. Solo WdaLaunchService.resetForRetry(), disparado por una
+            // acción explícita del usuario (botón "Reintentar"), reabre este camino.
+            return false;
+        }
+
         triggerOnDemandLaunch(udid);
         // El stream se abre igual — los frames empezarán a llegar cuando WDA esté listo.
         // triggerOnDemandLaunch() → runPreflight() publicará INITIALIZING en breve.
@@ -129,41 +139,27 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             return;
         }
 
-        long attemptStartedAtMs = System.currentTimeMillis();
         Thread t = new Thread(() -> {
             try {
                 BackendClient client = RunnerAgent.getClient();
                 if (client == null) {
                     String reason = "BackendClient no disponible todavía — no se pudo lanzar WDA.";
                     System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
-                    WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
+                    WdaLaunchService.markTerminalError(udid, reason);
                     return;
                 }
                 String mirrorExecutionId = "mirror-" + udid;
                 System.out.println("[IOSMirrorProvider] WDA no activo — lanzando bajo demanda "
                         + "(puede tardar varios minutos la primera vez) para " + udid + "...");
-                IosPreflightManager.IosPreflightResult result =
-                        IosPreflightManager.runPreflight(client, mirrorExecutionId, udid);
-
-                boolean wdaUp = result.wdaReady || WdaManager.isWdaRunning();
-                System.out.println("[IOSMirrorProvider] Preflight on-demand terminado para " + udid
-                        + " — WDA activo: " + wdaUp);
-
-                if (!wdaUp) {
-                    String realError = AppiumXcodebuildLogForwarder.findRealXcodeError(attemptStartedAtMs);
-                    String reason = realError != null
-                            ? realError
-                            : "WebDriverAgent no pudo iniciarse (motivo no capturado en appium.log).";
-                    WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
-                    System.err.println("[IOSMirrorProvider] WDA on-demand falló para " + udid + ": " + reason);
-                }
-                // Si wdaUp==true, se deja el estado en INITIALIZING_WDA — captureFrame()
-                // promueve a MIRROR_ACTIVE en cuanto de verdad llegue un frame, evitando
-                // reportar "activo" antes de que realmente haya imagen.
+                // runPreflight() -> WdaLaunchService.ensureRunning() ya publica TODA la
+                // máquina de estados (INITIALIZING/BUILDING/STARTING/VERIFYING/ACTIVE/ERROR)
+                // y captura el motivo real del PROPIO proceso xcodebuild de este intento —
+                // no hay nada más que este método deba decidir o publicar.
+                IosPreflightManager.runPreflight(client, mirrorExecutionId, udid);
             } catch (Exception e) {
                 String reason = "Error inesperado lanzando WDA: " + e.getMessage();
                 System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
-                WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
+                WdaLaunchService.markTerminalError(udid, reason);
             } finally {
                 // El Mirror SIEMPRE libera su propia sesión — nunca depende de que otra
                 // clase lo haga en su nombre. Esto es lo que garantiza que un lanzamiento

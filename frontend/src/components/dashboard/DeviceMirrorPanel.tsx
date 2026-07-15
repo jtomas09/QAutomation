@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useMirrorStream } from '../../hooks/useMirrorStream'
 import type { MirrorPhase } from '../../hooks/useMirrorStream'
+import { retryMirrorLaunch } from '../../services/mirrorService'
 import type { StreamState } from '../../services/deviceStream'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
 import { executionTrackingService } from '../../services/ExecutionTrackingService'
@@ -29,11 +30,14 @@ type MirrorStatus =
   | 'desconectado'
   | 'error'
   // ── Fases WDA (iOS) — desacopladas de "el Runner responde" ────────────────
-  // Antes, cualquiera de estas tres situaciones se mostraba como 'disponible'
+  // Antes, cualquiera de estas situaciones se mostraba como 'disponible'
   // (verde, "Conectado") con el video en negro, sin explicación. Ahora cada
   // una tiene su propio estado visual — ver IOSMirrorStateTracker (Runner).
   | 'ios-esperando-appium'
   | 'ios-iniciando-wda'
+  | 'ios-construyendo-wda'
+  | 'ios-arrancando-wda'
+  | 'ios-verificando-wda'
   | 'ios-error-wda'
 
 const MIRROR_STATUS_CFG: Record<MirrorStatus, {
@@ -54,6 +58,18 @@ const MIRROR_STATUS_CFG: Record<MirrorStatus, {
   'ios-iniciando-wda': {
     label: 'Iniciando WDA', color: '#f59e0b', pulse: true,
     bodyMessage: 'Iniciando WebDriverAgent…',
+  },
+  'ios-construyendo-wda': {
+    label: 'Compilando WDA', color: '#f59e0b', pulse: true,
+    bodyMessage: 'Compilando WebDriverAgent…\n\nPuede tardar varios minutos la primera vez en este dispositivo.',
+  },
+  'ios-arrancando-wda': {
+    label: 'Arrancando WDA', color: '#f59e0b', pulse: true,
+    bodyMessage: 'WebDriverAgent compilado — arrancando en el dispositivo…',
+  },
+  'ios-verificando-wda': {
+    label: 'Verificando WDA', color: '#f59e0b', pulse: true,
+    bodyMessage: 'Verificando que WebDriverAgent responda…',
   },
   'ios-error-wda': {
     label: 'Error de WDA', color: '#f87171', pulse: false,
@@ -111,6 +127,9 @@ function computeMirrorStatus(params: {
   if (mirrorPhase === 'DEVICE_DISCONNECTED') return 'desconectado'
   if (mirrorPhase === 'ERROR') return 'ios-error-wda'
   if (mirrorPhase === 'INITIALIZING_WDA') return 'ios-iniciando-wda'
+  if (mirrorPhase === 'BUILDING_WDA') return 'ios-construyendo-wda'
+  if (mirrorPhase === 'STARTING_WDA') return 'ios-arrancando-wda'
+  if (mirrorPhase === 'VERIFYING_WDA') return 'ios-verificando-wda'
   if (mirrorPhase === 'DEVICE_DETECTED') return 'ios-esperando-appium'
 
   if (streamState === 'available') return hasActiveExecution ? 'ejecutando' : 'disponible'
@@ -311,10 +330,21 @@ export default function DeviceMirrorPanel({ device }: Props) {
     }, 10_000)
   }, [udid, reconnectStream])
 
-  /** Botón manual "Reconectar" (Fase 4) — reutiliza el mismo flujo de recuperación. */
+  /**
+   * Botón manual "Reconectar" — reutiliza el flujo de recuperación de siempre,
+   * pero si el último intento de WDA terminó en ERROR (estado terminal en
+   * WdaLaunchService, ver Runner), primero llama a retryMirrorLaunch(): es la
+   * ÚNICA acción que saca a ese UDID del estado absorbente. El watchdog
+   * automático (attemptAutoRecovery, más abajo) NUNCA llama a esto — solo
+   * reabre el stream — precisamente para que un fallo de WDA no se reintente
+   * solo, sin acción del usuario.
+   */
   const handleReconnect = useCallback(() => {
+    if (udid && mirrorPhase === 'ERROR') {
+      void retryMirrorLaunch(udid)
+    }
     performReconnect()
-  }, [performReconnect])
+  }, [udid, mirrorPhase, performReconnect])
 
   /**
    * Se ejecuta cuando la pestaña vuelve a estar activa (visibilitychange,
@@ -457,7 +487,9 @@ export default function DeviceMirrorPanel({ device }: Props) {
             border:     `1px solid ${statusCfg.color}4d`,
           }}
         >
-          {mirrorStatus === 'conectando' || mirrorStatus === 'reconectando' || mirrorStatus === 'ios-iniciando-wda' ? (
+          {mirrorStatus === 'conectando' || mirrorStatus === 'reconectando' || mirrorStatus === 'ios-iniciando-wda'
+              || mirrorStatus === 'ios-construyendo-wda' || mirrorStatus === 'ios-arrancando-wda'
+              || mirrorStatus === 'ios-verificando-wda' ? (
             <Loader2 size={9} className="animate-spin" />
           ) : mirrorStatus === 'desconectado' || mirrorStatus === 'error' || mirrorStatus === 'ios-error-wda' ? (
             <WifiOff size={9} />

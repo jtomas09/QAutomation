@@ -24,11 +24,22 @@ public final class IOSMirrorStateTracker {
         DEVICE_DISCONNECTED,
         /** Dispositivo conectado y listo, pero ninguna sesión WDA se ha intentado todavía. */
         DEVICE_DETECTED,
-        /** Preflight/xcodebuild en curso — bajo demanda (Mirror) o disparado por una ejecución real. */
+        /** Preflight en curso (Team ID, túnel, caché) — bajo demanda (Mirror) o ejecución real. */
         INITIALIZING_WDA,
+        /** xcodebuild compilando WDA — ver WdaLaunchService. */
+        BUILDING_WDA,
+        /** Build terminado; esperando a que el proceso WDA anuncie su servidor HTTP. */
+        STARTING_WDA,
+        /** Proceso arriba; esperando a que /status responda. */
+        VERIFYING_WDA,
         /** WDA responde y ya se capturó al menos un frame real. */
         MIRROR_ACTIVE,
-        /** El último intento de levantar WDA falló — reason contiene el motivo real. */
+        /**
+         * Estado TERMINAL — el último intento de levantar WDA falló; reason contiene
+         * el motivo real. WdaLaunchService NO reintenta automáticamente desde aquí;
+         * solo una acción explícita del usuario (WdaLaunchService.resetForRetry())
+         * permite un nuevo intento.
+         */
         ERROR
     }
 
@@ -46,6 +57,18 @@ public final class IOSMirrorStateTracker {
 
     static void markInitializing(String udid) {
         STATES.put(udid, new Snapshot(Phase.INITIALIZING_WDA, null, System.currentTimeMillis()));
+    }
+
+    static void markBuilding(String udid) {
+        STATES.put(udid, new Snapshot(Phase.BUILDING_WDA, null, System.currentTimeMillis()));
+    }
+
+    static void markStarting(String udid) {
+        STATES.put(udid, new Snapshot(Phase.STARTING_WDA, null, System.currentTimeMillis()));
+    }
+
+    static void markVerifying(String udid) {
+        STATES.put(udid, new Snapshot(Phase.VERIFYING_WDA, null, System.currentTimeMillis()));
     }
 
     /** Idempotente — evita escrituras redundantes una vez que ya está activo. */

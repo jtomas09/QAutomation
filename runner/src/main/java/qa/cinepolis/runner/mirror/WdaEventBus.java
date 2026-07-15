@@ -16,11 +16,17 @@ package qa.cinepolis.runner.mirror;
 public final class WdaEventBus {
 
     public enum WdaEvent {
-        /** Preflight/xcodebuild en curso — bajo demanda o disparado por una ejecución real. */
+        /** Preflight (Team ID, túnel, caché) en curso — bajo demanda o ejecución real. */
         INITIALIZING,
+        /** xcodebuild compilando WDA — ver WdaLaunchService. */
+        BUILDING,
+        /** Build terminado; esperando a que el proceso anuncie su servidor HTTP. */
+        STARTING,
+        /** Proceso arriba; esperando a que /status responda. */
+        VERIFYING,
         /** WDA respondió y produjo al menos un frame real. */
         ACTIVE,
-        /** El intento de levantar WDA falló — reason contiene la causa real. */
+        /** El intento de levantar WDA falló (TERMINAL) — reason contiene la causa real. */
         ERROR,
         /** WDA dejó de ejecutarse sin error — vuelve al estado neutral (dispositivo detectado). */
         STOPPED
@@ -36,6 +42,9 @@ public final class WdaEventBus {
     public static void publish(String udid, WdaEvent event, String reason) {
         switch (event) {
             case INITIALIZING -> IOSMirrorStateTracker.markInitializing(udid);
+            case BUILDING     -> IOSMirrorStateTracker.markBuilding(udid);
+            case STARTING     -> IOSMirrorStateTracker.markStarting(udid);
+            case VERIFYING    -> IOSMirrorStateTracker.markVerifying(udid);
             case ACTIVE       -> IOSMirrorStateTracker.markActive(udid);
             case ERROR        -> IOSMirrorStateTracker.markError(udid, reason);
             case STOPPED      -> IOSMirrorStateTracker.clear(udid);

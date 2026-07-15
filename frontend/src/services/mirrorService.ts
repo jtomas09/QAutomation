@@ -18,11 +18,19 @@
 export const RUNNER_STREAM_PORT = parseInt(import.meta.env.VITE_RUNNER_STREAM_PORT ?? '8082', 10)
 export const RUNNER_STREAM_HOST = import.meta.env.VITE_RUNNER_STREAM_HOST ?? 'localhost'
 
-/** Fase observable del ciclo de vida de WDA — ver IOSMirrorStateTracker (Runner). */
+/**
+ * Fase observable del ciclo de vida de WDA — ver IOSMirrorStateTracker (Runner).
+ * ERROR es TERMINAL: WdaLaunchService (Runner) no reintenta automáticamente una
+ * vez alcanzado — solo retryMirrorLaunch() (acción explícita del usuario) lo saca
+ * de ese estado.
+ */
 export type MirrorPhase =
   | 'DEVICE_DISCONNECTED'
   | 'DEVICE_DETECTED'
   | 'INITIALIZING_WDA'
+  | 'BUILDING_WDA'
+  | 'STARTING_WDA'
+  | 'VERIFYING_WDA'
   | 'MIRROR_ACTIVE'
   | 'ERROR'
 
@@ -69,5 +77,23 @@ export async function getDeviceMirrorStatus(udid: string): Promise<DeviceMirrorS
     return (await res.json()) as DeviceMirrorState
   } catch {
     return null
+  }
+}
+
+/**
+ * Saca a un UDID del estado ERROR terminal en WdaLaunchService (Runner) — la
+ * ÚNICA forma de reintentar un lanzamiento de WDA que falló. Llamar solo desde
+ * una acción explícita del usuario (botón "Reintentar"), nunca desde el
+ * watchdog automático de reconexión del stream.
+ */
+export async function retryMirrorLaunch(udid: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `http://${RUNNER_STREAM_HOST}:${RUNNER_STREAM_PORT}/api/device-mirror/${encodeURIComponent(udid)}/retry`,
+      { method: 'POST' }
+    )
+    return res.ok
+  } catch {
+    return false
   }
 }

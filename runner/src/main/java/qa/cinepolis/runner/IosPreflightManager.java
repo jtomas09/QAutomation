@@ -181,28 +181,25 @@ public class IosPreflightManager {
             wdaBundleId = generateWdaBundleId(udid);
             wdaCached   = false;
             client.sendLog(executionId, "INFO",
-                    "🔨 WebDriverAgent se compilará e instalará automáticamente.");
+                    "🔨 WebDriverAgent se compilará e instalará automáticamente en este dispositivo.");
             client.sendTechLog(executionId,
                     "[WDA build] bundle: " + wdaBundleId
                     + " | teamId: " + (teamId.isBlank() ? "no detectado" : teamId));
         }
 
-        // 7. WDA verification and pre-start
-        // If WDA is cached (previously installed on device), attempt a fast warm start so
-        // that Appium's session creation is instantaneous (no build wait during tests).
-        // If WDA is not cached, Appium handles the full compilation during first session.
-        boolean wdaReady = WdaManager.ensureWdaRunning(
+        // 7. WDA verification and pre-start — ver WdaLaunchService, única puerta de
+        // entrada para construir/iniciar/verificar WDA (reemplaza a
+        // WdaManager.ensureWdaRunning()). wdaCached ya no decide SI se construye —
+        // solo si se intenta primero el camino rápido antes de caer al build completo.
+        boolean wdaReady = WdaLaunchService.ensureRunning(
                 client, executionId, udid, teamId, wdaBundleId, wdaCached);
 
         // Invalidate cache only when a real WDA launch failure occurred:
         //   wdaCached      = true  → cache said WDA was installed
         //   !wdaReady      = true  → WDA didn't respond
-        //   wasAttempted   = true  → xcodebuild was actually started (not just "no xcodeproj")
+        //   wasAttempted   = true  → xcodebuild was actually started
         //   !isWdaRunning  = true  → not already alive on the port
-        //
-        // Do NOT invalidate when launchAttempted=false ("no xcodeproj" path): Appium will
-        // handle WDA startup using its own xcodeproj, and the device binary stays valid.
-        boolean wasAttempted = WdaManager.wasLastLaunchAttempted();
+        boolean wasAttempted = WdaLaunchService.wasLastLaunchAttempted(udid);
         if (wdaCached && !wdaReady && wasAttempted && !WdaManager.isWdaRunning()) {
             client.sendLog(executionId, "WARN",
                     "♻️  [WDA] El caché existe pero WDA no respondió tras intentar iniciarlo.\n"

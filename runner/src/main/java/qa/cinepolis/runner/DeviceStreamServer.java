@@ -239,18 +239,28 @@ public class DeviceStreamServer {
                     ex.sendResponseHeaders(204, -1);
                     return;
                 }
-                if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
-                    sendText(ex, 405, "Method Not Allowed");
-                    return;
-                }
 
                 String path = ex.getRequestURI().getPath();
                 if (!path.startsWith(PATH_MIRROR)) {
                     sendText(ex, 404, "Not Found");
                     return;
                 }
+                String rest = path.substring(PATH_MIRROR.length());
 
-                String udid = path.substring(PATH_MIRROR.length()).trim();
+                // POST /api/device-mirror/{udid}/retry — única forma de sacar a un UDID
+                // del estado terminal ERROR de WdaLaunchService. Debe ser una acción
+                // explícita del usuario (botón "Reintentar") — nunca disparada por el
+                // watchdog de reconexión automática del frontend, que solo hace GET.
+                if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
+                    handleRetry(ex, rest);
+                    return;
+                }
+                if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+                    sendText(ex, 405, "Method Not Allowed");
+                    return;
+                }
+
+                String udid = rest.trim();
                 if (udid.isEmpty() || udid.contains("/") || udid.contains("..") ||
                         !udid.matches("[a-zA-Z0-9\\-_.]+")) {
                     sendText(ex, 400, "Invalid device identifier");
@@ -342,6 +352,27 @@ public class DeviceStreamServer {
                 System.err.println("[DeviceMirror] Handler error: " + e.getMessage());
                 try { sendText(ex, 500, "Internal error"); } catch (Exception ignored) {}
             }
+        }
+
+        /** Espera "{udid}/retry" — separado del parseo GET porque el sufijo "/retry" contiene "/". */
+        private void handleRetry(HttpExchange ex, String rest) throws IOException {
+            int slash = rest.indexOf('/');
+            String udid   = (slash >= 0 ? rest.substring(0, slash) : rest).trim();
+            String suffix = slash >= 0 ? rest.substring(slash + 1) : "";
+
+            if (!"retry".equals(suffix) || udid.isEmpty() || udid.contains("..")
+                    || !udid.matches("[a-zA-Z0-9\\-_.]+")) {
+                sendText(ex, 400, "Invalid retry request");
+                return;
+            }
+
+            qa.cinepolis.runner.WdaLaunchService.resetForRetry(udid);
+            System.out.println("[DeviceMirror] Retry solicitado explícitamente por el usuario: " + udid);
+
+            byte[] body = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().set("Content-Type", "application/json");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream out = ex.getResponseBody()) { out.write(body); }
         }
     }
 
