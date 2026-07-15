@@ -59,6 +59,8 @@ public final class IOSDeviceStateService {
         public final String  tunnelState;
         public final String  pairingState;
         public final String  coreDeviceId;
+        /** Transport type as devicectl reports it RIGHT NOW — WIRED, LOCAL_NETWORK, or UNKNOWN. */
+        public final String  transportType;
         /** True when state was loaded from Runner JVM properties (no subprocess executed). */
         public final boolean fromRunner;
         /** Wall-clock time (ms) when this snapshot was captured. */
@@ -66,12 +68,13 @@ public final class IOSDeviceStateService {
 
         DeviceState(boolean xctraceVisible, boolean coreDeviceVisible,
                     String tunnelState, String pairingState, String coreDeviceId,
-                    boolean fromRunner, long capturedAtMs) {
+                    String transportType, boolean fromRunner, long capturedAtMs) {
             this.xctraceVisible    = xctraceVisible;
             this.coreDeviceVisible = coreDeviceVisible;
             this.tunnelState       = tunnelState  != null ? tunnelState  : "unknown";
             this.pairingState      = pairingState != null ? pairingState : "unknown";
             this.coreDeviceId      = coreDeviceId != null ? coreDeviceId : "";
+            this.transportType     = transportType != null ? transportType : "UNKNOWN";
             this.fromRunner        = fromRunner;
             this.capturedAtMs      = capturedAtMs;
         }
@@ -174,6 +177,7 @@ public final class IOSDeviceStateService {
                 System.getProperty(PROP_PREFIX + "tunnelState",  "unknown"),
                 System.getProperty(PROP_PREFIX + "pairingState", "unknown"),
                 System.getProperty(PROP_PREFIX + "coreDeviceId", ""),
+                System.getProperty(PROP_PREFIX + "transportType", "UNKNOWN"),
                 true,
                 confirmedAt > 0 ? confirmedAt : System.currentTimeMillis()
             );
@@ -204,11 +208,11 @@ public final class IOSDeviceStateService {
 
         logger.info("[DeviceState]   xcrun xctrace list devices     → {} ({} ms)",
                 xctrace    ? "VISIBLE ✅" : "no visible ❌", xctMs);
-        logger.info("[DeviceState]   xcrun devicectl list devices   → CoreDevice:{} tunnel:{} pairing:{} ({} ms)",
-                coreDevice ? "VISIBLE ✅" : "no visible ❌", details[0], details[1], dctlMs);
+        logger.info("[DeviceState]   xcrun devicectl list devices   → CoreDevice:{} tunnel:{} pairing:{} transport:{} ({} ms)",
+                coreDevice ? "VISIBLE ✅" : "no visible ❌", details[0], details[1], details[4], dctlMs);
 
         return new DeviceState(
-                xctrace, coreDevice, details[0], details[1], details[2],
+                xctrace, coreDevice, details[0], details[1], details[2], details[4],
                 false, System.currentTimeMillis());
     }
 
@@ -245,14 +249,14 @@ public final class IOSDeviceStateService {
     }
 
     /**
-     * Queries {@code xcrun devicectl list devices --json-output -} and returns a 4-element array:
-     * <pre>[tunnelState, pairingState, coreDeviceId, coreDeviceVisible]</pre>
+     * Queries {@code xcrun devicectl list devices --json-output -} and returns a 5-element array:
+     * <pre>[tunnelState, pairingState, coreDeviceId, coreDeviceVisible, transportType]</pre>
      * where {@code coreDeviceVisible} is the string {@code "true"} when the UDID was found.
      *
      * Uses {@link DevicectlParser#findByUdid} for all JSON extraction — no indexOf/substring/regex.
      */
     static String[] devicectlDetails(String udid) {
-        String[] none = {"unknown", "unknown", "", "false"};
+        String[] none = {"unknown", "unknown", "", "false", "UNKNOWN"};
         if (udid == null || udid.isBlank()) return none;
         try {
             Process p = new ProcessBuilder(
@@ -268,12 +272,17 @@ public final class IOSDeviceStateService {
             DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
             if (info == null) return none;
 
+            String freshTransport = info.transportType != null ? info.transportType.name() : "UNKNOWN";
+
             // Transport type consistency gate — if the Runner declared a transportType,
             // compare with what devicectl reports now. A mismatch means the device
             // changed connectivity (USB→WiFi or WiFi→USB) during the execution.
+            // NOTE: this is a passive log only — the authoritative pre-session revalidation
+            // now lives in IOSPreSessionRevalidator, called from DriverFactory right before
+            // new IOSDriver(...). This check remains here too since devicectlDetails() is also
+            // reached from post-failure classification (readState()), independently of that path.
             String runnerTransport = System.getProperty("iosState.transportType");
-            if (runnerTransport != null && !runnerTransport.isBlank() && info.transportType != null) {
-                String freshTransport = info.transportType.name();
+            if (runnerTransport != null && !runnerTransport.isBlank()) {
                 if (!runnerTransport.equalsIgnoreCase(freshTransport)) {
                     log.error("[DeviceState] INCONSISTENCIA DE TRANSPORTE detectada — "
                             + "Runner={} | devicectl ahora={} (UDID: {}) — "
@@ -286,7 +295,8 @@ public final class IOSDeviceStateService {
                 info.tunnelState,
                 info.pairingState,
                 info.coreDeviceId,
-                "true"
+                "true",
+                freshTransport
             };
         } catch (Exception e) {
             log.debug("[DeviceState] devicectl error: {}", e.getMessage());
@@ -297,7 +307,7 @@ public final class IOSDeviceStateService {
     // ── Utilities ─────────────────────────────────────────────────────────────
 
     private static DeviceState emptyState() {
-        return new DeviceState(false, false, "unknown", "unknown", "",
+        return new DeviceState(false, false, "unknown", "unknown", "", "UNKNOWN",
                 false, System.currentTimeMillis());
     }
 

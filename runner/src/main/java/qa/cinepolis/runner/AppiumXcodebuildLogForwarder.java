@@ -119,6 +119,7 @@ public final class AppiumXcodebuildLogForwarder {
         if (tail == null) return null;
 
         String realError = null;
+        String remoteXpcError = null;
         String fallbackSummary = null;
 
         for (String line : tail.split("\n", -1)) {
@@ -130,6 +131,15 @@ public final class AppiumXcodebuildLogForwarder {
             if (realError == null && line.contains("[Xcode]") && line.toLowerCase().contains("error:")) {
                 realError = line.substring(line.indexOf("[Xcode]") + "[Xcode]".length()).trim();
             }
+            // Prioridad 1b: fallo de RemoteXPC ("Cannot create port forwarder via RemoteXPC
+            // tunnel", "RemoteXPC tunnel is not available for this session") — este error lo
+            // emite appium-xcuitest-driver/appium-ios-remotexpc, no xcodebuild, por lo que
+            // nunca lleva la etiqueta "[Xcode]". Sin este chequeo, el Mirror nunca se enteraba
+            // de este fallo — solo quedaba en los logs de Gradle (ver IOSPreSessionRevalidator
+            // y classifyIosSessionFailure/REMOTE_XPC_TUNNEL_FAILED, en la JVM de test).
+            if (remoteXpcError == null && isRemoteXpcFailureLine(line)) {
+                remoteXpcError = line.trim();
+            }
             // Fallback: el resumen genérico del driver ("xcodebuild failed with code 65...")
             // — se usa solo si nunca aparece una línea [Xcode] con "error:" explícito.
             if (fallbackSummary == null && line.toLowerCase().contains("xcodebuild failed with code")) {
@@ -138,7 +148,22 @@ public final class AppiumXcodebuildLogForwarder {
             }
         }
 
-        return realError != null ? realError : fallbackSummary;
+        if (realError != null) return realError;
+        if (remoteXpcError != null) return remoteXpcError;
+        return fallbackSummary;
+    }
+
+    /**
+     * Línea de fallo real de RemoteXPC (no informativa) — exige tanto la mención de
+     * RemoteXPC/port forwarder como una palabra que indique fallo, para no capturar
+     * líneas de log benignas que solo mencionen RemoteXPC de paso.
+     */
+    private static boolean isRemoteXpcFailureLine(String line) {
+        String lower = line.toLowerCase();
+        boolean mentionsRemoteXpc = lower.contains("remotexpc") || lower.contains("port forwarder");
+        boolean indicatesFailure  = lower.contains("cannot") || lower.contains("not available")
+                                  || lower.contains("error") || lower.contains("fail");
+        return mentionsRemoteXpc && indicatesFailure;
     }
 
     /**
@@ -152,7 +177,7 @@ public final class AppiumXcodebuildLogForwarder {
      * no tenían nada que ver con xcodebuild — solo ruido del propio driver.
      */
     private static boolean isXcodebuildRelevant(String line) {
-        return line.contains("[Xcode]");
+        return line.contains("[Xcode]") || isRemoteXpcFailureLine(line);
     }
 
     private static Long parseTimestampEpochMs(String line) {

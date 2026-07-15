@@ -334,6 +334,20 @@ public class DriverFactory {
                 }
             }
 
+            // ── Revalidación ligera justo antes de crear IOSDriver ──────────────
+            // iosState (arriba) es una foto tomada en IosPreflightManager.runPreflight(),
+            // minutos/segundos antes, en el proceso del Runner. El transporte CoreDevice
+            // puede cambiar (WIRED → LOCAL_NETWORK) en ese intervalo sin que este repo lo
+            // cause (ver CoreDeviceTunnelManager) — pero Appium sí puede fallar al construir
+            // su port forwarder RemoteXPC si eso ocurre. runnerOriginalIosState conserva el
+            // snapshot ORIGINAL del Runner para poder mostrar "antes vs después" si Appium
+            // igual rechaza la sesión (ver classifyIosSessionFailure). NO repite el
+            // Pre-flight completo — solo una consulta ligera xctrace+devicectl.
+            IOSDeviceState runnerOriginalIosState = iosState;
+            if ("local".equals(mode)) {
+                iosState = IOSPreSessionRevalidator.revalidate(iosState, prop("udid", ""), log);
+            }
+
             try {
                 IOSDriver d = new IOSDriver(hub, options);
                 d.manage().timeouts().implicitlyWait(Duration.ZERO);
@@ -371,7 +385,7 @@ public class DriverFactory {
                 log.error("[DriverFactory][iOS] Full stacktrace:", iosEx);
                 log.error("[DriverFactory][iOS] ══════════════════════════════════════════════════");
                 if ("local".equals(mode)) {
-                    classifyIosSessionFailure(prop("udid", ""), hub, options, iosEx);
+                    classifyIosSessionFailure(prop("udid", ""), hub, options, iosEx, runnerOriginalIosState);
                 }
                 throw iosEx;
             }
@@ -905,7 +919,8 @@ public class DriverFactory {
     }
 
     private static void classifyIosSessionFailure(String udid, URL hub,
-                                                   XCUITestOptions options, Exception e) {
+                                                   XCUITestOptions options, Exception e,
+                                                   IOSDeviceState runnerOriginalIosState) {
         // Post-failure: refresh forces a new subprocess query so classification reflects
         // actual state at the moment the session was rejected, not the pre-session cache.
         IOSDeviceSynchronizationManager.SyncState state =
@@ -943,6 +958,30 @@ public class DriverFactory {
                      + "  - UDID físico incorrecto (verifica con: xcrun xctrace list devices)\n"
                      + "  - Se usó CoreDevice UUID (8-4-4-4-12) en lugar del UDID físico (hex 25+ chars)\n"
                      + "  - webDriverAgentUrl no configurado cuando WDA ya está corriendo";
+        } else if (msg.contains("remotexpc") || msg.contains("port forwarder")) {
+            // Appium (appium-xcuitest-driver / appium-ios-remotexpc) failed to build its
+            // RemoteXPC port forwarder. Confirmed by investigation: this repo never manages
+            // the CoreDevice tunnel's lifecycle (see CoreDeviceTunnelManager) — the tunnel
+            // is entirely owned by macOS's remoted/CoreDeviceService. The Runner's transport
+            // snapshot from Pre-flight can go stale by the time IOSDriver is created; the
+            // "Runner Snapshot vs Current Snapshot" values below make that drift explicit
+            // instead of leaving it buried inside a generic SESSION_CREATION_FAILED.
+            category = IOSDeviceSynchronizationManager.SyncCategory.REMOTE_XPC_TUNNEL_FAILED;
+            String runnerTransport  = runnerOriginalIosState != null && !runnerOriginalIosState.transportType.isBlank()
+                    ? runnerOriginalIosState.transportType : "UNKNOWN";
+            String currentTransport = state.transportType.isBlank() ? "UNKNOWN" : state.transportType;
+            detail = "Appium no pudo crear el port forwarder vía RemoteXPC.\n"
+                    + "  Runner Snapshot (Pre-flight) → Transport: " + runnerTransport + "\n"
+                    + "  Current Snapshot (al fallar)  → Transport: " + currentTransport + "\n"
+                    + (runnerTransport.equalsIgnoreCase(currentTransport)
+                        ? "  El transporte no cambió — el fallo de RemoteXPC tiene otra causa "
+                          + "(revisa el mensaje original de Appium arriba).\n"
+                        : "  El transporte CoreDevice cambió entre el Pre-flight y la creación de "
+                          + "la sesión. Esto ocurre dentro de appium-xcuitest-driver/"
+                          + "appium-ios-remotexpc y CoreDeviceService de macOS — fuera del control "
+                          + "del Runner (transportType nunca es un gate bloqueante).\n")
+                    + "  → Reintenta la ejecución; si persiste, reconecta el cable USB o confirma "
+                    + "que el iPhone y el Mac estén en la misma red Wi-Fi.";
         } else if (msg.contains("driver not found")
                 || msg.contains("no driver") || msg.contains("cannot find module")) {
             // NOTA: antes también se comprobaba msg.contains("xcuitest"), pero Appium

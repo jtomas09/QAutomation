@@ -57,6 +57,8 @@ public final class IOSDeviceSynchronizationManager {
         XCUITEST_DRIVER_NOT_INSTALLED,// XCUITest driver missing from 'appium driver list'
         INVALID_PLATFORM_NAME,        // platformName was not exactly "iOS"
         DEVICE_NOT_FOUND_BY_APPIUM,   // device visible in xctrace but Appium rejected UDID
+        REMOTE_XPC_TUNNEL_FAILED,     // Appium could not build its RemoteXPC port forwarder —
+                                      // CoreDevice transport changed between Pre-flight and session creation
         SESSION_CREATION_FAILED       // device visible but Appium rejected the session
     }
 
@@ -79,14 +81,16 @@ public final class IOSDeviceSynchronizationManager {
         public final String  tunnelState;
         public final String  pairingState;
         public final String  coreDeviceId;
+        public final String  transportType;
 
         SyncState(boolean coreDeviceVisible, boolean xctraceVisible,
-                   String tunnelState, String pairingState, String coreDeviceId) {
+                   String tunnelState, String pairingState, String coreDeviceId, String transportType) {
             this.coreDeviceVisible = coreDeviceVisible;
             this.xctraceVisible    = xctraceVisible;
             this.tunnelState       = tunnelState  != null ? tunnelState  : "unknown";
             this.pairingState      = pairingState != null ? pairingState : "unknown";
             this.coreDeviceId      = coreDeviceId != null ? coreDeviceId : "";
+            this.transportType     = transportType != null ? transportType : "UNKNOWN";
         }
 
         public boolean isReadyForAppium() {
@@ -337,7 +341,8 @@ public final class IOSDeviceSynchronizationManager {
             ds.xctraceVisible,
             ds.tunnelState,
             ds.pairingState,
-            ds.coreDeviceId
+            ds.coreDeviceId,
+            ds.transportType
         );
     }
 

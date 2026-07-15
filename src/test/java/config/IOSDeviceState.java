@@ -219,6 +219,37 @@ public final class IOSDeviceState {
         return System.getProperty("iosState.xctraceVisible") != null;
     }
 
+    /**
+     * Returns a NEW IOSDeviceState with hardware/transport fields (xctraceVisible,
+     * coreDeviceVisible, tunnelConnected, paired, transportType, coreDeviceId, confirmedAt)
+     * replaced by a fresh {@link IOSDeviceStateService.DeviceState} snapshot — everything
+     * else (identity, signing, driver/WDA fields, unlock state) is preserved unchanged.
+     *
+     * Used by {@link IOSPreSessionRevalidator} to replace the Pre-flight snapshot with an
+     * up-to-date one immediately before Appium session creation, without re-running the
+     * full Pre-flight (Team ID selection, WDA cache validation, tunnel recovery polling,
+     * etc. — none of that is re-queried here, only hardware/transport visibility).
+     */
+    public IOSDeviceState withFreshHardwareState(IOSDeviceStateService.DeviceState fresh) {
+        boolean freshPaired          = !"unpaired".equalsIgnoreCase(fresh.pairingState);
+        boolean freshTunnelConnected = "connected".equalsIgnoreCase(fresh.tunnelState);
+        return new IOSDeviceState(
+                fresh.xctraceVisible,      fresh.coreDeviceVisible,
+                freshTunnelConnected,      freshPaired,
+                this.physicalUdid,
+                fresh.coreDeviceId.isBlank() ? this.coreDeviceId : fresh.coreDeviceId,
+                this.platformVersion,
+                this.teamId,               this.bundleId,
+                this.updatedWDABundleId,   this.webDriverAgentUrl,
+                this.xcuitestInstalled,    this.wdaPrebuilt,
+                fresh.capturedAtMs,
+                "UNKNOWN".equalsIgnoreCase(fresh.transportType) && !this.transportType.isBlank()
+                        ? this.transportType : fresh.transportType,
+                this.runnerReadyForExecution, this.runnerNotReadyReason,
+                this.deviceUnlocked,       this.confirmedUnlockedAtMs
+        );
+    }
+
     /** Age of this state in whole seconds since the Runner confirmed it. */
     public long ageSeconds() {
         return (System.currentTimeMillis() - confirmedAt) / 1000L;
