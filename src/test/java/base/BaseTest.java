@@ -242,7 +242,13 @@ public class BaseTest {
             try {
                 driver = DriverFactory.getDriver();
             } catch (Exception e) {
-                log.error("[BaseTest] Driver creation FAILED — verifica que Appium esté corriendo y el dispositivo conectado. Causa: {}", e.getMessage(), e);
+                // Solo contexto (qué test/suite se vio afectado) — el stacktrace completo
+                // ya se imprimió una vez dentro de DriverFactory (attemptCreate/Full
+                // stacktrace). No pasar "e" como segundo argumento: SLF4J lo interpretaría
+                // como Throwable y volvería a imprimir el stacktrace completo aquí.
+                log.error("[BaseTest] Driver creation FAILED en {} — "
+                        + "verifica que Appium esté corriendo y el dispositivo conectado. Causa: {}",
+                        testInfo.getDisplayName(), e.getMessage());
                 throw e;
             }
             log.info("[BaseTest] Driver created: {}", driver);

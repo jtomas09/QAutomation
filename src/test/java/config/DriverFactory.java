@@ -192,9 +192,13 @@ public class DriverFactory {
                     throw new RuntimeException(se.getMessage(), se);
                 }
 
-                log.error("[DriverFactory] Intento {} FALLIDO: {}", attempt, e.getMessage());
-                log.error("[DriverFactory] Causa raiz: {}", rootCause(e).getMessage());
-                e.printStackTrace();
+                // Capa superior — SOLO contexto (RUN ID, dispositivo, intento). El stacktrace
+                // completo ya se imprimió una única vez dentro de attemptCreate() (o, para
+                // Android, se imprimirá dentro de diagnose()/logcat abajo) — no se vuelve a
+                // pasar "e" como argumento Throwable aquí para evitar que SLF4J lo re-imprima.
+                log.error("[DriverFactory] Intento {}/{} FALLIDO — runId={} device={} platform={} — {}",
+                        attempt, MAX_RETRIES, prop("executionId", "?"), prop("deviceName", "?"),
+                        platform, e.getMessage());
 
                 // Req 3+4: Capture logcat and emit user-friendly root cause to Dashboard
                 if (!"iOS".equalsIgnoreCase(platform)) {
@@ -373,15 +377,11 @@ public class DriverFactory {
                 //   "... Message: <value.message>\nStacktrace:\n<value.stacktrace>"
                 extractAndLogAppiumResponse(iosEx, hub);
 
-                // Full cause chain
-                int depth = 0;
-                Throwable t = iosEx;
-                while (t.getCause() != null) {
-                    t = t.getCause();
-                    depth++;
-                    log.error("[DriverFactory][iOS] Cause[{}] {} : {}",
-                            depth, t.getClass().getName(), t.getMessage());
-                }
+                // Único punto donde se imprime el stacktrace completo (JVM) — incluye ya
+                // la cadena completa de "Caused by:" vía el overload Throwable de SLF4J.
+                // NO duplicar esto en capas superiores (createDriverWithRetries/BaseTest):
+                // deben limitarse a agregar contexto (intento, RUN ID, categoría) usando
+                // solo iosEx.getMessage(), nunca pasando iosEx de nuevo como argumento.
                 log.error("[DriverFactory][iOS] Full stacktrace:", iosEx);
                 log.error("[DriverFactory][iOS] ══════════════════════════════════════════════════");
                 if ("local".equals(mode)) {
@@ -1384,21 +1384,11 @@ public class DriverFactory {
                 log.error("[Diagnose][iOS] Appium server NO esta corriendo. Solucion: appium --port 4723");
             } else if (msg.contains("xcode") || msg.contains("instruments")
                     || msg.contains("wda") || msg.contains("webdriveragent")) {
-                // Never replace the Appium error with a generic hint — print the actual cause.
-                String rawMsg = e.getMessage() != null ? e.getMessage() : "";
-                String origErr = extractSection(rawMsg, "Original error:", "\n");
-                if (!origErr.isBlank()) {
-                    log.error("[Diagnose][iOS] Original error : {}", origErr.trim());
-                }
-                String valueMsg = extractSection(rawMsg, "Message:", "\nStacktrace:");
-                if (!valueMsg.isBlank()) {
-                    log.error("[Diagnose][iOS] value.message  : {}", valueMsg.trim());
-                }
-                if (origErr.isBlank() && valueMsg.isBlank() && !rawMsg.isBlank()) {
-                    log.error("[Diagnose][iOS] Appium error   : {}",
-                            rawMsg.lines().limit(15).reduce("", (a, b) -> a + "\n" + b).trim());
-                }
-                log.error("[Diagnose][iOS] Revisa el Log Tecnico para el stacktrace completo.");
+                // "Original error"/value.message/stacktrace ya se imprimieron una vez dentro
+                // de attemptCreate() (extractAndLogAppiumResponse + Full stacktrace) — esta
+                // capa solo agrega la referencia, sin volver a extraer/reimprimir el mensaje.
+                log.error("[Diagnose][iOS] Fallo relacionado con Xcode/WDA — ver "
+                        + "\"Original error\"/\"Full stacktrace\" arriba, en el intento correspondiente.");
             }
         } else {
             if (msg.contains("uiautomator2") && (msg.contains("not found") || msg.contains("not installed"))) {
@@ -1434,21 +1424,20 @@ public class DriverFactory {
 
         log.error("[DriverFactory][iOS] ── Appium W3C Response ───────────────────────────────");
 
-        // value.error — W3C error code (the exception class name is the clearest proxy)
-        log.error("[DriverFactory][iOS] value.error      : {}", ex.getClass().getSimpleName());
-
+        // value.error (nombre de clase) y value.message NO se reimprimen aquí — ya se
+        // muestran completos en el header ("Exception class: ...") y en el
+        // "Full stacktrace:" que sigue (iosEx.toString() los incluye). Solo se extraen
+        // aquí los campos que ESE log no cubre: la línea "Original error" (el mensaje
+        // más específico embebido por Appium) y el stacktrace del lado de Appium/Node
+        // (value.stacktrace) — distinto del stacktrace JVM, no un duplicado.
         if (raw != null && !raw.isBlank()) {
-            // value.message — content between "Message:" and "\nStacktrace:"
-            String valueMessage = extractSection(raw, "Message:", "\nStacktrace:");
-            if (valueMessage.isBlank()) valueMessage = raw; // fallback: entire message
-            log.error("[DriverFactory][iOS] value.message    :\n{}", valueMessage.trim());
-
             // Original error — innermost cause line; most diagnostic single line
             String origError = extractSection(raw, "Original error:", "\n");
             if (!origError.isBlank())
                 log.error("[DriverFactory][iOS] Original error   : {}", origError.trim());
 
-            // value.stacktrace — everything after "Stacktrace:" in the message
+            // value.stacktrace — stacktrace del lado de Appium/Node embebido en el mensaje,
+            // no es el stacktrace JVM que imprime "Full stacktrace:" más abajo.
             String stacktrace = extractSection(raw, "Stacktrace:", null);
             if (!stacktrace.isBlank())
                 log.error("[DriverFactory][iOS] value.stacktrace :\n{}", stacktrace.trim());
