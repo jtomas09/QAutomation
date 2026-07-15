@@ -5,13 +5,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.security.MessageDigest;
 import java.time.Instant;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.Comparator;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -157,7 +152,7 @@ public class IosPreflightManager {
                         "✅ WebDriverAgent precompilado y validado — saltando recompilación.");
                 client.sendLog(executionId, "INFO",
                         "🔎 [WDA validación] Team: " + validation.profileTeamId
-                        + " | Certificado: " + shortSha(validation.certSha1)
+                        + " | Certificado: " + AppleSigningUtils.shortSha(validation.certSha1)
                         + " | Expira: " + validation.expirationDate);
                 client.sendTechLog(executionId,
                         "[WDA caché] bundle: " + wdaBundleId
@@ -304,186 +299,22 @@ public class IosPreflightManager {
         }
     }
 
-    // ── 2. Apple Developer Team — detección multi-estrategia ─────────────────
+    // ── 2. Apple Developer Team — descubrimiento y selección multi-cuenta ────
     //
-    // Apple Team IDs son siempre 10 caracteres alfanuméricos en mayúsculas
-    // (p.ej. C32VD96Q84). IMPORTANTE: el Team ID NUNCA se lee del Common Name
-    // (CN) de un certificado — el CN de "Apple Development: email (XXXXXXXXXX)"
-    // contiene un identificador de cuenta/persona, NO el Team ID. El campo
-    // autoritativo es:
-    //   - TeamIdentifier   dentro de un provisioning profile real (fuente más confiable), o
-    //   - OU (Organizational Unit) del subject X.509 del certificado.
-    // Se prueban en orden de confiabilidad y se registra cada intento para que
-    // los fallos sean diagnosticables.
+    // Delegado por completo en AppleDeveloperTeamManager: descubre TODOS los
+    // Apple Developer Teams presentes en esta Mac (no solo el primero que
+    // aparezca) y aplica una política de selección con persistencia entre
+    // ejecuciones — necesario porque una misma Mac puede tener varios Apple ID
+    // logueados en Xcode (varios Teams). Ver el javadoc de esa clase para la
+    // política de selección completa y el porqué (MInstallerErrorDomain Code 64 /
+    // MismatchedApplicationIdentifierEntitlement cuando el Team cambia entre
+    // compilaciones de WebDriverAgent).
+    //
+    // La firma y el único call site (arriba, en runPreflight()) se mantienen
+    // sin cambios — este método es ahora una fachada de una línea.
 
     public static String detectAppleTeamId(BackendClient client, String executionId) {
-        client.sendTechLog(executionId,
-                "[TeamID] Buscando Apple Developer Team ID (OU del certificado / TeamIdentifier del perfil — nunca el CN)...");
-
-        String id;
-
-        // ── Estrategia 1: TeamIdentifier de un provisioning profile real en disco ──
-        // Es la fuente más autoritativa: es literalmente el campo que Apple firmó.
-        client.sendTechLog(executionId, "[TeamID] [1/4] TeamIdentifier de provisioning profiles en disco");
-        id = strategyProvisioningProfiles(client, executionId);
-        if (!id.isBlank()) return reportFound(client, executionId, id, "TeamIdentifier de provisioning profile");
-
-        // ── Estrategia 2: OU del certificado "Apple Development" ─────────────
-        client.sendTechLog(executionId, "[TeamID] [2/4] OU del certificado \"Apple Development\"");
-        id = strategyCertificateOU(client, executionId, "Apple Development");
-        if (!id.isBlank()) return reportFound(client, executionId, id, "OU del certificado Apple Development");
-
-        // ── Estrategia 3: OU del certificado "iPhone Developer" (legado) ─────
-        client.sendTechLog(executionId, "[TeamID] [3/4] OU del certificado \"iPhone Developer\" (legado)");
-        id = strategyCertificateOU(client, executionId, "iPhone Developer");
-        if (!id.isBlank()) return reportFound(client, executionId, id, "OU del certificado iPhone Developer (legado)");
-
-        // ── Estrategia 4: escanear TODOS los certificados del keychain por su OU ──
-        client.sendTechLog(executionId, "[TeamID] [4/4] OU de cualquier certificado del keychain");
-        id = strategyAnyCertificateOU(client, executionId);
-        if (!id.isBlank()) return reportFound(client, executionId, id, "OU de certificado en keychain (escaneo completo)");
-
-        // All strategies exhausted
-        client.sendLog(executionId, "WARN",
-                "⚠️  Team ID no encontrado por ninguna estrategia.\n"
-                + "   WDA no podrá firmarse sin Team ID en dispositivos físicos.\n"
-                + "   Solución: Xcode → Settings → Accounts → agrega tu Apple ID\n"
-                + "   y descarga tus certificados de desarrollo.");
-        return "";
-    }
-
-    private static String reportFound(BackendClient client, String executionId,
-                                       String id, String via) {
-        client.sendLog(executionId, "INFO",
-                "✅ Apple Developer Team ID: " + id + " (vía " + via + ")");
-        return id;
-    }
-
-    // ── Estrategia 1: TeamIdentifier de provisioning profiles ────────────────
-
-    /**
-     * Fuente más específica y confiable: el provisioning profile embebido en el
-     * ÚLTIMO build de WebDriverAgent (no un perfil cualquiera del sistema — un Mac
-     * puede tener perfiles de otros proyectos/equipos personales que NO aplican aquí).
-     *
-     * Si WDA nunca se compiló en este dispositivo (primera vez), cae a buscar entre
-     * los perfiles instalados SOLO los que correspondan a un bundle de este proyecto
-     * (io.qautomation.wda.*) — nunca acepta un perfil de otro proyecto sin relación.
-     */
-    private static String strategyProvisioningProfiles(BackendClient client, String executionId) {
-        File wdaProfile = findLatestWdaEmbeddedProfile();
-        if (wdaProfile != null) {
-            String plist = decodeProfilePlist(wdaProfile);
-            String teamId = plist != null ? extractPlistArrayFirstString(plist, "TeamIdentifier") : null;
-            if (teamId != null) {
-                client.sendTechLog(executionId,
-                        "[TeamID] TeamIdentifier leído del perfil embebido de WebDriverAgent ("
-                        + wdaProfile.getParentFile().getName() + "): " + teamId);
-                return teamId;
-            }
-        }
-
-        File[] dirs = {
-            new File(System.getProperty("user.home") + "/Library/MobileDevice/Provisioning Profiles"),
-            new File(System.getProperty("user.home") + "/Library/Developer/Xcode/UserData/Provisioning Profiles"),
-        };
-        for (File dir : dirs) {
-            if (!dir.isDirectory()) continue;
-            File[] profiles = dir.listFiles((d, n) -> n.endsWith(".mobileprovision"));
-            if (profiles == null || profiles.length == 0) continue;
-
-            // Perfil más reciente primero — más probable que refleje la config actual.
-            Arrays.sort(profiles, Comparator.comparingLong(File::lastModified).reversed());
-            client.sendTechLog(executionId,
-                    "[TeamID] Sin build previo de WDA — analizando " + profiles.length
-                    + " perfil(es) en " + dir.getAbsolutePath() + " (solo io.qautomation.wda.*)...");
-
-            for (File f : profiles) {
-                try {
-                    String plist = decodeProfilePlist(f);
-                    if (plist == null) continue;
-                    // Nunca aceptar un perfil de un proyecto sin relación (p.ej. otra app
-                    // de prueba personal) solo porque exista en el sistema.
-                    String appId = extractPlistArrayFirstString(plist, "application-identifier");
-                    if (appId == null || !appId.contains("io.qautomation.wda")) continue;
-                    String teamId = extractPlistArrayFirstString(plist, "TeamIdentifier");
-                    if (teamId != null) {
-                        client.sendTechLog(executionId, "[TeamID] TeamIdentifier leído de " + f.getName() + ": " + teamId);
-                        return teamId;
-                    }
-                } catch (Exception ignored) {}
-            }
-        }
-        client.sendTechLog(executionId,
-                "[TeamID] Sin perfil de WebDriverAgent existente ni perfil io.qautomation.wda.* instalado.");
-        return "";
-    }
-
-    // ── Estrategia 2/3: OU del certificado (nunca el CN) ──────────────────────
-
-    private static String strategyCertificateOU(BackendClient client, String executionId, String certName) {
-        try {
-            String cmd = "security find-certificate -c '" + certName + "' -p 2>/dev/null"
-                       + " | openssl x509 -noout -subject 2>/dev/null";
-            Process p = new ProcessBuilder("/bin/sh", "-c", cmd).start();
-            String out = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor(10, TimeUnit.SECONDS);
-
-            if (out.isBlank()) {
-                client.sendTechLog(executionId, "[TeamID] Certificado \"" + certName + "\" no encontrado.");
-                return "";
-            }
-            String ou = extractOuFromSubject(out);
-            if (ou == null) {
-                client.sendTechLog(executionId,
-                        "[TeamID] Certificado \"" + certName + "\" encontrado pero sin OU extraíble: "
-                        + out.substring(0, Math.min(120, out.length())));
-                return "";
-            }
-            return ou;
-        } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] Error leyendo OU de \"" + certName + "\": " + e.getMessage());
-            return "";
-        }
-    }
-
-    // ── Estrategia 4: OU de cualquier certificado del keychain ───────────────
-
-    private static String strategyAnyCertificateOU(BackendClient client, String executionId) {
-        try {
-            String cmd = "security find-certificate -a -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null";
-            Process p = new ProcessBuilder("/bin/sh", "-c", cmd).start();
-            String out = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor(15, TimeUnit.SECONDS);
-            if (out.isBlank()) return "";
-            String ou = extractOuFromSubject(out);
-            if (ou != null) return ou;
-            client.sendTechLog(executionId, "[TeamID] Sin OU extraíble en ningún certificado del keychain.");
-        } catch (Exception e) {
-            client.sendTechLog(executionId, "[TeamID] Error escaneando certificados del keychain: " + e.getMessage());
-        }
-        return "";
-    }
-
-    /**
-     * Extrae ÚNICAMENTE el campo OU (Organizational Unit) de un subject X.509 —
-     * jamás el CN, jamás el UID. Ambos formatos de openssl son soportados:
-     *   legado (LibreSSL/macOS):  /UID=.../CN=.../OU=TEAMID/O=.../C=US
-     *   RFC2253 (orden inverso):  CN=...,OU=TEAMID,O=...,C=US,UID=...
-     * El ancla explícita a "OU=" (nunca "UID=") es lo que evita el bug original,
-     * donde una alternancia (?:OU|UID) emparejaba el UID por aparecer primero
-     * en el subject legado.
-     */
-    private static String extractOuFromSubject(String subject) {
-        Pattern slashOu = Pattern.compile("/OU=([A-Z0-9]{10})(?:/|$)");
-        Matcher m = slashOu.matcher(subject);
-        if (m.find()) return m.group(1);
-
-        Pattern commaOu = Pattern.compile("(?:^|,\\s*)OU=([A-Z0-9]{10})(?:,|$)");
-        Matcher mc = commaOu.matcher(subject);
-        if (mc.find()) return mc.group(1);
-
-        return null;
+        return AppleDeveloperTeamManager.selectTeam(client, executionId);
     }
 
     // ── 3. iOS Version ────────────────────────────────────────────────────────
@@ -709,20 +540,20 @@ public class IosPreflightManager {
      */
     static WdaCacheValidation validateCachedWda(String udid, String expectedTeamId, String expectedBundleId,
                                                  BackendClient client, String executionId) {
-        File profileFile = findLatestWdaEmbeddedProfile();
+        File profileFile = AppleSigningUtils.findLatestWdaEmbeddedProfile();
         if (profileFile == null) {
             return WdaCacheValidation.invalid(
                     "No se encontró WebDriverAgentRunner-Runner.app compilado en DerivedData");
         }
 
-        String plist = decodeProfilePlist(profileFile);
+        String plist = AppleSigningUtils.decodeProfilePlist(profileFile);
         if (plist == null) {
             return WdaCacheValidation.invalid(
                     "No se pudo decodificar el provisioning profile embebido (" + profileFile.getName() + ")");
         }
 
         // 1. Bundle ID (se valida antes que nada — un profile de OTRO proyecto no cuenta)
-        String appId = extractPlistArrayFirstString(plist, "application-identifier");
+        String appId = AppleSigningUtils.extractPlistArrayFirstString(plist, "application-identifier");
         if (appId == null || (expectedBundleId != null && !appId.contains(expectedBundleId))) {
             return new WdaCacheValidation(false,
                     "Bundle ID del perfil (" + appId + ") no coincide con el esperado (" + expectedBundleId + ")",
@@ -730,7 +561,7 @@ public class IosPreflightManager {
         }
 
         // 2. Expiración
-        Instant expiration = extractExpirationDate(plist);
+        Instant expiration = AppleSigningUtils.extractExpirationDate(plist);
         String  expirationStr = expiration != null ? expiration.toString() : "desconocida";
         if (expiration == null) {
             return WdaCacheValidation.invalid("El perfil no tiene ExpirationDate legible");
@@ -742,7 +573,7 @@ public class IosPreflightManager {
         }
 
         // 3. Team ID — el mismo Team ID robusto que detectAppleTeamId() calcula ahora
-        String profileTeamId = extractPlistArrayFirstString(plist, "TeamIdentifier");
+        String profileTeamId = AppleSigningUtils.extractPlistArrayFirstString(plist, "TeamIdentifier");
         if (profileTeamId == null) {
             return new WdaCacheValidation(false, "El perfil no tiene TeamIdentifier legible",
                     null, null, expirationStr);
@@ -754,134 +585,25 @@ public class IosPreflightManager {
         }
 
         // 4. Dispositivo incluido
-        if (!containsProvisionedDevice(plist, udid)) {
+        if (!AppleSigningUtils.containsProvisionedDevice(plist, udid)) {
             return new WdaCacheValidation(false,
                     "El dispositivo " + udid + " no está en ProvisionedDevices del perfil",
                     null, profileTeamId, expirationStr);
         }
 
         // 5. Certificado embebido sigue siendo una identidad válida del keychain
-        String certSha1 = extractFirstDeveloperCertificateSha1(plist);
+        String certSha1 = AppleSigningUtils.extractFirstDeveloperCertificateSha1(plist);
         if (certSha1 == null) {
             return new WdaCacheValidation(false, "No se pudo leer el certificado embebido en el perfil",
                     null, profileTeamId, expirationStr);
         }
-        if (!isCertificateCurrentlyValid(certSha1)) {
+        if (!AppleSigningUtils.isCertificateCurrentlyValid(certSha1)) {
             return new WdaCacheValidation(false,
-                    "El certificado embebido (" + shortSha(certSha1) + ") ya no es una identidad válida en el keychain",
+                    "El certificado embebido (" + AppleSigningUtils.shortSha(certSha1) + ") ya no es una identidad válida en el keychain",
                     certSha1, profileTeamId, expirationStr);
         }
 
         return new WdaCacheValidation(true, "OK", certSha1, profileTeamId, expirationStr);
-    }
-
-    /** Busca el embedded.mobileprovision más reciente entre los builds de WebDriverAgent en DerivedData. */
-    private static File findLatestWdaEmbeddedProfile() {
-        File derivedDataRoot = new File(System.getProperty("user.home") + "/Library/Developer/Xcode/DerivedData");
-        File[] wdaDirs = derivedDataRoot.listFiles(f -> f.isDirectory() && f.getName().startsWith("WebDriverAgent-"));
-        if (wdaDirs == null || wdaDirs.length == 0) return null;
-
-        File latest = null;
-        for (File wdaDir : wdaDirs) {
-            File productsDir = new File(wdaDir, "Build/Products");
-            if (!productsDir.isDirectory()) continue;
-            File[] suiteDirs = productsDir.listFiles(f -> f.isDirectory() && f.getName().startsWith("Debug-iphoneos"));
-            if (suiteDirs == null) continue;
-            for (File suiteDir : suiteDirs) {
-                File profile = new File(suiteDir, "WebDriverAgentRunner-Runner.app/embedded.mobileprovision");
-                if (profile.isFile() && (latest == null || profile.lastModified() > latest.lastModified())) {
-                    latest = profile;
-                }
-            }
-        }
-        return latest;
-    }
-
-    /** Decodifica un .mobileprovision (CMS-signed) a su plist XML en texto plano. */
-    private static String decodeProfilePlist(File profile) {
-        try {
-            Process p = new ProcessBuilder("security", "cms", "-D", "-i", profile.getAbsolutePath())
-                    .redirectErrorStream(false).start();
-            String plist = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            boolean done = p.waitFor(10, TimeUnit.SECONDS);
-            return (done && !plist.isBlank()) ? plist : null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /** Devuelve el primer &lt;string&gt; que sigue a &lt;key&gt;{key}&lt;/key&gt; — sirve tanto para
-     *  valores planos (application-identifier) como para el primer elemento de un &lt;array&gt;
-     *  (TeamIdentifier). */
-    private static String extractPlistArrayFirstString(String plist, String key) {
-        String marker = "<key>" + key + "</key>";
-        int keyIdx = plist.indexOf(marker);
-        if (keyIdx < 0) return null;
-        int from = keyIdx + marker.length();
-        int to   = Math.min(plist.length(), from + 500);
-        Matcher m = Pattern.compile("<string>([^<]+)</string>").matcher(plist.substring(from, to));
-        return m.find() ? m.group(1).trim() : null;
-    }
-
-    private static Instant extractExpirationDate(String plist) {
-        String marker = "<key>ExpirationDate</key>";
-        int keyIdx = plist.indexOf(marker);
-        if (keyIdx < 0) return null;
-        int from = keyIdx + marker.length();
-        int to   = Math.min(plist.length(), from + 200);
-        Matcher m = Pattern.compile("<date>([^<]+)</date>").matcher(plist.substring(from, to));
-        if (!m.find()) return null;
-        try {
-            return Instant.parse(m.group(1).trim());
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static boolean containsProvisionedDevice(String plist, String udid) {
-        int keyIdx = plist.indexOf("<key>ProvisionedDevices</key>");
-        if (keyIdx < 0) return false;
-        int endIdx = plist.indexOf("</array>", keyIdx);
-        if (endIdx < 0) endIdx = plist.length();
-        return plist.substring(keyIdx, Math.min(plist.length(), endIdx)).contains(udid);
-    }
-
-    /** SHA1 (hex, mayúsculas) del primer certificado embebido en DeveloperCertificates. */
-    private static String extractFirstDeveloperCertificateSha1(String plist) {
-        int keyIdx = plist.indexOf("<key>DeveloperCertificates</key>");
-        if (keyIdx < 0) return null;
-        int dataStart = plist.indexOf("<data>", keyIdx);
-        if (dataStart < 0) return null;
-        int dataEnd = plist.indexOf("</data>", dataStart);
-        if (dataEnd < 0) return null;
-        String base64 = plist.substring(dataStart + "<data>".length(), dataEnd).replaceAll("\\s+", "");
-        try {
-            byte[] der  = Base64.getDecoder().decode(base64);
-            byte[] hash = MessageDigest.getInstance("SHA-1").digest(der);
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) sb.append(String.format("%02X", b));
-            return sb.toString();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /** ¿Sigue esta huella SHA1 entre las identidades de firma válidas del keychain? */
-    private static boolean isCertificateCurrentlyValid(String sha1) {
-        try {
-            Process p = new ProcessBuilder("security", "find-identity", "-v", "-p", "codesigning")
-                    .redirectErrorStream(true).start();
-            String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            p.waitFor(10, TimeUnit.SECONDS);
-            return out.toUpperCase().contains(sha1.toUpperCase());
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static String shortSha(String sha1) {
-        if (sha1 == null || sha1.isBlank()) return "desconocido";
-        return sha1.substring(0, Math.min(12, sha1.length())) + "...";
     }
 
     // ── Limpieza automática de DerivedData ────────────────────────────────────
