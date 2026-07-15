@@ -97,9 +97,13 @@ public class IosPreflightManager {
     public static IosPreflightResult runPreflight(
             BackendClient client, String executionId, String udid) {
 
-        // Señala a IOSMirrorProvider que una ejecución real es dueña del ciclo de vida
-        // de WDA a partir de aquí — ver WdaManager.markTestExecutionStart().
-        WdaManager.markTestExecutionStart();
+        // La adquisición de la sesión de lanzamiento (¿quién tiene derecho a que ESTE
+        // preflight levante WDA — una ejecución real o el Mirror on-demand?) es
+        // responsabilidad de cada LLAMADOR, no de este método compartido — ver
+        // WdaLaunchCoordinator. JobExecutor llama beginExecutionSession() antes de
+        // invocar este método; IOSMirrorProvider.triggerOnDemandLaunch() adquiere su
+        // propio MirrorSession antes de invocarlo. Este método no decide ni conoce
+        // quién es el dueño de la sesión.
 
         // Único punto de publicación de "WDA inicializando" para AMBOS flujos —
         // este método lo invoca tanto una ejecución real (JobExecutor) como el

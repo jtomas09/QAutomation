@@ -14,7 +14,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -60,14 +59,6 @@ public final class WdaManager {
     // False when WDA launch was skipped (Appium will handle it).
     // Used by IosPreflightManager to avoid invalidating cache on "no xcodeproj" paths.
     private static volatile boolean lastLaunchWasAttempted = false;
-
-    // True desde que IosPreflightManager.runPreflight() arranca para una ejecución de
-    // test real, hasta que IOSExecutionCleanupManager.cleanup() termina de liberar el
-    // dispositivo. Permite que IOSMirrorProvider (Device Mirror, ver paquete
-    // qa.cinepolis.runner.mirror) sepa que NO debe lanzar WDA por su cuenta mientras
-    // una ejecución real es dueña de su ciclo de vida — evita que "solo ver la pantalla"
-    // desde el Dashboard compita con o interrumpa una ejecución de test en curso.
-    private static final AtomicBoolean testExecutionActive = new AtomicBoolean(false);
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(3))
@@ -131,31 +122,10 @@ public final class WdaManager {
         return lastLaunchWasAttempted;
     }
 
-    // Momento (epoch ms) en que arrancó la ventana actual — usado por
-    // AppiumXcodebuildLogForwarder para saber desde dónde reenviar appium.log
-    // sin tener que tocar el flujo de JobExecutor para pasar este dato.
-    private static volatile long testExecutionStartedAtMs = 0L;
-
-    /** Marca el inicio de la ventana en la que una ejecución de test real es dueña de WDA. */
-    public static void markTestExecutionStart() {
-        testExecutionActive.set(true);
-        testExecutionStartedAtMs = System.currentTimeMillis();
-    }
-
-    /** Marca el fin de esa ventana — llamar siempre desde cleanup, incluso si algo falló. */
-    public static void markTestExecutionEnd() {
-        testExecutionActive.set(false);
-    }
-
-    /** ¿Hay una ejecución de test real usando/levantando WDA en este momento? */
-    public static boolean isTestExecutionActive() {
-        return testExecutionActive.get();
-    }
-
-    /** Epoch ms del último markTestExecutionStart() — 0 si nunca se llamó en este proceso. */
-    public static long getTestExecutionStartedAtMs() {
-        return testExecutionStartedAtMs;
-    }
+    // La propiedad "¿quién tiene derecho a lanzar/gestionar WDA ahora mismo?"
+    // (ejecución real vs. Mirror on-demand) vive en WdaLaunchCoordinator, no aquí —
+    // ver su javadoc para el porqué de la separación (SRP: WdaManager gestiona el
+    // PROCESO de WDA; WdaLaunchCoordinator arbitra quién tiene derecho a tocarlo).
 
     /**
      * Main entry point: verifies WDA is running and starts it if needed.

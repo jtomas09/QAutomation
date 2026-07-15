@@ -660,6 +660,12 @@ public class JobExecutor {
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
                     return;
                 }
+                // Ejecución real: adquiere la sesión de lanzamiento de WDA de forma
+                // incondicional (siempre gana sobre un lanzamiento on-demand del Mirror
+                // en curso) — ver WdaLaunchCoordinator. Se libera en
+                // IOSExecutionCleanupManager.cleanup(), llamado siempre al final de
+                // este método (catch/finally ya lo garantizan).
+                WdaLaunchCoordinator.beginExecutionSession();
                 iosResult = IosPreflightManager.runPreflight(
                         client, job.executionId, receivedUdid);
             }
@@ -1499,6 +1505,11 @@ public class JobExecutor {
         cmd.add("-Dappium.hub=" + cleanAppiumHub);
         cmd.add("-DexecutionName=" + nvl(job.suite,   "Suite"));
         cmd.add("-DREUSE_DRIVER=true");
+        // RUN ID — permite que DriverFactory/BaseTest agreguen contexto a sus logs
+        // (qué ejecución falló) sin tener que re-imprimir la excepción para identificarla.
+        if (job.executionId != null && !job.executionId.isBlank()) {
+            cmd.add("-DexecutionId=" + job.executionId);
+        }
 
         // Dynamic device capabilities from Device Farm discovery
         if (job.udid != null && !job.udid.isBlank()) {

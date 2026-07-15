@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * Esta clase NO modifica el flujo de JobExecutor ni de DriverFactory — solo
  * lee un archivo que Appium ya escribe y reenvía las líneas relevantes de la
  * ventana temporal de la ejecución actual (delimitada por
- * WdaManager.markTestExecutionStart()/markTestExecutionEnd()).
+ * WdaLaunchCoordinator.beginExecutionSession()/endExecutionSession()).
  */
 public final class AppiumXcodebuildLogForwarder {
 

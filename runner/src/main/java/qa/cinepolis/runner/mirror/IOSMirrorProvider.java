@@ -7,6 +7,7 @@ import qa.cinepolis.runner.BackendClient;
 import qa.cinepolis.runner.IOSDeviceRegistry;
 import qa.cinepolis.runner.IosPreflightManager;
 import qa.cinepolis.runner.RunnerAgent;
+import qa.cinepolis.runner.WdaLaunchCoordinator;
 import qa.cinepolis.runner.WdaManager;
 
 import java.net.URI;
@@ -36,17 +37,27 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * cada pocos segundos.
  *
  * Salvaguardas para no interferir con una ejecución de test real:
- *  1. Si WdaManager.isTestExecutionActive() es true, este provider NO lanza
- *     nada — una ejecución real ya es dueña del ciclo de vida de WDA en este
- *     momento (ventana marcada por IosPreflightManager/IOSExecutionCleanupManager).
+ *  1. Si WdaLaunchCoordinator.isExecutionActive() es true, este provider NO
+ *     lanza nada — una ejecución real ya tiene la sesión de lanzamiento
+ *     (adquirida por JobExecutor vía WdaLaunchCoordinator.beginExecutionSession()).
  *  2. ensureWdaRunning() es `synchronized` en WdaManager, así que aunque el
  *     mirror y una ejecución real inicien su preflight casi al mismo tiempo,
  *     solo uno de los dos termina lanzando xcodebuild; el otro ve WDA ya
  *     arriba (fast path) y no hace nada.
  *  3. launchInProgress evita lanzar múltiples preflights on-demand en paralelo
- *     desde el propio mirror (p.ej. varias pestañas del Dashboard abiertas).
+ *     desde el propio mirror (p.ej. varias pestañas del Dashboard abiertas);
+ *     WdaLaunchCoordinator.tryAcquireForMirror() es una segunda salvaguarda
+ *     independiente contra la misma condición, y además impide competir con
+ *     una ejecución real que haya adquirido la sesión justo en ese instante.
  *  4. stop() sigue sin detener WDA nunca — pertenece al ciclo de vida de la
  *     ejecución de test, no al del mirror.
+ *
+ * Ciclo de vida de la sesión de Mirror: triggerOnDemandLaunch() adquiere su
+ * propio WdaLaunchCoordinator.MirrorSession y lo libera SIEMPRE en su propio
+ * finally — a diferencia del diseño anterior (WdaManager.testExecutionActive),
+ * nunca depende de que otra clase (IOSExecutionCleanupManager) libere algo en
+ * su nombre, así que una ejecución real nunca queda bloqueada por un
+ * lanzamiento on-demand del Mirror que no se cerró correctamente.
  */
 public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
@@ -85,8 +96,8 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             return true;
         }
 
-        if (WdaManager.isTestExecutionActive()) {
-            // Una ejecución de test real ya está usando/levantando WDA — el mirror
+        if (WdaLaunchCoordinator.isExecutionActive()) {
+            // Una ejecución de test real ya tiene la sesión de lanzamiento — el mirror
             // no debe competir. La fase INITIALIZING ya la publicó esa ejecución
             // real vía IosPreflightManager.runPreflight() (WdaEventBus es el único
             // publicador — ver su javadoc); este método no publica nada, solo
@@ -106,6 +117,18 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
         if (!launchInProgress.compareAndSet(false, true)) {
             return; // ya hay un intento on-demand en curso para este Runner
         }
+
+        // Adquiere la propia sesión del Mirror — null si justo ahora una ejecución
+        // real tomó el control, o si otro intento on-demand ganó la carrera (no
+        // debería ocurrir dado launchInProgress, pero es una segunda salvaguarda
+        // independiente sin costo). Si no se adquiere, no competir: no hay nada
+        // que liberar porque no se adquirió nada.
+        WdaLaunchCoordinator.MirrorSession session = WdaLaunchCoordinator.tryAcquireForMirror();
+        if (session == null) {
+            launchInProgress.set(false);
+            return;
+        }
+
         long attemptStartedAtMs = System.currentTimeMillis();
         Thread t = new Thread(() -> {
             try {
@@ -142,6 +165,10 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
                 System.err.println("[IOSMirrorProvider] " + reason + " UDID: " + udid);
                 WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ERROR, reason);
             } finally {
+                // El Mirror SIEMPRE libera su propia sesión — nunca depende de que otra
+                // clase lo haga en su nombre. Esto es lo que garantiza que un lanzamiento
+                // on-demand del Mirror jamás deje el sistema bloqueado para el futuro.
+                session.release();
                 launchInProgress.set(false);
             }
         }, "ios-mirror-wda-launch");

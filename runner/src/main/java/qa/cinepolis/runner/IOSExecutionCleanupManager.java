@@ -48,7 +48,7 @@ public final class IOSExecutionCleanupManager {
         //    pero nunca llegaba al Dashboard; el usuario solo veía el resumen
         //    ("xcodebuild failed with code 65...") sin la causa real de Xcode.
         String realXcodeError = AppiumXcodebuildLogForwarder.forwardSince(
-                WdaManager.getTestExecutionStartedAtMs(), client, executionId);
+                WdaLaunchCoordinator.executionStartedAtMs(), client, executionId);
 
         // Publica hacia el Mirror el MISMO evento que publicaría un lanzamiento
         // on-demand fallido (WdaEventBus es el único canal — ver su javadoc). Antes,
@@ -109,11 +109,11 @@ public final class IOSExecutionCleanupManager {
                     + " los botones de volumen para forzar la detención.");
         }
 
-        // Cierra la ventana abierta en IosPreflightManager.runPreflight() — a partir de
-        // aquí IOSMirrorProvider puede volver a lanzar WDA bajo demanda si hace falta.
+        // Libera la sesión de ejecución — a partir de aquí IOSMirrorProvider puede
+        // volver a adquirir su propia sesión y lanzar WDA bajo demanda si hace falta.
         // Se llama siempre, incluso si el dispositivo quedó "OCUPADO" arriba: el intento
         // de esta ejecución terminó de cualquier forma.
-        WdaManager.markTestExecutionEnd();
+        WdaLaunchCoordinator.endExecutionSession();
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
