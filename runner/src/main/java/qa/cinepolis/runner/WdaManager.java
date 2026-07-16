@@ -20,8 +20,11 @@ import java.util.regex.Pattern;
 
 /**
  * WDA (WebDriverAgent) process MECHANISM for iOS testing — no launch/orchestration
- * decisions live here anymore (ver WdaLaunchService, la única puerta de entrada que
- * decide CUÁNDO construir/arrancar/verificar WDA). Esta clase solo sabe CÓMO hacerlo.
+ * decisions live here (ver {@link WdaLifecycleOwner}, la ÚNICA autoridad que decide
+ * CUÁNDO construir/arrancar/verificar/detener WDA). Esta clase solo sabe CÓMO
+ * hacerlo, y sus métodos de construcción/detención son package-private a propósito:
+ * SOLO {@link WdaLifecycleOwner} debe invocarlos. Ningún otro componente de este
+ * paquete debe llamar a tryStartFrom..., stop() o cleanup() directamente.
  *
  * WDA es el puente de automatización que usa el driver XCUITest de Appium. En Xcode
  * 16+/26 con CoreDevice, WDA puede enlazar a una IP específica del dispositivo (p.ej.
@@ -117,7 +120,7 @@ public final class WdaManager {
 
     // La propiedad "¿quién tiene derecho a lanzar/gestionar WDA ahora mismo?"
     // (ejecución real vs. Mirror on-demand) vive en WdaLaunchCoordinator; CUÁNDO
-    // construir/arrancar/verificar vive en WdaLaunchService. Esta clase (WdaManager)
+    // construir/arrancar/verificar vive en WdaLifecycleOwner. Esta clase (WdaManager)
     // solo ofrece el mecanismo — ver su javadoc de clase para el porqué de la separación.
 
     /**
@@ -192,7 +195,7 @@ public final class WdaManager {
      * el forwarder de red de WDA de forma huérfana — mismo patrón ya usado para
      * el proceso Gradle en JobExecutor.forceKillProcessTree().
      */
-    public static void stop() {
+    static void stop() {
         Process p = wdaProcess;
         if (p != null && p.isAlive()) {
             try {
@@ -217,7 +220,7 @@ public final class WdaManager {
      *
      * Safe to call multiple times (idempotent). Never throws.
      */
-    public static void cleanup(BackendClient client, String executionId, String physicalUdid) {
+    static void cleanup(BackendClient client, String executionId, String physicalUdid) {
         stop(); // kill Mac-side xcodebuild
 
         if (physicalUdid != null && !physicalUdid.isBlank()) {
@@ -241,13 +244,33 @@ public final class WdaManager {
                 stopped = !isWdaRunning();
             }
 
+            // Verificación determinística real: isWdaRunning() solo prueba /status por
+            // HTTP (puede fallar por motivos ajenos al proceso, p.ej. red). La prueba
+            // definitiva de "ya no queda ningún proceso WDA en el dispositivo" es
+            // volver a consultar devicectl directamente — la misma fuente que
+            // terminateWdaOnDevice() usó para encontrar los PIDs a matar.
+            Set<String> survivors = queryWdaPidsOnDevice(physicalUdid);
+            if (!survivors.isEmpty()) {
+                stopped = false;
+                if (client != null && executionId != null) {
+                    client.sendTechLog(executionId,
+                            "[WDA] devicectl reporta procesos WDA aún vivos tras SIGKILL: " + survivors);
+                }
+                // Último intento: SIGKILL directo a los PIDs que devicectl confirma vivos.
+                terminateWdaOnDevice(physicalUdid, 9);
+                try { Thread.sleep(1_500); } catch (InterruptedException ignored) {}
+                survivors = queryWdaPidsOnDevice(physicalUdid);
+                stopped = survivors.isEmpty();
+            }
+
             // Log honest result — ONLY "✓ WebDriverAgent detenido" when truly verified
             if (client != null && executionId != null) {
                 if (stopped)
                     client.sendLog(executionId, "INFO", "✓ WebDriverAgent detenido");
                 else
                     client.sendLog(executionId, "WARN",
-                            "⚠ WebDriverAgent aún activo en el dispositivo");
+                            "⚠ WebDriverAgent aún activo en el dispositivo (devicectl confirma PIDs: "
+                            + survivors + ")");
             }
         }
 
@@ -311,6 +334,37 @@ public final class WdaManager {
     }
 
     private static void terminateWdaOnDevice(String physicalUdid, int signal) {
+        Set<String> pids = queryWdaPidsOnDevice(physicalUdid);
+        if (pids.isEmpty()) {
+            System.out.println("[WdaManager] Sin procesos WDA activos en dispositivo.");
+            return;
+        }
+
+        // Xcode 26: send SIGTERM (signal 15) — replaces "process terminate"
+        for (String pid : pids) {
+            try {
+                Process kill = new ProcessBuilder(
+                        "xcrun", "devicectl", "device", "process", "signal",
+                        "--device", physicalUdid, "--pid", pid, "--signal", String.valueOf(signal))
+                        .redirectErrorStream(true).start();
+                kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
+                kill.waitFor(8, TimeUnit.SECONDS);
+                System.out.println("[WdaManager] ✅ WDA PID=" + pid + " señal=" + signal + " enviada.");
+            } catch (Exception ex) {
+                System.err.println("[WdaManager] No se pudo terminar PID=" + pid + ": " + ex.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Consulta directa a devicectl — devuelve los PIDs de procesos WDA vivos AHORA
+     * MISMO en el dispositivo, sin depender de ninguna referencia Java a un
+     * proceso. Es la fuente de verdad usada tanto para decidir a quién matar
+     * (terminateWdaOnDevice) como para verificar de forma determinística que ya
+     * no queda nada vivo (cleanup) — nunca confía en el resultado de la señal por
+     * sí solo.
+     */
+    static Set<String> queryWdaPidsOnDevice(String physicalUdid) {
         File tmpJson = null;
         try {
             tmpJson = File.createTempFile("wda_procs_", ".json");
@@ -327,36 +381,17 @@ public final class WdaManager {
             if (!done) {
                 list.destroyForcibly();
                 System.err.println("[WdaManager] Timeout listando procesos del dispositivo.");
-                return;
+                return java.util.Collections.emptySet();
             }
 
             String json;
             try (FileInputStream fis = new FileInputStream(tmpJson)) {
                 json = new String(fis.readAllBytes());
             }
-
-            Set<String> pids = extractWdaPids(json);
-            if (pids.isEmpty()) {
-                System.out.println("[WdaManager] Sin procesos WDA activos en dispositivo.");
-                return;
-            }
-
-            // Xcode 26: send SIGTERM (signal 15) — replaces "process terminate"
-            for (String pid : pids) {
-                try {
-                    Process kill = new ProcessBuilder(
-                            "xcrun", "devicectl", "device", "process", "signal",
-                            "--device", physicalUdid, "--pid", pid, "--signal", String.valueOf(signal))
-                            .redirectErrorStream(true).start();
-                    kill.getInputStream().transferTo(java.io.OutputStream.nullOutputStream());
-                    kill.waitFor(8, TimeUnit.SECONDS);
-                    System.out.println("[WdaManager] ✅ WDA PID=" + pid + " señal=" + signal + " enviada.");
-                } catch (Exception ex) {
-                    System.err.println("[WdaManager] No se pudo terminar PID=" + pid + ": " + ex.getMessage());
-                }
-            }
+            return extractWdaPids(json);
         } catch (Exception e) {
-            System.err.println("[WdaManager] terminateWdaOnDevice error: " + e.getMessage());
+            System.err.println("[WdaManager] queryWdaPidsOnDevice error: " + e.getMessage());
+            return java.util.Collections.emptySet();
         } finally {
             if (tmpJson != null) tmpJson.delete();
         }
@@ -396,7 +431,7 @@ public final class WdaManager {
     /**
      * Resultado de UN intento de arrancar WDA — nunca se comparte entre intentos.
      * {@code capturedError} lo actualiza en tiempo real {@link #streamBuildOutput}
-     * con la línea "error:" más específica vista en ESTE proceso — WdaLaunchService
+     * con la línea "error:" más específica vista en ESTE proceso — WdaLifecycleOwner
      * la lee después de que {@link #waitForWdaReady} agota su plazo, garantizando
      * que el motivo mostrado en el Mirror pertenece siempre a este mismo intento,
      * nunca a appium.log ni a ningún otro proceso.
@@ -427,6 +462,17 @@ public final class WdaManager {
         final java.util.concurrent.atomic.AtomicBoolean testFailed =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
 
+        /**
+         * True cuando xcodebuild reportó que el dispositivo está bloqueado/requiere
+         * passcode ("Unlock ... to Continue", dominio com.apple.dt.deviceprep) —
+         * confirmado con ejecución real: sin esta detección, xcodebuild espera su
+         * propio timeout interno de "Run Destination Preflight" (hasta ~6 minutos)
+         * antes de rendirse. Al detectar esta línea, streamBuildOutput() mata el
+         * proceso INMEDIATAMENTE en vez de esperar ese timeout.
+         */
+        final java.util.concurrent.atomic.AtomicBoolean deviceLocked =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+
         private BuildOutcome(boolean started) { this.started = started; }
 
         static BuildOutcome started()    { return new BuildOutcome(true); }
@@ -435,6 +481,7 @@ public final class WdaManager {
         String  capturedError()       { return capturedError.get(); }
         boolean mismatchedIdentifier() { return mismatchedIdentifier.get(); }
         boolean testFailed()           { return testFailed.get(); }
+        boolean deviceLocked()         { return deviceLocked.get(); }
     }
 
     // ── Start attempt A: test-without-building ────────────────────────────────
@@ -613,6 +660,15 @@ public final class WdaManager {
             + "developer mode|coredevice|miinstallererrordomain|ixuserpresentableerrordomain|"
             + "mismatchedapplicationidentifierentitlement|testing failed|test failed|failed to install");
 
+    // Dispositivo bloqueado/passcode requerido — confirmado con ejecución real contra
+    // dispositivo físico: xcodebuild imprime "com.apple.dt.deviceprep" con el mensaje
+    // "Unlock <device> to Continue" / "the device is locked" cuando la pantalla está
+    // bloqueada. Detección específica de ese dominio de error — no el genérico "error:"
+    // (evita falsos positivos con cualquier otra línea que mencione "locked").
+    private static final Pattern DEVICE_LOCKED_PAT = Pattern.compile(
+            "(?i)com\\.apple\\.dt\\.deviceprep|unlock .* to continue|the device is locked|"
+            + "may need to be unlocked|timed out waiting for all destinations");
+
     private static final long BUILD_LOG_FLUSH_MS    = 1_000L;
     private static final int  BUILD_LOG_FLUSH_CHARS = 6_000;
 
@@ -626,7 +682,7 @@ public final class WdaManager {
      *  - Detecta "ServerURLHere->URL<-ServerURLHere" → guarda la URL, log INFO inmediato.
      *  - Detecta BUILD SUCCEEDED/FAILED → log INFO/ERROR inmediato (además del lote).
      *  - Captura en {@code capturedError} la línea "error:" más específica vista —
-     *    WdaLaunchService la usa como motivo real si el intento termina fallando,
+     *    WdaLifecycleOwner la usa como motivo real si el intento termina fallando,
      *    en vez de un mensaje genérico o de contenido de otro proceso.
      */
     private static void streamBuildOutput(Process p, String prefix, BackendClient client,
@@ -724,9 +780,30 @@ public final class WdaManager {
                     // Detección dedicada (no vía capturedError — esta línea real de iOS no
                     // contiene "error:", confirmado con ejecución real): un WDA anterior
                     // sigue instalado en el dispositivo, firmado con un Team distinto al
-                    // actual. WdaLaunchService decide si reintenta tras desinstalarlo.
+                    // actual. WdaLifecycleOwner decide si reintenta tras desinstalarlo.
                     if (line.contains("MismatchedApplicationIdentifierEntitlement")) {
                         outcome.mismatchedIdentifier.set(true);
+                    }
+
+                    // Dispositivo bloqueado/passcode requerido — confirmado con ejecución
+                    // real: xcodebuild imprime esta línea (dominio com.apple.dt.deviceprep,
+                    // "Unlock <device> to Continue") y luego espera SU PROPIO timeout interno
+                    // de "Run Destination Preflight" — hasta ~6 minutos observados — antes de
+                    // rendirse por su cuenta. En vez de esperar eso, se mata el proceso (y su
+                    // árbol) AQUÍ MISMO, en cuanto aparece la línea, sin esperar nada más.
+                    if (DEVICE_LOCKED_PAT.matcher(line).find()) {
+                        outcome.deviceLocked.set(true);
+                        client.sendLog(executionId, "ERROR",
+                                "🔒 [WDA] Dispositivo bloqueado — cancelando el arranque de WDA "
+                                + "inmediatamente (no se espera el timeout interno de xcodebuild). "
+                                + "Desbloquea el iPhone y reintenta.");
+                        try {
+                            p.toHandle().descendants().forEach(h -> {
+                                try { h.destroyForcibly(); } catch (Exception ignored2) {}
+                            });
+                        } catch (Exception ignored2) {}
+                        p.destroyForcibly();
+                        break;
                     }
 
                     long now = System.currentTimeMillis();

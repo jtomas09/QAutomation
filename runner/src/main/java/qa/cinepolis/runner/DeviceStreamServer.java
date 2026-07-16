@@ -283,7 +283,7 @@ public class DeviceStreamServer {
                 String rest = path.substring(PATH_MIRROR.length());
 
                 // POST /api/device-mirror/{udid}/retry — única forma de sacar a un UDID
-                // del estado terminal ERROR de WdaLaunchService. Debe ser una acción
+                // del estado terminal ERROR de WdaLifecycleOwner. Debe ser una acción
                 // explícita del usuario (botón "Reintentar") — nunca disparada por el
                 // watchdog de reconexión automática del frontend, que solo hace GET.
                 if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
@@ -430,7 +430,7 @@ public class DeviceStreamServer {
                 return;
             }
 
-            qa.cinepolis.runner.WdaLaunchService.resetForRetry(udid);
+            WdaLifecycleOwner.resetForRetry(udid);
             System.out.println("[DeviceMirror] Retry solicitado explícitamente por el usuario: " + udid);
 
             byte[] body = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);

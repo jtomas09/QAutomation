@@ -219,10 +219,20 @@ public class AppiumManager {
         stopping.set(true);
         Process p = appiumProcess;
         if (p != null && p.isAlive()) {
+            // Mata también los descendientes (p.ej. un xcodebuild que Appium haya
+            // lanzado internamente para construir su propia copia de WDA) — mismo
+            // patrón ya usado en WdaManager.stop()/JobExecutor.forceKillProcessTree():
+            // destroy()/destroyForcibly() en Unix solo señala al PID indicado, nunca
+            // a su árbol.
+            try {
+                p.toHandle().descendants().forEach(h -> {
+                    try { h.destroyForcibly(); } catch (Exception ignored) {}
+                });
+            } catch (Exception ignored) {}
             p.destroy();
             try { p.waitFor(5, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
             if (p.isAlive()) p.destroyForcibly();
-            System.out.println("[AppiumValidator] Proceso detenido.");
+            System.out.println("[AppiumValidator] Proceso detenido (árbol de procesos incluido).");
         }
     }
 

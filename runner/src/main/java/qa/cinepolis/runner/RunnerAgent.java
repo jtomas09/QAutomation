@@ -263,6 +263,16 @@ public class RunnerAgent {
                 System.setProperty("XCODE_VERSION", "N/A");
             }
 
+            // ── 6b. Barrido de procesos WDA huérfanos de una instancia anterior ──
+            // Un reinicio del Runner (auto-update, crash, kill -9) pierde cualquier
+            // referencia Java a un xcodebuild en curso, pero el proceso del sistema
+            // operativo no depende de esa referencia para seguir vivo (confirmado
+            // con ejecución real: PPID reparentado a launchd). Se barre una sola vez,
+            // al arrancar, antes de aceptar cualquier job nuevo.
+            if ("MACOS".equals(config.os)) {
+                WdaLifecycleOwner.sweepStaleProcesses();
+            }
+
             // ── 7. HostStatusManager ───────────────────────────────────────────
             HostStatusManager.HostReport hostReport = HostStatusManager.evaluate(
                     true, nodeOk, appiumOk, adbFunctional, xcodeOk, config.iosSupported);
@@ -460,6 +470,16 @@ public class RunnerAgent {
 
         // ── Null out jobExecutor (process already killed above) ───────────────
         if (jobExecutor != null)  { jobExecutor = null; }
+
+        // ── WDA (Mac-side) ──────────────────────────────────────────────────────
+        // Apagado ordenado: mata cualquier xcodebuild de WDA que este Runner haya
+        // lanzado, determinísticamente, sin depender de que un shutdown hook de la
+        // JVM llegue a ejecutarse (esta llamada es explícita, parte del propio
+        // flujo de stopAllServices). El barrido de arranque (ver runStartupSequence)
+        // sigue siendo la red de seguridad para apagados NO ordenados (kill -9).
+        if ("MACOS".equals(config.os)) {
+            WdaLifecycleOwner.sweepStaleProcesses();
+        }
 
         // ── Appium ─────────────────────────────────────────────────────────────
         if (appiumMgr != null)    { appiumMgr.stop(); appiumMgr = null; }

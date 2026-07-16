@@ -14,8 +14,11 @@ import java.util.regex.Pattern;
  *
  * Cleanup sequence:
  *  1. Close Appium session via HTTP DELETE (lets Appium stop WDA gracefully)
- *  2. WdaManager.cleanup() — kills Mac-side xcodebuild, terminates WDA on device,
- *     waits for SIGTERM/SIGKILL to take effect, verifies via HTTP probe
+ *  2. WdaLifecycleOwner.teardown() — única autoridad del ciclo de vida de WDA:
+ *     mata Mac-side xcodebuild + descendientes, termina WDA en el dispositivo,
+ *     escala SIGTERM→SIGKILL, y verifica contra devicectl (no solo HTTP) que
+ *     ya no queda ningún proceso — determinístico, no depende del shutdown hook
+ *     de ninguna JVM.
  *  3. Final state verification
  *  4. Logs structured device state table
  *  5. Logs "✓ Dispositivo liberado correctamente" ONLY when WDA confirmed stopped
@@ -64,10 +67,11 @@ public final class IOSExecutionCleanupManager {
         // 2. Close Appium session via HTTP — Appium stops WDA gracefully on session delete
         closeAppiumSession(client, executionId, appiumHubBase, udid);
 
-        // 3. Kill Mac-side xcodebuild + terminate WDA on device + verify
-        //    WdaManager.cleanup() waits after SIGTERM, probes /status, escalates to SIGKILL
-        //    if needed, and logs the honest result.
-        WdaManager.cleanup(client, executionId, udid);
+        // 3. Kill Mac-side xcodebuild + terminate WDA on device + verify — a través
+        //    de la ÚNICA autoridad de ciclo de vida (WdaLifecycleOwner.teardown()),
+        //    que verifica contra el dispositivo (no solo HTTP) antes de dar por
+        //    cerrado el ciclo, y escala SIGTERM→SIGKILL si hace falta.
+        WdaLifecycleOwner.teardown(client, executionId, udid);
 
         // Sin error detectado — WDA terminó su ciclo de vida normalmente para esta
         // ejecución (éxito, o un fallo ajeno a WDA). El Mirror vuelve al estado
@@ -79,40 +83,103 @@ public final class IOSExecutionCleanupManager {
                     udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.STOPPED);
         }
 
-        // 4. Final state checks
-        boolean wdaDown  = !WdaManager.isWdaRunning();
+        // 4. Verificación final EXPLÍCITA — cada punto se verifica por separado y se
+        //    registra siempre (nunca silenciosamente), en ERROR si no quedó como debía.
+        //    Idempotente: son solo lecturas + (si hace falta) un barrido adicional que
+        //    ya es en sí mismo idempotente (WdaLifecycleOwner.sweepStaleProcesses()) —
+        //    llamar a cleanup() más de una vez para la misma ejecución no tiene ningún
+        //    efecto secundario distinto de repetir estas mismas comprobaciones.
+        boolean allClear = true;
+
+        // 4a. xcodebuild = 0 (system-wide, no solo la referencia que este Runner
+        //     recordaba) — si algo sigue vivo, es un hallazgo real, así que además
+        //     de reportarlo se remedia aquí mismo (mismo mecanismo idempotente que
+        //     el barrido de arranque/apagado).
+        int xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
+        if (xcodebuildLeft > 0) {
+            client.sendLog(executionId, "ERROR",
+                    "❌ [Cleanup] xcodebuild aún activo tras el cleanup (" + xcodebuildLeft
+                    + " proceso(s)) — deteniendo ahora.");
+            WdaLifecycleOwner.sweepStaleProcesses();
+            xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
+            if (xcodebuildLeft > 0) allClear = false;
+        }
+
+        // 4b. WebDriverAgentRunner / XCTest = 0 en el dispositivo (misma consulta que
+        //     terminateWdaOnDevice ya usa — "xctrunner" cubre el proceso XCTest en el
+        //     dispositivo, no existe un proceso "XCTest" distinto observable vía devicectl).
+        java.util.Set<String> devicePids = WdaManager.queryWdaPidsOnDevice(udid);
+        boolean deviceClear = devicePids.isEmpty();
+        if (!deviceClear) {
+            client.sendLog(executionId, "ERROR",
+                    "❌ [Cleanup] WebDriverAgentRunner/XCTest siguen vivos en el dispositivo tras "
+                    + "el cleanup — PIDs: " + devicePids);
+            allClear = false;
+        }
+
+        // 4c. Sesión Appium cerrada
         boolean appiumOk = !hasOpenAppiumSession(appiumHubBase, udid);
-        boolean deviceOk = wdaDown;
+        if (!appiumOk) {
+            client.sendLog(executionId, "ERROR", "❌ [Cleanup] Sesión Appium sigue activa tras el cleanup.");
+            allClear = false;
+        }
 
-        // 5. Structured state summary — always visible
-        String sessionState = appiumOk ? "CERRADA ✓"  : "ACTIVA ⚠";
-        String wdaState     = wdaDown  ? "DETENIDO ✓" : "ACTIVO ⚠";
-        String autoState    = wdaDown  ? "NO ✓"       : "SÍ ⚠";
-        String deviceState  = deviceOk ? "LIBRE ✓"    : "OCUPADO ⚠";
+        // 4d. Mirror detenido para este UDID
+        boolean mirrorClear = !MirrorService.isStreaming(udid);
+        if (!mirrorClear) {
+            client.sendLog(executionId, "ERROR",
+                    "❌ [Cleanup] El Mirror sigue transmitiendo para " + udid + " tras el cleanup.");
+            allClear = false;
+        }
 
-        client.sendLog(executionId, "INFO", String.format(
-                "════════ Estado final del dispositivo ════════%n"
-                + "  Sesión Appium     : %s%n"
-                + "  WebDriverAgent    : %s%n"
-                + "  Automation Running: %s%n"
-                + "  Dispositivo       : %s%n"
-                + "══════════════════════════════════════════════",
-                sessionState, wdaState, autoState, deviceState));
+        // 4e. Tunnel CoreDevice — SOLO informativo. Este repo nunca posee ni destruye
+        //     el túnel (CoreDeviceTunnelManager: "el Runner solo OBSERVA el túnel") —
+        //     reportar su estado aquí es para visibilidad, nunca una condición de fallo.
+        String tunnelState;
+        try {
+            tunnelState = CoreDeviceTunnelManager.readConnectionState(udid).tunnelState;
+        } catch (Exception e) {
+            tunnelState = "desconocido";
+        }
 
-        // 5. Functional outcome — "✓ Dispositivo liberado correctamente" only when verified
-        if (deviceOk) {
-            client.sendLog(executionId, "INFO", "✓ Dispositivo liberado correctamente");
+        // "Automation Running" no es consultable directamente (Apple no expone esa
+        // señal) — su proxy real es "¿sigue vivo el proceso que lo produce en el
+        // dispositivo?", ya verificado en 4b.
+        boolean autoRunningOff = deviceClear;
+
+        // 5. Reporte estructurado — SIEMPRE visible, nunca omitido.
+        client.sendLog(executionId, allClear ? "INFO" : "ERROR", String.format(
+                "════════ Verificación final de liberación ════════%n"
+                + "  xcodebuild (Mac)     : %s%n"
+                + "  WebDriverAgentRunner  : %s%n"
+                + "  XCTest (dispositivo)  : %s%n"
+                + "  Automation Running    : %s%n"
+                + "  Sesión Appium         : %s%n"
+                + "  Mirror                : %s%n"
+                + "  Tunnel CoreDevice     : %s (informativo — no gestionado por este Runner)%n"
+                + "═══════════════════════════════════════════════",
+                xcodebuildLeft == 0 ? "0 ✓" : xcodebuildLeft + " ❌",
+                deviceClear ? "0 ✓" : devicePids.size() + " ❌ " + devicePids,
+                deviceClear ? "0 ✓" : devicePids.size() + " ❌ " + devicePids,
+                autoRunningOff ? "OFF ✓" : "ON ❌",
+                appiumOk ? "CERRADA ✓" : "ACTIVA ❌",
+                mirrorClear ? "DETENIDO ✓" : "ACTIVO ❌",
+                tunnelState));
+
+        // 6. Resultado funcional — nunca silencioso: siempre uno de los dos mensajes.
+        if (allClear) {
+            client.sendLog(executionId, "INFO", "✓ Dispositivo liberado completamente y verificado.");
         } else {
-            client.sendLog(executionId, "WARN",
-                    "⚠ El dispositivo podría requerir intervención manual.\n"
-                    + "  Si el banner 'Automation Running' persiste, mantén presionados"
-                    + " los botones de volumen para forzar la detención.");
+            client.sendLog(executionId, "ERROR",
+                    "❌ El dispositivo NO quedó completamente liberado — ver detalle arriba. "
+                    + "Si 'Automation Running' persiste, mantén presionados los botones de volumen "
+                    + "para forzar la detención.");
         }
 
         // Libera la sesión de ejecución — a partir de aquí IOSMirrorProvider puede
-        // volver a adquirir su propia sesión y lanzar WDA bajo demanda si hace falta.
-        // Se llama siempre, incluso si el dispositivo quedó "OCUPADO" arriba: el intento
-        // de esta ejecución terminó de cualquier forma.
+        // volver a consumir WDA si otra ejecución real lo levanta. Se llama siempre,
+        // incluso si el dispositivo quedó OCUPADO arriba: el intento de esta ejecución
+        // terminó de cualquier forma.
         WdaLaunchCoordinator.endExecutionSession();
     }
 

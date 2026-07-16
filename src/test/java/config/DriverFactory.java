@@ -374,9 +374,19 @@ public class DriverFactory {
                     log.info("[DriverFactory] ⚡ WDA precompilado (Runner) pero sin URL confirmable en vivo — "
                             + "skipServerInstallation=true; Appium localizará el proceso existente por su cuenta.");
                 } else {
-                    options.setCapability("skipServerInstallation", false);
-                    log.info("[DriverFactory] 🔨 Sin WDA confirmado en vivo ni precompilado — "
-                            + "Appium compilará e instalará WDA automáticamente.");
+                    // El Runner (WdaLifecycleOwner) es la ÚNICA autoridad del ciclo de vida
+                    // de WDA. Si no confirmó una URL viva ni marcó wdaPrebuilt, NUNCA se
+                    // delega la construcción a Appium (eso creaba una segunda compilación
+                    // no coordinada, invisible para el Runner — causa raíz confirmada con
+                    // ejecución real de "WDA se instala/compila múltiples veces"). Se falla
+                    // rápido y explícito; el bucle de reintentos ya existente en
+                    // createDriverWithRetries() vuelve a consultar al Runner en el siguiente
+                    // intento — esto no agrega ningún reintento nuevo.
+                    String reason = "WDA no fue confirmado por el Runner antes de crear la sesión. "
+                            + "El Runner es la única autoridad del ciclo de vida de WDA — esta sesión "
+                            + "no delega su construcción a Appium.";
+                    log.error("[DriverFactory][iOS] ❌ {}", reason);
+                    throw new IllegalStateException("[DriverFactory] " + reason);
                 }
             }
 

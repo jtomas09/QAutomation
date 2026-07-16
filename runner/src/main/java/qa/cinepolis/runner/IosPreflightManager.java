@@ -97,18 +97,11 @@ public class IosPreflightManager {
     public static IosPreflightResult runPreflight(
             BackendClient client, String executionId, String udid) {
 
-        // La adquisición de la sesión de lanzamiento (¿quién tiene derecho a que ESTE
-        // preflight levante WDA — una ejecución real o el Mirror on-demand?) es
-        // responsabilidad de cada LLAMADOR, no de este método compartido — ver
-        // WdaLaunchCoordinator. JobExecutor llama beginExecutionSession() antes de
-        // invocar este método; IOSMirrorProvider.triggerOnDemandLaunch() adquiere su
-        // propio MirrorSession antes de invocarlo. Este método no decide ni conoce
-        // quién es el dueño de la sesión.
+        // Este método solo lo invoca una ejecución de test real (JobExecutor llama
+        // WdaLaunchCoordinator.beginExecutionSession() antes de invocarlo) — el Mirror
+        // ya NUNCA lo llama (ver IOSMirrorProvider: solo consume WDA existente).
 
-        // Único punto de publicación de "WDA inicializando" para AMBOS flujos —
-        // este método lo invoca tanto una ejecución real (JobExecutor) como el
-        // lanzamiento on-demand del Mirror (IOSMirrorProvider.triggerOnDemandLaunch).
-        // Ver WdaEventBus — no duplicar esta llamada en ninguno de los dos flujos.
+        // Único punto de publicación de "WDA inicializando" — ver WdaEventBus.
         qa.cinepolis.runner.mirror.WdaEventBus.publish(
                 udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.INITIALIZING);
 
@@ -187,19 +180,22 @@ public class IosPreflightManager {
                     + " | teamId: " + (teamId.isBlank() ? "no detectado" : teamId));
         }
 
-        // 7. WDA verification and pre-start — ver WdaLaunchService, única puerta de
-        // entrada para construir/iniciar/verificar WDA (reemplaza a
-        // WdaManager.ensureWdaRunning()). wdaCached ya no decide SI se construye —
-        // solo si se intenta primero el camino rápido antes de caer al build completo.
-        boolean wdaReady = WdaLaunchService.ensureRunning(
+        // 7. WDA verification and pre-start — ver WdaLifecycleOwner, ÚNICA autoridad
+        // del Runner para construir/iniciar/verificar/detener WDA. wdaCached ya no
+        // decide SI se construye — solo si se intenta primero el camino rápido antes
+        // de caer al build completo. Si otro llamador (p.ej. el Mirror on-demand) ya
+        // tiene un intento en curso para este mismo UDID, esta llamada se une a él en
+        // vez de disparar una segunda compilación.
+        WdaLifecycleOwner.Result wdaResult = WdaLifecycleOwner.acquire(
                 client, executionId, udid, teamId, wdaBundleId, wdaCached);
+        boolean wdaReady = wdaResult.ready;
 
         // Invalidate cache only when a real WDA launch failure occurred:
         //   wdaCached      = true  → cache said WDA was installed
         //   !wdaReady      = true  → WDA didn't respond
         //   wasAttempted   = true  → xcodebuild was actually started
         //   !isWdaRunning  = true  → not already alive on the port
-        boolean wasAttempted = WdaLaunchService.wasLastLaunchAttempted(udid);
+        boolean wasAttempted = WdaLifecycleOwner.wasLastLaunchAttempted(udid);
         if (wdaCached && !wdaReady && wasAttempted && !WdaManager.isWdaRunning()) {
             client.sendLog(executionId, "WARN",
                     "♻️  [WDA] El caché existe pero WDA no respondió tras intentar iniciarlo.\n"

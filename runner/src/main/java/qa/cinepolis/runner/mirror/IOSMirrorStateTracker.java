@@ -26,7 +26,7 @@ public final class IOSMirrorStateTracker {
         DEVICE_DETECTED,
         /** Preflight en curso (Team ID, túnel, caché) — bajo demanda (Mirror) o ejecución real. */
         INITIALIZING_WDA,
-        /** xcodebuild compilando WDA — ver WdaLaunchService. */
+        /** xcodebuild compilando WDA — ver WdaLifecycleOwner. */
         BUILDING_WDA,
         /** Build terminado; esperando a que el proceso WDA anuncie su servidor HTTP. */
         STARTING_WDA,
@@ -36,8 +36,8 @@ public final class IOSMirrorStateTracker {
         MIRROR_ACTIVE,
         /**
          * Estado TERMINAL — el último intento de levantar WDA falló; reason contiene
-         * el motivo real. WdaLaunchService NO reintenta automáticamente desde aquí;
-         * solo una acción explícita del usuario (WdaLaunchService.resetForRetry())
+         * el motivo real. WdaLifecycleOwner NO reintenta automáticamente desde aquí;
+         * solo una acción explícita del usuario (WdaLifecycleOwner.resetForRetry())
          * permite un nuevo intento.
          */
         ERROR

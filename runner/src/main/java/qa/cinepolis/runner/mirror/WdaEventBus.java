@@ -18,7 +18,7 @@ public final class WdaEventBus {
     public enum WdaEvent {
         /** Preflight (Team ID, túnel, caché) en curso — bajo demanda o ejecución real. */
         INITIALIZING,
-        /** xcodebuild compilando WDA — ver WdaLaunchService. */
+        /** xcodebuild compilando WDA — ver WdaLifecycleOwner. */
         BUILDING,
         /** Build terminado; esperando a que el proceso anuncie su servidor HTTP. */
         STARTING,
