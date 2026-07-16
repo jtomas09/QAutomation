@@ -127,6 +127,10 @@ public final class WdaLaunchService {
                     : "🔨 [WDA] Compilando WebDriverAgent desde cero para " + udid
                       + " (primera vez en este dispositivo — puede tardar varios minutos)...");
 
+        // Resuelto una sola vez — lo necesita tanto el Attempt B inicial como el
+        // reintento tras desinstalar un WDA en conflicto (ver más abajo).
+        String projectPath = WdaManager.findWdaProjectPath();
+
         // Attempt A: test-without-building — solo si hay caché, es el camino rápido.
         WdaManager.BuildOutcome outcome = wdaCached
                 ? WdaManager.tryStartFromDerivedData(client, executionId, udid)
@@ -136,7 +140,6 @@ public final class WdaLaunchService {
         // Esto es lo que elimina la dependencia de una ejecución previa de Appium:
         // ya no importa si wdaCached es false, este camino funciona desde cero.
         if (!outcome.started) {
-            String projectPath = WdaManager.findWdaProjectPath();
             if (projectPath == null) {
                 String reason = "No se encontró WebDriverAgent.xcodeproj — reinstala el driver: "
                         + "appium driver install xcuitest";
@@ -165,6 +168,29 @@ public final class WdaLaunchService {
         // pero sigue siendo un límite real, nunca una espera indefinida.
         int timeoutSeconds = wdaCached ? 180 : 600;
         boolean ready = WdaManager.waitForWdaReady(client, executionId, timeoutSeconds);
+
+        // Causa raíz #2 (demostrada con ejecución real): un WDA anterior sigue
+        // instalado en el dispositivo, firmado con un Team distinto al actual — iOS
+        // rechaza la instalación (MismatchedApplicationIdentifierEntitlement).
+        // Equivalente exacto al comportamiento de Appium ante este mismo error
+        // (installToRealDevice, appium-webdriveragent): desinstalar el bundle
+        // conflictivo y reintentar UNA sola vez — nunca de forma preventiva, solo
+        // cuando iOS mismo ya confirmó el conflicto.
+        if (!ready && outcome.mismatchedIdentifier() && projectPath != null) {
+            String xctestBundleId = wdaBundleId + ".xctrunner";
+            client.sendLog(executionId, "WARN",
+                    "♻️ [WDA] Hay una instalación anterior de WebDriverAgent firmada con un Team "
+                    + "distinto — desinstalando " + xctestBundleId + " y reintentando...");
+            if (WdaManager.uninstallApp(udid, xctestBundleId)) {
+                outcome = WdaManager.tryStartFromProject(client, executionId, udid, teamId, wdaBundleId, projectPath);
+                if (outcome.started) {
+                    ready = WdaManager.waitForWdaReady(client, executionId, timeoutSeconds);
+                }
+            } else {
+                client.sendLog(executionId, "WARN",
+                        "⚠️ [WDA] No se pudo desinstalar " + xctestBundleId + " — no se reintenta.");
+            }
+        }
 
         if (!ready) {
             String captured = outcome.capturedError();

@@ -146,6 +146,21 @@ public final class WdaManager {
                 return true;
             }
 
+            // El proceso xcodebuild ya terminó (con cualquier desenlace: BUILD
+            // FAILED, ** TEST FAILED **, Testing failed, o cualquier formato
+            // futuro que Apple use) — seguir esperando hasta agotar
+            // timeoutSeconds sería una espera inútil. Demostrado con ejecución
+            // real: sin esta verificación, un fallo confirmado a los pocos
+            // segundos se reportaba recién a los 600s. El ciclo de vida real
+            // del proceso del SO es la señal más robusta de "terminó" — cubre
+            // cualquier desenlace, no depende de parsear un string concreto.
+            Process activeProcess = wdaProcess;
+            if (activeProcess != null && !activeProcess.isAlive()) {
+                client.sendTechLog(executionId,
+                        "[WDA] El proceso xcodebuild ya finalizó — se detiene la espera de /status.");
+                return false;
+            }
+
             // Progress update every ~15 s
             if (attempt % 5 == 0) {
                 long remaining = (deadline - System.currentTimeMillis()) / 1_000;
@@ -239,6 +254,48 @@ public final class WdaManager {
      */
     private static void terminateWdaOnDevice(String physicalUdid) {
         terminateWdaOnDevice(physicalUdid, 15);
+    }
+
+    /**
+     * Desinstala una app del dispositivo por su bundle identifier — usado
+     * exclusivamente para resolver MismatchedApplicationIdentifierEntitlement
+     * (ver {@link #tryStartFromProject}): un WDA anterior, firmado con un Team
+     * distinto al actual, bloquea la reinstalación con el mismo bundle ID.
+     *
+     * Equivalente exacto al comportamiento real de Appium ante este mismo error
+     * (appium-webdriveragent, real-device-management.ts::installToRealDevice):
+     * solo se invoca cuando iOS mismo ya confirmó el conflicto reportando ese
+     * error — nunca de forma preventiva/especulativa — así que nunca toca una
+     * app ajena ni un WDA correctamente instalado (eso jamás produce ese error).
+     *
+     * No es una copia del código de Appium: invoca la MISMA herramienta oficial
+     * del sistema operativo (xcrun devicectl) que Appium termina invocando para
+     * dispositivos reales — se reutiliza el comportamiento (detectar → eliminar
+     * el conflictivo → reintentar una vez), no su implementación en TypeScript.
+     *
+     * @return true si el comando de desinstalación terminó con éxito.
+     */
+    static boolean uninstallApp(String physicalUdid, String bundleId) {
+        try {
+            Process p = new ProcessBuilder(
+                    "xcrun", "devicectl", "device", "uninstall", "app",
+                    "--device", physicalUdid, bundleId)
+                    .redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes());
+            boolean done = p.waitFor(30, TimeUnit.SECONDS);
+            if (!done) {
+                p.destroyForcibly();
+                System.err.println("[WdaManager] Timeout desinstalando " + bundleId);
+                return false;
+            }
+            boolean ok = p.exitValue() == 0;
+            System.out.println("[WdaManager] " + (ok ? "✅" : "⚠️") + " Desinstalación de " + bundleId
+                    + " (exit=" + p.exitValue() + "): " + out.trim());
+            return ok;
+        } catch (Exception e) {
+            System.err.println("[WdaManager] uninstallApp error: " + e.getMessage());
+            return false;
+        }
     }
 
     private static void terminateWdaOnDevice(String physicalUdid, int signal) {
@@ -335,13 +392,37 @@ public final class WdaManager {
     static final class BuildOutcome {
         final boolean started;
         final AtomicReference<String> capturedError = new AtomicReference<>();
+        /**
+         * True cuando xcodebuild reportó "MismatchedApplicationIdentifierEntitlement" —
+         * ya hay un WDA instalado en el dispositivo firmado con un Team distinto al
+         * actual (confirmado con evidencia real: iOS rechaza la instalación porque el
+         * application-identifier embebido no coincide). Detección dedicada, separada de
+         * capturedError, porque esta cadena NUNCA contiene el patrón "error:" — no es
+         * detectable por ese mecanismo genérico.
+         */
+        final java.util.concurrent.atomic.AtomicBoolean mismatchedIdentifier =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        /**
+         * True cuando xcodebuild emitió un final de tipo "test" (Testing failed:
+         * / ** TEST FAILED **) en vez de un final de tipo "build" (BUILD FAILED).
+         * xcodebuild test NUNCA imprime BUILD FAILED si el paso de compilación
+         * en sí tuvo éxito y solo falló la instalación/lanzamiento del test —
+         * confirmado con ejecución real (ver evidencia en findWdaProjectPath()
+         * y streamBuildOutput()). Sin este flag, ese desenlace no se distinguía
+         * de un build exitoso hasta agotar todo el timeout de waitForWdaReady.
+         */
+        final java.util.concurrent.atomic.AtomicBoolean testFailed =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
 
         private BuildOutcome(boolean started) { this.started = started; }
 
         static BuildOutcome started()    { return new BuildOutcome(true); }
         static BuildOutcome notStarted() { return new BuildOutcome(false); }
 
-        String capturedError() { return capturedError.get(); }
+        String  capturedError()       { return capturedError.get(); }
+        boolean mismatchedIdentifier() { return mismatchedIdentifier.get(); }
+        boolean testFailed()           { return testFailed.get(); }
     }
 
     // ── Start attempt A: test-without-building ────────────────────────────────
@@ -385,7 +466,7 @@ public final class WdaManager {
                             .start();
                     wdaProcess = p;
                     BuildOutcome outcome = BuildOutcome.started();
-                    streamBuildOutput(p, "[WDA-fast]", client, executionId, outcome.capturedError);
+                    streamBuildOutput(p, "[WDA-fast]", client, executionId, outcome);
                     return outcome;
                 } catch (Exception e) {
                     client.sendLog(executionId, "WARN",
@@ -430,7 +511,7 @@ public final class WdaManager {
                     .start();
             wdaProcess = p;
             BuildOutcome outcome = BuildOutcome.started();
-            streamBuildOutput(p, "[WDA-build]", client, executionId, outcome.capturedError);
+            streamBuildOutput(p, "[WDA-build]", client, executionId, outcome);
             return outcome;
         } catch (Exception e) {
             client.sendLog(executionId, "WARN",
@@ -442,29 +523,33 @@ public final class WdaManager {
     // ── Project path discovery ────────────────────────────────────────────────
 
     /**
-     * Searches known Appium installation locations for WebDriverAgent.xcodeproj.
-     * Returns the first path found, or null if none exist.
+     * Locates WebDriverAgent.xcodeproj using the SAME single source of truth
+     * AppiumManager uses for where Appium's drivers are installed: the
+     * {@code APPIUM_HOME} JVM property (set by the Runner launcher and forwarded
+     * verbatim to the Appium server's own environment — see
+     * {@code AppiumManager.java}'s "APPIUM_HOME — Appium's own node_modules location").
+     *
+     * Causa raíz corregida aquí (demostrada con ejecución real contra un dispositivo
+     * físico): esta lista antes contenía 4 rutas hardcodeadas que nunca coincidían
+     * con la ubicación real de instalación de este Runner
+     * (AGENT_DATA_DIR/runtime/appium-home/...), así que el Mirror fallaba en
+     * milisegundos con "No se encontró WebDriverAgent.xcodeproj" sin invocar
+     * xcodebuild jamás. Ahora hay una única fuente de verdad: si APPIUM_HOME no
+     * está definido (p. ej. un entorno de desarrollo sin el launcher del Runner),
+     * se usa el mismo default documentado de Appium (~/.appium) — no una ruta
+     * inventada específica de este proyecto.
+     *
+     * @return absolute path to WebDriverAgent.xcodeproj, or null if not found there.
      */
     public static String findWdaProjectPath() {
-        String home = System.getProperty("user.home");
-        String[] candidates = {
-            // appium driver install xcuitest  (Appium 2.x driver store)
-            home + "/.appium/node_modules/appium-xcuitest-driver"
-                 + "/node_modules/appium-webdriveragent/WebDriverAgent.xcodeproj",
-            // Embedded Runner appium (enterprise / self-hosted)
-            home + "/.automationqa/runtime/appium/node_modules/appium-xcuitest-driver"
-                 + "/node_modules/appium-webdriveragent/WebDriverAgent.xcodeproj",
-            // Homebrew Apple Silicon
-            "/opt/homebrew/lib/node_modules/appium-xcuitest-driver"
-                 + "/node_modules/appium-webdriveragent/WebDriverAgent.xcodeproj",
-            // Homebrew Intel / npm global
-            "/usr/local/lib/node_modules/appium-xcuitest-driver"
-                 + "/node_modules/appium-webdriveragent/WebDriverAgent.xcodeproj",
-        };
-        for (String path : candidates) {
-            if (new File(path).exists()) return path;
+        String appiumHome = System.getProperty("APPIUM_HOME");
+        if (appiumHome == null || appiumHome.isBlank()) {
+            // Appium's own documented default when APPIUM_HOME is unset.
+            appiumHome = System.getProperty("user.home") + "/.appium";
         }
-        return null;
+        File candidate = new File(appiumHome,
+                "node_modules/appium-xcuitest-driver/node_modules/appium-webdriveragent/WebDriverAgent.xcodeproj");
+        return candidate.isDirectory() ? candidate.getAbsolutePath() : null;
     }
 
     // ── Failure diagnosis ─────────────────────────────────────────────────────
@@ -512,7 +597,9 @@ public final class WdaManager {
     // ver streamBuildOutput) — solo decide qué línea puntual dispara una alerta
     // INFO/ERROR inmediata en vez de esperar al siguiente flush por lotes.
     private static final Pattern IMMEDIATE_SIGNAL = Pattern.compile(
-            "(?i)error:|codesign|provisioning profile|requires a provisioning profile");
+            "(?i)error:|codesign|provisioning profile|requires a provisioning profile|"
+            + "developer mode|coredevice|miinstallererrordomain|ixuserpresentableerrordomain|"
+            + "mismatchedapplicationidentifierentitlement|testing failed|test failed|failed to install");
 
     private static final long BUILD_LOG_FLUSH_MS    = 1_000L;
     private static final int  BUILD_LOG_FLUSH_CHARS = 6_000;
@@ -531,10 +618,14 @@ public final class WdaManager {
      *    en vez de un mensaje genérico o de contenido de otro proceso.
      */
     private static void streamBuildOutput(Process p, String prefix, BackendClient client,
-                                           String executionId, AtomicReference<String> capturedError) {
+                                           String executionId, BuildOutcome outcome) {
+        AtomicReference<String> capturedError = outcome.capturedError;
         Thread t = new Thread(() -> {
             StringBuilder batch = new StringBuilder();
             long lastFlush = System.currentTimeMillis();
+            // True entre la línea "Testing failed:" y la línea en blanco /
+            // "** TEST FAILED **" que la cierra — ver captura dedicada abajo.
+            boolean insideTestFailureBlock = false;
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(p.getInputStream()))) {
                 String line;
@@ -554,6 +645,15 @@ public final class WdaManager {
                         }
                     }
 
+                    // xcodebuild tiene DOS familias de desenlace final, no una:
+                    //  - "build":  BUILD SUCCEEDED / BUILD FAILED (falla la compilación).
+                    //  - "test":   ** TEST SUCCEEDED ** / ** TEST FAILED ** + el bloque
+                    //              "Testing failed:" (falla instalar/lanzar el test aunque
+                    //              la compilación haya tenido éxito).
+                    // xcodebuild test (el que usa WDA) NUNCA imprime BUILD FAILED cuando
+                    // el fallo ocurre en instalar/lanzar, no en compilar — confirmado con
+                    // ejecución real: sin esta rama, ese desenlace pasaba desapercibido
+                    // hasta agotar el timeout completo de waitForWdaReady (hasta 600s).
                     String upper = line.toUpperCase();
                     if (upper.contains("BUILD SUCCEEDED")) {
                         if (client != null && executionId != null) {
@@ -565,14 +665,56 @@ public final class WdaManager {
                             client.sendLog(executionId, "ERROR",
                                     "❌ [WDA] Error compilando WDA — BUILD FAILED.");
                         }
+                    } else if (upper.contains("** TEST SUCCEEDED **")) {
+                        if (client != null && executionId != null) {
+                            client.sendLog(executionId, "INFO",
+                                    "✅ [WDA] xcodebuild test finalizó: TEST SUCCEEDED.");
+                        }
+                    } else if (upper.contains("** TEST FAILED **")) {
+                        outcome.testFailed.set(true);
+                        insideTestFailureBlock = false;
+                        if (client != null && executionId != null) {
+                            client.sendLog(executionId, "ERROR",
+                                    "❌ [WDA] xcodebuild test finalizó: TEST FAILED.");
+                        }
+                    }
+
+                    // Bloque "Testing failed:" — precede a "** TEST FAILED **" y trae la
+                    // razón real, legible, del propio xcodebuild (p.ej. "Failed to install
+                    // the app on the device. (Underlying Error: ... rejecting upgrade.)").
+                    // Se captura de forma AUTORITATIVA (set, no compareAndSet): sustituye
+                    // cualquier línea "error:" genérica ya capturada, porque esta cadena
+                    // real de iOS demostró NO contener "error:" y por eso el detector
+                    // genérico podía quedarse con una línea de diagnóstico irrelevante
+                    // vista antes (falso positivo confirmado con ejecución real).
+                    if (line.trim().equalsIgnoreCase("Testing failed:")) {
+                        insideTestFailureBlock = true;
+                        outcome.testFailed.set(true);
+                    } else if (insideTestFailureBlock) {
+                        String trimmed = line.trim();
+                        if (trimmed.isEmpty() || trimmed.startsWith("**")) {
+                            insideTestFailureBlock = false;
+                        } else {
+                            capturedError.set(trimmed);
+                        }
                     }
 
                     // Captura la PRIMERA línea "error:" de ESTE intento — la causa raíz
                     // real suele aparecer antes que los resúmenes genéricos que xcodebuild
                     // imprime al final (p.ej. "xcodebuild: error: Failed to build workspace
                     // ..."). Nunca se sobreescribe con contenido de otro proceso (appium.log).
+                    // El bloque "Testing failed:" de arriba puede sobreescribir esto después
+                    // — deliberado, ver comentario de esa rama.
                     if (line.toLowerCase().contains("error:")) {
                         capturedError.compareAndSet(null, line.trim());
+                    }
+
+                    // Detección dedicada (no vía capturedError — esta línea real de iOS no
+                    // contiene "error:", confirmado con ejecución real): un WDA anterior
+                    // sigue instalado en el dispositivo, firmado con un Team distinto al
+                    // actual. WdaLaunchService decide si reintenta tras desinstalarlo.
+                    if (line.contains("MismatchedApplicationIdentifierEntitlement")) {
+                        outcome.mismatchedIdentifier.set(true);
                     }
 
                     long now = System.currentTimeMillis();
