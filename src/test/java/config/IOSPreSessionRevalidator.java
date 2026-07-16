@@ -2,6 +2,12 @@ package config;
 
 import org.slf4j.Logger;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+
 /**
  * Revalida el estado del dispositivo iOS INMEDIATAMENTE antes de crear IOSDriver.
  *
@@ -16,34 +22,57 @@ import org.slf4j.Logger;
  *   construir su port forwarder RemoteXPC si el transporte cambió
  *   ("Cannot create port forwarder via RemoteXPC tunnel").
  *
- * Qué hace esta clase:
- *   1. Ejecuta UNA consulta ligera y fresca — reutiliza
- *      {@link IOSDeviceStateService#refresh}, la misma consulta xctrace+devicectl
- *      ya usada por IOSDeviceSynchronizationManager. NO repite el Pre-flight
- *      completo (no hay selección de Team, no hay validación de caché de WDA,
- *      no hay polling de recuperación, no hay killall).
- *   2. Compara la foto fresca contra el snapshot original del Runner.
- *   3. Registra explícitamente cualquier diferencia (transporte, tunnel, pairing,
- *      xctrace, CoreDevice) — NUNCA aborta por una diferencia. transportType
- *      sigue sin ser un gate bloqueante, exactamente como CoreDeviceTunnelManager
- *      ya establece para el lado del Runner.
- *   4. Devuelve un IOSDeviceState actualizado (mismo objeto salvo los campos de
- *      hardware/transporte) para que DriverFactory lo use de aquí en adelante,
- *      incluida la clasificación de fallos si Appium igual rechaza la sesión.
+ * Causa raíz demostrada (evidencia real, ver investigación previa): webDriverAgentUrl
+ * se descubría UNA vez en el Runner (WdaManager, parseando ServerURLHere del stdout de
+ * xcodebuild) y se transportaba como propiedad JVM congelada. Ninguna clase la
+ * revalidaba — quedaba obsoleta exactamente cuando el transporte cambiaba, produciendo
+ * ECONNREFUSED reproducible. La autoridad real (WdaManager) sigue viva durante toda
+ * la ejecución en el proceso Runner; el problema nunca fue la URL en sí, sino que su
+ * ownership desaparecía antes de consumirla.
+ *
+ * Esta clase resuelve DOS preguntas independientes, deliberadamente separadas:
+ *
+ *   1. {@link #revalidate} — ¿sigue vigente el snapshot de HARDWARE/transporte del
+ *      Runner (xctrace, CoreDevice, tunnel, pairing)? Reutiliza
+ *      {@link IOSDeviceStateService#refresh}, la misma consulta xctrace+devicectl ya
+ *      usada por IOSDeviceSynchronizationManager. Devuelve un IOSDeviceState
+ *      actualizado — sigue siendo, y solo es, un snapshot (ver IOSDeviceState).
+ *
+ *   2. {@link #resolveLiveWdaUrl} — ¿cuál es el webDriverAgentUrl vigente AHORA?
+ *      Pregunta directamente a la única autoridad que existe para este dato
+ *      (WdaManager, en el proceso Runner, vía DeviceStreamServer.GET /api/wda/url).
+ *      Devuelve un String, nunca un IOSDeviceState — este dato deliberadamente NO
+ *      forma parte de ningún snapshot: es un hecho de conectividad en vivo, y
+ *      guardarlo en un objeto de snapshot (aunque fuera "refrescado" después)
+ *      crearía una segunda representación de la misma autoridad. DriverFactory debe
+ *      llamar a este método directamente, en el último instante antes de
+ *      new IOSDriver(), y usar su respuesta sin intermediarios.
  *
  * Separación de responsabilidades:
- *   - IOSDeviceStateService: única fuente de subprocesos xctrace/devicectl + caché.
- *   - IOSDeviceState: objeto de valor inmutable (snapshot).
- *   - IOSPreSessionRevalidator (esta clase): política que combina ambos para un
- *     único propósito — revalidar justo antes de crear la sesión Appium.
+ *   - IOSDeviceStateService: única fuente de subprocesos xctrace/devicectl + caché
+ *     (hardware/transporte).
+ *   - IOSDeviceState: objeto de valor inmutable — SOLO snapshot, nunca conectividad viva.
+ *   - IOSPreSessionRevalidator (esta clase): política que se ejecuta en el último
+ *     instante antes de crear la sesión Appium — combina la revalidación de hardware
+ *     (snapshot) con la consulta viva de WDA (no-snapshot), pero nunca mezcla ambas
+ *     en un mismo objeto de retorno.
  *   No duplica ninguna lógica de subprocess ni de parsing — todo delega en
- *   IOSDeviceStateService/DevicectlParser, ya existentes.
+ *   IOSDeviceStateService/DevicectlParser/WdaManager (vía HTTP), ya existentes.
  */
 public final class IOSPreSessionRevalidator {
+
+    private static final Duration LIVE_WDA_URL_TIMEOUT = Duration.ofSeconds(3);
+
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(LIVE_WDA_URL_TIMEOUT)
+            .build();
 
     private IOSPreSessionRevalidator() {}
 
     /**
+     * Revalida ÚNICAMENTE hardware/transporte (xctrace, CoreDevice, tunnel, pairing).
+     * No conoce ni toca webDriverAgentUrl — ver {@link #resolveLiveWdaUrl} para eso.
+     *
      * @param snapshot snapshot original del Runner (IOSDeviceState.fromRunnerProps())
      * @param udid     UDID físico del dispositivo
      * @param log      logger del llamador (DriverFactory)
@@ -55,10 +84,47 @@ public final class IOSPreSessionRevalidator {
 
         log.info("[PreSessionRevalidator] Revalidando estado del dispositivo justo antes de IOSDriver...");
         IOSDeviceStateService.DeviceState fresh = IOSDeviceStateService.refresh(udid, log);
-
         logDrift(snapshot, fresh, log);
-
         return snapshot.withFreshHardwareState(fresh);
+    }
+
+    /**
+     * Única autoridad de webDriverAgentUrl en todo el pipeline. Consulta UNA vez, de
+     * forma síncrona, al propio Runner (vía DeviceStreamServer.GET /api/wda/url, que
+     * expone WdaManager — el único proceso con visión continua de WDA durante toda
+     * la ejecución). Sin reintentos, sin sleeps, sin caché: una sola pregunta, en el
+     * instante exacto en que la respuesta importa.
+     *
+     * Deliberadamente devuelve un {@code String}, no un IOSDeviceState — este dato no
+     * es un snapshot y no debe guardarse como si lo fuera (ver javadoc de clase).
+     * DriverFactory debe llamar a este método directamente, inmediatamente antes de
+     * new IOSDriver(), y aplicar su resultado sin pasar por ningún objeto intermedio.
+     *
+     * runnerControlPort es la DIRECCIÓN donde preguntar, no el dato en sí — la fija
+     * JobExecutor una vez al lanzar Gradle porque el propio puerto HTTP del Runner es,
+     * en sí mismo, estable durante toda la ejecución (a diferencia de la URL de WDA,
+     * que depende del transporte).
+     *
+     * @return la URL confirmada en vivo ahora mismo, o cadena vacía si el Runner no
+     *         respondió, WDA no está activo, o el puerto de control no fue provisto.
+     *         Nunca inventa ni reutiliza un valor anterior — cadena vacía significa
+     *         explícitamente "no hay autoridad confirmable en este instante".
+     */
+    public static String resolveLiveWdaUrl(Logger log) {
+        String portStr = System.getProperty("runnerControlPort", "");
+        if (portStr.isBlank()) return "";
+
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + portStr.trim() + "/api/wda/url"))
+                    .timeout(LIVE_WDA_URL_TIMEOUT)
+                    .GET().build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200) return resp.body().trim();
+        } catch (Exception e) {
+            log.debug("[PreSessionRevalidator] Consulta viva de webDriverAgentUrl falló: {}", e.getMessage());
+        }
+        return "";
     }
 
     /**

@@ -124,6 +124,41 @@ public class DeviceStreamServer {
             try (OutputStream out = ex.getResponseBody()) { out.write(body); }
         });
 
+        // Autoridad viva de WebDriverAgentUrl — GET /api/wda/url
+        //
+        // Causa raíz corregida aquí: el pipeline anterior descubría esta URL una sola
+        // vez en el Runner (WdaManager) y la transportaba congelada como propiedad JVM
+        // (-DwebDriverAgentUrl=...) hacia el proceso Gradle de test. Entre ese instante
+        // y la creación real de IOSDriver (arranque de Gradle sin daemon, JUnit
+        // discovery) el transporte CoreDevice podía cambiar y esa copia quedaba
+        // obsoleta sin que nada lo detectara a tiempo (ver IOSPreSessionRevalidator).
+        //
+        // Este endpoint no descubre nada nuevo — expone la MISMA autoridad que ya
+        // existe (WdaManager, que sigue viva durante toda la ejecución en este mismo
+        // proceso Runner) para que quien la necesite la consulte en el instante exacto
+        // en que la va a usar, en vez de confiar en una copia hecha minutos antes.
+        server.createContext("/api/wda/url", ex -> {
+            addCorsHeaders(ex);
+            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+                ex.sendResponseHeaders(204, -1);
+                return;
+            }
+            if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+                sendText(ex, 405, "Method Not Allowed");
+                return;
+            }
+            if (!WdaManager.isWdaRunning()) {
+                sendText(ex, 404, "WDA no activo");
+                return;
+            }
+            String url = WdaManager.getDetectedWdaUrl();
+            if (url == null || url.isBlank()) url = WdaManager.getWdaBaseUrl();
+            byte[] body = url.getBytes(StandardCharsets.UTF_8);
+            ex.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+            ex.sendResponseHeaders(200, body.length);
+            try (OutputStream out = ex.getResponseBody()) { out.write(body); }
+        });
+
         // Recording engine endpoints
         server.createContext("/api/recording/start",   new RecordingStartHandler());
         server.createContext("/api/recording/stop/",   new RecordingStopHandler());

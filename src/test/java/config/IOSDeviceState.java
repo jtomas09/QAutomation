@@ -1,14 +1,26 @@
 package config;
 
 /**
- * Immutable snapshot of all iOS device and app-signing state confirmed by the Runner
+ * Immutable snapshot of iOS device and app-signing state confirmed by the Runner
  * (JobExecutor / IosPreflightManager) before the Gradle test process started.
  *
  * All fields are populated from -D JVM flags injected by the Runner.
  * This class NEVER executes subprocesses.
  *
+ * Qué es, y qué deliberadamente NO es:
+ *   Esta clase representa exclusivamente un snapshot — un valor congelado, válido
+ *   para el instante en que el Runner lo confirmó. NO contiene webDriverAgentUrl:
+ *   ese dato es un hecho de conectividad en vivo (depende del transporte CoreDevice
+ *   vigente en cada instante, no de una decisión tomada una vez en Preflight), y
+ *   copiarlo aquí — aunque fuera "revalidado" después — significaría tener dos
+ *   representaciones distintas de la misma autoridad (este snapshot y la consulta
+ *   en vivo), violando "una única fuente de verdad". Su única autoridad es
+ *   {@link IOSPreSessionRevalidator#resolveLiveWdaUrl}, consultada directamente por
+ *   DriverFactory en el instante exacto en que se necesita — nunca transportada,
+ *   nunca cacheada, nunca parte de este objeto.
+ *
  * Design intent:
- *   The Runner is the single source of truth for iOS device state.
+ *   The Runner is the single source of truth for iOS device IDENTITY/CONFIG state.
  *   DriverFactory and IOSDeviceSynchronizationManager consume this object
  *   and skip redundant subprocess calls when {@link #ready} is true.
  *
@@ -41,7 +53,11 @@ public final class IOSDeviceState {
     public final String teamId;
     public final String bundleId;
     public final String updatedWDABundleId;
-    public final String webDriverAgentUrl;
+
+    // NOTA: webDriverAgentUrl NO es un campo de esta clase. Es un hecho de
+    // conectividad en vivo, no un dato de snapshot — su única autoridad es
+    // IOSPreSessionRevalidator.resolveLiveWdaUrl(), consultada en el instante
+    // exacto en que se necesita, nunca copiada aquí. Ver el javadoc de clase.
 
     // ── Driver / WDA state ────────────────────────────────────────────────────
 
@@ -107,7 +123,7 @@ public final class IOSDeviceState {
             boolean tunnelConnected,   boolean paired,
             String  physicalUdid,      String coreDeviceId,    String platformVersion,
             String  teamId,            String bundleId,
-            String  updatedWDABundleId, String webDriverAgentUrl,
+            String  updatedWDABundleId,
             boolean xcuitestInstalled, boolean wdaPrebuilt,
             long    confirmedAt,
             String  transportType,     boolean runnerReadyForExecution, String runnerNotReadyReason,
@@ -123,7 +139,6 @@ public final class IOSDeviceState {
         this.teamId                  = safe(teamId);
         this.bundleId                = safe(bundleId);
         this.updatedWDABundleId      = safe(updatedWDABundleId);
-        this.webDriverAgentUrl       = safe(webDriverAgentUrl);
         this.xcuitestInstalled       = xcuitestInstalled;
         this.wdaPrebuilt             = wdaPrebuilt;
         // All critical conditions must hold. notReadyReason() explains the first failure.
@@ -189,7 +204,6 @@ public final class IOSDeviceState {
                 System.getProperty("xcodeOrgId",            ""),
                 System.getProperty("bundleId",              ""),
                 System.getProperty("updatedWDABundleId",    ""),
-                System.getProperty("webDriverAgentUrl",     ""),
                 xcuitestInstalled, wdaPrebuilt,
                 confirmedAt,
                 transportType, runnerReadyForExecution, runnerNotReadyReason,
@@ -204,7 +218,7 @@ public final class IOSDeviceState {
     public static IOSDeviceState empty() {
         return new IOSDeviceState(
                 false, false, false, false,
-                "", "", "", "", "", "", "",
+                "", "", "", "", "", "",
                 false, false,
                 System.currentTimeMillis(),
                 "", false, "",
@@ -240,7 +254,7 @@ public final class IOSDeviceState {
                 fresh.coreDeviceId.isBlank() ? this.coreDeviceId : fresh.coreDeviceId,
                 this.platformVersion,
                 this.teamId,               this.bundleId,
-                this.updatedWDABundleId,   this.webDriverAgentUrl,
+                this.updatedWDABundleId,
                 this.xcuitestInstalled,    this.wdaPrebuilt,
                 fresh.capturedAtMs,
                 "UNKNOWN".equalsIgnoreCase(fresh.transportType) && !this.transportType.isBlank()

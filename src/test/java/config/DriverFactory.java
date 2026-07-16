@@ -350,6 +350,34 @@ public class DriverFactory {
             IOSDeviceState runnerOriginalIosState = iosState;
             if ("local".equals(mode)) {
                 iosState = IOSPreSessionRevalidator.revalidate(iosState, prop("udid", ""), log);
+
+                // Única autoridad, única consulta, para las tres capabilities que dependen
+                // de si existe un WDA ya confirmado y alcanzable en ESTE instante —
+                // webDriverAgentUrl, usePrebuiltWDA y skipServerInstallation se deciden
+                // JUNTOS, a partir de la MISMA respuesta, nunca de la propiedad JVM
+                // congelada (-DwebDriverAgentUrl, que ya no se usa para ninguna decisión).
+                // Este es el último instante posible antes de new IOSDriver() — el
+                // ownership de webDriverAgentUrl nunca "desaparece" entre descubrirlo y
+                // consumirlo porque nunca se copia: se pregunta aquí mismo.
+                String liveWdaUrl  = IOSPreSessionRevalidator.resolveLiveWdaUrl(log);
+                boolean wdaPrebuilt = Boolean.parseBoolean(prop("wdaPrebuilt", "false"));
+                if (!liveWdaUrl.isBlank()) {
+                    options.setCapability("appium:webDriverAgentUrl",   liveWdaUrl);
+                    options.setCapability("appium:usePrebuiltWDA",      true);
+                    options.setCapability("skipServerInstallation",     true);
+                    if (wdaPrebuilt) options.setCapability("shouldUseSingletonTestManager", true);
+                    log.info("[DriverFactory] 🌐 webDriverAgentUrl={} (única autoridad, confirmado en vivo) — "
+                            + "usePrebuiltWDA=true, skipServerInstallation=true", liveWdaUrl);
+                } else if (wdaPrebuilt) {
+                    options.setCapability("skipServerInstallation",        true);
+                    options.setCapability("shouldUseSingletonTestManager", true);
+                    log.info("[DriverFactory] ⚡ WDA precompilado (Runner) pero sin URL confirmable en vivo — "
+                            + "skipServerInstallation=true; Appium localizará el proceso existente por su cuenta.");
+                } else {
+                    options.setCapability("skipServerInstallation", false);
+                    log.info("[DriverFactory] 🔨 Sin WDA confirmado en vivo ni precompilado — "
+                            + "Appium compilará e instalará WDA automáticamente.");
+                }
             }
 
             try {
@@ -630,30 +658,16 @@ public class DriverFactory {
         // useNewWDA=false — reuse WDA if already running on device (don't restart it).
         o.setCapability("useNewWDA", false);
 
-        // skipServerInstallation — skip xcodebuild if WDA is already installed (prebuilt)
-        // or already running (webDriverAgentUrl set). When WDA URL is provided, Appium must
-        // connect to the existing WDA directly and not attempt UDID-based device lookup.
-        boolean wdaPrebuilt  = Boolean.parseBoolean(prop("wdaPrebuilt", "false"));
-        boolean skipInstall  = wdaPrebuilt || !wdaUrl.isBlank();
-        if (skipInstall) {
-            o.setCapability("skipServerInstallation", true);
-            if (wdaPrebuilt) {
-                o.setCapability("shouldUseSingletonTestManager", true);
-                log.info("[DriverFactory] ⚡ WDA precompilado — skipServerInstallation=true (sin recompilación)");
-            }
-        } else {
-            o.setCapability("skipServerInstallation", false);
-            log.info("[DriverFactory] 🔨 Primera ejecución — Appium compilará e instalará WDA automáticamente");
-        }
-
-        if (!wdaUrl.isBlank()) {
-            o.setCapability("appium:webDriverAgentUrl", wdaUrl);
-            // usePrebuiltWDA=true: WDA is confirmed running — Appium must connect directly
-            // without performing any UDID-based device validation or WDA install attempt.
-            // This is the key fix for "Unknown device or simulator UDID" when using CoreDevice.
-            o.setCapability("appium:usePrebuiltWDA",    true);
-            log.info("[DriverFactory] 🌐 webDriverAgentUrl={} — usePrebuiltWDA=true, skipInstall=true", wdaUrl);
-        }
+        // NOTA: skipServerInstallation / shouldUseSingletonTestManager / usePrebuiltWDA /
+        // webDriverAgentUrl ya NO se fijan aquí. Este método corre ANTES de
+        // IOSPreSessionRevalidator (ver attemptCreate()) — fijar estas capabilities en
+        // este punto significaba decidirlas a partir de la propiedad JVM
+        // -DwebDriverAgentUrl (una copia hecha minutos/segundos antes en el proceso
+        // Runner), sin ninguna posibilidad de reflejar un cambio de transporte detectado
+        // después, y con dos fuentes de verdad distintas para la misma pregunta ("¿hay
+        // WDA alcanzable ahora?"). Ahora las cuatro se deciden JUNTAS en attemptCreate(),
+        // a partir de una única consulta en vivo (IOSPreSessionRevalidator.resolveLiveWdaUrl()),
+        // inmediatamente antes de new IOSDriver().
 
         String envHub = System.getenv("APPIUM_SERVER_URL");
         String finalHub = (envHub != null && !envHub.isBlank()) ? envHub : hubUrl;
@@ -682,8 +696,9 @@ public class DriverFactory {
         log.info("[DriverFactory][iOS] xcodeOrgId        : {}", teamId.isBlank()      ? "(no configurado)" : teamId);
         log.info("[DriverFactory][iOS] bundleId          : {}", bundleId.isBlank()    ? "(no configurado)" : bundleId);
         log.info("[DriverFactory][iOS] updatedWDABundleId: {}", wdaBundleId.isBlank() ? "(auto)"           : wdaBundleId);
-        log.info("[DriverFactory][iOS] wdaPrebuilt       : {}", wdaPrebuilt);
-        log.info("[DriverFactory][iOS] webDriverAgentUrl : {}", wdaUrl.isBlank() ? "(Appium administra WDA)" : wdaUrl);
+        log.info("[DriverFactory][iOS] wdaPrebuilt       : {}", prop("wdaPrebuilt", "false"));
+        log.info("[DriverFactory][iOS] webDriverAgentUrl : {} (snapshot Preflight — se revalida en vivo antes de IOSDriver)",
+                wdaUrl.isBlank() ? "(Appium administra WDA)" : wdaUrl);
         log.info("[DriverFactory][iOS] ════════════════════════════════════════");
 
         return URI.create(finalHub).toURL();

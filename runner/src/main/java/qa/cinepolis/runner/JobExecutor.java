@@ -749,10 +749,22 @@ public class JobExecutor {
                     // directly to this URL instead of trying to start its own WDA instance.
                     String wdaUrl = WdaManager.getDetectedWdaUrl();
                     if (wdaUrl != null && !wdaUrl.isBlank()) {
+                        // Solo diagnóstico / detección best-effort de platformVersion en
+                        // DriverFactory.buildLocalIOS() — YA NO es la fuente de verdad para
+                        // la capability webDriverAgentUrl que Appium recibe (ver más abajo).
                         cmd.add("-DwebDriverAgentUrl=" + wdaUrl);
                         client.sendLog(job.executionId, "INFO",
                                 "[JobExecutor] 🌐 WebDriverAgent URL: " + wdaUrl);
                     }
+
+                    // Puerto de control del propio Runner — NO es el dato en sí, es la
+                    // dirección donde IOSPreSessionRevalidator puede preguntar por el valor
+                    // vigente de webDriverAgentUrl en el instante exacto en que lo necesita
+                    // (GET /api/wda/url, ver DeviceStreamServer). El Runner sigue vivo durante
+                    // toda la ejecución de Gradle — es la única autoridad continua que existe
+                    // para este dato; esta propiedad solo le dice al consumidor DÓNDE
+                    // preguntar, nunca CUÁL es la respuesta.
+                    cmd.add("-DrunnerControlPort=" + config.streamPort);
 
                     client.sendLog(job.executionId, "INFO",
                             "[JobExecutor] 📦 WDA bundle: " + iosResult.wdaBundleId
