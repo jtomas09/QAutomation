@@ -342,18 +342,47 @@ public class DeviceStreamServer {
                             // dispositivo estaba sano — es decir, ~20 veces/segundo.
                             // La propia falla de captura ya es la señal de que algo anda
                             // mal; solo entonces vale la pena pagar el costo de verificar
-                            // conectividad real. Se conserva exactamente la misma ventana
-                            // de detección de desconexión (12 intentos ≈ 6 s). Si no hay
-                            // provider soportado para este UDID (p.ej. iOS en un Runner
-                            // no-macOS), esto se cumple de inmediato y el stream cierra
-                            // tras el mismo margen, sin caso especial.
-                            if (provider == null || !provider.isDeviceConnected(udid)) {
-                                if (++missCount > 12) break; // device gone for ~6 s
-                                Thread.sleep(500);
+                            // conectividad real.
+                            boolean deviceGone = (provider == null || !provider.isDeviceConnected(udid));
+
+                            // missCount cuenta TODA falla de captureFrame(), no solo la
+                            // rama "dispositivo desconectado": antes se reseteaba a 0 en
+                            // cada iteración mientras el dispositivo siguiera presente, así
+                            // que si WDA estaba caído pero el iPhone seguía conectado (el
+                            // caso normal), este loop reintentaba contra :8100 a ritmo casi
+                            // real-time (~12.5/seg) INDEFINIDAMENTE — causa confirmada de
+                            // las decenas de "RemoteXPC connect/socket error" en los logs
+                            // al terminar una ejecución (WDA ya derribado, el Mirror del
+                            // Dashboard seguía golpeando el puerto).
+                            if (++missCount > 12) {
+                                if (deviceGone) break; // dispositivo realmente desconectado (~6s)
+
+                                // Condición objetiva de "WDA no se recuperará dentro de
+                                // esta sesión de stream": WdaLaunchCoordinator.currentOwner()
+                                // (ya existente, sin cambios) es la única fuente de verdad de
+                                // quién tiene el control de lanzamiento de WDA ahora mismo —
+                                // una ejecución real (EXECUTION) o un lanzamiento on-demand de
+                                // este mismo Mirror en curso (MIRROR). provider.start(udid) solo
+                                // se invoca UNA VEZ, al abrir esta conexión (arriba, antes del
+                                // while) — nunca de nuevo dentro de este loop. Si nadie tiene el
+                                // control en este instante, ningún mecanismo de este sistema va
+                                // a revivir WDA para ESTE stream (ni una ejecución en curso lo
+                                // está reconstruyendo, ni el propio Mirror tiene un intento
+                                // on-demand activo) — seguir reintentando sería indefinido por
+                                // definición. Se termina el stream limpiamente (el finally de
+                                // abajo ya libera jpegWriter/provider/MirrorService); una nueva
+                                // petición del cliente abre un Mirror nuevo que vuelve a llamar
+                                // provider.start(udid) y reevalúa desde cero.
+                                if (WdaLaunchCoordinator.currentOwner() == null) break;
+
+                                // Alguien tiene el control (ejecución real reconstruyendo WDA, o
+                                // un lanzamiento on-demand de este propio Mirror todavía en
+                                // curso) — WDA puede seguir llegando; se mantiene la misma espera
+                                // ya validada, sin agregar ningún mecanismo nuevo.
+                                Thread.sleep(2_000);
                                 continue;
                             }
-                            missCount = 0;
-                            Thread.sleep(80);
+                            Thread.sleep(deviceGone ? 500 : 80);
                             continue;
                         }
                         missCount = 0;

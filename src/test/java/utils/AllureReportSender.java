@@ -251,7 +251,13 @@ public class AllureReportSender {
 
         log.info("[AllureReportSender] Sending final suite email...");
 
+        // [TIMING] Instrumentación de solo lectura (Problema 5) — tiempo real de
+        // generación del reporte Allure/PDF (gradlew allureReport anidado + Chrome +
+        // Selenium), forwarded al Dashboard por el mismo mecanismo que ya reenvía el
+        // resto del stdout de Gradle. No cambia ningún comportamiento.
+        long tAllureStart = System.currentTimeMillis();
         Path allurePdf = generateAllureOverviewPdf();
+        log.info("[TIMING] allure (PDF generation): {} ms", System.currentTimeMillis() - tAllureStart);
 
         boolean sent = sendInternalAllureOnly(
                 allurePdf,
@@ -358,6 +364,13 @@ public class AllureReportSender {
         props.put("mail.smtp.port", smtpPort);
         props.put("mail.smtp.auth", "true");
         props.put("mail.smtp.ssl.trust", smtpHost);
+        // Sin estos tres, Transport.send() no tiene ninguna cota superior: un
+        // handshake STARTTLS lento o un host que descarta paquetes en silencio
+        // puede bloquear el hilo de cierre de la suite (SuiteMailer.close()) por
+        // varios minutos sin que ningún código lo interrumpa.
+        props.put("mail.smtp.connectiontimeout", "15000");
+        props.put("mail.smtp.timeout",           "15000");
+        props.put("mail.smtp.writetimeout",      "15000");
 
         Session session = Session.getInstance(props, new Authenticator() {
             @Override
@@ -596,11 +609,14 @@ public class AllureReportSender {
         message.setContent(multipart);
 
         log.info("[AllureReportSender] Sending via {}...", smtpHost);
+        long tSmtpStart = System.currentTimeMillis();
         try {
             Transport.send(message);
+            log.info("[TIMING] SMTP send: {} ms", System.currentTimeMillis() - tSmtpStart);
             log.info("[AllureReportSender] Email sent successfully to: {}", to);
             return true;
         } catch (Throwable e) {
+            log.info("[TIMING] SMTP send (falló): {} ms", System.currentTimeMillis() - tSmtpStart);
             log.error("[AllureReportSender] Email send failed: {} -> {}", e.getClass().getName(), e.getMessage(), e);
             return false;
         }

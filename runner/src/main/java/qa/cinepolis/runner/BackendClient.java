@@ -44,6 +44,7 @@ public class BackendClient {
                 .uri(URI.create(baseUrl + "/api/jobs/next"))
                 .header("Authorization", "Bearer " + token)
                 .header("X-Runner-Id", runnerId)
+                .timeout(java.time.Duration.ofSeconds(20))
                 .GET()
                 .build();
         HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -76,6 +77,7 @@ public class BackendClient {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/executions/" + executionId))
                     .header("Authorization", "Bearer " + token)
+                    .timeout(java.time.Duration.ofSeconds(10))
                     .GET()
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -447,6 +449,7 @@ public class BackendClient {
                     .header("X-File-Name",   filename)
                     .header("X-Suite-Name",  suiteName != null ? suiteName : "")
                     .header("X-Test-Name",   testName  != null ? testName  : "")
+                    .timeout(java.time.Duration.ofSeconds(60))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bytes))
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -497,6 +500,7 @@ public class BackendClient {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/runner/config"))
                     .header("Authorization", "Bearer " + token)
+                    .timeout(java.time.Duration.ofSeconds(20))
                     .GET()
                     .build();
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -553,6 +557,7 @@ public class BackendClient {
                 .uri(URI.create(baseUrl + path))
                 .header("Content-Type",  "application/json; charset=UTF-8")
                 .header("Authorization", "Bearer " + token)
+                .timeout(java.time.Duration.ofSeconds(20))
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                 .build();
         return http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

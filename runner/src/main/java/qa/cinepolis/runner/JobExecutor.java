@@ -592,6 +592,11 @@ public class JobExecutor {
         final AtomicBoolean wasAborted = new AtomicBoolean(false);
         // Guards against duplicate sendResult() and enables the finally safety-net
         final AtomicBoolean resultSent = new AtomicBoolean(false);
+        // [TIMING] Instrumentación de solo lectura (Problema 5): marca cuándo empieza
+        // el cierre (justo cuando Gradle terminó) para poder reportar, en el finally,
+        // cuánto tardó el post-procesamiento completo del Runner. 0 = el cierre nunca
+        // empezó (p.ej. Gradle no llegó a lanzarse). No cambia ningún comportamiento.
+        long closeStartMs = 0L;
         // Hoisted para que sendResult() pueda reportarlo al backend incluso si el resultado
         // se envía desde el catch/finally (fuera del bloque try donde se calcula su valor
         // real); -1 hasta que resolveExpectedCountFromCommand() lo determine más abajo.
@@ -613,6 +618,7 @@ public class JobExecutor {
                 client.sendLog(job.executionId, "ERROR",
                         "❌ No fue posible obtener la configuración del proyecto.");
                 client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                resultSent.set(true);
                 return;
             }
             client.sendLog(job.executionId, "INFO", "✅ Configuración recibida.");
@@ -630,6 +636,7 @@ public class JobExecutor {
                         "❌ La configuración almacenada no coincide con el dispositivo enviado. " +
                         "Verifica que el dispositivo esté conectado y registrado en el Runner.");
                 client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                resultSent.set(true);
                 return;
             }
 
@@ -640,6 +647,7 @@ public class JobExecutor {
             File projectDir = wsMgr.ensureWorkspace(job.executionId);
             if (projectDir == null) {
                 client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                resultSent.set(true);
                 return;
             }
             String workDir = projectDir.getAbsolutePath();
@@ -658,6 +666,7 @@ public class JobExecutor {
             } else {
                 if (!checkIosXcuitestDriver(job.executionId)) {
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
                     return;
                 }
                 // Ejecución real: adquiere la sesión de lanzamiento de WDA de forma
@@ -696,6 +705,7 @@ public class JobExecutor {
                             "❌ Launcher Activity no encontrada para " + effectivePackage
                             + ". Verifica que la app esté instalada en el dispositivo.");
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
                     return;
                 }
                 cmd.add("-DappActivity=" + resolvedActivity);
@@ -828,6 +838,7 @@ public class JobExecutor {
                             + "   Motivo: " + iosResult.notReadyReason + "\n"
                             + "   Corrige el problema y reintenta desde el Dashboard.");
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
                     return;
                 }
 
@@ -841,6 +852,7 @@ public class JobExecutor {
                             + "   El dispositivo se bloqueó entre el Pre-flight y el inicio de la ejecución.\n"
                             + "   Desbloquea el iPhone y reintenta.");
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
                     return;
                 }
                 client.sendLog(job.executionId, "INFO",
@@ -978,6 +990,10 @@ public class JobExecutor {
                 if (wasInterrupted) Thread.currentThread().interrupt();
             }
 
+            // [TIMING] Gradle ya terminó — arranca el cierre que instrumentamos.
+            closeStartMs = System.currentTimeMillis();
+            System.out.println("[Executor] [TIMING] inicio cierre");
+
             // Stop recording before any other work (must precede uploadVideos to finalize MP4)
             if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
 
@@ -1092,6 +1108,7 @@ public class JobExecutor {
             }
 
             // [POST-2] Cleanup de dispositivo iOS (si aplica)
+            long t2 = System.currentTimeMillis();
             if (isPlatformIos && !iosUdid.isBlank()) {
                 System.out.println("[Executor] [POST-2] Iniciando cleanup de dispositivo iOS…");
                 try {
@@ -1105,8 +1122,10 @@ public class JobExecutor {
                             "[POST-2] Error en cleanup iOS — " + describeException(ex)); } catch (Exception ignored) {}
                 }
             }
+            System.out.println("[Executor] [TIMING] cleanup: " + (System.currentTimeMillis() - t2) + " ms");
 
             // [POST-3] Upload de videos
+            long t3 = System.currentTimeMillis();
             System.out.println("[Executor] [POST-3] Procesando videos…");
             try {
                 if (iosRecordingActive || !isPlatformIos) {
@@ -1118,8 +1137,12 @@ public class JobExecutor {
                 try { client.sendLog(job.executionId, "WARN",
                         "[POST-3] Error al subir videos — " + describeException(ex)); } catch (Exception ignored) {}
             }
+            System.out.println("[Executor] [TIMING] subida videos: " + (System.currentTimeMillis() - t3) + " ms");
 
-            // [POST-4] Generación de reporte Allure
+            // [POST-4] Generación de reporte Allure (CLI, del lado del Runner — distinto
+            // del reporte/PDF/SMTP que ya genera AllureReportSender dentro de la JVM de
+            // test, cuyo propio tiempo se instrumenta ahí mismo, ver [TIMING] en ese archivo)
+            long t4 = System.currentTimeMillis();
             System.out.println("[Executor] [POST-4] Generando reporte Allure…");
             String allureUrl = null;
             try {
@@ -1129,13 +1152,16 @@ public class JobExecutor {
             } catch (Exception ex) {
                 System.err.println("[Executor] [POST-4] Error en Allure:\n" + getStackTrace(ex));
             }
+            System.out.println("[Executor] [TIMING] allure (Runner CLI): " + (System.currentTimeMillis() - t4) + " ms");
 
             // [POST-5] Envío de resultado final al Backend (obligatorio)
+            long t5 = System.currentTimeMillis();
             System.out.println("[Executor] [POST-5] Enviando resultado final al Backend…");
             client.sendResult(job.executionId,
                     passed.get(), failed.get(), skipped.get(), allureUrl, testCases,
                     Math.max(expectedCountHolder.get(), 0));
             resultSent.set(true);
+            System.out.println("[Executor] [TIMING] backend (sendResult): " + (System.currentTimeMillis() - t5) + " ms");
             System.out.println("[Executor] ✓ Finalizado correctamente: " + job.executionId
                     + " — " + summary);
 
@@ -1183,6 +1209,13 @@ public class JobExecutor {
                             passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases,
                             Math.max(expectedCountHolder.get(), 0));
                 } catch (Exception ignored) {}
+            }
+            // [TIMING] fin Runner — cubre TODOS los caminos de salida (feliz, abort,
+            // excepción), ya que finally siempre se ejecuta. closeStartMs==0 significa
+            // que el cierre nunca empezó (p.ej. Gradle no llegó a lanzarse).
+            if (closeStartMs > 0) {
+                System.out.println("[Executor] [TIMING] fin Runner — cierre total: "
+                        + (System.currentTimeMillis() - closeStartMs) + " ms | " + job.executionId);
             }
         }
     }
@@ -1888,7 +1921,16 @@ public class JobExecutor {
                     "allure", "generate", "build/allure-results",
                     "-o", "build/reports/allure-report/" + executionId, "--clean");
             pb.directory(new File(workDir));
-            int exit = pb.start().waitFor();
+            Process p = pb.start();
+            // Sin cota, un "allure generate" colgado (CLI externa, fuera de nuestro
+            // control) bloquearía indefinidamente el post-procesamiento de la
+            // ejecución. 60s es generoso para un directorio allure-results local.
+            if (!p.waitFor(60, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                System.out.println("[Executor] Allure CLI excedió 60s — proceso terminado, se omite URL de reporte.");
+                return null;
+            }
+            int exit = p.exitValue();
             if (exit == 0 && !config.allureBaseUrl.isBlank()) {
                 String url = config.allureBaseUrl + "/" + executionId;
                 System.out.println("[Executor] Allure report generado: " + url);

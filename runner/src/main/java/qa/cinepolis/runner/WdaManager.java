@@ -184,13 +184,25 @@ public final class WdaManager {
     /**
      * Kills the xcodebuild controller process managed by this class (if any).
      * WDA itself keeps running on the device until the next Appium session stops it.
+     *
+     * Mata también los procesos DESCENDIENTES de xcodebuild (xcbuild/clang/
+     * swift-frontend), no solo el PID directo: destroyForcibly() en Unix solo
+     * envía la señal al proceso indicado, nunca a su árbol. Sin esto, un hijo de
+     * xcodebuild puede sobrevivir a este destroy() y seguir compilando/hospedando
+     * el forwarder de red de WDA de forma huérfana — mismo patrón ya usado para
+     * el proceso Gradle en JobExecutor.forceKillProcessTree().
      */
     public static void stop() {
         Process p = wdaProcess;
         if (p != null && p.isAlive()) {
+            try {
+                p.toHandle().descendants().forEach(h -> {
+                    try { h.destroyForcibly(); } catch (Exception ignored) {}
+                });
+            } catch (Exception ignored) {}
             p.destroyForcibly();
             wdaProcess = null;
-            System.out.println("[WdaManager] xcodebuild controller detenido.");
+            System.out.println("[WdaManager] xcodebuild controller detenido (árbol de procesos incluido).");
         }
     }
 

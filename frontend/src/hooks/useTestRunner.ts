@@ -45,6 +45,14 @@ export function useTestRunner() {
   const executionIdRef          = useRef<string | null>(null)
   const executionIdsRef         = useRef<string[]>([])     // all active IDs for multi-device stop
   const closeStreamRef          = useRef<(() => void) | null>(null)
+  // Autoridad única de "qué casos ya se contaron" para passed/failed/skipped de
+  // esta ejecución — el backend reenvía (replay) todo el historial de logs a
+  // cualquier cliente SSE que se conecte o reconecte (ver StreamController),
+  // así que el mismo PASS/FAIL/SKIP puede llegar más de una vez para el MISMO
+  // caso. Se deduplica por el mismo criterio de identidad que ya usa
+  // ExecutionTrackingService.onRunnerResult() (extractTestNameFromLog) — una
+  // sola autoridad de conteo, no dos intentando resolverlo por separado.
+  const countedCasesRef         = useRef<Set<string>>(new Set())
 
   const addLog = useCallback((level: LogLevel, message: string) => {
     const entry: LogEntry = {
@@ -55,9 +63,15 @@ export function useTestRunner() {
     }
     setState(prev => {
       let { passed, failed, skipped, total, totalExpected } = prev
-      if (level === 'PASS') { passed++; total++ }
-      if (level === 'FAIL') { failed++; total++ }
-      if (level === 'SKIP') { skipped++; total++ }
+      if (level === 'PASS' || level === 'FAIL' || level === 'SKIP') {
+        const caseName = extractTestNameFromLog(message)
+        if (!countedCasesRef.current.has(caseName)) {
+          countedCasesRef.current.add(caseName)
+          if (level === 'PASS') { passed++; total++ }
+          if (level === 'FAIL') { failed++; total++ }
+          if (level === 'SKIP') { skipped++; total++ }
+        }
+      }
 
       if (level === 'INFO') {
         const m = message.match(/TOTAL_ESPERADO:(\d+)/)
@@ -104,6 +118,8 @@ export function useTestRunner() {
       closeStreamRef.current()
       closeStreamRef.current = null
     }
+
+    countedCasesRef.current = new Set()
 
     setState(prev => ({
       ...prev,
@@ -238,6 +254,7 @@ export function useTestRunner() {
     if (executionIdRef.current) return
     executionIdRef.current  = executionId
     executionIdsRef.current = [executionId]
+    countedCasesRef.current = new Set()
     setState(prev => ({
       ...prev,
       status:        'running',

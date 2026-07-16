@@ -396,11 +396,23 @@ public class BaseTest {
             if (REUSE_DRIVER) {
                 try {
                     if (driver != null) {
-                        String pkg = getAppPackageSafe();
-                        if (pkg != null && !pkg.isBlank()) {
-                            DriverFactory.terminateApp(driver, pkg);
-                            log.info("[BaseTest] App terminada tras test; próximo setUp la relanzará.");
-                        }
+                        // Antes: solo terminateApp() aquí, dejando el dispositivo en
+                        // SpringBoard hasta que el @BeforeEach del SIGUIENTE test lo
+                        // relanzara (ensureAppRunning()). Ese hueco no tiene cota: si
+                        // este era el ÚLTIMO test de la suite, ningún @BeforeEach
+                        // futuro llega, y el dispositivo queda sin ninguna interacción
+                        // durante todo el post-procesamiento final (PDF/Allure/SMTP,
+                        // que puede tardar varios minutos) — tiempo suficiente para que
+                        // iOS aplique su Auto-Lock configurado y solicite el passcode
+                        // en pleno curso de la ejecución. Se reutiliza relaunchAppSafe()
+                        // (terminate+activate juntos, ya usado en el camino de excepción
+                        // de este mismo método) para que el relanzamiento sea inmediato:
+                        // el estado "fresco" que el siguiente test necesita es idéntico
+                        // sin importar cuándo ocurra el relaunch, porque terminateApp()
+                        // ya mata el proceso — activateApp() después siempre produce un
+                        // cold start, ya sea aquí o en el próximo setUp.
+                        relaunchAppSafe();
+                        log.info("[BaseTest] App terminada y relanzada tras test (dispositivo nunca queda inactivo).");
                     }
                 } catch (Exception ignored) {}
             }
