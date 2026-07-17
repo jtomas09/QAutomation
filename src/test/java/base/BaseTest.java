@@ -364,6 +364,7 @@ public class BaseTest {
 
     @AfterEach
     public void tearDown(TestInfo testInfo) {
+        log.info("[EMAIL FLOW] Entrando a @AfterEach (BaseTest): {}", testInfo.getDisplayName());
         stopVideoRecording(testInfo);
         String testKey = testInfo.getDisplayName();
 
@@ -440,6 +441,7 @@ public class BaseTest {
 
     @AfterAll
     public void afterAllSuiteAndCloseDriverIfNeeded() {
+        log.info("[EMAIL FLOW] Entrando a @AfterAll (BaseTest): {}", getClass().getSimpleName());
         try {
             suiteEnd = System.currentTimeMillis();
             long duration = suiteEnd - suiteStart;

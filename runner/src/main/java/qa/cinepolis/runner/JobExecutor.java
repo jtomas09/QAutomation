@@ -535,8 +535,18 @@ public class JobExecutor {
     public void killActiveProcess() {
         Process p = activeProcess;
         if (p != null && p.isAlive()) {
-            System.out.println("\n[Runner] Shutdown detectado — terminando proceso Gradle...");
+            System.out.println("\n==========================");
+            System.out.println("PROCESS FLOW");
+            System.out.println("==========================");
+            System.out.println("[PROCESS FLOW] JobExecutor.killActiveProcess() invocado — pid=" + p.pid()
+                    + " | proceso Gradle SIGUE VIVO (isAlive=true).");
+            System.out.println("[PROCESS FLOW] Stack del llamador de killActiveProcess():\n"
+                    + getStackTrace(new Throwable("killActiveProcess() caller trace")));
+            System.out.println("[Runner] Shutdown detectado — terminando proceso Gradle...");
             forceKillProcessTree(p);
+            System.out.println("[PROCESS FLOW] JobExecutor.killActiveProcess() completado — proceso Gradle destruido "
+                    + "ANTES de que Launcher.execute()/JUnit engine hayan podido terminar por sí solos.");
+            System.out.println("==========================");
             System.out.println("[Runner] Proceso Gradle terminado.");
         }
     }
@@ -552,11 +562,16 @@ public class JobExecutor {
         long pid = process.pid();
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
 
+        System.out.println("[PROCESS FLOW] forceKillProcessTree() ENTRY — pid=" + pid
+                + " isAlive=" + process.isAlive());
+
         // Paso 1: Java ProcessHandle (funciona en todos los SO)
         try {
             process.toHandle().descendants().forEach(h -> {
+                System.out.println("[PROCESS FLOW] Runner llama destroyForcibly() sobre descendiente pid=" + h.pid());
                 try { h.destroyForcibly(); } catch (Exception ignored) {}
             });
+            System.out.println("[PROCESS FLOW] Runner llama destroyForcibly() sobre proceso raíz Gradle pid=" + pid);
             process.destroyForcibly();
         } catch (Exception e) {
             System.err.println("[Executor] Error matando proceso (Java): " + e.getMessage());
@@ -578,6 +593,8 @@ public class JobExecutor {
     public void execute(JobDto job) {
         System.out.printf("%n[Executor] ▶  %s  |  Suite: %s  |  Env: %s  |  País: %s%n",
                 job.executionId, job.suite, job.env, job.country);
+        System.out.println("[PROCESS FLOW] JobExecutor.execute() START — executionId=" + job.executionId
+                + " | hilo=" + Thread.currentThread().getName());
 
         AtomicInteger passed  = new AtomicInteger(0);
         AtomicInteger failed  = new AtomicInteger(0);
@@ -906,6 +923,8 @@ public class JobExecutor {
 
             Process process = pb.start();
             activeProcess = process;
+            System.out.println("[PROCESS FLOW] Proceso Gradle iniciado — pid=" + process.pid()
+                    + " | executionId=" + job.executionId);
 
             // Abort watcher — polls backend every 1s; kills Gradle tree si ABORTING/ABORTED
             Thread abortWatcher = new Thread(() -> {
@@ -916,6 +935,8 @@ public class JobExecutor {
                         client.sendLog(job.executionId, "WARN",
                             "🛑 Aborto recibido — deteniendo proceso Gradle...");
                         System.out.println("\n[Executor] Aborto detectado — terminando árbol de procesos Gradle");
+                        System.out.println("[PROCESS FLOW] Runner ejecuta abortRun() (abort-watcher) — "
+                                + "executionId=" + job.executionId + " | pid=" + process.pid());
                         forceKillProcessTree(process);
                         // Confirmar al backend que el proceso fue terminado (marca ABORTED + libera device)
                         client.confirmAbort(job.executionId);
@@ -947,9 +968,13 @@ public class JobExecutor {
             {
                 boolean wasInterrupted = false;
                 exitCode = 0;
+                System.out.println("[PROCESS FLOW] Runner inicia waitFor() — pid=" + process.pid()
+                        + " | executionId=" + job.executionId);
                 while (true) {
                     try {
                         exitCode = process.waitFor();
+                        System.out.println("[PROCESS FLOW] Runner sale de waitFor() — terminó normalmente, "
+                                + "exitCode=" + exitCode + " | executionId=" + job.executionId);
                         break; // process finished normally
                     } catch (InterruptedException ie) {
                         wasInterrupted = true;
@@ -970,6 +995,10 @@ public class JobExecutor {
                             // Proceso ya terminó — leer exitValue() y continuar
                             System.out.println("[Runner] Proceso ya terminado — leyendo exitValue()");
                             try { exitCode = process.exitValue(); } catch (Exception ev) { exitCode = -1; }
+                            System.out.println("[PROCESS FLOW] Runner sale de waitFor() vía InterruptedException + "
+                                    + "isAlive()=false — exitCode=" + exitCode + " | executionId=" + job.executionId
+                                    + " | esto significa que ALGO mató el proceso mientras el hilo estaba "
+                                    + "interrumpido (ver killActiveProcess()/forceKillProcessTree() logs arriba).");
                             break;
                         }
 
@@ -1217,6 +1246,8 @@ public class JobExecutor {
                 System.out.println("[Executor] [TIMING] fin Runner — cierre total: "
                         + (System.currentTimeMillis() - closeStartMs) + " ms | " + job.executionId);
             }
+            System.out.println("[PROCESS FLOW] JobExecutor.execute() END — executionId=" + job.executionId
+                    + " | resultSent=" + resultSent.get() + " | wasAborted=" + wasAborted.get());
         }
     }
 

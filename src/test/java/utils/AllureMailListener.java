@@ -32,6 +32,7 @@ public class AllureMailListener implements TestExecutionListener {
 
     @Override
     public void testPlanExecutionStarted(TestPlan testPlan) {
+        log.info("[EMAIL FLOW] Entrando a TestExecutionListener.testPlanExecutionStarted().");
         startMs = System.currentTimeMillis();
         executedMenus.clear();
         executedClasses.clear();
@@ -108,6 +109,8 @@ public class AllureMailListener implements TestExecutionListener {
 
     @Override
     public void testPlanExecutionFinished(TestPlan testPlan) {
+        log.info("[EMAIL FLOW] Entrando a TestExecutionListener.testPlanExecutionFinished() — "
+                + "esto solo ocurre si Launcher.execute() completó normalmente.");
         long duration    = System.currentTimeMillis() - startMs;
         String executedTests = executedMenus.stream().collect(Collectors.joining(" | "));
 

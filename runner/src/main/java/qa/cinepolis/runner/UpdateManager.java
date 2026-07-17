@@ -6,6 +6,7 @@ import java.net.http.*;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Checks backend for a newer runner version, downloads the new JAR,
@@ -37,6 +38,16 @@ public class UpdateManager {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    // ── Thread-safety ─────────────────────────────────────────────────────
+    // scheduleAtFixedRate() ya garantiza que el MISMO task programado nunca se
+    // solapa consigo mismo (la siguiente ejecución espera a que la anterior
+    // termine). Este flag cubre el único otro escenario posible: un ciclo
+    // STOP→START/RESTART crea un workScheduler nuevo mientras una invocación
+    // de checkAndApply() del workScheduler anterior sigue en vuelo (p.ej.
+    // bloqueada en I/O de red y aún no reactiva a la interrupción de
+    // shutdownNow()). CAS no bloqueante — sin locks, sin esperas.
+    private final AtomicBoolean checkInProgress = new AtomicBoolean(false);
+
     public UpdateManager(String backendUrl, String runnerToken,
                          String currentVersion, Path agentDataDir) {
         this.backendUrl      = backendUrl;
@@ -53,9 +64,28 @@ public class UpdateManager {
      * outer shell loop (run-runner.bat / run-runner.sh) restarts the JVM
      * with the new JAR.
      *
+     * Nunca reinicia mientras exista un Job activo o en proceso de ser reclamado:
+     * desde que RunnerAgent.beginExclusiveUpdate() tiene éxito y hasta que se libera
+     * (descarga fallida) o el JVM termina (update aplicado), RunnerAgent.tryBeginJob()
+     * falla determinísticamente — el job-poll thread NO le pide un job nuevo al
+     * backend durante toda la descarga/validación/rotate, sin importar cuánto tarde.
+     * No es un re-chequeo en el tiempo: es exclusión mutua real vía CAS sobre el
+     * mismo AtomicReference que usa el job-poll thread — la ventana de carrera no
+     * se reduce, se elimina estructuralmente.
+     *
+     * Si el gate no está disponible (Runner ocupado), no se descarga nada, no se
+     * reemplaza el JAR, no se llama System.exit() — se difiere al siguiente ciclo
+     * programado (scheduleAtFixedRate(..., 60, 60, MINUTES)), sin hilos ni timers
+     * nuevos.
+     *
      * Safe to call from a scheduled thread — does not throw on transient errors.
      */
     public void checkAndApply() {
+        if (!checkInProgress.compareAndSet(false, true)) {
+            System.out.println("[Update] Verificación ya en curso en otro hilo — se omite esta invocación.");
+            return;
+        }
+        boolean holdingGate = false;
         try {
             VersionInfo remote = fetchVersionInfo();
             if (remote == null) return;
@@ -65,8 +95,20 @@ public class UpdateManager {
                 return;
             }
 
-            System.out.println("[Update] Nueva version disponible: " + remote.version +
-                    " (actual: " + currentVersion + ")");
+            System.out.println("[Update] Nueva versión detectada: " + remote.version
+                    + " (actual: " + currentVersion + ")");
+
+            // ── Gate exclusivo ───────────────────────────────────────────────────────
+            // Desde aquí, RunnerAgent.tryBeginJob() falla mientras este gate siga en
+            // GateOwner.UPDATE — el job-poll thread no puede reclamar ningún job
+            // nuevo, ni ahora ni en 10 ms, ni durante toda la descarga.
+            if (!RunnerAgent.beginExclusiveUpdate()) {
+                System.out.println("[Update] Runner ocupado. Actualización diferida.");
+                return;
+            }
+            holdingGate = true;
+
+            System.out.println("[Update] Runner libre. Aplicando actualización.");
 
             // Download + SHA256 validation with up to 3 retry attempts
             Path newJar = null;
@@ -102,8 +144,15 @@ public class UpdateManager {
             if (newJar == null) {
                 System.setProperty("HOST_STATUS", "DEGRADED");
                 System.err.println("[Update] Fallo la descarga/validacion tras 3 intentos. Host marcado DEGRADED.");
-                return;
+                return; // finally libera el gate — el job-poll thread puede reclamar de nuevo
             }
+
+            // Verificación final defensiva (cinturón y tirantes): con el gate
+            // exclusivo tomado desde ANTES de la descarga, esta condición ya es
+            // estructuralmente imposible de violar — tryBeginJob() no ha podido
+            // tener éxito ni una sola vez desde beginExclusiveUpdate(). Se conserva
+            // como constancia explícita en el log, no como el mecanismo real.
+            System.out.println("[Update] Verificación final: sin jobs activos.");
 
             rotate(newJar);
 
@@ -115,10 +164,31 @@ public class UpdateManager {
                 System.err.println("[Update] Warning: no se pudo guardar baseline SHA256: " + e.getMessage());
             }
 
-            System.out.println("[Update] Actualizacion aplicada. Reiniciando...");
-            System.exit(0); // shell loop restarts JVM with updated JAR
-        } catch (Exception e) {
-            System.err.println("[Update] Error verificando actualizacion: " + e.getMessage());
+            System.out.println("[Update] Reiniciando Runner con la versión " + remote.version
+                    + " (gate exclusivo confirmado: sin jobs activos desde antes de la descarga).");
+            // Único punto de entrada oficial para terminar la JVM (ver
+            // RunnerAgent.requestShutdown): registra el motivo tipado y delega en
+            // System.exit(), que dispara el shutdown hook ya existente
+            // (stopAllServices(true)) — nunca se llama System.exit() directamente
+            // desde aquí. El detalle rico (qué versión) ya quedó en el log de arriba;
+            // el motivo tipado solo identifica la categoría.
+            RunnerAgent.requestShutdown(0, RunnerAgent.ShutdownReason.AUTO_UPDATE);
+            // never returns — el gate queda en UPDATE, pero la JVM ya terminó
+        } catch (Throwable t) {
+            // Throwable (no solo Exception) a propósito: este método corre dentro de
+            // workScheduler.scheduleAtFixedRate(...). Si un Error (OutOfMemoryError,
+            // LinkageError, etc.) escapara sin capturar, el JDK cancela silenciosamente
+            // TODAS las ejecuciones futuras de este task periódico — el auto-update
+            // quedaría deshabilitado para siempre, sin ningún log que lo indique. El
+            // gate ya se libera igual vía el finally con Exception simple (Java lo
+            // garantiza para cualquier Throwable) — este catch amplio protege el
+            // scheduling del mecanismo, no el gate en sí.
+            System.err.println("[Update] Error verificando actualizacion: " + t.getMessage());
+        } finally {
+            checkInProgress.set(false);
+            // Si System.exit(0) se ejecutó, este código nunca se alcanza (la JVM ya
+            // terminó) — no hay riesgo de "liberar" un gate que ya no importa.
+            if (holdingGate) RunnerAgent.endExclusiveUpdate();
         }
     }
 

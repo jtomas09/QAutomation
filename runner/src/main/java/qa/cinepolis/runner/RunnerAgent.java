@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -71,6 +72,112 @@ public class RunnerAgent {
     private static final AtomicReference<DeviceSelfHealingManager> deviceHealerRef
             = new AtomicReference<>();
 
+    // ── Diagnóstico PROCESS FLOW / ShutdownHook ────────────────────────────────
+    // Motivo del cierre de JVM, fijado por quien decide terminar el proceso (p.ej.
+    // UpdateManager ANTES de System.exit(0)) para que el shutdown hook pueda
+    // reportar POR QUÉ se está cerrando, no solo QUE se está cerrando.
+    //
+    // Tipo fuerte en vez de String: el compilador impide pasar un motivo inválido
+    // o inventado ad-hoc en un call site nuevo — solo existen los valores
+    // declarados aquí, y agregar uno nuevo exige tocar este enum explícitamente.
+    public enum ShutdownReason {
+        /** Runner reinicia su propia JVM tras aplicar una actualización de versión (UpdateManager). */
+        AUTO_UPDATE,
+        /** OutOfMemoryError / StackOverflowError / InternalError / UnknownError no recuperable en un hilo de larga vida. */
+        FATAL_VM_ERROR,
+        /** Valor por defecto: la JVM se está cerrando sin haber pasado por requestShutdown()
+         *  (kill externo, Ctrl+C, SIGTERM, o cualquier terminación no iniciada por este código). */
+        UNKNOWN
+    }
+
+    private static final AtomicReference<ShutdownReason> shutdownReason =
+            new AtomicReference<>(ShutdownReason.UNKNOWN);
+
+    // Java no expone a los shutdown hooks el exitCode pasado a System.exit() —
+    // se guarda aquí, junto al motivo, en el mismo instante en requestShutdown().
+    // -1 = ningún exitCode registrado todavía (kill externo/SIGTERM/Ctrl+C).
+    private static final AtomicInteger shutdownExitCode = new AtomicInteger(-1);
+
+    /** Diagnóstico de solo lectura — no cambia ningún comportamiento. */
+    public static boolean isJobActive() {
+        JobExecutor je = jobExecutor;
+        return je != null && je.hasActiveProcess();
+    }
+
+    /** Llamar ANTES de cualquier System.exit()/Runtime.halt() para que el shutdown hook explique el motivo. */
+    private static void recordShutdownReason(ShutdownReason reason) {
+        shutdownReason.set(reason);
+    }
+
+    /**
+     * Único punto de entrada oficial para terminar deliberadamente esta JVM.
+     *
+     * No reemplaza ni duplica el mecanismo de limpieza — el shutdown hook
+     * registrado en main() (que llama stopAllServices(true)) YA se dispara para
+     * cualquier System.exit(), sin importar el hilo que lo invoque; eso es
+     * garantía de la propia JVM, no de este método. Lo que este método fija es
+     * el RITUAL previo: es estructuralmente imposible terminar el proceso desde
+     * este código sin dejar registrado el motivo — evita que un futuro punto de
+     * llamada invoque System.exit() directamente y deje el shutdown hook sin
+     * explicación. El motivo es un ShutdownReason (no String): el compilador
+     * rechaza cualquier valor que no sea uno de los declarados en el enum.
+     *
+     * Todo componente que decida terminar el Runner (auto-update aplicado,
+     * un Error fatal en el job-poll thread, o cualquier caso futuro) debe pasar
+     * por aquí en vez de llamar a System.exit() por su cuenta.
+     */
+    public static void requestShutdown(int exitCode, ShutdownReason reason) {
+        shutdownExitCode.set(exitCode);
+        recordShutdownReason(reason);
+        System.exit(exitCode);
+    }
+
+    // ── Gate exclusivo: aceptación de Jobs vs. auto-update ─────────────────────
+    // Mismo idioma que WdaLaunchCoordinator.Owner (AtomicReference<Owner>, null =
+    // libre): un único punto de CAS compartido entre el job-poll thread (que
+    // reclama jobs del backend) y UpdateManager (que aplica actualizaciones).
+    //
+    // Por qué esto cierra la carrera POR COMPLETO y no solo la reduce: con un
+    // simple "if (isJobActive()) return;" siempre queda una ventana entre LEER
+    // el estado y ACTUAR sobre él (check-then-act), sin importar cuántas veces
+    // se re-chequee. Aquí no hay lectura seguida de acción — el propio CAS ES
+    // la acción: tryBeginJob() y beginExclusiveUpdate() compiten por la MISMA
+    // referencia, así que exactamente uno de los dos puede tener éxito en un
+    // instante dado. Si UPDATE tiene el gate, tryBeginJob() falla de forma
+    // determinística — el job-poll thread ni siquiera le pide un job nuevo al
+    // backend ese ciclo (no hay job que "deshacer" después).
+    private enum GateOwner { JOB, UPDATE }
+    private static final AtomicReference<GateOwner> gate = new AtomicReference<>(null);
+
+    /** Job-poll thread: reserva el gate ANTES de pedir un job al backend.
+     *  Si falla, un auto-update ya lo tiene — no se debe llamar a getNextJob(). */
+    private static boolean tryBeginJob() {
+        return gate.compareAndSet(null, GateOwner.JOB);
+    }
+
+    /** Libera el gate del lado job — llamar siempre (con o sin job encontrado). */
+    private static void endJob() {
+        gate.compareAndSet(GateOwner.JOB, null);
+    }
+
+    /**
+     * UpdateManager: reserva el gate en EXCLUSIVA antes de descargar/aplicar una
+     * actualización. Solo tiene éxito si el gate está libre — es decir, si el
+     * job-poll thread ni está reclamando un job ni tiene uno en ejecución en
+     * este instante. A partir de que esto retorna true y hasta endExclusiveUpdate()
+     * (o System.exit()), tryBeginJob() falla determinísticamente: ningún job
+     * nuevo puede empezar, sin importar cuánto tarde la descarga.
+     */
+    public static boolean beginExclusiveUpdate() {
+        return gate.compareAndSet(null, GateOwner.UPDATE);
+    }
+
+    /** Libera el gate de actualización — llamar siempre que beginExclusiveUpdate()
+     *  haya devuelto true y NO se vaya a llamar System.exit() (p.ej. descarga fallida). */
+    public static void endExclusiveUpdate() {
+        gate.compareAndSet(GateOwner.UPDATE, null);
+    }
+
     // ── Lifecycle scheduler (always alive, drives heartbeats + commands) ──────
 
     private static ScheduledExecutorService lifecycleScheduler;
@@ -80,6 +187,22 @@ public class RunnerAgent {
     // ─────────────────────────────────────────────────────────────────────────
 
     public static void main(String[] args) throws Exception {
+        // ── DefaultUncaughtExceptionHandler ────────────────────────────────────
+        // Cualquier excepción no capturada en CUALQUIER hilo de esta JVM (incluidos
+        // work-scheduler, job-poll, abort-watcher) queda registrada con nombre del
+        // hilo y stack completa — para descartar/confirmar que un Error no
+        // manejado en un hilo daemon está matando la JVM de forma indirecta.
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            System.err.println("\n==========================");
+            System.err.println("PROCESS FLOW — UNCAUGHT EXCEPTION");
+            System.err.println("==========================");
+            System.err.println("[PROCESS FLOW] Fecha/hora : " + java.time.LocalDateTime.now());
+            System.err.println("[PROCESS FLOW] Hilo       : " + t.getName());
+            System.err.println("[PROCESS FLOW] Excepción  : " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+            System.err.println("==========================");
+        });
+
         config        = RunnerConfig.fromEnv();
         client        = new BackendClient(config.backendUrl, config.runnerToken, config.runnerId);
 
@@ -95,7 +218,29 @@ public class RunnerAgent {
         // JVM shutdown hook — hard cleanup
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             jvmShutting = true;
-            System.out.println("\n[Runner] JVM cerrando — limpiando recursos...");
+            boolean jobWasActive = isJobActive();
+            System.out.println("\n==========================");
+            System.out.println("PROCESS FLOW — SHUTDOWN HOOK EJECUTADO");
+            System.out.println("==========================");
+            System.out.println("[PROCESS FLOW] Fecha/hora        : " + java.time.LocalDateTime.now());
+            System.out.println("[PROCESS FLOW] Hilo del hook     : " + Thread.currentThread().getName());
+            System.out.println("[PROCESS FLOW] Shutdown reason   : " + shutdownReason.get().name());
+            System.out.println("[PROCESS FLOW] Exit code         : "
+                    + (shutdownExitCode.get() == -1 ? "N/A (no pasó por requestShutdown — kill externo/SIGTERM/Ctrl+C)"
+                                                     : shutdownExitCode.get()));
+            System.out.println("[PROCESS FLOW] ¿Job activo ahora?: " + jobWasActive
+                    + (jobWasActive ? "  ⚠ HABÍA UN PROCESO GRADLE VIVO — este shutdown lo va a destruir." : ""));
+            System.out.println("[PROCESS FLOW] Estado lifecycle  : " + lifecycleState);
+            System.out.println("[PROCESS FLOW] Stack traces de TODOS los hilos vivos en este instante:");
+            for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+                Thread th = entry.getKey();
+                System.out.println("  -- Hilo: " + th.getName() + " (daemon=" + th.isDaemon() + ", estado=" + th.getState() + ")");
+                for (StackTraceElement el : entry.getValue()) {
+                    System.out.println("       at " + el);
+                }
+            }
+            System.out.println("==========================");
+            System.out.println("[Runner] JVM cerrando — limpiando recursos...");
             stopAllServices(true);
         }, "shutdown-hook"));
 
@@ -157,6 +302,10 @@ public class RunnerAgent {
 
     private static void dispatchCommand(String cmd) {
         System.out.println("[Runner] Comando recibido: " + cmd);
+        if (("STOP".equalsIgnoreCase(cmd) || "RESTART".equalsIgnoreCase(cmd)) && isJobActive()) {
+            System.out.println("[PROCESS FLOW] Comando " + cmd + " recibido MIENTRAS HAY UN JOB ACTIVO — "
+                    + "esto va a forzar killActiveProcess() sobre el proceso Gradle en ejecución.");
+        }
         switch (cmd.toUpperCase()) {
             case "START" -> {
                 if (lifecycleState == LifecycleState.STOPPED
@@ -417,6 +566,30 @@ public class RunnerAgent {
         } catch (Exception e) {
             System.err.println("[Runner] Error critico al iniciar: " + e.getMessage());
             e.printStackTrace();
+
+            // Cierra cualquier recurso que ESTE intento fallido ya haya creado o
+            // arrancado (pasos anteriores al que lanzó la excepción — p.ej. Appium
+            // ya iniciado en el paso 3, workScheduler ya con tareas programadas en
+            // el paso 12). Sin esto, un START posterior exitoso sobreescribe estas
+            // referencias estáticas con instancias nuevas, dejando las anteriores
+            // huérfanas (proceso Appium, hilos del workScheduler) corriendo
+            // indefinidamente sin que nada vuelva a referenciarlas. Mismo patrón
+            // guard-null-y-detener que ya usa stopAllServices() — cada liberación
+            // en su propio try/catch para garantizar que lifecycleState=ERROR y el
+            // heartbeat DEGRADED de abajo siempre se ejecuten, incluso si una
+            // liberación individual falla.
+            try { if (workScheduler != null) workScheduler.shutdownNow(); } catch (Exception ignored) {}
+            workScheduler = null;
+            try { if (selfHealing != null) selfHealing.stop(); } catch (Exception ignored) {}
+            selfHealing = null;
+            try { if (appiumMgr != null) appiumMgr.stop(); } catch (Exception ignored) {}
+            appiumMgr = null;
+            try { if (streamServer != null) streamServer.stop(); } catch (Exception ignored) {}
+            streamServer = null;
+            jobExecutor = null;
+            deviceHealer = null;
+            deviceHealerRef.set(null);
+
             lifecycleState = LifecycleState.ERROR;
             silentHeartbeat("DEGRADED");
         }
@@ -432,6 +605,8 @@ public class RunnerAgent {
             return;
         }
         System.out.println("[Runner] ===== DETENIENDO RUNNER =====");
+        System.out.println("[PROCESS FLOW] RunnerAgent.stopAllServices(jvmExit=" + jvmExit + ") START — "
+                + "hilo=" + Thread.currentThread().getName() + " | job activo=" + isJobActive());
         lifecycleState = LifecycleState.STOPPING;
 
         // Notify backend immediately
@@ -450,6 +625,7 @@ public class RunnerAgent {
 
         // ── Job poll thread ────────────────────────────────────────────────────
         if (jobPollThread != null) {
+            System.out.println("[PROCESS FLOW] Thread interrumpido: jobPollThread.interrupt()");
             jobPollThread.interrupt();
             try { jobPollThread.join(5_000); } catch (InterruptedException ignored) {}
             jobPollThread = null;
@@ -457,6 +633,8 @@ public class RunnerAgent {
 
         // ── Work scheduler ─────────────────────────────────────────────────────
         if (workScheduler != null) {
+            System.out.println("[PROCESS FLOW] ExecutorService shutdownNow(): workScheduler "
+                    + "(incluye updateMgr.checkAndApply, heartbeats, self-healing, ping)");
             workScheduler.shutdownNow();
             try { workScheduler.awaitTermination(5, TimeUnit.SECONDS); }
             catch (InterruptedException ignored) {}
@@ -494,6 +672,8 @@ public class RunnerAgent {
             silentHeartbeat("OFFLINE");
             System.out.println("[Runner] ===== RUNNER DETENIDO — esperando START =====");
         }
+        System.out.println("[PROCESS FLOW] RunnerAgent.stopAllServices(jvmExit=" + jvmExit + ") END — "
+                + "Runner considera la(s) ejecución(es) finalizada(s).");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -506,17 +686,72 @@ public class RunnerAgent {
             System.out.println("[Runner] Job-poll thread iniciado.");
             while (lifecycleState == LifecycleState.RUNNING && !Thread.currentThread().isInterrupted()) {
                 try {
-                    Optional<JobDto> job = client.getNextJob();
-                    if (job.isPresent() && jobExecutor != null) {
-                        System.out.println("[Runner] Job recibido: " + job.get().executionId);
-                        jobExecutor.execute(job.get());
-                    } else {
+                    // Reservar el gate ANTES de pedirle un job al backend. Si un
+                    // auto-update ya lo tiene (GateOwner.UPDATE), ni siquiera se llama
+                    // a getNextJob() — no hay job que "deshacer" después, y el ciclo
+                    // se resuelve con el MISMO sleep que ya existía para "sin trabajo",
+                    // sin polling ni espera adicional.
+                    if (!tryBeginJob()) {
                         Thread.sleep(config.pollIntervalMs);
+                        continue;
                     }
+                    boolean claimed = false;
+                    try {
+                        Optional<JobDto> job = client.getNextJob();
+                        if (job.isPresent() && jobExecutor != null) {
+                            claimed = true;
+                            System.out.println("[Runner] Job recibido: " + job.get().executionId);
+                            jobExecutor.execute(job.get());
+                        }
+                    } finally {
+                        // Libera el gate tanto si hubo job (ya terminó execute()) como
+                        // si no había ninguno — siempre en el mismo ciclo del poll.
+                        endJob();
+                    }
+                    if (!claimed) Thread.sleep(config.pollIntervalMs);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                } catch (ThreadDeath td) {
+                    // Contrato histórico de Thread.stop() (JDK): si se captura, DEBE
+                    // relanzarse sin excepción — nunca absorberse. Prácticamente
+                    // inalcanzable desde JDK 20 (Thread.stop() ya lanza
+                    // UnsupportedOperationException), pero un catch(Throwable) sin
+                    // esta guarda violaría el contrato si alguna vez ocurriera.
+                    throw td;
+                } catch (VirtualMachineError fatal) {
+                    // OutOfMemoryError / InternalError / UnknownError / StackOverflowError.
+                    // El propio Javadoc de VirtualMachineError: "la JVM se quedó sin
+                    // recursos... o está de alguna manera corrupta". No es seguro asumir
+                    // que el resto del proceso (heap, GC, estado nativo de Appium/WDA)
+                    // sigue siendo confiable. Absorber esto y seguir el loop dejaría un
+                    // Runner "vivo" (heartbeat ONLINE) pero ciego a jobs para siempre —
+                    // el peor tipo de fallo silencioso. Se registra con el máximo detalle
+                    // posible y se termina la JVM deliberadamente: System.exit (no
+                    // Runtime.halt) para que el shutdown hook YA existente limpie WDA/
+                    // Appium/streamServer antes de morir. El wrapper externo reinicia el
+                    // proceso — mismo mecanismo que ya usa UpdateManager tras un update.
+                    System.err.println("\n==========================");
+                    System.err.println("[Runner] FATAL: VirtualMachineError en job-poll thread — "
+                            + "terminando la JVM deliberadamente (no se puede confiar en que "
+                            + "el resto del proceso siga íntegro).");
+                    System.err.println("==========================");
+                    fatal.printStackTrace();
+                    // El detalle rico (qué subtipo exacto, dónde) ya quedó en el stack trace
+                    // de arriba — el motivo tipado solo necesita identificar la CATEGORÍA.
+                    requestShutdown(1, ShutdownReason.FATAL_VM_ERROR);
                 } catch (Exception e) {
                     System.err.println("[Runner] Error en job poll: " + e.getMessage());
+                    try { Thread.sleep(config.pollIntervalMs); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                } catch (Error nonFatal) {
+                    // AssertionError, LinkageError y cualquier otro Error que NO sea
+                    // VirtualMachineError: indica un defecto de código/classpath/aserción
+                    // aislado, no corrupción de la JVM. Matar el poller entero por un
+                    // defecto de UNA clase/job sería peor que sobrevivir dejando
+                    // constancia ruidosa — mismo criterio que ya se usa para Exception.
+                    System.err.println("[Runner] ⚠ Error no fatal en job-poll thread "
+                            + "(revisar causa — no se oculta): " + nonFatal);
+                    nonFatal.printStackTrace();
                     try { Thread.sleep(config.pollIntervalMs); }
                     catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 }

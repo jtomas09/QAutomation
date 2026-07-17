@@ -40,6 +40,27 @@ public class PdfReportExtension implements
 
     private static volatile long suiteStartMillis = 0L;
 
+    // ── Diagnóstico EMAIL FLOW ──────────────────────────────────────────────
+    // Prueba, con evidencia de log, si SuiteMailer.close() (el único disparador de
+    // correo cuando se corre vía `gradlew test`) realmente se invoca al final del
+    // run. Si el JVM termina (shutdown hook) y RUN_INIT sí arrancó pero close()
+    // nunca marcó CLOSE_INVOKED, la causa es que el motor JUnit nunca llegó a
+    // cerrar el root store (p.ej. la JVM murió antes de completar el engine),
+    // no un fallo dentro de SuiteMailer/AllureReportSender.
+    private static volatile boolean RUN_STARTED     = false;
+    private static volatile boolean CLOSE_INVOKED   = false;
+
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (RUN_STARTED && !CLOSE_INVOKED) {
+                log.error("[EMAIL FLOW] JVM shutdown hook: SuiteMailer.close() NUNCA fue invocado "
+                        + "aunque el run sí inició (RUN_INIT=true). El root store de JUnit no llegó a "
+                        + "cerrarse con normalidad — el JVM terminó antes de que el engine completara su "
+                        + "ciclo de vida (crash, kill, o salida anómala), no un fallo dentro del envío de correo.");
+            }
+        }, "email-flow-suite-mailer-watchdog"));
+    }
+
     @Override
     public void beforeAll(ExtensionContext context) {
         String execName = System.getProperty("executionName");
@@ -49,6 +70,7 @@ public class PdfReportExtension implements
 
         context.getRoot().getStore(NS).getOrComputeIfAbsent("RUN_INIT", key -> {
             suiteStartMillis = System.currentTimeMillis();
+            RUN_STARTED = true;
 
             EXECUTED_TESTS.setLength(0);
             EXECUTED_CLASSES.clear();
@@ -63,7 +85,11 @@ public class PdfReportExtension implements
 
         context.getRoot().getStore(NS).getOrComputeIfAbsent(
                 "SUITE_MAILER",
-                key -> new SuiteMailer(),
+                key -> {
+                    log.info("[EMAIL FLOW] SuiteMailer registrado en el root store (se ejecutará en "
+                            + "close() cuando el engine de JUnit termine todo el run).");
+                    return new SuiteMailer();
+                },
                 SuiteMailer.class
         );
     }
@@ -145,13 +171,18 @@ public class PdfReportExtension implements
 
     @Override
     public void afterAll(ExtensionContext context) {
-        log.debug("[Suite] afterAll: suite email will be sent by SuiteMailer.close() at JVM shutdown.");
+        log.info("[EMAIL FLOW] Entrando a AfterAll (PdfReportExtension) — clase: {}. "
+                + "El correo se enviará luego, en SuiteMailer.close(), cuando el root store "
+                + "cierre al terminar TODO el run (no al terminar esta clase).",
+                context.getTestClass().map(Class::getSimpleName).orElse("?"));
     }
 
     private static class SuiteMailer implements ExtensionContext.Store.CloseableResource {
 
         @Override
         public void close() {
+            CLOSE_INVOKED = true;
+            log.info("[EMAIL FLOW] Entrando a SuiteMailer.close() — root store cerrando, fin real del run.");
             long durationMillis = Math.max(0, System.currentTimeMillis() - suiteStartMillis);
 
             try {

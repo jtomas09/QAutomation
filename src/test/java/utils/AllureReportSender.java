@@ -215,10 +215,13 @@ public class AllureReportSender {
             java.util.Set<String> executedClasses
     ) throws Exception {
 
+        log.info("[EMAIL FLOW] Entrando a AllureReportSender.sendFinalSuiteReport(). total={} passed={} failed={}",
+                totalTests, passedTests, failedTests);
         log.info("[AllureReportSender] sendFinalSuiteReport — sendMail={} mail.enabled={} MAIL_TO={}",
                 System.getProperty("sendMail", "<not set>"),
                 System.getProperty("mail.enabled", "<not set>"),
                 System.getenv("MAIL_TO") != null ? System.getenv("MAIL_TO") : "<not set>");
+        log.info("[EMAIL FLOW] Email habilitado = {}", isMailEnabled());
 
         if (!isMailEnabled()) {
             log.info("[AllureReportSender] Email delivery disabled (-DsendMail=false). Skipping.");
@@ -379,6 +382,7 @@ public class AllureReportSender {
             }
         });
 
+        log.info("[EMAIL FLOW] Construyendo correo...");
         MimeMessage message = new MimeMessage(session);
         message.setFrom(new InternetAddress(from));
         message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
@@ -570,6 +574,7 @@ public class AllureReportSender {
         multipart.addBodyPart(htmlPart);
 
         // Adjunto 1: Allure Overview + Behaviors PDF (optional — skip if generation failed)
+        log.info("[EMAIL FLOW] Adjuntando PDF...");
         if (allurePdf != null && Files.exists(allurePdf)) {
             MimeBodyPart allurePart = new MimeBodyPart();
             allurePart.attachFile(allurePdf.toFile());
@@ -609,11 +614,13 @@ public class AllureReportSender {
         message.setContent(multipart);
 
         log.info("[AllureReportSender] Sending via {}...", smtpHost);
+        log.info("[EMAIL FLOW] Invocando SMTP...");
         long tSmtpStart = System.currentTimeMillis();
         try {
             Transport.send(message);
             log.info("[TIMING] SMTP send: {} ms", System.currentTimeMillis() - tSmtpStart);
             log.info("[AllureReportSender] Email sent successfully to: {}", to);
+            log.info("[EMAIL FLOW] Correo enviado correctamente.");
             return true;
         } catch (Throwable e) {
             log.info("[TIMING] SMTP send (falló): {} ms", System.currentTimeMillis() - tSmtpStart);
