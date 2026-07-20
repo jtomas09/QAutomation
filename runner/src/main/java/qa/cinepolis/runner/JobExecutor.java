@@ -52,15 +52,6 @@ public class JobExecutor {
     /** Número de casos seleccionados para una ejecución Smoke. */
     static final int SMOKE_SIZE = 50;
 
-    /**
-     * Mapa de filtro Gradle → número de tests que ejecutará.
-     * Calculado automáticamente desde SUITE_MAP:
-     *  - Filtro de método (4+ puntos)   → 1
-     *  - Filtro de clase  (3 puntos)    → número de métodos de esa clase en SUITE_MAP
-     *  - Filtro wildcard  (.*)          → suma de métodos de todas las clases del paquete
-     */
-    static final Map<String, Integer> SUITE_FILTER_SIZE = new HashMap<>();
-
     static {
         SUITE_MAP = new HashMap<>();
         // Full suites — smoke apunta a lógica propia, NO a RunAllTests
@@ -345,55 +336,6 @@ public class JobExecutor {
                 MEXICO_SMOKE_POOL.add(filter);
             }
         }
-
-        // ── Calcular SUITE_FILTER_SIZE: cuántos tests ejecuta cada filtro ────────
-        // Paso 1: contar métodos por clase (filtros de 4+ puntos → extraer la clase padre)
-        Map<String, Integer> classMethodCount = new HashMap<>();
-        for (String f : SUITE_MAP.values()) {
-            if (f == null || f.startsWith("§") || !f.startsWith("tests.")) continue;
-            long dots = f.chars().filter(c -> c == '.').count();
-            if (dots >= 4 && !f.endsWith(".*")) {
-                // Filtro de método → clase es todo menos el último segmento
-                String cls = f.substring(0, f.lastIndexOf('.'));
-                classMethodCount.merge(cls, 1, Integer::sum);
-            }
-        }
-        // Paso 2: construir mapa filtro → count para los tres tipos de filtro
-        for (String f : SUITE_MAP.values()) {
-            if (f == null || f.startsWith("§") || f.equals("tests.RunAllTests")) continue;
-            long dots = f.chars().filter(c -> c == '.').count();
-            if (!f.endsWith(".*") && dots >= 4) {
-                // Método individual
-                SUITE_FILTER_SIZE.put(f, 1);
-            } else if (!f.endsWith(".*") && dots == 3) {
-                // Clase completa → buscar conteo de métodos
-                Integer cnt = classMethodCount.get(f);
-                if (cnt != null) SUITE_FILTER_SIZE.put(f, cnt);
-            } else if (f.endsWith(".*")) {
-                // Wildcard de paquete → sumar métodos de todas las clases del paquete
-                String pkg = f.substring(0, f.length() - 2) + "."; // "tests.xxx.alimentos."
-                int total = 0;
-                for (Map.Entry<String, Integer> e : classMethodCount.entrySet()) {
-                    if (e.getKey().startsWith(pkg)) total += e.getValue();
-                }
-                if (total > 0) SUITE_FILTER_SIZE.put(f, total);
-            }
-        }
-
-        // ── Correcciones de conteo real vs entradas en SUITE_MAP ─────────────
-        // SUITE_MAP solo registra los métodos usados para ejecución individual,
-        // pero las clases pueden tener más @Test. Verificado con:
-        //   grep -c "^    @Test$" ClassName.java
-        //
-        // MenuCoffeTree: 50 @Test reales, 30 en SUITE_MAP (coffee-t01..t30)
-        SUITE_FILTER_SIZE.put("tests.México.alimentos.MenuCoffeTree",  50);
-        // MenuMiCine:    50 @Test reales, 40 en SUITE_MAP (micine-t01..t40)
-        SUITE_FILTER_SIZE.put("tests.México.alimentos.MenuMiCine",     50);
-        // MenuTradicional: 50 reales = 50 en SUITE_MAP (trad-t01..t50) — ya correcto
-        // MenuVIP: 50 reales; vip-t1..t2 (los 2 originales) siguen activos — selección
-        // individual parcial, mismo patrón que MenuCoffeTree/MenuMiCine arriba.
-        // MenuAtmosfera: 47 reales = 47 en SUITE_MAP (atmos-t01..t47) — ya correcto,
-        // auto-derivado sin necesitar una entrada explícita aquí.
     }
 
     private final RunnerConfig   config;
@@ -413,16 +355,18 @@ public class JobExecutor {
     }
 
     /**
-     * Calcula el total esperado DESDE EL COMANDO GRADLE ya construido, garantizando
-     * que el valor enviado al dashboard coincide exactamente con lo que se ejecutará.
+     * Calcula el total esperado DESDE EL COMANDO GRADLE ya construido — única fuente
+     * de verdad para "cuántos tests se van a ejecutar", sin ninguna tabla mantenida a
+     * mano de por medio:
      *
-     *  - Smoke / múltiples --tests individuales → número de flags --tests (1 por método)
+     *  - Smoke / múltiples --tests individuales → número de flags --tests (1 por método,
+     *    exactamente los que el propio comando ya construyó — nada que recalcular).
      *  - Suite de clase (1 flag --tests ClassName) → se CUENTAN los @Test activos en
-     *    el .java fuente real de esa clase (nunca un número hardcodeado que pueda
-     *    desincronizarse si alguien agrega/comenta casos) — SUITE_FILTER_SIZE queda
-     *    solo como respaldo si el archivo fuente no se puede localizar/leer.
-     *  - Wildcard (1 flag --tests pkg.*) → lookup en SUITE_FILTER_SIZE
-     *  - Desconocido → -1 (sin barra de progreso)
+     *    el .java fuente real de esa clase en este preciso momento.
+     *  - Wildcard (1 flag --tests pkg.*) → se CUENTAN los @Test activos de todas las
+     *    clases del paquete en este preciso momento.
+     *  - Árbol de fuentes no disponible / filtro no reconocible (p. ej. RunAllTests) →
+     *    -1 (desconocido, sin barra de progreso) — nunca un número sustituto.
      */
     private int resolveExpectedCountFromCommand(JobDto job, List<String> cmd, File projectDir) {
         String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
@@ -444,34 +388,41 @@ public class JobExecutor {
                 // Clase completa (exactamente 3 puntos, sin ".*") → contar los @Test
                 // reales en el archivo fuente. "Los casos que realmente son": si la
                 // clase tiene 50 @Test activos hoy, el esperado es 50; si mañana solo
-                // tiene 8 (por comentar/eliminar casos), el esperado pasa a ser 8 —
-                // nunca un número desactualizado copiado a mano en SUITE_FILTER_SIZE.
+                // tiene 8 (por comentar/eliminar casos), el esperado pasa a ser 8 — nunca
+                // un número mantenido a mano en una tabla separada que puede desincronizarse.
                 if (filter.chars().filter(c -> c == '.').count() == 3 && !filter.endsWith(".*")) {
                     Integer real = countRealTestMethodsInSource(projectDir, filter);
                     if (real != null) return real;
                 }
 
-                Integer count = SUITE_FILTER_SIZE.get(filter);
-                if (count != null) return count;
-                // 4+ puntos sin .* = selector de método → 1 test
+                // Wildcard de paquete ("tests.México.alimentos.*") → mismo principio: contar
+                // los @Test reales de TODAS las clases del paquete en este preciso momento.
+                if (filter.endsWith(".*")) {
+                    Integer real = countRealTestMethodsInPackage(projectDir, filter);
+                    if (real != null) return real;
+                }
+
+                // 4+ puntos sin .* = selector de método → siempre exactamente 1 test
+                // (regla estructural del propio filtro Gradle, no una tabla mantenida a mano).
                 if (filter.chars().filter(c -> c == '.').count() >= 4
                         && !filter.endsWith(".*")) return 1;
             }
         }
 
+        // Árbol de fuentes no disponible (o filtro no reconocible, p. ej. RunAllTests) →
+        // desconocido. Nunca se sustituye por un número adivinado: -1 es explícitamente
+        // "sin barra de progreso", no una cifra que aparente ser una fuente de verdad.
         return -1;
     }
 
     /**
      * Cuenta los @Test activos (no comentados, ni en línea ni en bloque) en el .java
-     * fuente real de la clase — la fuente de verdad para "cuántos casos tiene esta
-     * suite" en vez de un número mantenido a mano que puede quedar desactualizado
-     * (ya ocurrió: MenuCoffeTree, MenuMiCine y MenuAtmosfera tuvieron mapas
-     * desincronizados del conteo real de @Test en algún momento).
+     * fuente real de la clase — única fuente de verdad para "cuántos casos tiene esta
+     * suite" (reemplaza una tabla mantenida a mano que ya quedó desincronizada del
+     * código real más de una vez: MenuCoffeTree, MenuMiCine, MenuAtmosfera, MenuVIP).
      *
-     * @return el conteo real, o null si el archivo no existe/no se pudo leer — en
-     *         ese caso el llamador cae de vuelta a SUITE_FILTER_SIZE como respaldo
-     *         (p. ej. ejecutable empaquetado sin el árbol de fuentes disponible).
+     * @return el conteo real, o null si el archivo no existe/no se pudo leer — en ese
+     *         caso el llamador retorna -1 (desconocido), nunca un número sustituto.
      */
     private static Integer countRealTestMethodsInSource(File projectDir, String classFqn) {
         try {
@@ -498,31 +449,34 @@ public class JobExecutor {
     }
 
     /**
-     * Devuelve el número de tests esperados para la suite dada usando SUITE_FILTER_SIZE.
-     * Cubre automáticamente todas las suites registradas en SUITE_MAP:
-     *  - smoke               → SMOKE_SIZE (50, selección aleatoria)
-     *  - clase completa      → número de métodos de esa clase en SUITE_MAP
-     *  - wildcard de paquete → suma de todos los métodos del paquete
-     *  - método individual   → 1
-     *  - full suite / RunAllTests → -1 (desconocido, sin barra de progreso)
+     * Cuenta los @Test reales de TODAS las clases .java bajo el paquete de un filtro
+     * wildcard (p. ej. "tests.México.alimentos.*") — misma fuente de verdad que
+     * countRealTestMethodsInSource(), sumada sobre el paquete completo.
+     *
+     * @return la suma real, o null si el directorio del paquete no existe/no se pudo
+     *         listar — en ese caso el llamador retorna -1 (desconocido).
      */
-    private int resolveExpectedTestCount(JobDto job) {
-        String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
+    private static Integer countRealTestMethodsInPackage(File projectDir, String wildcardFilter) {
+        try {
+            String pkgFqn  = wildcardFilter.substring(0, wildcardFilter.length() - 2); // quita ".*"
+            String pkgPath = pkgFqn.replace('.', File.separatorChar);
+            File pkgDir = new File(projectDir,
+                    "src" + File.separator + "test" + File.separator + "java" + File.separator + pkgPath);
+            if (!pkgDir.isDirectory()) return null;
 
-        // Smoke: selección aleatoria de tamaño fijo
-        if ("smoke tests".equals(key) || "smoke".equals(key)) {
-            return Math.min(SMOKE_SIZE, MEXICO_SMOKE_POOL.size());
+            File[] javaFiles = pkgDir.listFiles((dir, name) -> name.endsWith(".java"));
+            if (javaFiles == null) return null;
+
+            int total = 0;
+            for (File f : javaFiles) {
+                String simpleName = f.getName().substring(0, f.getName().length() - ".java".length());
+                Integer count = countRealTestMethodsInSource(projectDir, pkgFqn + "." + simpleName);
+                if (count != null) total += count;
+            }
+            return total;
+        } catch (Exception e) {
+            return null;
         }
-
-        // Buscar el filtro Gradle para esta suite
-        String filter = SUITE_MAP.getOrDefault(key, "");
-        if (filter.isEmpty() || filter.startsWith("§") || filter.equals("tests.RunAllTests")) {
-            return -1;
-        }
-
-        // Lookup en el mapa precalculado
-        Integer count = SUITE_FILTER_SIZE.get(filter);
-        return count != null ? count : -1;
     }
 
     /** Returns true if a Gradle test process is currently active. */
@@ -827,11 +781,11 @@ public class JobExecutor {
                 }
             }
 
-            // Notificar TOTAL_ESPERADO DESPUÉS de construir el comando para usar
-            // el conteo real: para smoke = número de --tests flags seleccionados;
-            // para clases = @Test reales en el .java fuente (con SUITE_FILTER_SIZE como
-            // respaldo si el archivo no se puede leer). Esto garantiza que la barra de
-            // progreso siempre coincide con lo que realmente se ejecuta.
+            // Notificar TOTAL_ESPERADO DESPUÉS de construir el comando para usar el
+            // conteo real: para smoke = número de --tests flags seleccionados; para
+            // clases/wildcards = @Test reales en el .java fuente en este momento. Esto
+            // garantiza que la barra de progreso siempre coincide con lo que realmente
+            // se ejecuta — sin ninguna tabla mantenida a mano de por medio.
             int expectedCount = resolveExpectedCountFromCommand(job, cmd, projectDir);
             expectedCountHolder.set(expectedCount);
             if (expectedCount > 0) {
@@ -1309,17 +1263,8 @@ public class JobExecutor {
                 String line;
                 while ((line = br.readLine()) != null) {
                     consecutiveFailures = 0; // el stream volvió a estar sano
-                    String level = detectLevel(line);
-                    client.sendLog(job.executionId, level, line);
-                    System.out.println("[" + level + "] " + line);
-                    boolean isCaseResult = false;
-                    if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); isCaseResult = true; }
-                    else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); isCaseResult = true; }
-                    else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); isCaseResult = true; }
-                    if (isCaseResult) {
-                        logCaseProgress(job, process, passed.get() + failed.get() + skipped.get(),
-                                expectedCount, streamIncidents.get());
-                    }
+                    processOutputLine(job, line, passed, failed, skipped, testCases,
+                            expectedCount, streamIncidents, process);
                 }
 
                 // readLine() devolvió null → EOF.
@@ -1337,6 +1282,15 @@ public class JobExecutor {
                 streamIncidents.incrementAndGet();
                 logStreamDisruption(job, "EOF-con-proceso-vivo", null, consecutiveFailures);
                 attemptStreamRecovery(job, consecutiveFailures);
+                // CAUSA RAÍZ (conteos por debajo de lo real, p. ej. 48/50): InputStreamReader
+                // ya pudo haber extraído del pipe del proceso más bytes de los que readLine()
+                // alcanzó a entregar (su propio buffer interno, ~8KB) — esos bytes, que pueden
+                // contener una o más líneas PASS/FAIL/SKIP completas, se pierden para siempre
+                // si simplemente se abandona `br` y se envuelve un BufferedReader nuevo: el
+                // pipe del sistema operativo no re-entrega bytes que ya salieron de él.
+                // drainPendingLines() agota lo que br ya tenía bufferado ANTES de reemplazarlo.
+                drainPendingLines(job, br, process, passed, failed, skipped, testCases,
+                        expectedCount, streamIncidents);
                 br = new BufferedReader(new InputStreamReader(process.getInputStream()));
 
             } catch (IOException ioe) {
@@ -1350,6 +1304,9 @@ public class JobExecutor {
                 streamIncidents.incrementAndGet();
                 logStreamDisruption(job, diagnoseStreamDisruption(job), ioe.getMessage(), consecutiveFailures);
                 attemptStreamRecovery(job, consecutiveFailures);
+                // Mismo motivo que arriba: drenar antes de abandonar `br`.
+                drainPendingLines(job, br, process, passed, failed, skipped, testCases,
+                        expectedCount, streamIncidents);
                 // IMPORTANTE: NO se llama a br.close() en ningún punto de este método.
                 // Solo se reemplaza la referencia — el InputStream subyacente de
                 // process.getInputStream() nunca se cierra mientras el proceso viva,
@@ -1358,6 +1315,52 @@ public class JobExecutor {
             }
         }
         System.out.println("[Executor] Proceso ya no está vivo — fin de la lectura de stdout/stderr.");
+    }
+
+    /**
+     * Clasifica y cuenta UNA línea ya leída de stdout/stderr — extraído del loop
+     * principal para que drainPendingLines() pueda reusar EXACTAMENTE la misma
+     * lógica de conteo al rescatar líneas de un reader a punto de descartarse,
+     * sin mantener una segunda copia divergente de la clasificación.
+     */
+    private void processOutputLine(JobDto job, String line,
+            AtomicInteger passed, AtomicInteger failed, AtomicInteger skipped,
+            List<TestCaseResult> testCases, int expectedCount,
+            AtomicInteger streamIncidents, Process process) {
+        String level = detectLevel(line);
+        client.sendLog(job.executionId, level, line);
+        System.out.println("[" + level + "] " + line);
+        boolean isCaseResult = false;
+        if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); isCaseResult = true; }
+        else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); isCaseResult = true; }
+        else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); isCaseResult = true; }
+        if (isCaseResult) {
+            logCaseProgress(job, process, passed.get() + failed.get() + skipped.get(),
+                    expectedCount, streamIncidents.get());
+        }
+    }
+
+    /**
+     * Agota cualquier línea COMPLETA que ya esté en el buffer interno de `reader`
+     * antes de que el llamador lo abandone. Best-effort: si el propio drenaje
+     * falla (el reader ya está realmente roto), se ignora — no hay nada más
+     * recuperable de un reader que ni siquiera puede reportar si tiene datos
+     * pendientes (ready() también puede lanzar IOException).
+     */
+    private void drainPendingLines(JobDto job, BufferedReader reader, Process process,
+            AtomicInteger passed, AtomicInteger failed, AtomicInteger skipped,
+            List<TestCaseResult> testCases, int expectedCount, AtomicInteger streamIncidents) {
+        try {
+            while (reader.ready()) {
+                String pending = reader.readLine();
+                if (pending == null) break;
+                System.out.println("[Executor] Línea rescatada del buffer antes de reemplazar el reader: " + pending);
+                processOutputLine(job, pending, passed, failed, skipped, testCases,
+                        expectedCount, streamIncidents, process);
+            }
+        } catch (IOException ignored) {
+            // El reader ya estaba roto — mismo comportamiento que sin el drenaje.
+        }
     }
 
     /**
