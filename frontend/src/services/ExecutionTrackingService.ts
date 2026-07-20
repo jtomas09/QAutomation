@@ -114,8 +114,49 @@ class ExecutionTrackingServiceImpl {
     if (this.records === null) {
       try { this.records = JSON.parse(localStorage.getItem(KEY) ?? '[]') as ExecutionRecord[] }
       catch { this.records = [] }
+      this.reconcileStaleExecutions()
     }
     return this.records;
+  }
+
+  /**
+   * Reconciliación de arranque — se ejecuta una sola vez, en la primera lectura
+   * de localStorage de esta sesión de pestaña.
+   *
+   * CAUSA RAÍZ: un ExecutionRecord solo avanza de estado (queued → running →
+   * passed/failed/...) mientras la suscripción SSE dentro de la promesa de
+   * runSuite() sigue viva — y esa suscripción vive en el heap de JS de la
+   * pestaña, no se persiste. Si la pestaña se recarga o se cierra antes de que
+   * el SSE llegue a finishExecution(), el ExecutionRecord queda escrito en
+   * localStorage congelado en un status de ACTIVE_STATUSES para siempre — sin
+   * ningún proceso vivo que lo vaya a completar. RunTestsPanel/getActiveExecutions()
+   * lo seguían tratando como "la ejecución en curso" indefinidamente.
+   *
+   * Este es el único punto donde se puede distinguir con certeza "activo de
+   * verdad" vs. "huérfano de una sesión anterior": si estamos leyendo
+   * localStorage por primera vez en esta sesión, ningún run de ESTA sesión ha
+   * podido crear un registro todavía — cualquier "activo" ya presente aquí es,
+   * por construcción, de una sesión anterior. No requiere umbral de tiempo ni
+   * heurística: es una garantía estructural, no una suposición.
+   */
+  private reconcileStaleExecutions(): void {
+    if (this.records === null) return
+    let changed = false
+    this.records = this.records.map(r => {
+      if (!(ACTIVE_STATUSES as string[]).includes(r.status)) return r
+      changed = true
+      return {
+        ...r,
+        status:     'error' as const,
+        finishedAt: r.finishedAt ?? now(),
+        activity:   [...r.activity.slice(-199), {
+          ts: now(), level: 'warn' as const,
+          msg: 'Ejecución marcada como finalizada — quedó activa de una sesión anterior '
+             + '(la pestaña se cerró o recargó antes de recibir el resultado final del Runner).',
+        }],
+      }
+    })
+    if (changed) this.persist(this.records)
   }
 
   private persist(records: ExecutionRecord[]): void {

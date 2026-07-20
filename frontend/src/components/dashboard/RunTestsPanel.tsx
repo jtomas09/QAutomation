@@ -226,13 +226,27 @@ export default function RunTestsPanel(props: Props) {
   useEffect(() => {
     const refresh = () => {
       const active = executionTrackingService.getActiveExecutions()
-      setActiveExec(active[0] ?? null)
+      // Preferir el registro que corresponde a ESTA ejecución (executionId es el
+      // ID devuelto por el Runner, guardado como runnerId en el ExecutionRecord).
+      // active[0] tomaba el activo más ANTIGUO — si un run previo quedaba
+      // "atascado" en estado activo (el SSE nunca llegó a un status final), el
+      // panel seguía mostrando sus resultados en vez de los del run recién
+      // lanzado. Si el registro nuevo aún no tiene runnerId asignado (ventana
+      // breve entre crearlo y recibir la respuesta del Runner), se usa el más
+      // reciente por createdAt — nunca el más antiguo.
+      const byRunnerId = executionId
+        ? active.find(r => r.runnerId === executionId)
+        : undefined
+      const mostRecent = [...active].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )[0]
+      setActiveExec(byRunnerId ?? mostRecent ?? null)
     }
     refresh()
     const events = ['qa:exec:created', 'qa:exec:updated', 'qa:exec:finished']
     events.forEach(e => window.addEventListener(e, refresh))
     return () => events.forEach(e => window.removeEventListener(e, refresh))
-  }, [])
+  }, [executionId])
 
   return (
     <div className="flex flex-col h-full overflow-hidden rounded-2xl"
