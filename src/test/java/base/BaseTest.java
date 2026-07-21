@@ -418,7 +418,13 @@ public class BaseTest {
                 } catch (Exception ignored) {}
             }
 
-            BaseTestStatusRegistry.clear(testKey);
+            // NOTA: BaseTestStatusRegistry.clear(testKey) NO va aquí. @AfterEach corre
+            // ANTES de que JUnit invoque TestWatcher (testSuccessful/testFailed/testAborted
+            // en PdfReportExtension) — limpiar el latch "ya contado" en este punto lo borra
+            // justo antes de que TestWatcher pudiera leerlo, causando que markFailed()
+            // cuente el mismo test dos veces (una aquí si el setup falló, otra al llegar
+            // TestWatcher). La limpieza ahora vive al final de cada callback de TestWatcher
+            // en PdfReportExtension, después de que el conteo ya se aplicó.
 
         } catch (Exception e) {
             failedTests++;

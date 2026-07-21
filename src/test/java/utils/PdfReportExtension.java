@@ -128,6 +128,13 @@ public class PdfReportExtension implements
     @Override
     public void testSuccessful(ExtensionContext context) {
         BaseTestStatusRegistry.markPassed(context.getDisplayName());
+        // clear() al final, no en @AfterEach: JUnit 5 invoca TestWatcher DESPUÉS de
+        // @AfterEach — limpiar antes (como hacía BaseTest.tearDown()) borra el latch
+        // "ya falló"/"ya contado" justo antes de que este callback pudiera leerlo,
+        // causando doble conteo. Ver BaseTestStatusRegistry.clear() para el porqué
+        // de la limpieza en sí (colisiones de clave entre tests con el mismo
+        // getDisplayName() en distintas clases).
+        BaseTestStatusRegistry.clear(context.getDisplayName());
     }
 
     @Override
@@ -141,12 +148,18 @@ public class PdfReportExtension implements
                         .add(new StepResult("Evidencia - fallo de test (auto)", "ERROR", path));
             }
         });
+
+        // clear() al final — ver comentario en testSuccessful().
+        BaseTestStatusRegistry.clear(context.getDisplayName());
     }
 
     @Override
     public void testAborted(ExtensionContext context, Throwable cause) {
         // Test abortado vía Assumptions.abort() → se cuenta como skipped, NO como fallido.
         // El conteo skipped se deriva de (total - passed - failed); no incrementar FAILED aquí.
+        // Igual que en testSuccessful()/testFailed(): limpiar aquí, al final del ciclo
+        // de vida del test, para no interferir con el latch antes de que se consulte.
+        BaseTestStatusRegistry.clear(context.getDisplayName());
     }
 
     @Override
