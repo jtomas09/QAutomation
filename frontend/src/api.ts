@@ -159,7 +159,6 @@ export function streamExecution(
   // every onopen and retry forever instead of ever reporting a fatal error.
   const STABLE_CONNECTION_MS = 5000
 
-  let passed = 0, failed = 0, skipped = 0, total = 0
   let es: EventSource | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempts = 0
@@ -178,13 +177,16 @@ export function streamExecution(
       openedAtMs    = Date.now()
     }
 
+    // 'log' únicamente alimenta el panel de logs — NUNCA recalcula passed/failed/
+    // skipped/total/progress. La única fuente de verdad para esas métricas es el
+    // payload del evento 'done' (ver más abajo), que ya trae los valores exactos
+    // que Runner → Backend confirmaron. Reconstruirlos aquí a partir del stream de
+    // logs duplicaba el conteo en cada reconexión SSE (los contadores locales no
+    // se reseteaban entre reintentos de connect()).
     es.addEventListener('log', (e: MessageEvent) => {
       try {
         const { level, message } = JSON.parse(e.data) as { level: LogLevel; message: string }
         addLog(level, message)
-        if (level === 'PASS') { passed++; total++ }
-        if (level === 'FAIL') { failed++; total++ }
-        if (level === 'SKIP') { skipped++; total++ }
       } catch {
         addLog('WARN', `Unexpected SSE event: ${e.data}`)
       }
@@ -198,12 +200,28 @@ export function streamExecution(
       } catch { /* ignore malformed events */ }
     })
 
-    es.addEventListener('done', () => {
-      const icon = failed > 0 ? '❌' : '✅'
-      addLog('INFO', `${icon} Suite finalizada — ${passed} PASSED · ${failed} FAILED · ${skipped} SKIPPED`)
+    // Única fuente de verdad para las métricas finales: el payload que el propio
+    // backend adjunta a este evento (ExecutionService.complete() lo arma con los
+    // mismos passed/failed/skipped/total que ya reportó el Runner). No se
+    // recalcula, no se deduplica, no se infiere nada a partir del stream de logs.
+    es.addEventListener('done', (e: MessageEvent) => {
+      let result: RunResult = { passed: 0, failed: 0, skipped: 0, total: 0 }
+      try {
+        const data = JSON.parse(e.data) as Partial<RunResult>
+        result = {
+          passed:  data.passed  ?? 0,
+          failed:  data.failed  ?? 0,
+          skipped: data.skipped ?? 0,
+          total:   data.total   ?? 0,
+        }
+      } catch {
+        addLog('WARN', `Evento 'done' sin payload válido: ${e.data}`)
+      }
+      const icon = result.failed > 0 ? '❌' : '✅'
+      addLog('INFO', `${icon} Suite finalizada — ${result.passed} PASSED · ${result.failed} FAILED · ${result.skipped} SKIPPED`)
       stopped = true
       es?.close()
-      onDone({ passed, failed, skipped, total })
+      onDone(result)
     })
 
     es.onerror = () => {
