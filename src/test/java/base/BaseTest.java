@@ -65,10 +65,16 @@ public class BaseTest {
                     System.getenv().getOrDefault("AUTO_SCROLL_SWIPES", "1"))
     );
 
+    // NOTA-ENDURECIMIENTO: el default original solo cubría @text/@content-desc/@resource-id
+    // (atributos exclusivos de Android) — con AUTO_SCROLL_ON_OPEN=true en iOS este ancla
+    // nunca hubiera encontrado nada. Se agrega default iOS (@label/@name/@value);
+    // sigue siendo 100% sobreescribible vía system property/env var como antes.
     private static final String AUTO_SCROLL_ALIMENTOS_ANCHOR_XPATH =
             System.getProperty("AUTO_SCROLL_ALIMENTOS_ANCHOR_XPATH",
                     System.getenv().getOrDefault("AUTO_SCROLL_ALIMENTOS_ANCHOR_XPATH",
-                            "//*[contains(@text,'Alimentos') or contains(@content-desc,'Alimentos') or contains(@resource-id,'alimentos')]"
+                            config.DriverFactory.isIOS()
+                                    ? "//*[contains(@label,'Alimentos') or contains(@name,'Alimentos') or contains(@value,'Alimentos')]"
+                                    : "//*[contains(@text,'Alimentos') or contains(@content-desc,'Alimentos') or contains(@resource-id,'alimentos')]"
                     ));
 
     private static final int AUTO_SCROLL_ALIMENTOS_WAIT_SECONDS = Integer.parseInt(
@@ -238,6 +244,10 @@ public class BaseTest {
 
     @BeforeEach
     public void setUp(TestInfo testInfo) {
+        long tBeforeEach0 = System.currentTimeMillis();
+        log.info("[TRACE] Entrando BaseTest.beforeEach() | hilo={} plataforma={} test={} hora={}",
+                Thread.currentThread().getName(), DriverFactory.isIOS() ? "iOS" : "Android",
+                testInfo.getDisplayName(), tBeforeEach0);
         if (!REUSE_DRIVER) {
             try {
                 driver = DriverFactory.getDriver();
@@ -252,6 +262,8 @@ public class BaseTest {
                 throw e;
             }
             log.info("[BaseTest] Driver created: {}", driver);
+            log.info("[TRACE] Driver listo | hilo={} plataforma={}",
+                    Thread.currentThread().getName(), DriverFactory.isIOS() ? "iOS" : "Android");
             autoScrollOnAppOpen(driver);
             log.debug("[BaseTest] Invoking PromosGuard after auto-scroll...");
             new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach");
@@ -324,6 +336,8 @@ public class BaseTest {
                     lastAlimentosCinema = targetCinema;
                 } catch (Exception e) {
                     log.warn("[BaseTest] ensureCinemaSelectedFromAlimentos({}) falló: {}", targetCinema, e.getMessage());
+                    log.warn("[TRACE] ensureCinemaSelectedFromAlimentos lanzó excepción — CAPTURADA aquí, " +
+                            "@BeforeEach de BaseTest continúa (no es este el punto de fallo del test).");
                     // Dismiss cinema selector overlay so it doesn't block test navigation
                     try { driver.navigate().back(); Thread.sleep(800); } catch (Exception ignored) {}
                 }
@@ -360,6 +374,10 @@ public class BaseTest {
         } catch (Exception e) {
             log.error("[BaseTest] Failed to create environment.properties: {}", e.getMessage());
         }
+
+        log.info("[TRACE] BeforeEach finalizado (BaseTest) | hilo={} plataforma={} test={} duracionMs={}",
+                Thread.currentThread().getName(), DriverFactory.isIOS() ? "iOS" : "Android",
+                testInfo.getDisplayName(), System.currentTimeMillis() - tBeforeEach0);
     }
 
     @AfterEach

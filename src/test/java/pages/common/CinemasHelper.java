@@ -53,6 +53,10 @@ public class CinemasHelper extends BasePage {
         }
     }
 
+    private WebElement findInstant(PlatformLocator locator) {
+        return findInstant(locator.resolve(isIOS()));
+    }
+
     /** True si el elemento existe en el DOM actual y está visible (sin esperar). */
     private boolean isVisibleInstant(By locator) {
         try {
@@ -61,6 +65,10 @@ public class CinemasHelper extends BasePage {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private boolean isVisibleInstant(PlatformLocator locator) {
+        return isVisibleInstant(locator.resolve(isIOS()));
     }
 
     /**
@@ -76,6 +84,10 @@ public class CinemasHelper extends BasePage {
         try { el.click(); return true; } catch (Exception ignored) {}
         try { tapCenter(el); return true; } catch (Exception ignored) {}
         return false;
+    }
+
+    private boolean tapInstant(PlatformLocator locator) {
+        return tapInstant(locator.resolve(isIOS()));
     }
 
     /**
@@ -100,156 +112,222 @@ public class CinemasHelper extends BasePage {
     // ==========================
     // ✅ TAB ALIMENTOS
     // ==========================
-    private static final By TAB_ALIMENTOS =
-            By.xpath("//android.widget.TextView[@text='Alimentos']");
+    private static final PlatformLocator TAB_ALIMENTOS = PlatformLocator.byExactText("Alimentos");
 
     // ✅ Detectores para evitar quedarnos en Películas (Cartelera/Horarios)
-    private static final By TAB_CARTELERA = By.xpath("//android.widget.TextView[@text='Cartelera']");
-    private static final By TAB_HORARIOS  = By.xpath("//android.widget.TextView[@text='Horarios']");
-    // ✅ Tab 'Alimentos' como seleccionado (cuando el bottom nav expone selected/checked)
-    private static final By TAB_ALIMENTOS_SELECTED = By.xpath(
-            "//android.widget.TextView[@text='Alimentos' and (@selected='true' or @checked='true')]" +
-                    " | //android.widget.TextView[@text='Alimentos']/..[@selected='true' or @checked='true']");
+    private static final PlatformLocator TAB_CARTELERA = PlatformLocator.byExactText("Cartelera");
+    private static final PlatformLocator TAB_HORARIOS  = PlatformLocator.byExactText("Horarios");
+    // ✅ Tab 'Alimentos' como seleccionado (cuando el bottom nav expone selected/checked).
+    // iOS: XCUITest también expone @selected en controles tipo tab — mismo atributo.
+    private static final PlatformLocator TAB_ALIMENTOS_SELECTED = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='Alimentos' and (@selected='true' or @checked='true')]" +
+                    " | //android.widget.TextView[@text='Alimentos']/..[@selected='true' or @checked='true']"),
+            By.xpath("//*[(@label='Alimentos' or @name='Alimentos' or @value='Alimentos') and @selected='true']"));
 
 
     // ==========================
     // ✅ GUARD: PANTALLA CLUB CINÉPOLIS (LOGIN)
     // ==========================
-    private static final By CLUB_LOGIN_TITLE =
-            By.xpath("//*[contains(@text,'Inicia sesi\u00f3n') or contains(@text,'Inicia sesion')]");
-    private static final By CLUB_LOGIN_LOGO =
-            By.xpath("//*[contains(@text,'CLUB') and (contains(@text,'cin\u00e9polis') or contains(@text,'cinepolis'))]");
+    private static final PlatformLocator CLUB_LOGIN_TITLE = PlatformLocator.of(
+            By.xpath("//*[contains(@text,'Inicia sesi\u00f3n') or contains(@text,'Inicia sesion')]"),
+            By.xpath("//*[contains(@label,'Inicia sesi\u00f3n') or contains(@label,'Inicia sesion') " +
+                    "or contains(@value,'Inicia sesi\u00f3n') or contains(@value,'Inicia sesion') " +
+                    "or contains(@name,'Inicia sesi\u00f3n') or contains(@name,'Inicia sesion')]"));
+    private static final PlatformLocator CLUB_LOGIN_LOGO = PlatformLocator.of(
+            By.xpath("//*[contains(@text,'CLUB') and (contains(@text,'cin\u00e9polis') or contains(@text,'cinepolis'))]"),
+            By.xpath("//*[(contains(@label,'CLUB') or contains(@value,'CLUB') or contains(@name,'CLUB')) " +
+                    "and (contains(@label,'cin\u00e9polis') or contains(@label,'cinepolis') " +
+                    "or contains(@value,'cin\u00e9polis') or contains(@value,'cinepolis') " +
+                    "or contains(@name,'cin\u00e9polis') or contains(@name,'cinepolis'))]"));
     // Flecha/back de la pantalla — orden de prioridad:
-    // 1. ImageButton/ImageView con content-desc "Atrás/Navigate up" (nativo Android)
-    private static final By CLUB_BACK_BUTTON_A11Y =
-            By.xpath("//android.widget.ImageButton[contains(@content-desc,'Atrás') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]" +
-                    " | //android.widget.ImageView[contains(@content-desc,'Atrás') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]");
+    // 1. ImageButton/ImageView con content-desc "Atrás/Navigate up" (nativo Android) /
+    //    @name en iOS (XCUITest no distingue ImageButton/ImageView, se usa * genérico).
+    private static final PlatformLocator CLUB_BACK_BUTTON_A11Y = PlatformLocator.of(
+            By.xpath("//android.widget.ImageButton[contains(@content-desc,'Atr\u00e1s') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]" +
+                    " | //android.widget.ImageView[contains(@content-desc,'Atr\u00e1s') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]"),
+            By.xpath("//*[contains(@name,'Atr\u00e1s') or contains(@name,'Atras') or contains(@name,'Navigate up') or contains(@name,'Back')]"));
 
     // 2. android.widget.Button con texto VACÍO (la flecha ← no tiene texto;
     //    "Inicia sesión" y "Crear tu Cuenta" SÍ tienen texto → quedan excluidos)
+    //    UiAutomator2 es una API exclusiva de Android — no existe equivalente iOS,
+    //    por eso permanece como By (no PlatformLocator) y solo se usa en la rama Android.
     private static final By CLUB_BACK_BUTTON_UIAUTO =
             AppiumBy.androidUIAutomator(
                 "new UiSelector().className(\"android.widget.Button\").text(\"\").instance(0)");
 
-    // 3. Fallback: primer Button sin texto por XPath
+    // 3. Fallback: primer Button sin texto/label por XPath.
+    // NOTA-MIGRACION (bug pre-existente corregido): tapBackFromClubUI() usaba esta
+    // constante (100% Android — android.widget.Button) como rama "iOS" del ternario
+    // isIOS()?CLUB_BACK_BUTTON_XPATH:CLUB_BACK_BUTTON_UIAUTO — nunca podía resolver
+    // en iOS. Se separa en variante Android (sin cambios) y variante iOS genúina.
     private static final By CLUB_BACK_BUTTON_XPATH =
             By.xpath("(//android.widget.Button[not(@text) or @text=''])[1]");
-    // Tab alterno por content-desc (bottom nav en algunos builds)
-    private static final By TAB_ALIMENTOS_ALT =
-            By.xpath("//*[@content-desc='Alimentos' or @text='Alimentos']");
+    // Justificación del locator posicional (no hay alternativa por accesibilidad):
+    // la flecha "back" de esta pantalla es un ícono sin accessibility identifier
+    // conocido (el equivalente Android tampoco tiene @text — CLUB_BACK_BUTTON_XPATH
+    // usa el mismo criterio "primer botón sin texto"). Se filtra por @visible='true'
+    // para no capturar botones ocultos que también cumplan "sin name/label".
+    private static final By CLUB_BACK_BUTTON_XPATH_IOS =
+            By.xpath("(//XCUIElementTypeButton[@visible='true' and (not(@name) or @name='' or not(@label) or @label='')])[1]");
+    // Tab alterno por content-desc (bottom nav en algunos builds) / @name en iOS.
+    private static final PlatformLocator TAB_ALIMENTOS_ALT = PlatformLocator.of(
+            By.xpath("//*[@content-desc='Alimentos' or @text='Alimentos']"),
+            By.xpath("//*[@name='Alimentos' or @label='Alimentos' or @value='Alimentos']"));
 
     // ==========================
     // ✅ ICONO/CHIP REAL DE CINES EN HEADER (Compose)
     // ==========================
-    private static final By CINES_ICON_VIEW =
-            By.xpath("//android.view.View[contains(@content-desc,'Selecciona uno o más cines') or contains(@content-desc,'cines') or contains(@content-desc,'Cines')]");
+    private static final PlatformLocator CINES_ICON_VIEW = PlatformLocator.of(
+            By.xpath("//android.view.View[contains(@content-desc,'Selecciona uno o más cines') or contains(@content-desc,'cines') or contains(@content-desc,'Cines')]"),
+            By.xpath("//*[contains(@name,'Selecciona uno o más cines') or contains(@name,'cines') or contains(@name,'Cines')]"));
 
-    private static final By CINES_TEXT =
-            By.xpath("//android.widget.TextView[@text=\"Cines\"]");
+    private static final PlatformLocator CINES_TEXT = PlatformLocator.byExactText("Cines");
 
-    private static final By CINES_TEXT_PARENT =
-            By.xpath("//android.widget.TextView[@text=\"Cines\"]/ancestor::*[self::android.view.View or self::android.view.ViewGroup][1]");
+    // Ancestro del label "Cines" — Android: android.view.View/ViewGroup. iOS: no hay
+    // ViewGroup nativo; XCUIElementTypeOther es el contenedor genérico equivalente.
+    private static final PlatformLocator CINES_TEXT_PARENT = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text=\"Cines\"]/ancestor::*[self::android.view.View or self::android.view.ViewGroup][1]"),
+            By.xpath("//*[@label=\"Cines\" or @name=\"Cines\" or @value=\"Cines\"]/ancestor::XCUIElementTypeOther[1]"));
 
     // Pantalla "Elige un cine para tus alimentos"
-    private static final By BTN_SELECCIONAR_UBICACION_TEXT =
-            By.xpath("(//android.widget.TextView[@text='Seleccionar ubicación' or @text='Seleccionar ubicacion'])[1]");
+    private static final PlatformLocator BTN_SELECCIONAR_UBICACION_TEXT = PlatformLocator.of(
+            By.xpath("(//android.widget.TextView[@text='Seleccionar ubicación' or @text='Seleccionar ubicacion'])[1]"),
+            By.xpath("(//*[@label='Seleccionar ubicación' or @label='Seleccionar ubicacion' " +
+                    "or @name='Seleccionar ubicación' or @name='Seleccionar ubicacion' " +
+                    "or @value='Seleccionar ubicación' or @value='Seleccionar ubicacion'])[1]"));
 
-    private static final By BTN_SELECCIONAR_UBICACION_BUTTON_NEAR_TEXT =
-            By.xpath("(//android.widget.TextView[@text='Seleccionar ubicación' or @text='Seleccionar ubicacion'])[1]/parent::*/android.widget.Button");
+    private static final PlatformLocator BTN_SELECCIONAR_UBICACION_BUTTON_NEAR_TEXT = PlatformLocator.of(
+            By.xpath("(//android.widget.TextView[@text='Seleccionar ubicación' or @text='Seleccionar ubicacion'])[1]/parent::*/android.widget.Button"),
+            By.xpath("(//*[@label='Seleccionar ubicación' or @label='Seleccionar ubicacion'])[1]/parent::*/XCUIElementTypeButton"));
 
-    private static final By BTN_SELECCIONAR_UBICACION_CLICKABLE_ANCESTOR =
-            By.xpath("(//android.widget.TextView[@text='Seleccionar ubicación' or @text='Seleccionar ubicacion'])[1]/ancestor::*[@clickable='true'][1]");
+    private static final PlatformLocator BTN_SELECCIONAR_UBICACION_CLICKABLE_ANCESTOR = PlatformLocator.of(
+            By.xpath("(//android.widget.TextView[@text='Seleccionar ubicación' or @text='Seleccionar ubicacion'])[1]/ancestor::*[@clickable='true'][1]"),
+            By.xpath("(//*[@label='Seleccionar ubicación' or @label='Seleccionar ubicacion'])[1]/ancestor::XCUIElementTypeOther[1]"));
 
     // ==========================
     // ✅ Selector de cines
     // ==========================
-    private static final By TITLE_SELECCIONAR_CINES =
-            By.xpath("//android.widget.TextView[@text='Seleccionar cines']");
+    private static final PlatformLocator TITLE_SELECCIONAR_CINES = PlatformLocator.byExactText("Seleccionar cines");
 
-    private static final By SEARCH_HINT =
-            By.xpath("//android.widget.TextView[@text='Busca tu ciudad o tu cine' or @text='Escribe tu ciudad o cine' or @text='Escribe tu ciudad o cine']");
+    private static final PlatformLocator SEARCH_HINT = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='Busca tu ciudad o tu cine' or @text='Escribe tu ciudad o cine' or @text='Escribe tu ciudad o cine']"),
+            By.xpath("//*[@label='Busca tu ciudad o tu cine' or @label='Escribe tu ciudad o cine' " +
+                    "or @value='Busca tu ciudad o tu cine' or @value='Escribe tu ciudad o cine' " +
+                    "or @name='Busca tu ciudad o tu cine' or @name='Escribe tu ciudad o cine']"));
 
-    private static final By SEARCH_PARENT_ROUNDED =
-            By.xpath("//android.view.View[@content-desc='Rounded.Search']");
+    private static final PlatformLocator SEARCH_PARENT_ROUNDED = PlatformLocator.byAccessibilityId("Rounded.Search");
 
-    private static final By SEARCH_INPUT =
-            By.xpath("//android.widget.EditText");
+    // Campo de búsqueda de cines. Android: EditText nativo. iOS: XCUITest no tiene ese
+    // tipo — se acepta SearchField o TextField (misma decisión que SelectorPage.java,
+    // sin verificar en dispositivo real).
+    private static final PlatformLocator SEARCH_INPUT = PlatformLocator.of(
+            By.xpath("//android.widget.EditText"),
+            By.xpath("//XCUIElementTypeSearchField | //XCUIElementTypeTextField"));
 
-    private static final By SEARCH_INNER_VIEW =
-            By.xpath("//android.widget.EditText/android.view.View[2]");
+    // NOTA-MIGRACION: posicional dentro del EditText (segundo hijo View) — sin ancla de
+    // texto/accesibilidad. Equivalente iOS mejor-esfuerzo: el propio campo de búsqueda.
+    private static final PlatformLocator SEARCH_INNER_VIEW = PlatformLocator.of(
+            By.xpath("//android.widget.EditText/android.view.View[2]"),
+            By.xpath("//XCUIElementTypeSearchField | //XCUIElementTypeTextField"));
 
     // TextView inside button (clickable=false) — used only to find the real Button
-    private static final By BTN_APLICAR_SELECCION_LABEL =
-            By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']");
+    private static final PlatformLocator BTN_APLICAR_SELECCION_LABEL = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']"),
+            PlatformLocator.byExactText("Aplicar selección").ios());
 
     // Sibling Button right next to the label (Compose layout)
-    private static final By BTN_APLICAR_SELECCION_SIBLING =
+    private static final PlatformLocator BTN_APLICAR_SELECCION_SIBLING = PlatformLocator.of(
             By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']"
                    + "/following-sibling::android.widget.Button"
                    + " | //android.widget.TextView[@text='Aplicar seleccion']"
-                   + "/following-sibling::android.widget.Button");
+                   + "/following-sibling::android.widget.Button"),
+            By.xpath("//*[@label='Aplicar selección' or @label='Aplicar seleccion']"
+                   + "/following-sibling::XCUIElementTypeButton"));
 
     // Clickable ancestor of the label (catches any wrapper View)
-    private static final By BTN_APLICAR_SELECCION_ANCESTOR =
+    private static final PlatformLocator BTN_APLICAR_SELECCION_ANCESTOR = PlatformLocator.of(
             By.xpath("(//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion'])"
-                   + "/ancestor::*[@clickable='true'][1]");
+                   + "/ancestor::*[@clickable='true'][1]"),
+            By.xpath("(//*[@label='Aplicar selección' or @label='Aplicar seleccion'])"
+                   + "/ancestor::XCUIElementTypeOther[1]"));
 
     // UiAutomator fallback — finds any clickable element whose text matches
+    // (exclusivo de Android — no tiene equivalente iOS, sin cambios).
     private static final String UA_APLICAR_SELECCION =
             "new UiSelector().clickable(true).textContains(\"Aplicar\")";
 
     // kept for backward compat (label-only, used as last resort)
-    private static final By BTN_APLICAR_SELECCION =
-            By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']");
+    private static final PlatformLocator BTN_APLICAR_SELECCION = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='Aplicar selección' or @text='Aplicar seleccion']"),
+            PlatformLocator.byExactText("Aplicar selección").ios());
 
     // ==========================
     // ✅ DETECCIÓN CINE NO SELECCIONADO (México)
     // ==========================
-    private static final By CINES_SIN_SELECCION = By.xpath(
-            "//android.widget.TextView[@text='Selecciona uno o más cines']" +
-            " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]");
+    private static final PlatformLocator CINES_SIN_SELECCION = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='Selecciona uno o más cines']" +
+            " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]"),
+            By.xpath("//*[@label='Selecciona uno o más cines' or @value='Selecciona uno o más cines' or @name='Selecciona uno o más cines'" +
+            " or contains(@label,'Selecciona uno o m') or contains(@value,'Selecciona uno o m') or contains(@name,'Selecciona uno o m')]"));
 
-    // Ancestro clickable del chip (android.view.View clickable=true que envuelve el TextView)
-    private static final By CINES_CHIP_CLICKABLE = By.xpath(
-            "//android.widget.TextView[@text='Selecciona uno o más cines']/ancestor::android.view.View[@clickable='true'][1]" +
-            " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]/ancestor::android.view.View[@clickable='true'][1]");
+    // Ancestro clickable del chip (android.view.View clickable=true que envuelve el TextView) —
+    // iOS: XCUIElementTypeOther es el contenedor genérico equivalente.
+    private static final PlatformLocator CINES_CHIP_CLICKABLE = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='Selecciona uno o más cines']/ancestor::android.view.View[@clickable='true'][1]" +
+            " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]/ancestor::android.view.View[@clickable='true'][1]"),
+            By.xpath("//*[@label='Selecciona uno o más cines' or contains(@label,'Selecciona uno o m')]/ancestor::XCUIElementTypeOther[1]"));
 
     private static final String MEXICO_CINEMA_CONFIG = "mexico-cinema.txt";
 
     // ==========================
     // ✅ POPUP CAMBIO DE ZONA/UBICACIÓN (aparece al inicio, no siempre)
     // ==========================
-    private static final By POPUP_ZONA_DETECTION = By.xpath(
-            "//*[contains(@text,'lejos de') or contains(@text,'cambiar tu cartelera') " +
-            "or contains(@text,'cambiar la cartelera') or contains(@text,'Cambiar zona')]");
+    private static final PlatformLocator POPUP_ZONA_DETECTION = PlatformLocator.of(
+            By.xpath("//*[contains(@text,'lejos de') or contains(@text,'cambiar tu cartelera') " +
+            "or contains(@text,'cambiar la cartelera') or contains(@text,'Cambiar zona')]"),
+            By.xpath("//*[contains(@label,'lejos de') or contains(@label,'cambiar tu cartelera') " +
+            "or contains(@label,'cambiar la cartelera') or contains(@label,'Cambiar zona') " +
+            "or contains(@value,'lejos de') or contains(@value,'cambiar tu cartelera') " +
+            "or contains(@value,'cambiar la cartelera') or contains(@value,'Cambiar zona')]"));
 
-    private static final By BTN_NO_CAMBIAR = By.xpath(
-            "//android.widget.TextView[@text='No cambiar']" +
-            " | //android.widget.Button[@text='No cambiar']");
+    private static final PlatformLocator BTN_NO_CAMBIAR = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text='No cambiar']" +
+            " | //android.widget.Button[@text='No cambiar']"),
+            PlatformLocator.byExactText("No cambiar").ios());
 
     // ==========================
     // ✅ Alertas
     // ==========================
-    private static final By ALERT_CAMBIAR_CIUDAD_TITLE =
-            By.xpath("//android.widget.TextView[contains(@text,'¿Quieres cambiar la ciudad') or contains(@text,'Quieres cambiar la ciudad')]");
+    private static final PlatformLocator ALERT_CAMBIAR_CIUDAD_TITLE = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[contains(@text,'¿Quieres cambiar la ciudad') or contains(@text,'Quieres cambiar la ciudad')]"),
+            By.xpath("//*[contains(@label,'¿Quieres cambiar la ciudad') or contains(@label,'Quieres cambiar la ciudad') " +
+            "or contains(@value,'¿Quieres cambiar la ciudad') or contains(@value,'Quieres cambiar la ciudad')]"));
 
-    private static final By ALERT_ACEPTAR_LAST =
-            By.xpath("(//android.widget.TextView[@text='Aceptar'])[last()]");
+    private static final PlatformLocator ALERT_ACEPTAR_LAST = PlatformLocator.of(
+            By.xpath("(//android.widget.TextView[@text='Aceptar'])[last()]"),
+            By.xpath("(//*[@label='Aceptar' or @name='Aceptar' or @value='Aceptar'])[last()]"));
 
-    private static final By ALERT_CAMBIAR_CINE_TITLE =
-            By.xpath("//android.widget.TextView[contains(@text,'¿Estás seguro que deseas cambiar de cine') or contains(@text,'Estas seguro que deseas cambiar de cine')]");
+    private static final PlatformLocator ALERT_CAMBIAR_CINE_TITLE = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[contains(@text,'¿Estás seguro que deseas cambiar de cine') or contains(@text,'Estas seguro que deseas cambiar de cine')]"),
+            By.xpath("//*[contains(@label,'¿Estás seguro que deseas cambiar de cine') or contains(@label,'Estas seguro que deseas cambiar de cine') " +
+            "or contains(@value,'¿Estás seguro que deseas cambiar de cine') or contains(@value,'Estas seguro que deseas cambiar de cine')]"));
 
-    private static final By BTN_SI_CAMBIAR_CINE_TEXT =
-            By.xpath("//android.widget.TextView[contains(@text,'Sí, cambiar de cine') or contains(@text,'Si, cambiar de cine') or contains(@text,'cambiar de cine')]");
+    private static final PlatformLocator BTN_SI_CAMBIAR_CINE_TEXT = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[contains(@text,'Sí, cambiar de cine') or contains(@text,'Si, cambiar de cine') or contains(@text,'cambiar de cine')]"),
+            By.xpath("//*[contains(@label,'Sí, cambiar de cine') or contains(@label,'Si, cambiar de cine') or contains(@label,'cambiar de cine') " +
+            "or contains(@value,'Sí, cambiar de cine') or contains(@value,'Si, cambiar de cine') or contains(@value,'cambiar de cine')]"));
 
-    private static final By BTN_SI_CAMBIAR_CINE_CLICKABLE_ANCESTOR =
-            By.xpath("(//android.widget.TextView[contains(@text,'Sí, cambiar de cine') or contains(@text,'Si, cambiar de cine')])[1]/ancestor::*[@clickable='true'][1]");
+    private static final PlatformLocator BTN_SI_CAMBIAR_CINE_CLICKABLE_ANCESTOR = PlatformLocator.of(
+            By.xpath("(//android.widget.TextView[contains(@text,'Sí, cambiar de cine') or contains(@text,'Si, cambiar de cine')])[1]/ancestor::*[@clickable='true'][1]"),
+            By.xpath("(//*[contains(@label,'Sí, cambiar de cine') or contains(@label,'Si, cambiar de cine')])[1]/ancestor::XCUIElementTypeOther[1]"));
 
-    private static final By BTN_SI_CAMBIAR_CINE_BUTTON_ABS =
-            By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.widget.Button");
+    // NOTA-MIGRACION: posicional sin ancla de texto — Android preservado exacto;
+    // equivalente iOS mejor-esfuerzo (último botón), sin verificar en dispositivo real.
+    private static final PlatformLocator BTN_SI_CAMBIAR_CINE_BUTTON_ABS = PlatformLocator.of(
+            By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.widget.Button"),
+            PlatformLocator.lastActionButton().ios());
 
-    private static final By BTN_MODAL_ANY_BUTTON =
-            By.xpath("(//android.widget.Button)[last()]");
+    private static final PlatformLocator BTN_MODAL_ANY_BUTTON = PlatformLocator.lastActionButton();
 
     public CinemasHelper(AppiumDriver driver) {
         super(driver);
@@ -294,6 +372,8 @@ public class CinemasHelper extends BasePage {
     }
 
     public void ensureCinemaSelectedFromAlimentos(String targetCinema) {
+        log.info("[TRACE] Inicio ensureCinemaSelectedFromAlimentos('{}') | hilo={} plataforma={} hora={}",
+                targetCinema, Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", System.currentTimeMillis());
         log.info("[CinemasHelper] ensureCinemaSelectedFromAlimentos -> '{}'", targetCinema);
         long t0Total = System.currentTimeMillis();
 
@@ -316,18 +396,23 @@ public class CinemasHelper extends BasePage {
                 if (cinemaMatches(currentCinema, targetCinema)) {
                     log.info("[CinemasHelper] El cine ya coincide con '{}' — continuando flujo. | Total: {}ms",
                             targetCinema, System.currentTimeMillis() - t0Total);
+                    log.info("[TRACE] Fin ensureCinemaSelectedFromAlimentos (cine ya coincidía) | duracionMs={}",
+                            System.currentTimeMillis() - t0Total);
                     return;
                 }
                 log.info("[CinemasHelper] Cambiando cine de '{}' a '{}'", currentCinema, targetCinema);
             } else {
                 // Intento 2: verificar si el texto del cine objetivo ya es visible en el chip.
                 // isVisibleInstant(wait=0): evita 10s de espera adicional cuando el nombre no está
-                String xpathTarget = "//android.widget.TextView[contains(@text,'"
-                        + escapeXpath(targetCinema) + "')]"
-                        + " | //android.view.View[contains(@content-desc,'"
-                        + escapeXpath(targetCinema) + "')]";
-                if (isVisibleInstant(By.xpath(xpathTarget))) {
+                By xpathTarget = isIOS()
+                        ? By.xpath("//*[contains(@label,'" + escapeXpath(targetCinema) + "') or contains(@name,'"
+                                + escapeXpath(targetCinema) + "') or contains(@value,'" + escapeXpath(targetCinema) + "')]")
+                        : By.xpath("//android.widget.TextView[contains(@text,'" + escapeXpath(targetCinema) + "')]"
+                                + " | //android.view.View[contains(@content-desc,'" + escapeXpath(targetCinema) + "')]");
+                if (isVisibleInstant(xpathTarget)) {
                     log.info("[CinemasHelper] Cine '{}' ya visible en pantalla — continuando flujo.", targetCinema);
+                    log.info("[TRACE] Fin ensureCinemaSelectedFromAlimentos (cine visible por texto) | duracionMs={}",
+                            System.currentTimeMillis() - t0Total);
                     return;
                 }
                 log.info("[CinemasHelper] Hay cine seleccionado pero no se pudo leer su nombre ({}ms) — " +
@@ -341,8 +426,12 @@ public class CinemasHelper extends BasePage {
         // El cine no coincide o no hay uno seleccionado — abrir selector y seleccionar
         long t0Search = System.currentTimeMillis();
         log.info("[PERF] Paso: Inicio búsqueda cine | Inicio: {}", t0Search);
+        log.info("[TRACE] Esperando locator selector 'Seleccionar cines' (waitSelectorScreenOrThrow) | hilo={} plataforma={}",
+                Thread.currentThread().getName(), isIOS() ? "iOS" : "Android");
         openSelectorFromAlimentosIfNeeded();
         waitSelectorScreenOrThrow();
+        log.info("[TRACE] Locator selector 'Seleccionar cines' encontrado | duracionMs={}",
+                System.currentTimeMillis() - t0Search);
         typeInSearchBoxULTRA(targetCinema);
         log.info("[PERF] Paso: Fin búsqueda cine | Fin: {} | Duración: {}ms",
                 System.currentTimeMillis(), System.currentTimeMillis() - t0Search);
@@ -361,6 +450,8 @@ public class CinemasHelper extends BasePage {
 
         log.info("[CinemasHelper] Cine configurado correctamente -> '{}' | Total: {}ms",
                 targetCinema, System.currentTimeMillis() - t0Total);
+        log.info("[TRACE] Fin ensureCinemaSelectedFromAlimentos (cine configurado) | duracionMs={}",
+                System.currentTimeMillis() - t0Total);
     }
 
     /**
@@ -377,12 +468,16 @@ public class CinemasHelper extends BasePage {
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
 
+            boolean ios = isIOS();
+
             // 1) TextView hermano anterior o posterior a la etiqueta "Cines"
             try {
-                List<WebElement> siblings = driver.findElements(By.xpath(
-                    "//android.widget.TextView[@text='Cines']/preceding-sibling::android.widget.TextView" +
-                    " | //android.widget.TextView[@text='Cines']/following-sibling::android.widget.TextView"
-                ));
+                By siblingsLocator = ios
+                        ? By.xpath("//*[@label='Cines' or @name='Cines' or @value='Cines']/preceding-sibling::*" +
+                                " | //*[@label='Cines' or @name='Cines' or @value='Cines']/following-sibling::*")
+                        : By.xpath("//android.widget.TextView[@text='Cines']/preceding-sibling::android.widget.TextView" +
+                                " | //android.widget.TextView[@text='Cines']/following-sibling::android.widget.TextView");
+                List<WebElement> siblings = driver.findElements(siblingsLocator);
                 for (WebElement el : siblings) {
                     try {
                         String t = el.getText();
@@ -391,13 +486,15 @@ public class CinemasHelper extends BasePage {
                 }
             } catch (Exception ignored) {}
 
-            // 2) content-desc del contenedor padre del chip de cines
+            // 2) content-desc (Android) / name (iOS) del contenedor padre del chip de cines
             try {
-                List<WebElement> cinesLabels = driver.findElements(
-                    By.xpath("//android.widget.TextView[@text='Cines']"));
+                By cinesLabelLocator = ios
+                        ? By.xpath("//*[@label='Cines' or @name='Cines' or @value='Cines']")
+                        : By.xpath("//android.widget.TextView[@text='Cines']");
+                List<WebElement> cinesLabels = driver.findElements(cinesLabelLocator);
                 if (cinesLabels != null && !cinesLabels.isEmpty()) {
                     WebElement parent = cinesLabels.get(0).findElement(By.xpath(".."));
-                    String desc = parent.getAttribute("content-desc");
+                    String desc = parent.getAttribute(ios ? "name" : "content-desc");
                     if (desc != null && !desc.isBlank()) {
                         String cleaned = desc.replace("Cines", "").replace(",", "").trim();
                         if (!cleaned.isEmpty()) return cleaned;
@@ -405,12 +502,14 @@ public class CinemasHelper extends BasePage {
                 }
             } catch (Exception ignored) {}
 
-            // 3) Cualquier TextView visible dentro del chip de cines (excluye "Cines")
+            // 3) Cualquier texto visible dentro del chip de cines (excluye "Cines")
             try {
-                List<WebElement> candidates = driver.findElements(By.xpath(
-                    "//android.widget.TextView[@text='Cines']/ancestor::android.view.View[1]" +
-                    "//android.widget.TextView[@text != 'Cines']"
-                ));
+                By candidatesLocator = ios
+                        ? By.xpath("//*[@label='Cines' or @name='Cines' or @value='Cines']/ancestor::XCUIElementTypeOther[1]" +
+                                "//*[@label != 'Cines' and @name != 'Cines' and @value != 'Cines']")
+                        : By.xpath("//android.widget.TextView[@text='Cines']/ancestor::android.view.View[1]" +
+                                "//android.widget.TextView[@text != 'Cines']");
+                List<WebElement> candidates = driver.findElements(candidatesLocator);
                 for (WebElement el : candidates) {
                     try {
                         String t = el.getText();
@@ -564,6 +663,9 @@ public class CinemasHelper extends BasePage {
         }
 
         if (!isSelectorOpen()) {
+            log.error("[TRACE] waitSelectorScreenOrThrow: locators Android-only (TITLE_SELECCIONAR_CINES/SEARCH_HINT) " +
+                    "nunca coincidieron | hilo={} plataforma={} duracionMs={}",
+                    Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", System.currentTimeMillis() - (end - 9000));
             throw new RuntimeException("No se abrió la pantalla 'Seleccionar cines'. Evité escribir en 'Ingresa tu folio'.");
         }
     }
@@ -741,7 +843,9 @@ public class CinemasHelper extends BasePage {
         if (words.length == 0) return false;
 
         String w1 = escapeXpath(words[0]);
-        By resultAny = By.xpath("//android.widget.TextView[contains(@text,'" + w1 + "')]");
+        By resultAny = isIOS()
+                ? By.xpath("//*[contains(@label,'" + w1 + "') or contains(@name,'" + w1 + "') or contains(@value,'" + w1 + "')]")
+                : By.xpath("//android.widget.TextView[contains(@text,'" + w1 + "')]");
         return isVisibleNow(resultAny);
     }
 
@@ -758,6 +862,9 @@ public class CinemasHelper extends BasePage {
             try { t = el.getAttribute("value"); } catch (Exception ignored) {}
             if (t != null && !t.trim().isEmpty()) return t;
 
+            try { t = el.getAttribute("label"); } catch (Exception ignored) {}
+            if (t != null && !t.trim().isEmpty()) return t;
+
             try { t = el.getAttribute("content-desc"); } catch (Exception ignored) {}
             return t;
         } catch (Exception e) {
@@ -766,10 +873,10 @@ public class CinemasHelper extends BasePage {
     }
 
     private void pickCinemaFromResults(String targetCinema) {
-        By exact = By.xpath("//android.widget.TextView[@text='" + targetCinema + "']");
+        PlatformLocator exact = PlatformLocator.byExactText(targetCinema);
         if (clickIfPresent(exact) || tapIfPresent(exact)) return;
 
-        By contains = By.xpath("//android.widget.TextView[contains(@text,'" + escapeXpath(targetCinema) + "')]");
+        PlatformLocator contains = PlatformLocator.byTextContains(escapeXpath(targetCinema));
         if (clickIfPresent(contains) || tapIfPresent(contains)) return;
 
         boolean found = scrollSlowDownThenUpUntilVisible(contains, 12);
@@ -938,6 +1045,10 @@ public class CinemasHelper extends BasePage {
         }
     }
 
+    private boolean tapIfPresent(PlatformLocator locator) {
+        return tapIfPresent(locator.resolve(isIOS()));
+    }
+
     // ✅ W3C tap (reemplaza TouchAction para Appium 2 / Selenium 4)
     private void w3cTap(int x, int y, long holdMs) {
         try {
@@ -970,6 +1081,10 @@ public class CinemasHelper extends BasePage {
         }
     }
 
+    private WebElement firstOrNull(PlatformLocator locator) {
+        return firstOrNull(locator.resolve(isIOS()));
+    }
+
     private String safeGetText(WebElement el) {
         try { return el == null ? null : el.getText(); } catch (Exception e) { return null; }
     }
@@ -981,6 +1096,10 @@ public class CinemasHelper extends BasePage {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private boolean isVisibleNow(PlatformLocator locator) {
+        return isVisibleNow(locator.resolve(isIOS()));
     }
 
     private String normalize(String s) {
@@ -1005,20 +1124,24 @@ public class CinemasHelper extends BasePage {
      */
     public boolean isClubLoginVisible() {
         // El menú de Alimentos tiene "Ingresa tu folio" — no es la pantalla de login.
-        if (isVisibleInstant(By.xpath("//android.widget.TextView[@text='Ingresa tu folio']"))) return false;
+        if (isVisibleInstant(PlatformLocator.byExactText("Ingresa tu folio"))) return false;
 
         if (isVisibleInstant(CLUB_LOGIN_TITLE)) return true;
         if (isVisibleInstant(CLUB_LOGIN_LOGO))  return true;
 
-        // Fallback con patrones sin acento — también con wait=0 (era el mayor cuello de botella)
+        // Fallback con patrones sin acento — también con wait=0 (era el mayor cuello de botella).
+        // NOTA-MIGRACION: usaba @text sin condicional de plataforma (bare attribute, sin
+        // prefijo android.widget.* — por eso no lo capturó el barrido inicial). En iOS
+        // ningún nodo expone @text, por lo que este fallback nunca encontraba nada.
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            String attr = isIOS() ? "@label" : "@text";
             List<WebElement> els = driver.findElements(By.xpath(
-                "//*[contains(@text,'Inicia sesi')" +
-                " or contains(@text,'CLUB Cin')" +
-                " or contains(@text,'Club Cin')" +
-                " or contains(@text,'Correo electr')" +
-                " or contains(@text,'Contrase')]"
+                "//*[contains(" + attr + ",'Inicia sesi')" +
+                " or contains(" + attr + ",'CLUB Cin')" +
+                " or contains(" + attr + ",'Club Cin')" +
+                " or contains(" + attr + ",'Correo electr')" +
+                " or contains(" + attr + ",'Contrase')]"
             ));
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             for (WebElement el : els) {
@@ -1123,15 +1246,23 @@ public class CinemasHelper extends BasePage {
         log.warn("[CinemasHelper] No se pudo cerrar Club Cinépolis en reintentos; se continúa flujo.");
         return false;
     }
+    // NOTA-MIGRACION: usaba @text sin condicional de plataforma (bare attribute, sin
+    // prefijo android.widget.* — por eso no lo capturó el barrido inicial). En iOS
+    // ningún nodo expone @text, por lo que la promo Mario nunca se detectaba/cerraba ahí.
+    private By marioPromoLocator() {
+        return isIOS()
+                ? By.xpath("//*[normalize-space(@label)='CONSULTA CARTELERA' or contains(@label,'CONSULTA CARTELERA') " +
+                        "or normalize-space(@value)='CONSULTA CARTELERA' or contains(@value,'CONSULTA CARTELERA')]")
+                : By.xpath("//*[normalize-space(@text)='CONSULTA CARTELERA' or contains(@text,'CONSULTA CARTELERA')]");
+    }
+
     private boolean isMarioPromoVisible() {
         // implicitlyWait=0: evita 10s de espera por pass cuando la promo no está presente.
         // Era el principal cuello de botella en PromosGuard (5 passes × 10s = 50s extra).
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
             // ✅ SOLO si existe el CTA específico de la promo
-            boolean found = !driver.findElements(By.xpath(
-                    "//*[normalize-space(@text)='CONSULTA CARTELERA' or contains(@text,'CONSULTA CARTELERA')]"
-            )).isEmpty();
+            boolean found = !driver.findElements(marioPromoLocator()).isEmpty();
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             return found;
         } catch (Exception e) {
@@ -1148,9 +1279,7 @@ public class CinemasHelper extends BasePage {
             log.info("[CinemasHelper] Promo Mario detectada. Cerrando...");
 
             // Intento 1: tap al CTA "CONSULTA CARTELERA"
-            List<WebElement> ctas = driver.findElements(By.xpath(
-                    "//*[contains(@text,'CONSULTA CARTELERA')]"
-            ));
+            List<WebElement> ctas = driver.findElements(marioPromoLocator());
             if (!ctas.isEmpty()) {
                 ctas.get(0).click();
                 // Espera inteligente: sale en cuanto la promo desaparece (máx 800ms)
@@ -1187,6 +1316,8 @@ public class CinemasHelper extends BasePage {
      * coexisten; ninguno se elimina.
      */
     public void dismissTransientPromosGuard(String where) {
+        log.info("[TRACE] Inicio PromosGuard | hilo={} plataforma={} where={} hora={}",
+                Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", where, System.currentTimeMillis());
         log.info("[CinemasHelper][PromosGuard] ENTER where={}", where);
         long tTotal = System.currentTimeMillis();
 
@@ -1221,6 +1352,8 @@ public class CinemasHelper extends BasePage {
                             msMainNav += System.currentTimeMillis() - tNav0;
                             log.info("[PromosGuard] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | EXIT pass={} where={}",
                                     msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, pass, where);
+                            log.info("[TRACE] Fin PromosGuard (via MainNav tras Club) | hilo={} plataforma={} where={} duracionMs={}",
+                                    Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", where, System.currentTimeMillis() - tTotal);
                             return;
                         }
                         log.debug("[CinemasHelper][PromosGuard] Main nav no visible en 5s tras cerrar Club ({}ms)",
@@ -1267,6 +1400,8 @@ public class CinemasHelper extends BasePage {
                     msMainNav += System.currentTimeMillis() - t0Nav;
                     log.info("[PERF][BeforeEach] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | EXIT pass={} where={}",
                             msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, pass, where);
+                    log.info("[TRACE] Fin PromosGuard (MainNav visible) | hilo={} plataforma={} where={} duracionMs={}",
+                            Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", where, System.currentTimeMillis() - tTotal);
                     return;
                 }
                 msMainNav += System.currentTimeMillis() - t0Nav;
@@ -1286,6 +1421,8 @@ public class CinemasHelper extends BasePage {
         log.warn("[PERF][BeforeEach] ClubGuard={}ms ZonaGuard={}ms MainNav={}ms Total={}ms | Max passes where={}",
                 msClub, msZona, msMainNav, System.currentTimeMillis() - tTotal, where);
         log.info("[CinemasHelper][PromosGuard] EXIT where={}", where);
+        log.info("[TRACE] Fin PromosGuard (5 passes agotados, MainNav NUNCA detectado) | hilo={} plataforma={} where={} duracionMs={}",
+                Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", where, System.currentTimeMillis() - tTotal);
     }
 
     /**
@@ -1308,13 +1445,20 @@ public class CinemasHelper extends BasePage {
      * Con tapInstant(), retorna en <10ms si ningún elemento existe en el DOM actual.
      */
     private void tryGenericOverlayDismiss() {
-        // Botones de cierre más comunes en promos/modales de Cinépolis
-        By[] dismissLocators = {
+        // Botones de cierre más comunes en promos/modales de Cinépolis.
+        // Android: @content-desc/@text. iOS: @name/@label (XCUITest).
+        By[] dismissLocatorsAndroid = {
             By.xpath("//*[@content-desc='Close' or @content-desc='Cerrar' or @content-desc='close']"),
             By.xpath("//android.widget.Button[@text='Cerrar' or @text='No gracias' or @text='Omitir' or @text='Saltar']"),
             By.xpath("//android.widget.TextView[@text='Cerrar' or @text='No gracias' or @text='Omitir' or @text='Saltar']"),
             By.xpath("//android.widget.ImageButton[@content-desc='Atrás' or @content-desc='Atras' or @content-desc='Navigate up']"),
         };
+        By[] dismissLocatorsIOS = {
+            By.xpath("//*[@name='Close' or @name='Cerrar' or @name='close']"),
+            By.xpath("//*[@label='Cerrar' or @label='No gracias' or @label='Omitir' or @label='Saltar']"),
+            By.xpath("//*[@name='Atrás' or @name='Atras' or @name='Navigate up' or @name='Back']"),
+        };
+        By[] dismissLocators = isIOS() ? dismissLocatorsIOS : dismissLocatorsAndroid;
         for (By loc : dismissLocators) {
             if (tapInstant(loc)) {
                 log.info("[CinemasHelper][PromosGuard] Overlay genérico cerrado con: {}", loc);
@@ -1341,7 +1485,7 @@ public class CinemasHelper extends BasePage {
         // implicitlyWait=0: evita 10s de espera por pass cuando el popup no está presente.
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            List<WebElement> els = driver.findElements(POPUP_ZONA_DETECTION);
+            List<WebElement> els = driver.findElements(POPUP_ZONA_DETECTION.resolve(isIOS()));
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             for (WebElement el : els) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
@@ -1404,10 +1548,10 @@ public class CinemasHelper extends BasePage {
     private boolean tapBackFromClubUI() {
         try {
             List<WebElement> candidates = isIOS()
-                ? driver.findElements(CLUB_BACK_BUTTON_XPATH)
+                ? driver.findElements(CLUB_BACK_BUTTON_XPATH_IOS)
                 : driver.findElements(CLUB_BACK_BUTTON_UIAUTO);
             if (candidates == null || candidates.isEmpty()) {
-                candidates = driver.findElements(CLUB_BACK_BUTTON_XPATH);
+                candidates = driver.findElements(isIOS() ? CLUB_BACK_BUTTON_XPATH_IOS : CLUB_BACK_BUTTON_XPATH);
             }
 
             for (WebElement el : candidates) {
@@ -1468,6 +1612,10 @@ public class CinemasHelper extends BasePage {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private boolean exists(PlatformLocator locator, int seconds) {
+        return exists(locator.resolve(isIOS()), seconds);
     }
 
     // ==========================

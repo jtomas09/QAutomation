@@ -58,6 +58,10 @@ public class TestSteps {
     }
 
     public static void run(String name, Runnable action, AppiumDriver driver) {
+        long t0 = System.currentTimeMillis();
+        boolean ios = config.DriverFactory.isIOS();
+        log.info("[TRACE] Ejecutando TestSteps.run(\"{}\") | hilo={} plataforma={} hora={}",
+                name, Thread.currentThread().getName(), ios ? "iOS" : "Android", t0);
         final String[] ref = {null};
         try {
             Allure.step(name, () -> {
@@ -67,6 +71,7 @@ public class TestSteps {
                 }
             });
             steps.get().add(new StepResult(name, "OK", ref[0]));
+            log.info("[TRACE] TestSteps.run(\"{}\") OK | duracionMs={}", name, System.currentTimeMillis() - t0);
 
         } catch (TestAbortedException aborted) {
             String screenshotPath = null;
@@ -98,6 +103,8 @@ public class TestSteps {
             steps.get().add(new StepResult(name, "ERROR", screenshotPath));
 
             log.error("[TestSteps] Step failed: {}", name, t);
+            log.error("[TRACE] TestSteps.run(\"{}\") ERROR | plataforma={} duracionMs={} causa={}",
+                    name, ios ? "iOS" : "Android", System.currentTimeMillis() - t0, t.getMessage());
             Assertions.fail(name + " failed.", t);
         }
     }

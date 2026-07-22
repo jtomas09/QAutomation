@@ -96,6 +96,55 @@ public class BasePage {
     }
 
     // =========================================================
+    // =========== PlatformLocator — capa multiplataforma =======
+    // =========================================================
+    //
+    // Estos overloads son el único punto donde el código de flujo (page objects,
+    // helpers) deja de necesitar isIOS()/if-android-if-ios: reciben un
+    // PlatformLocator, lo resuelven contra la plataforma real de ESTA sesión, y
+    // delegan en la implementación existente basada en By — sin duplicar ninguna
+    // lógica de espera/reintento/telemetría ya presente en esos métodos.
+
+    protected void click(PlatformLocator locator) {
+        click(locator.resolve(isIOS()));
+    }
+
+    protected boolean clickIfPresent(PlatformLocator locator) {
+        return clickIfPresent(locator.resolve(isIOS()));
+    }
+
+    protected boolean isVisibleQuick(PlatformLocator locator) {
+        return isVisibleQuick(locator.resolve(isIOS()));
+    }
+
+    protected WebElement waitForVisibility(PlatformLocator locator) {
+        return waitForVisibility(locator.resolve(isIOS()));
+    }
+
+    protected boolean tryClickIfAlreadyVisible(PlatformLocator locator, int timeoutSeconds) {
+        return tryClickIfAlreadyVisible(locator.resolve(isIOS()), timeoutSeconds);
+    }
+
+    protected boolean oneShotVerticalSearch(PlatformLocator locator, int maxDownSwipes) {
+        return oneShotVerticalSearch(locator.resolve(isIOS()), maxDownSwipes);
+    }
+
+    /** Click por texto visible exacto (@text en Android, @label/@name/@value en iOS). */
+    protected void clickByExactText(String text) {
+        click(PlatformLocator.byExactText(text));
+    }
+
+    /** Como {@link #clickByExactText(String)} pero tomando el N-ésimo resultado (1-based). */
+    protected void clickByExactText(String text, int index) {
+        click(PlatformLocator.byExactText(text, index));
+    }
+
+    /** Click por identificador de accesibilidad (@content-desc en Android, @name en iOS). */
+    protected void clickByAccessibilityId(String id) {
+        click(PlatformLocator.byAccessibilityId(id));
+    }
+
+    // =========================================================
     // =============== REINTENTOS (anti-fragilidad) =============
     // =========================================================
 
@@ -266,11 +315,22 @@ public class BasePage {
     // el artículo no existe para el cine configurado. Debe tratarse como SKIPPED
     // (nunca FAILED) y la suite debe continuar con el siguiente caso — mismo
     // mecanismo (TestAbortedException) que "producto agotado" arriba.
-    private static final By PRODUCTO_NO_DISPONIBLE_DIALOG = By.xpath(
-            "//*[contains(@text,'no está disponible en el cine') "
-          + "or contains(@text,'no esta disponible en el cine') "
-          + "or contains(@text,'elige otro artículo') "
-          + "or contains(@text,'elige otro articulo')]");
+    // NOTA-MIGRACION: usaba @text sin condicional de plataforma (bare attribute, sin
+    // prefijo android.widget.* — no lo capturó el barrido inicial). Se resuelve vía
+    // PlatformLocator porque este método es alcanzado desde click(), en la ruta crítica.
+    private static final PlatformLocator PRODUCTO_NO_DISPONIBLE_DIALOG = PlatformLocator.of(
+            By.xpath("//*[contains(@text,'no está disponible en el cine') "
+                  + "or contains(@text,'no esta disponible en el cine') "
+                  + "or contains(@text,'elige otro artículo') "
+                  + "or contains(@text,'elige otro articulo')]"),
+            By.xpath("//*[contains(@label,'no está disponible en el cine') "
+                  + "or contains(@label,'no esta disponible en el cine') "
+                  + "or contains(@label,'elige otro artículo') "
+                  + "or contains(@label,'elige otro articulo') "
+                  + "or contains(@value,'no está disponible en el cine') "
+                  + "or contains(@value,'no esta disponible en el cine') "
+                  + "or contains(@value,'elige otro artículo') "
+                  + "or contains(@value,'elige otro articulo')]"));
 
     /**
      * Si el diálogo "Este producto actualmente no está disponible en el cine.
@@ -297,9 +357,13 @@ public class BasePage {
         // Cerrar el diálogo — best-effort: el SKIPPED se reporta igual aunque
         // el botón no se encuentre o el tap falle.
         try {
-            By aceptar = By.xpath("//*[@text='Aceptar' or @text='ACEPTAR' or @text='OK']");
+            PlatformLocator aceptar = PlatformLocator.of(
+                    By.xpath("//*[@text='Aceptar' or @text='ACEPTAR' or @text='OK']"),
+                    By.xpath("//*[@label='Aceptar' or @label='ACEPTAR' or @label='OK' " +
+                            "or @name='Aceptar' or @name='ACEPTAR' or @name='OK' " +
+                            "or @value='Aceptar' or @value='ACEPTAR' or @value='OK']"));
             if (isVisibleQuick(aceptar)) {
-                WebElement btn = driver.findElement(aceptar);
+                WebElement btn = driver.findElement(aceptar.resolve(isIOS()));
                 try { btn.click(); } catch (Exception e) { tapCenterW3C(btn); }
             }
         } catch (Exception ignored) {}
@@ -314,6 +378,10 @@ public class BasePage {
         } catch (Exception e) {
             Assertions.fail("No se pudo encontrar o validar la visibilidad del elemento: " + locator, e);
         }
+    }
+
+    public void validarElementoVisible(PlatformLocator locator) {
+        validarElementoVisible(locator.resolve(isIOS()));
     }
 
     protected WebElement waitAndGet(By locator) {
@@ -344,6 +412,10 @@ public class BasePage {
     // =========================================================
     // ===================== CLICKS (compat) ====================
     // =========================================================
+    protected boolean scrollSlowDownThenUpUntilVisible(PlatformLocator locator, int maxSwipesEachDirection) {
+        return scrollSlowDownThenUpUntilVisible(locator.resolve(isIOS()), maxSwipesEachDirection);
+    }
+
     protected boolean scrollSlowDownThenUpUntilVisible(By locator, int maxSwipesEachDirection) {
         if (isVisible(locator)) return true;
 
@@ -375,6 +447,7 @@ public class BasePage {
     }
     protected void click(By locator) {
         ensureAppIsInForegroundOrRecover();
+        if (IOSLocatorDebug.isEnabled() && isIOS()) IOSLocatorDebug.beforeInteraction(driver, "click", locator);
         try {
             WebElement el = waitAndGet(locator);
             el.click();
@@ -382,6 +455,7 @@ public class BasePage {
         } catch (org.opentest4j.TestAbortedException aborted) {
             throw aborted; // ya es un SKIPPED explícito — no interceptar
         } catch (RuntimeException e) {
+            if (IOSLocatorDebug.isEnabled() && isIOS()) IOSLocatorDebug.onFailure(driver, "click", locator, e);
             // El elemento esperado no apareció — antes de reportar el fallo tal cual,
             // se descarta la causa más común y benigna: el diálogo de "producto no
             // disponible" cubriendo la pantalla. Si no es eso, se relanza intacto.
@@ -391,6 +465,12 @@ public class BasePage {
     }
 
     protected boolean clickIfPresent(By locator) {
+        // NOTA: clickIfPresent() es "best effort" por diseño — no encontrar el
+        // elemento es un resultado normal y frecuente (docenas de llamadas por test
+        // en guards de overlay), no una falla a diagnosticar. Por eso NO se conecta
+        // a IOSLocatorDebug aquí: hacerlo generaría capturas de pageSource en cada
+        // miss esperado, con costo real en cada corrida. El diagnóstico vive en
+        // click(By) — la variante bloqueante, donde "no se encontró" sí es una falla.
         ensureAppIsInForegroundOrRecover();
         try {
             List<WebElement> elements = findElementsFast(locator);

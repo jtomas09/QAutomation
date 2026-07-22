@@ -20,6 +20,7 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.opentest4j.TestAbortedException;
 import pages.common.BasePage;
+import pages.common.PlatformLocator;
 import java.text.Normalizer;
 import java.util.Locale;
 
@@ -34,23 +35,43 @@ public class SelectorPage extends BasePage {
         super(driver);
     }
 
+    // Tab "Alimentos" del bottom-nav. Android: UiSelector por texto (rama Android más
+    // abajo) con fallback posicional Compose sin tocar. iOS: no existe UiAutomator2 —
+    // se usa directamente el texto visible "Alimentos" (misma ancla que la estrategia
+    // Android preferida), en vez de intentar adivinar la posición del árbol Compose
+    // en iOS, que puede no coincidir con la de Android.
+    private static final PlatformLocator TAB_ALIMENTOS_BOTTOMNAV = PlatformLocator.of(
+            By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]/android.view.View/android.view.View[2]/android.view.View[3]"),
+            PlatformLocator.byExactText("Alimentos").ios());
+
     public void abrirMenu() {
-        // UiSelector works from any screen (Android); use XPath on iOS
+        long t0 = System.currentTimeMillis();
+        log.info("[TRACE] Inicio SelectorPage.abrirMenu() | hilo={} plataforma={} hora={}",
+                Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", t0);
+        // UiSelector works from any screen (Android) — estrategia preferida, sin cambios.
         if (!isIOS()) {
             try {
                 driver.findElement(AppiumBy.androidUIAutomator(
                     "new UiSelector().text(\"Alimentos\")"
                 )).click();
                 sleep(800);
+                log.info("[TRACE] Fin SelectorPage.abrirMenu() (UiAutomator, Android) | duracionMs={}",
+                        System.currentTimeMillis() - t0);
                 return;
             } catch (Exception ignored) {}
         }
-        // Fallback: Compose xpath for bottom-nav Alimentos tab from home/cartelera screen
+        // Fallback multiplataforma: Android conserva su xpath posicional original;
+        // iOS resuelve por el texto visible "Alimentos" (ver TAB_ALIMENTOS_BOTTOMNAV).
         try {
-            this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]/android.view.View/android.view.View[2]/android.view.View[3]"));
+            this.click(TAB_ALIMENTOS_BOTTOMNAV);
+            log.info("[TRACE] Locator encontrado en abrirMenu() | duracionMs={}", System.currentTimeMillis() - t0);
         } catch (Exception e) {
-            this.fallbackTap("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]/android.view.View/android.view.View[2]/android.view.View[3]");
+            log.error("[TRACE] Locator NUNCA encontrado en abrirMenu() tras espera bloqueante — plataforma={} " +
+                    "duracionMs={} excepcion={}", isIOS() ? "iOS" : "Android",
+                    System.currentTimeMillis() - t0, e.getMessage());
+            this.fallbackTap(TAB_ALIMENTOS_BOTTOMNAV);
         }
+        log.info("[TRACE] Fin SelectorPage.abrirMenu() | duracionMs={}", System.currentTimeMillis() - t0);
     }
 
     public void buscarDippinDots() {
@@ -389,25 +410,36 @@ public class SelectorPage extends BasePage {
      * implícita al navegar a la pantalla del producto — no hace falta un
      * paso adicional de cierre.
      */
+    // Campo de búsqueda del menú de Alimentos. Android: el EditText nativo de Compose
+    // (android.widget.EditText). iOS: XCUITest no tiene ese tipo — se acepta tanto
+    // XCUIElementTypeSearchField como XCUIElementTypeTextField porque, sin inspector
+    // en un dispositivo real, no se puede confirmar cuál expone Compose Multiplatform
+    // para este control (ver reporte de migración: locator sin verificar en iOS).
+    private static final By CAMPO_BUSQUEDA_ALIMENTOS_IOS =
+            By.xpath("//XCUIElementTypeSearchField | //XCUIElementTypeTextField");
+
     private void buscarProducto(String nombreProducto) {
         long t0 = System.currentTimeMillis();
         log.info("[BuscarProducto] ENTER producto='{}'", nombreProducto);
 
-        // El ícono de búsqueda del menú de alimentos tiene content-desc="Buscar" (parent View, no el TextView hijo)
-        this.click(By.xpath("//android.view.View[@content-desc='Buscar']"));
+        // El ícono de búsqueda del menú de alimentos tiene accessibility id "Buscar"
+        // (Android: @content-desc, iOS: @name) — parent View, no el TextView hijo.
+        this.click(PlatformLocator.byAccessibilityId("Buscar"));
         this.sleep(600);
 
         // Foco en el campo de texto y escritura — sin ®/™/© (algunos teclados/campos
         // no los aceptan bien); el match posterior sí tolera esos caracteres.
-        this.click(By.className("android.widget.EditText"));
+        this.click(PlatformLocator.of(By.className("android.widget.EditText"), CAMPO_BUSQUEDA_ALIMENTOS_IOS));
         String consulta = nombreProducto.replaceAll("[®™©]", "").trim();
+        // "mobile: type" es un comando cross-platform de Appium (UiAutomator2 y XCUITest
+        // lo implementan igual) — no requiere rama de plataforma.
         this.driver.executeScript("mobile: type", Map.of("text", consulta));
         this.sleep(1500);
 
         // Selección: exacto literal → exacto normalizado → fuzzy validado por tokens
         // (ver encontrarResultadoTolerante). "exacta" (el booleano) es la ÚNICA señal
         // que decide si se hace clic — nunca se hace clic si el log dice NO.
-        By exact = By.xpath("//android.widget.TextView[@text=\"" + escapeXpathValue(nombreProducto) + "\"]");
+        PlatformLocator exact = PlatformLocator.byExactText(nombreProducto);
         WebElement resultado;
         boolean exacta;
         String textoEncontrado;
@@ -419,7 +451,7 @@ public class SelectorPage extends BasePage {
         } else {
             resultado       = encontrarResultadoTolerante(nombreProducto);
             exacta          = resultado != null;
-            textoEncontrado = resultado != null ? resultado.getAttribute("text") : "(ninguno)";
+            textoEncontrado = resultado != null ? textoDeResultado(resultado) : "(ninguno)";
         }
 
         log.info("[BUSQUEDA] Producto solicitado: {}", nombreProducto);
@@ -430,13 +462,23 @@ public class SelectorPage extends BasePage {
             if (resultado != null) tapCenterW3C(resultado);
             else this.click(exact);
         } else {
-            // No se selecciona ningún producto — el clic sobre el xpath exacto original
+            // No se selecciona ningún producto — el clic sobre el locator exacto original
             // no encontrará nada y lanzará una excepción clara (el flujo existente decide
             // qué hacer con eso, p. ej. SKIPPED si corresponde al guard de "producto no
             // disponible").
             this.click(exact);
         }
         log.info("[BuscarProducto] EXIT producto='{}' | {}ms", nombreProducto, System.currentTimeMillis() - t0);
+    }
+
+    /** Texto visible de un resultado de búsqueda: @text en Android, @label/@name/@value en iOS. */
+    private String textoDeResultado(WebElement el) {
+        if (el == null) return null;
+        if (!isIOS()) return el.getAttribute("text");
+        String v = el.getAttribute("label");
+        if (v == null || v.isBlank()) v = el.getAttribute("name");
+        if (v == null || v.isBlank()) v = el.getAttribute("value");
+        return v;
     }
 
     // Similitud mínima POR TOKEN (0-100) para el fallback fuzzy — solo se aplica cuando
@@ -465,19 +507,27 @@ public class SelectorPage extends BasePage {
      *      tokens) sin importar cuán "parecidas" luzcan las cadenas completas,
      *      porque el conteo de tokens ya no coincide.
      */
+    // Candidatos con texto visible en los resultados de búsqueda. Android: TextView
+    // con @text no vacío. iOS: cualquier nodo con @label o @value no vacío (XCUITest
+    // no tiene un único tipo "texto"; Compose Multiplatform puede usar cualquiera).
+    private static final By CANDIDATOS_TEXTO_BUSQUEDA_IOS =
+            By.xpath("//*[string-length(@label) > 0 or string-length(@value) > 0]");
+
     private WebElement encontrarResultadoTolerante(String nombreProducto) {
         String target = normalizeForSearch(nombreProducto);
+        By candidatosLocator = isIOS()
+                ? CANDIDATOS_TEXTO_BUSQUEDA_IOS
+                : By.xpath("//android.widget.TextView[string-length(@text) > 0]");
 
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
-            java.util.List<WebElement> candidatos = driver.findElements(
-                    By.xpath("//android.widget.TextView[string-length(@text) > 0]"));
+            java.util.List<WebElement> candidatos = driver.findElements(candidatosLocator);
 
             // ── Tier 2: coincidencia exacta normalizada (igualdad de cadena completa) ──
             for (WebElement candidato : candidatos) {
                 try {
                     if (!candidato.isDisplayed()) continue;
-                    String texto = candidato.getAttribute("text");
+                    String texto = textoDeResultado(candidato);
                     if (texto == null || texto.isBlank()) continue;
                     if (normalizeForSearch(texto).equals(target)) return candidato;
                 } catch (Exception ignored) {}
@@ -488,7 +538,7 @@ public class SelectorPage extends BasePage {
             for (WebElement candidato : candidatos) {
                 try {
                     if (!candidato.isDisplayed()) continue;
-                    String texto = candidato.getAttribute("text");
+                    String texto = textoDeResultado(candidato);
                     if (texto == null || texto.isBlank()) continue;
                     String[] candidatoTokens = normalizeForSearch(texto).split("\\s+");
                     if (coincidenTokensValidados(targetTokens, candidatoTokens)) return candidato;
@@ -649,7 +699,15 @@ public class SelectorPage extends BasePage {
     }
 
     public void cerrarPantalla() {
-        this.clickIfPresent(By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.widget.Button"));
+        long t0 = System.currentTimeMillis();
+        log.info("[TRACE] Inicio SelectorPage.cerrarPantalla() | hilo={} plataforma={}",
+                Thread.currentThread().getName(), isIOS() ? "iOS" : "Android");
+        // clickIfPresent() no bloquea (findElementsFast usa implicitlyWait=0) — en iOS este
+        // locator Android-only (android.view.ViewGroup/.../android.widget.Button) simplemente
+        // no encuentra nada y retorna false de inmediato, sin tap y sin excepción.
+        boolean clicked = this.clickIfPresent(By.xpath("//android.view.ViewGroup/android.view.View/android.view.View/android.view.View/android.view.View/android.view.View/android.widget.Button"));
+        log.info("[TRACE] Fin SelectorPage.cerrarPantalla() | clicked={} duracionMs={}",
+                clicked, System.currentTimeMillis() - t0);
     }
 
     /**
@@ -690,13 +748,24 @@ public class SelectorPage extends BasePage {
         throw new RuntimeException("No se pudo abrir el carrito correctamente tras 3 intentos", lastError);
     }
 
+    // Badge numérico (1-9) del carrito. Android: @text. iOS: @label/@name/@value.
+    private static final By BADGE_CARRITO_ANDROID = By.xpath(
+            "//android.widget.TextView[@text='1' or @text='2' or @text='3' " +
+            "or @text='4' or @text='5' or @text='6' or @text='7' or @text='8' or @text='9']");
+    private static final By BADGE_CARRITO_IOS = By.xpath(
+            "//*[@label='1' or @label='2' or @label='3' or @label='4' or @label='5' " +
+            "or @label='6' or @label='7' or @label='8' or @label='9' " +
+            "or @name='1' or @name='2' or @name='3' or @name='4' or @name='5' " +
+            "or @name='6' or @name='7' or @name='8' or @name='9' " +
+            "or @value='1' or @value='2' or @value='3' or @value='4' or @value='5' " +
+            "or @value='6' or @value='7' or @value='8' or @value='9']");
+
     private boolean intentarAbrirCarritoInterno(int intento) {
         // Estrategia 1: badge numérico en el header (cualquier número 1-9)
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            java.util.List<WebElement> badges = driver.findElements(By.xpath(
-                "//android.widget.TextView[@text='1' or @text='2' or @text='3' " +
-                "or @text='4' or @text='5' or @text='6' or @text='7' or @text='8' or @text='9']"));
+            java.util.List<WebElement> badges = driver.findElements(
+                    isIOS() ? BADGE_CARRITO_IOS : BADGE_CARRITO_ANDROID);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
 
             for (WebElement badge : badges) {
@@ -715,13 +784,17 @@ public class SelectorPage extends BasePage {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
 
-        // Estrategia 2: ícono de carrito por content-desc / resource-id
+        // Estrategia 2: ícono de carrito por content-desc/resource-id (Android) o
+        // name/label (iOS — XCUITest no tiene resource-id ni content-desc).
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(2));
-            WebElement icon = driver.findElement(By.xpath(
-                "//*[@content-desc='Carrito' or @content-desc='Cart' or " +
-                "contains(@resource-id,'cart') or contains(@resource-id,'carrito') or " +
-                "@content-desc='carrito' or @content-desc='basket']"));
+            By iconLocator = isIOS()
+                    ? By.xpath("//*[@name='Carrito' or @name='Cart' or @name='carrito' or @name='basket' " +
+                        "or @label='Carrito' or @label='Cart' or @label='carrito' or @label='basket']")
+                    : By.xpath("//*[@content-desc='Carrito' or @content-desc='Cart' or " +
+                        "contains(@resource-id,'cart') or contains(@resource-id,'carrito') or " +
+                        "@content-desc='carrito' or @content-desc='basket']");
+            WebElement icon = driver.findElement(iconLocator);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             Rectangle r = icon.getRect();
             log.info("[abrirCarrito] Ícono carrito encontrado por content-desc ({},{})",
@@ -754,13 +827,26 @@ public class SelectorPage extends BasePage {
         log.info("[abrirCarrito] Tap ejecutado correctamente");
     }
 
+    private static final By SEÑALES_PANTALLA_CARRITO_ANDROID = By.xpath(
+            "//*[contains(@text,'Carrito') or contains(@text,'carrito') " +
+            "or contains(@text,'Continuar') or contains(@text,'Ir a pagar') " +
+            "or contains(@text,'tu orden') or contains(@text,'Boletos')]");
+    private static final By SEÑALES_PANTALLA_CARRITO_IOS = By.xpath(
+            "//*[contains(@label,'Carrito') or contains(@label,'carrito') " +
+            "or contains(@label,'Continuar') or contains(@label,'Ir a pagar') " +
+            "or contains(@label,'tu orden') or contains(@label,'Boletos') " +
+            "or contains(@value,'Carrito') or contains(@value,'carrito') " +
+            "or contains(@value,'Continuar') or contains(@value,'Ir a pagar') " +
+            "or contains(@value,'tu orden') or contains(@value,'Boletos') " +
+            "or contains(@name,'Carrito') or contains(@name,'carrito') " +
+            "or contains(@name,'Continuar') or contains(@name,'Ir a pagar') " +
+            "or contains(@name,'tu orden') or contains(@name,'Boletos')]");
+
     private boolean estaEnPantallaCarrito() {
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(5));
-            boolean en = !driver.findElements(By.xpath(
-                "//*[contains(@text,'Carrito') or contains(@text,'carrito') " +
-                "or contains(@text,'Continuar') or contains(@text,'Ir a pagar') " +
-                "or contains(@text,'tu orden') or contains(@text,'Boletos')]")).isEmpty();
+            boolean en = !driver.findElements(
+                    isIOS() ? SEÑALES_PANTALLA_CARRITO_IOS : SEÑALES_PANTALLA_CARRITO_ANDROID).isEmpty();
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             if (en) log.info("[abrirCarrito] Pantalla carrito detectada");
             return en;
@@ -770,213 +856,235 @@ public class SelectorPage extends BasePage {
         }
     }
 
+    // NOTA-MIGRACION: locator Android original 100% posicional (sin ancla de texto ni
+    // de accesibilidad) — se preserva EXACTO para Android. El equivalente iOS
+    // ("último botón de la pantalla") es mejor-esfuerzo y debe verificarse contra un
+    // dispositivo real antes de confiar en él (ver reporte de migración).
     public void personalizar() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View/android.view.View/android.widget.Button"));
+        this.click(PlatformLocator.of(
+                By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View/android.view.View/android.widget.Button"),
+                PlatformLocator.lastActionButton().ios()));
     }
 
+    // NOTA-MIGRACION: mismo caso que personalizar() — locator posicional Android
+    // preservado exacto; equivalente iOS es mejor-esfuerzo (ver reporte de migración).
     public void agregarCarrito() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View/android.view.View/android.widget.Button"));
+        this.click(PlatformLocator.of(
+                By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View/android.view.View/android.widget.Button"),
+                PlatformLocator.lastActionButton().ios()));
     }
 
     public void ManzanaCanela() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Manzana Canela\"]"));
+        this.clickByExactText("Manzana Canela");
     }
 
     public void MermeladaZarzamora() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Mermelada de zarzamora\"]"));
+        this.clickByExactText("Mermelada de zarzamora");
     }
 
     public void QuesoPhiladelphia() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Queso Philadelphia®\"]"));
+        this.clickByExactText("Queso Philadelphia®");
     }
 
     public void QuesoManchego() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Queso machego\"]"));
+        this.clickByExactText("Queso machego");
     }
 
     public void Champiqueso() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Champiqueso con queso Philadelphia®\"]"));
+        this.clickByExactText("Champiqueso con queso Philadelphia®");
     }
 
     public void ChampiquesoManchego() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Champiqueso con queso mancheco\"]"));
+        this.clickByExactText("Champiqueso con queso mancheco");
     }
 
     public void Nutella() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Nutella®\"]"));
+        this.clickByExactText("Nutella®");
     }
 
     public void PLlevar() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Para Llevar\"]"));
+        this.clickByExactText("Para Llevar");
     }
 
     public void Jumbo() {
-        this.click(By.xpath("//android.view.View[@content-desc=\"Jumbo\"]"));
+        this.clickByAccessibilityId("Jumbo");
     }
 
     public void TeMediano() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Mediano Caliente\"]"));
+        this.clickByExactText("Mediano Caliente");
     }
 
     public void CafeDescafeinado() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Café Descafeinado\"]"));
+        this.clickByExactText("Café Descafeinado");
     }
 
     public void Grandes() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Grandes\"]"));
+        this.clickByExactText("Grandes");
     }
 
     public void ChocolateMediano() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Mediano\"]"));
+        this.clickByExactText("Mediano");
     }
 
     public void Grande() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Grande\"]"));
+        this.clickByExactText("Grande");
     }
 
     public void seismili() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"600 ML\"]"));
+        this.clickByExactText("600 ML");
     }
 
     public void Mango() {
-        this.click(By.xpath("(//android.widget.TextView[@text=\"Mango\"])[1]"));
+        this.clickByExactText("Mango", 1);
     }
 
     public void Adobadas() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Adobadas\"]"));
+        this.clickByExactText("Adobadas");
     }
 
     public void Skittles() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Skittles®\"]"));
+        this.clickByExactText("Skittles®");
     }
 
     public void NachosChicos() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Chicos\"]"));
+        this.clickByExactText("Chicos");
     }
 
     public void Cacahuate120g() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Cacahuate 120 g.\"]"));
+        this.clickByExactText("Cacahuate 120 g.");
     }
 
     public void NachosNachos() {
-        this.click(By.xpath("(//android.widget.TextView[@text=\"Nachos\"])[2]"));
+        this.clickByExactText("Nachos", 2);
     }
 
     public void CookiesCream() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Cookies & Cream\"]"));
+        this.clickByExactText("Cookies & Cream");
     }
 
     public void NachosTajin() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"NACHOS TAJIN\"]"));
+        this.clickByExactText("NACHOS TAJIN");
     }
 
     public void Medianas() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Medianas\"]"));
+        this.clickByExactText("Medianas");
     }
 
     public void Chicas() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Chicas\"]"));
+        this.clickByExactText("Chicas");
     }
 
     public void CarlosV() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Carlos V®\"]"));
+        this.clickByExactText("Carlos V®");
     }
 
     public void Chicas2() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Chicos\"]"));
+        this.clickByExactText("Chicos");
     }
 
     public void Res() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Res\"]"));
+        this.clickByExactText("Res");
     }
 
     public void Boneless() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Boneless\"]"));
+        this.clickByExactText("Boneless");
     }
 
+    // NOTA-MIGRACION: posicional sin ancla de texto/accesibilidad — Android preservado
+    // exacto; equivalente iOS mejor-esfuerzo, requiere verificación en dispositivo real
+    // (riesgo: si "Regresar"/"Mas" coexisten visibles en la misma pantalla, "último
+    // botón" puede ambigüarse entre los tres — ver reporte de migración).
     public void Siguiente() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View[2]/android.view.View/android.widget.Button"));
+        this.click(PlatformLocator.of(
+                By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View[2]/android.view.View/android.widget.Button"),
+                PlatformLocator.lastActionButton().ios()));
     }
 
     public void seisoz() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"6 Oz\"]"));
+        this.clickByExactText("6 Oz");
     }
 
     public void FresaCoco() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Fresa-Coco\"]"));
+        this.clickByExactText("Fresa-Coco");
     }
 
     public void nachosBoneless() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Nachos Boneless\"]"));
+        this.clickByExactText("Nachos Boneless");
     }
 
     public void nachosBrisquet() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Nachos Brisket de Res\"]"));
+        this.clickByExactText("Nachos Brisket de Res");
     }
 
 
     public void Chico() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Chico\"]"));
+        this.clickByExactText("Chico");
     }
 
     public void Mediano() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Mediano\"]"));
+        this.clickByExactText("Mediano");
     }
 
     public void Guacamole() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Guacamole\"]"));
+        this.clickByExactText("Guacamole");
     }
 
     public void TexasDog() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Texas Dog\"]"));
+        this.clickByExactText("Texas Dog");
     }
 
     public void Amareto() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Piña Colada Amareto\"]"));
+        this.clickByExactText("Piña Colada Amareto");
     }
 
     public void CocaCola() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Coca-Cola®\"]"));
+        this.clickByExactText("Coca-Cola®");
     }
 
     public void PinaColada() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Piña Colada Grande\"]"));
+        this.clickByExactText("Piña Colada Grande");
     }
 
     public void FrambuesaAzul() {
-        this.click(By.xpath("(//android.widget.TextView[@text=\"Frambuesa Azul\"])[1]"));
+        this.clickByExactText("Frambuesa Azul", 1);
     }
 
     public void Midori() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Piña Colada Midori\"]"));
+        this.clickByExactText("Piña Colada Midori");
     }
 
     public void kahlua() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Piña Colada Kahlua\"]"));
+        this.clickByExactText("Piña Colada Kahlua");
     }
 
     public void Pepino() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Pepino\"]"));
+        this.clickByExactText("Pepino");
     }
 
     public void Manzana() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Manzana Verde\"]"));
+        this.clickByExactText("Manzana Verde");
     }
 
     public void Cereza() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Cereza\"]"));
+        this.clickByExactText("Cereza");
     }
 
+    // NOTA-MIGRACION: ver comentario en Siguiente() — mismo caso.
     public void Regresar() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[2]/android.view.View/android.view.View[1]/android.widget.Button"));
+        this.click(PlatformLocator.of(
+                By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[2]/android.view.View/android.view.View[1]/android.widget.Button"),
+                PlatformLocator.lastActionButton().ios()));
     }
 
+    // NOTA-MIGRACION: ver comentario en Siguiente() — mismo caso.
     public void Mas() {
-        this.click(By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View[2]/android.widget.Button"));
+        this.click(PlatformLocator.of(
+                By.xpath("//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View/android.view.View/android.view.View[1]/android.view.View[2]/android.widget.Button"),
+                PlatformLocator.lastActionButton().ios()));
     }
 
     public void Algodon() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Algodon de azucar\"]"));
+        this.clickByExactText("Algodon de azucar");
     }
 
 
@@ -1014,8 +1122,10 @@ public class SelectorPage extends BasePage {
             for (WebElement candidate : candidates) {
                 try {
                     if (!candidate.isDisplayed()) continue;
-                    String actual = candidate.getAttribute("text");
-                    if (actual == null || actual.isBlank()) actual = candidate.getAttribute("content-desc");
+                    String actual = isIOS()
+                            ? textoDeResultado(candidate)
+                            : candidate.getAttribute("text");
+                    if ((actual == null || actual.isBlank()) && !isIOS()) actual = candidate.getAttribute("content-desc");
                     if (actual == null || actual.isBlank()) continue;
                     log.info("[Fuzzy] Match: '{}' → búsqueda '{}'", actual, logLabel);
                     tapCenterW3C(candidate);
@@ -1073,12 +1183,18 @@ public class SelectorPage extends BasePage {
         for (String term : searchTerms) {
             String safeT = escapeXpathValue(term);
             log.debug("[Fuzzy] Probando término: '{}'", term);
-            if (tryClickByXpathContains("//*[contains(@text, \"" + safeT + "\")]", targetText)) {
+            String textXpath = isIOS()
+                    ? "//*[contains(@label, \"" + safeT + "\") or contains(@value, \"" + safeT + "\")]"
+                    : "//*[contains(@text, \"" + safeT + "\")]";
+            if (tryClickByXpathContains(textXpath, targetText)) {
                 log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-text-contains | Tiempo={}ms | Resultado=ENCONTRADO",
                     targetText, System.currentTimeMillis() - t0);
                 return true;
             }
-            if (tryClickByXpathContains("//*[contains(@content-desc, \"" + safeT + "\")]", targetText)) {
+            String descXpath = isIOS()
+                    ? "//*[contains(@name, \"" + safeT + "\")]"
+                    : "//*[contains(@content-desc, \"" + safeT + "\")]";
+            if (tryClickByXpathContains(descXpath, targetText)) {
                 log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-desc-contains | Tiempo={}ms | Resultado=ENCONTRADO",
                     targetText, System.currentTimeMillis() - t0);
                 return true;
@@ -1136,14 +1252,16 @@ public class SelectorPage extends BasePage {
     private void logVisibleElements(String contexto) {
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            java.util.List<WebElement> textos = driver.findElements(
-                By.xpath("//*[string-length(@text)>0 or string-length(@content-desc)>0]"));
+            By locator = isIOS()
+                    ? By.xpath("//*[string-length(@label)>0 or string-length(@value)>0 or string-length(@name)>0]")
+                    : By.xpath("//*[string-length(@text)>0 or string-length(@content-desc)>0]");
+            java.util.List<WebElement> textos = driver.findElements(locator);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             StringBuilder sb = new StringBuilder("[TELEMETRIA] ").append(contexto).append("\n");
             for (WebElement t : textos) {
                 try {
-                    String txt = t.getAttribute("text");
-                    if (txt == null || txt.isBlank()) txt = t.getAttribute("content-desc");
+                    String txt = textoDeResultado(t);
+                    if ((txt == null || txt.isBlank()) && !isIOS()) txt = t.getAttribute("content-desc");
                     if (txt != null && !txt.isBlank()) sb.append("  VISIBLE: '").append(txt.trim()).append("'\n");
                 } catch (Exception ignored) {}
             }
@@ -1164,8 +1282,12 @@ public class SelectorPage extends BasePage {
         log.info("[ClickCard] ENTER producto='{}' longTimeout={}s", visibleText, longTimeoutSeconds);
 
         // ✅ 1) Construcción de XPaths Mejorada (Texto exacto o Descripción de accesibilidad)
-        // Esto cubre tanto el TextView como el contenedor de Compose
-        String xpathText   = "//*[@text=\"" + visibleText + "\" or @content-desc=\"" + visibleText + "\"]";
+        // Esto cubre tanto el TextView como el contenedor de Compose.
+        // Android expone el contenido en @text/@content-desc; iOS (XCUITest) lo expone
+        // en @label/@name/@value — el elemento ya era genérico (*), solo cambian los atributos.
+        String xpathText = isIOS()
+                ? "//*[@label=\"" + visibleText + "\" or @name=\"" + visibleText + "\" or @value=\"" + visibleText + "\"]"
+                : "//*[@text=\"" + visibleText + "\" or @content-desc=\"" + visibleText + "\"]";
         String xpathParent = xpathText + "/..";
 
         By byText   = By.xpath(xpathText);
@@ -1591,19 +1713,24 @@ public class SelectorPage extends BasePage {
     }
 
     public void seleccionarSaborPorContentDesc(String contentDesc, int index) {
-        String xpath = "(//android.view.View[@content-desc=\"" + contentDesc + "\"])[" + index + "]";
+        String xpath = isIOS()
+                ? "(//*[@name=\"" + contentDesc + "\"])[" + index + "]"
+                : "(//android.view.View[@content-desc=\"" + contentDesc + "\"])[" + index + "]";
         this.clickSmart(xpath, 10);
     }
 
     private WebElement findCardContainer(WebElement base) {
+        // Mismo mapeo que BasePage.findBestCardContainer(): iOS no tiene "android.view.View" —
+        // el contenedor genérico de Compose Multiplatform en XCUITest es XCUIElementTypeOther.
+        String view = isIOS() ? "XCUIElementTypeOther" : "android.view.View";
         try {
             return base.findElement(By.xpath("./ancestor::*[@clickable='true'][1]"));
         } catch (Exception var5) {
             try {
-                return base.findElement(By.xpath("./ancestor::android.view.View[2]"));
+                return base.findElement(By.xpath("./ancestor::" + view + "[2]"));
             } catch (Exception var4) {
                 try {
-                    return base.findElement(By.xpath("./ancestor::android.view.View[3]"));
+                    return base.findElement(By.xpath("./ancestor::" + view + "[3]"));
                 } catch (Exception var3) {
                     return base;
                 }
@@ -1620,6 +1747,19 @@ public class SelectorPage extends BasePage {
             this.takeScreenshot();
         } catch (Exception var5) {
             throw new RuntimeException("No se pudo interactuar con el elemento (click y tap fallaron). XPath: " + xpath + "\nPageSource:\n" + this.driver.getPageSource(), var5);
+        }
+    }
+
+    private void fallbackTap(PlatformLocator locator) {
+        try {
+            WebElement el = this.waits.waitClickable(locator.resolve(isIOS()));
+            int cx = el.getLocation().getX() + el.getSize().getWidth() / 2;
+            int cy = el.getLocation().getY() + el.getSize().getHeight() / 2;
+            this.w3cTap(cx, cy, 150);
+            this.takeScreenshot();
+        } catch (Exception var5) {
+            throw new RuntimeException("No se pudo interactuar con el elemento (click y tap fallaron). Locator: "
+                    + locator + "\nPageSource:\n" + this.driver.getPageSource(), var5);
         }
     }
 

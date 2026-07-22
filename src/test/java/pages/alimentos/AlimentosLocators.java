@@ -1,11 +1,22 @@
 package pages.alimentos;
 
 import org.openqa.selenium.By;
+import pages.common.PlatformLocator;
 
 /**
  * Locators centralizados para todas las pantallas de Alimentos.
  * Fusiona el contenido de LocatorsAlimentos (deprecada) en esta clase canónica.
  * Usa By directamente para evitar envolver con By.xpath() en los tests.
+ *
+ * NOTA-MIGRACION (auditoría multiplataforma): de todas las constantes de este
+ * archivo, SOLO BTN_REGRESARMENU, BTN_ALIMENTOS_ICON, BTN_GRANDE_CALIENTE,
+ * TXT_TE_CALIENTE_CARRITO y TXT_TE_VARIANTE_CARRITO se usan realmente en el
+ * proyecto (vía page.validarElementoVisible(...) en los tests Menu*.java y en
+ * flujos/AlimentosFlujo.java) — se migraron a PlatformLocator. El resto de las
+ * constantes de este archivo (BTN_PERSONALIZAR, BTN_SIGUIENTE, BTN_JUMBO, todas
+ * las de "Bebidas y sabores"/"Snacks y nachos"/"Postres"/"Vinculación VIP", etc.)
+ * NO tiene ninguna referencia en el código — quedaron como By de Android sin
+ * tocar. Se recomienda eliminarlas en una limpieza aparte (ver reporte).
  */
 public final class AlimentosLocators {
 
@@ -17,13 +28,24 @@ public final class AlimentosLocators {
         "//android.view.ViewGroup/android.view.View/android.view.View/android.view.View" +
         "/android.view.View/android.view.View/android.widget.Button");
 
-    public static final By BTN_ALIMENTOS_ICON = By.xpath(
-        "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]" +
-        "/android.view.View/android.view.View[2]/android.view.View[3]");
+    // NOTA-MIGRACION: locator Android 100% posicional, sin ancla de texto — el
+    // equivalente iOS ("Alimentos" por texto visible, misma ancla que
+    // SelectorPage.TAB_ALIMENTOS_BOTTOMNAV) es mejor-esfuerzo sin verificar en
+    // dispositivo real.
+    public static final PlatformLocator BTN_ALIMENTOS_ICON = PlatformLocator.of(
+        By.xpath(
+            "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View[2]" +
+            "/android.view.View/android.view.View[2]/android.view.View[3]"),
+        PlatformLocator.byExactText("Alimentos").ios());
 
-    public static final By BTN_REGRESARMENU = By.xpath(
-        "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View" +
-        "/android.view.View/android.view.View[2]/android.view.View/android.view.View[1]/android.widget.Button");
+    // NOTA-MIGRACION: locator Android 100% posicional, sin ancla de texto — el
+    // equivalente iOS ("último botón de la pantalla") es mejor-esfuerzo, requiere
+    // verificación en dispositivo real (ver PlatformLocator.lastActionButton()).
+    public static final PlatformLocator BTN_REGRESARMENU = PlatformLocator.of(
+        By.xpath(
+            "//androidx.compose.ui.platform.ComposeView/android.view.View/android.view.View" +
+            "/android.view.View/android.view.View[2]/android.view.View/android.view.View[1]/android.widget.Button"),
+        PlatformLocator.lastActionButton().ios());
 
     // ─── Acciones de producto ─────────────────────────────────────────────────
 
@@ -191,7 +213,7 @@ public final class AlimentosLocators {
 
     // ─── Té Caliente ──────────────────────────────────────────────────────────────
 
-    public static final By BTN_GRANDE_CALIENTE      = By.xpath("//android.widget.TextView[@text='Grande Caliente']");
-    public static final By TXT_TE_CALIENTE_CARRITO  = By.xpath("//android.widget.TextView[@text='Té caliente']");
-    public static final By TXT_TE_VARIANTE_CARRITO  = By.xpath("//android.widget.TextView[@text='Grande Caliente. Té Menta Manzanilla.']");
+    public static final PlatformLocator BTN_GRANDE_CALIENTE     = PlatformLocator.byExactText("Grande Caliente");
+    public static final PlatformLocator TXT_TE_CALIENTE_CARRITO = PlatformLocator.byExactText("Té caliente");
+    public static final PlatformLocator TXT_TE_VARIANTE_CARRITO = PlatformLocator.byExactText("Grande Caliente. Té Menta Manzanilla.");
 }
