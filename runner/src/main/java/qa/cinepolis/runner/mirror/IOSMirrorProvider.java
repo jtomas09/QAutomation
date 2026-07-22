@@ -3,6 +3,7 @@ package qa.cinepolis.runner.mirror;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import qa.cinepolis.runner.IOSDeviceRegistry;
+import qa.cinepolis.runner.RunnerAgent;
 import qa.cinepolis.runner.WdaLifecycleOwner;
 import qa.cinepolis.runner.WdaManager;
 
@@ -21,17 +22,22 @@ import java.util.Base64;
  * Formato de salida: PNG (igual que AndroidMirrorProvider), vía el endpoint
  * WDA GET /screenshot, que WDA expone sin necesitar una sesión Appium activa.
  *
- * ── El Mirror NUNCA inicia WDA ───────────────────────────────────────────
- * Este provider ÚNICAMENTE consume un WDA que ya exista (lanzado por una
- * ejecución de test real, vía IosPreflightManager → WdaLifecycleOwner). Si
- * WDA no está corriendo, start() no hace nada más que reflejar el estado
- * neutral — nunca compila, nunca instala, nunca lanza xcodebuild. Esto
- * elimina por completo la condición de carrera Mirror-vs-ejecución real (antes
- * ambos podían terminar compilando WDA para el mismo dispositivo) y garantiza
- * que WdaLifecycleOwner sea la única autoridad que decide cuándo se construye.
+ * ── El Mirror NUNCA construye WDA por su cuenta ──────────────────────────
+ * Este provider jamás invoca xcodebuild, Preflight ni ninguna lógica de
+ * construcción directamente — eso sigue 100% centralizado en
+ * {@link WdaLifecycleOwner} (única autoridad del ciclo de vida). Lo que SÍ
+ * hace es solicitar FORMALMENTE una instancia activa, vía
+ * {@link WdaLifecycleOwner#requestForMirror}: si WDA ya existe, lo reutiliza;
+ * si no existe, WdaLifecycleOwner la construye por el mismo camino que usa
+ * una ejecución de test real (IosPreflightManager → acquire()), con la misma
+ * garantía de "una sola compilación a la vez" (Future compartido por UDID)
+ * que ya tenía antes de este cambio — el Mirror simplemente se une a ella
+ * como un consumidor más, nunca como una segunda autoridad.
  *
- * stop() tampoco detiene WDA nunca — pertenece al ciclo de vida de la
- * ejecución de test (WdaLifecycleOwner.teardown()), no al del Mirror.
+ * stop() libera la referencia del Mirror (WdaLifecycleOwner.release()) — NO
+ * destruye WDA directamente; si una ejecución real todavía lo necesita, la
+ * instancia se mantiene viva. Solo cuando ningún consumidor queda activo
+ * WdaLifecycleOwner ejecuta el teardown real.
  */
 public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
@@ -62,31 +68,42 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
     @Override
     public boolean start(String udid) {
+        // Registra al Mirror como consumidor activo y, solo si hace falta, solicita
+        // formalmente al único propietario del ciclo de vida que consiga WDA — esta
+        // llamada nunca compila, instala ni lanza xcodebuild aquí mismo (ver
+        // WdaLifecycleOwner.requestForMirror(), que dispara el mismo camino que
+        // JobExecutor en un hilo de fondo, sin bloquear esta llamada).
+        WdaLifecycleOwner.requestForMirror(RunnerAgent.getClient(), udid);
+
         if (WdaManager.isWdaRunning()) {
-            // Ya arriba — captureFrame() promoverá a MIRROR_ACTIVE en el primer frame real.
+            // Ya arriba (por esta solicitud o por una ejecución real) —
+            // captureFrame() promoverá a MIRROR_ACTIVE en el primer frame real.
             return true;
         }
 
         if (WdaLifecycleOwner.isTerminalError(udid)) {
-            // El último intento de una EJECUCIÓN REAL falló de forma terminal (ver
-            // WdaLifecycleOwner) — el Mirror solo refleja ese estado, nunca reintenta
-            // por su cuenta. Solo WdaLifecycleOwner.resetForRetry(), disparado por una
-            // acción explícita del usuario (botón "Reintentar"), reabre este camino.
+            // El último intento (de cualquier consumidor) falló de forma terminal —
+            // el Mirror solo refleja ese estado, nunca reintenta por su cuenta. Solo
+            // WdaLifecycleOwner.resetForRetry(), disparado por una acción explícita
+            // del usuario (botón "Reintentar"), reabre este camino.
             return false;
         }
 
-        // WDA no existe todavía y no hay un error terminal que mostrar: el Mirror
-        // publica el estado neutral (nada corriendo) y espera — nunca construye ni
-        // instala nada por su cuenta. Solo una ejecución real (JobExecutor →
-        // IosPreflightManager → WdaLifecycleOwner) puede levantar WDA.
-        WdaEventBus.publish(udid, WdaEventBus.WdaEvent.STOPPED);
-        return false;
+        // requestForMirror() ya disparó (o se unió a) la construcción en segundo
+        // plano — el stream se abre igual; los frames empezarán a llegar cuando
+        // WDA esté listo (ver DeviceStreamServer, que tolera la espera mientras
+        // WdaLifecycleOwner.isBuildInFlight(udid) sea true).
+        return true;
     }
 
     @Override
     public void stop(String udid) {
-        // Intencionalmente NO detiene WDA — pertenece al ciclo de vida de la
-        // ejecución de test (WdaLifecycleOwner.teardown()), no al del mirror.
+        // Libera la referencia del Mirror. Si ninguna ejecución real sigue usando
+        // esta misma instancia, WdaLifecycleOwner la destruye aquí; si sigue en
+        // uso, la mantiene viva. El Mirror nunca decide esto por su cuenta — ver
+        // WdaLifecycleOwner.release().
+        WdaLifecycleOwner.release(
+                WdaLifecycleOwner.Consumer.MIRROR, RunnerAgent.getClient(), "mirror-" + udid, udid);
     }
 
     @Override

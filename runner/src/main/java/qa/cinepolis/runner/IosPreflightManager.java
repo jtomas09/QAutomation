@@ -95,11 +95,15 @@ public class IosPreflightManager {
     // ── Entry point ───────────────────────────────────────────────────────────
 
     public static IosPreflightResult runPreflight(
-            BackendClient client, String executionId, String udid) {
+            BackendClient client, String executionId, String udid, WdaLifecycleOwner.Consumer consumer) {
 
-        // Este método solo lo invoca una ejecución de test real (JobExecutor llama
-        // WdaLaunchCoordinator.beginExecutionSession() antes de invocarlo) — el Mirror
-        // ya NUNCA lo llama (ver IOSMirrorProvider: solo consume WDA existente).
+        // Punto único de pre-flight — lo invoca tanto una ejecución de test real
+        // (JobExecutor, consumer=JOB_EXECUTION, tras WdaLaunchCoordinator.beginExecutionSession())
+        // como una solicitud del Mirror (WdaLifecycleOwner.requestForMirror(),
+        // consumer=MIRROR, desde un hilo de fondo — ver esa clase). Ambos caminos
+        // terminan en el mismo WdaLifecycleOwner.acquire() con su Future compartido
+        // por UDID: si ya hay un intento en curso (de cualquiera de los dos), el que
+        // llega después se une a él en vez de lanzar una segunda compilación.
 
         // Único punto de publicación de "WDA inicializando" — ver WdaEventBus.
         qa.cinepolis.runner.mirror.WdaEventBus.publish(
@@ -183,11 +187,11 @@ public class IosPreflightManager {
         // 7. WDA verification and pre-start — ver WdaLifecycleOwner, ÚNICA autoridad
         // del Runner para construir/iniciar/verificar/detener WDA. wdaCached ya no
         // decide SI se construye — solo si se intenta primero el camino rápido antes
-        // de caer al build completo. Si otro llamador (p.ej. el Mirror on-demand) ya
+        // de caer al build completo. Si otro llamador (ejecución real o el Mirror) ya
         // tiene un intento en curso para este mismo UDID, esta llamada se une a él en
         // vez de disparar una segunda compilación.
         WdaLifecycleOwner.Result wdaResult = WdaLifecycleOwner.acquire(
-                client, executionId, udid, teamId, wdaBundleId, wdaCached);
+                consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
         boolean wdaReady = wdaResult.ready;
 
         // Invalidate cache only when a real WDA launch failure occurred:

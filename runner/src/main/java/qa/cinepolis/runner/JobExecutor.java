@@ -647,7 +647,7 @@ public class JobExecutor {
                 // este método (catch/finally ya lo garantizan).
                 WdaLaunchCoordinator.beginExecutionSession();
                 iosResult = IosPreflightManager.runPreflight(
-                        client, job.executionId, receivedUdid);
+                        client, job.executionId, receivedUdid, WdaLifecycleOwner.Consumer.JOB_EXECUTION);
             }
             checkAppiumServer(job.executionId);
 

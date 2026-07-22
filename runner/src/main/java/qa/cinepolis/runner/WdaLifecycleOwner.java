@@ -3,6 +3,7 @@ package qa.cinepolis.runner;
 import qa.cinepolis.runner.mirror.WdaEventBus;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -61,6 +62,26 @@ public final class WdaLifecycleOwner {
         Result(boolean ready, String reason) { this.ready = ready; this.reason = reason; }
     }
 
+    /**
+     * Quién puede necesitar que WDA se mantenga vivo. NO son autoridades distintas
+     * sobre el ciclo de vida — WdaLifecycleOwner sigue siendo la única — son,
+     * simplemente, las dos razones posibles por las que alguien pide (acquire) o dejar
+     * de necesitar (release) una instancia ya administrada por esta clase.
+     */
+    public enum Consumer { JOB_EXECUTION, MIRROR }
+
+    // UDID → consumidores que ACTUALMENTE necesitan que WDA siga vivo. Mientras este
+    // conjunto no esté vacío, release() nunca destruye la instancia — sin importar
+    // quién pida soltar su propia referencia. Vacío (nunca null, ver registerConsumer)
+    // es la única condición que autoriza el teardown real.
+    private static final Map<String, Set<Consumer>> ACTIVE_CONSUMERS = new ConcurrentHashMap<>();
+
+    // Evita encolar más de un hilo de "solicitud del Mirror" en paralelo para el mismo
+    // UDID (p.ej. reconexiones rápidas del stream mientras la primera solicitud sigue
+    // en curso). NO es una segunda salvaguarda de construcción — esa ya la garantiza
+    // el mapa INFLIGHT de acquire() más abajo; esto solo evita hilos redundantes.
+    private static final Set<String> MIRROR_REQUEST_PENDING = ConcurrentHashMap.newKeySet();
+
     // UDID → intento en curso. Mientras exista una entrada, cualquier llamador
     // nuevo para ESE UDID se une al mismo Future en vez de lanzar un segundo
     // xcodebuild — esto es lo que garantiza "una sola compilación a la vez",
@@ -115,6 +136,96 @@ public final class WdaLifecycleOwner {
                 udid, WdaEventBus.WdaEvent.ERROR, reason);
     }
 
+    // ── Referencias activas (acquire/release por consumidor) ───────────────────
+
+    private static void registerConsumer(String udid, Consumer consumer) {
+        ACTIVE_CONSUMERS.computeIfAbsent(udid, k -> ConcurrentHashMap.newKeySet()).add(consumer);
+    }
+
+    /** @return los consumidores que quedan activos para {@code udid} tras quitar {@code consumer}. */
+    private static Set<Consumer> unregisterConsumer(String udid, Consumer consumer) {
+        Set<Consumer> set = ACTIVE_CONSUMERS.get(udid);
+        if (set == null) return Set.of();
+        set.remove(consumer);
+        return Set.copyOf(set);
+    }
+
+    /**
+     * Único punto donde un consumidor deja de necesitar WDA. Si, tras quitar a
+     * {@code consumer}, queda algún otro consumidor activo (p.ej. el Mirror sigue
+     * transmitiendo mientras termina una ejecución de test), la instancia se
+     * mantiene viva y NO se destruye — solo cuando el conjunto queda vacío se
+     * ejecuta el teardown real (WdaManager.cleanup, vía {@link #teardown}).
+     *
+     * @return true si esta llamada disparó el teardown real; false si la instancia
+     *         se mantuvo viva porque otro consumidor todavía la necesita.
+     */
+    public static boolean release(Consumer consumer, BackendClient client, String executionId, String udid) {
+        Set<Consumer> remaining = unregisterConsumer(udid, consumer);
+        if (!remaining.isEmpty()) {
+            if (client != null) {
+                client.sendLog(executionId, "INFO",
+                        "ℹ️ [WDA] " + consumer + " liberó su referencia — " + remaining
+                        + " sigue usando WebDriverAgent, la instancia se mantiene activa (sin teardown).");
+            }
+            return false;
+        }
+        teardown(client, executionId, udid);
+        return true;
+    }
+
+    /**
+     * Solicitud formal del Mirror para que WDA esté disponible — NUNCA compila,
+     * instala ni lanza xcodebuild por sí misma. Registra al Mirror como consumidor
+     * activo (para que {@link #release} nunca destruya la instancia mientras el
+     * Mirror la esté usando) y, solo si hace falta, dispara EXACTAMENTE el mismo
+     * camino que usa una ejecución de test real ({@link IosPreflightManager#runPreflight})
+     * en un hilo de fondo — porque este método debe devolver de inmediato (lo llama
+     * el handler HTTP del stream, antes de escribir la respuesta).
+     *
+     * No introduce ninguna autoridad nueva: la construcción sigue centralizada en
+     * {@link #acquire}, con su mismo Future compartido por UDID — si una ejecución
+     * real ya está construyendo WDA para este UDID en este instante, esta solicitud
+     * se une a ese mismo intento en vez de lanzar uno nuevo.
+     */
+    public static void requestForMirror(BackendClient client, String udid) {
+        registerConsumer(udid, Consumer.MIRROR);
+
+        if (WdaManager.isWdaRunning()) {
+            return; // nada que solicitar — ya está arriba (por esta razón o por una ejecución real)
+        }
+        if (isTerminalError(udid)) {
+            return; // el Mirror solo refleja el estado; nunca reintenta por su cuenta
+        }
+        if (client == null) {
+            return; // BackendClient aún no disponible (arranque muy temprano del Runner)
+        }
+        if (!MIRROR_REQUEST_PENDING.add(udid)) {
+            return; // ya hay una solicitud del Mirror en curso para este UDID
+        }
+
+        Thread t = new Thread(() -> {
+            try {
+                IosPreflightManager.runPreflight(client, "mirror-" + udid, udid, Consumer.MIRROR);
+            } finally {
+                MIRROR_REQUEST_PENDING.remove(udid);
+            }
+        }, "wda-mirror-request");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * ¿Hay ahora mismo un intento de construir/verificar WDA en curso para este
+     * UDID, sin importar quién lo haya solicitado? Usado por DeviceStreamServer
+     * para decidir si vale la pena seguir esperando frames en vez de cerrar el
+     * stream — antes de esta clase, esa decisión dependía de WdaLaunchCoordinator,
+     * que solo podía reflejar una ejecución real, nunca una solicitud del Mirror.
+     */
+    public static boolean isBuildInFlight(String udid) {
+        return INFLIGHT.containsKey(udid);
+    }
+
     // ── Entrada principal ───────────────────────────────────────────────────────
 
     /**
@@ -124,13 +235,19 @@ public final class WdaLifecycleOwner {
      * en vez de lanzar un segundo xcodebuild. Nunca hay dos compilaciones
      * simultáneas para el mismo dispositivo.
      *
+     * @param consumer  quién pide esta instancia — se registra ANTES de intentar
+     *                  construir, para que un release() concurrente de otro
+     *                  consumidor nunca destruya WDA mientras este intento sigue
+     *                  en curso.
      * @param wdaCached solo decide si se intenta primero el camino rápido
      *                  (test-without-building) antes del build completo —
      *                  nunca decide si se intenta construir.
      * @return resultado con ready=true si WDA quedó confirmado (/status responde).
      */
-    static Result acquire(BackendClient client, String executionId, String udid,
+    static Result acquire(Consumer consumer, BackendClient client, String executionId, String udid,
                           String teamId, String wdaBundleId, boolean wdaCached) {
+        registerConsumer(udid, consumer);
+
         // Fast path: WDA ya está corriendo — no hay nada que construir.
         if (WdaManager.isWdaRunning()) {
             client.sendLog(executionId, "INFO",

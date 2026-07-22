@@ -14,12 +14,17 @@ import java.util.regex.Pattern;
  *
  * Cleanup sequence:
  *  1. Close Appium session via HTTP DELETE (lets Appium stop WDA gracefully)
- *  2. WdaLifecycleOwner.teardown() — única autoridad del ciclo de vida de WDA:
- *     mata Mac-side xcodebuild + descendientes, termina WDA en el dispositivo,
- *     escala SIGTERM→SIGKILL, y verifica contra devicectl (no solo HTTP) que
- *     ya no queda ningún proceso — determinístico, no depende del shutdown hook
- *     de ninguna JVM.
- *  3. Final state verification
+ *  2. WdaLifecycleOwner.release(JOB_EXECUTION, ...) — única autoridad del ciclo de
+ *     vida de WDA: libera la referencia de ESTA ejecución. Si ningún otro
+ *     consumidor (p.ej. el Mirror, viendo el mismo dispositivo desde el
+ *     Dashboard) sigue activo, ejecuta el teardown real — mata Mac-side
+ *     xcodebuild + descendientes, termina WDA en el dispositivo, escala
+ *     SIGTERM→SIGKILL, y verifica contra devicectl (no solo HTTP) que ya no
+ *     queda ningún proceso. Si el Mirror sigue activo, la instancia se
+ *     mantiene viva a propósito — release() lo reporta, nunca lo oculta.
+ *  3. Final state verification (adaptada: si WDA se mantuvo vivo para el
+ *     Mirror, "xcodebuild activo"/"WDA en el dispositivo" dejan de ser
+ *     fallos — son el resultado esperado)
  *  4. Logs structured device state table
  *  5. Logs "✓ Dispositivo liberado correctamente" ONLY when WDA confirmed stopped
  *
@@ -67,18 +72,24 @@ public final class IOSExecutionCleanupManager {
         // 2. Close Appium session via HTTP — Appium stops WDA gracefully on session delete
         closeAppiumSession(client, executionId, appiumHubBase, udid);
 
-        // 3. Kill Mac-side xcodebuild + terminate WDA on device + verify — a través
-        //    de la ÚNICA autoridad de ciclo de vida (WdaLifecycleOwner.teardown()),
-        //    que verifica contra el dispositivo (no solo HTTP) antes de dar por
-        //    cerrado el ciclo, y escala SIGTERM→SIGKILL si hace falta.
-        WdaLifecycleOwner.teardown(client, executionId, udid);
+        // 3. Libera la referencia de ESTA ejecución sobre WDA — a través de la ÚNICA
+        //    autoridad de ciclo de vida (WdaLifecycleOwner.release()). Si el Mirror
+        //    todavía está consumiendo esta misma instancia (usuario viendo el
+        //    dispositivo en el Dashboard), release() NO la destruye — la mantiene
+        //    viva y lo registra. Solo cuando ningún consumidor queda activo se
+        //    ejecuta el teardown real, que verifica contra el dispositivo (no solo
+        //    HTTP) antes de darlo por cerrado, y escala SIGTERM→SIGKILL si hace falta.
+        boolean tornDown = WdaLifecycleOwner.release(
+                WdaLifecycleOwner.Consumer.JOB_EXECUTION, client, executionId, udid);
 
         // Sin error detectado — WDA terminó su ciclo de vida normalmente para esta
-        // ejecución (éxito, o un fallo ajeno a WDA). El Mirror vuelve al estado
-        // neutral (dispositivo detectado) en vez de quedar congelado en
-        // "Iniciando WebDriverAgent…" para siempre — la causa raíz original del
-        // bug que motivó este mecanismo.
-        if (realXcodeError == null) {
+        // ejecución (éxito, o un fallo ajeno a WDA). Si además se destruyó la
+        // instancia (tornDown), el Mirror vuelve al estado neutral (dispositivo
+        // detectado) en vez de quedar congelado en "Iniciando WebDriverAgent…" para
+        // siempre — la causa raíz original del bug que motivó este mecanismo. Si el
+        // Mirror la mantiene viva (tornDown=false), NO se publica STOPPED — sería
+        // falso: WDA sigue arriba y el Mirror lo sabe por su propio captureFrame().
+        if (realXcodeError == null && tornDown) {
             qa.cinepolis.runner.mirror.WdaEventBus.publish(
                     udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.STOPPED);
         }
@@ -89,32 +100,52 @@ public final class IOSExecutionCleanupManager {
         //    ya es en sí mismo idempotente (WdaLifecycleOwner.sweepStaleProcesses()) —
         //    llamar a cleanup() más de una vez para la misma ejecución no tiene ningún
         //    efecto secundario distinto de repetir estas mismas comprobaciones.
+        //
+        //    IMPORTANTE: si tornDown=false (release() detectó que el Mirror sigue
+        //    usando esta misma instancia de WDA), "xcodebuild activo", "WDA vivo en
+        //    el dispositivo" y "Mirror transmitiendo" dejan de ser fallos — son
+        //    exactamente el resultado esperado de mantener la instancia viva a
+        //    propósito. Verificarlos como si debieran estar en cero produciría un
+        //    falso positivo en cada ejecución mientras el Mirror esté abierto.
         boolean allClear = true;
 
-        // 4a. xcodebuild = 0 (system-wide, no solo la referencia que este Runner
-        //     recordaba) — si algo sigue vivo, es un hallazgo real, así que además
-        //     de reportarlo se remedia aquí mismo (mismo mecanismo idempotente que
-        //     el barrido de arranque/apagado).
-        int xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
-        if (xcodebuildLeft > 0) {
-            client.sendLog(executionId, "ERROR",
-                    "❌ [Cleanup] xcodebuild aún activo tras el cleanup (" + xcodebuildLeft
-                    + " proceso(s)) — deteniendo ahora.");
-            WdaLifecycleOwner.sweepStaleProcesses();
-            xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
-            if (xcodebuildLeft > 0) allClear = false;
-        }
+        int xcodebuildLeft;
+        java.util.Set<String> devicePids;
+        boolean deviceClear;
 
-        // 4b. WebDriverAgentRunner / XCTest = 0 en el dispositivo (misma consulta que
-        //     terminateWdaOnDevice ya usa — "xctrunner" cubre el proceso XCTest en el
-        //     dispositivo, no existe un proceso "XCTest" distinto observable vía devicectl).
-        java.util.Set<String> devicePids = WdaManager.queryWdaPidsOnDevice(udid);
-        boolean deviceClear = devicePids.isEmpty();
-        if (!deviceClear) {
-            client.sendLog(executionId, "ERROR",
-                    "❌ [Cleanup] WebDriverAgentRunner/XCTest siguen vivos en el dispositivo tras "
-                    + "el cleanup — PIDs: " + devicePids);
-            allClear = false;
+        if (!tornDown) {
+            client.sendLog(executionId, "INFO",
+                    "ℹ️ [Cleanup] WebDriverAgent se mantiene activo intencionalmente — "
+                    + "el Mirror sigue usando esta instancia (ver WdaLifecycleOwner.release()).");
+            xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
+            devicePids     = WdaManager.queryWdaPidsOnDevice(udid);
+            deviceClear    = true; // no aplica como condición de fallo mientras el Mirror la use
+        } else {
+            // 4a. xcodebuild = 0 (system-wide, no solo la referencia que este Runner
+            //     recordaba) — si algo sigue vivo, es un hallazgo real, así que además
+            //     de reportarlo se remedia aquí mismo (mismo mecanismo idempotente que
+            //     el barrido de arranque/apagado).
+            xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
+            if (xcodebuildLeft > 0) {
+                client.sendLog(executionId, "ERROR",
+                        "❌ [Cleanup] xcodebuild aún activo tras el cleanup (" + xcodebuildLeft
+                        + " proceso(s)) — deteniendo ahora.");
+                WdaLifecycleOwner.sweepStaleProcesses();
+                xcodebuildLeft = WdaLifecycleOwner.countXcodebuildProcesses();
+                if (xcodebuildLeft > 0) allClear = false;
+            }
+
+            // 4b. WebDriverAgentRunner / XCTest = 0 en el dispositivo (misma consulta que
+            //     terminateWdaOnDevice ya usa — "xctrunner" cubre el proceso XCTest en el
+            //     dispositivo, no existe un proceso "XCTest" distinto observable vía devicectl).
+            devicePids  = WdaManager.queryWdaPidsOnDevice(udid);
+            deviceClear = devicePids.isEmpty();
+            if (!deviceClear) {
+                client.sendLog(executionId, "ERROR",
+                        "❌ [Cleanup] WebDriverAgentRunner/XCTest siguen vivos en el dispositivo tras "
+                        + "el cleanup — PIDs: " + devicePids);
+                allClear = false;
+            }
         }
 
         // 4c. Sesión Appium cerrada
@@ -124,12 +155,20 @@ public final class IOSExecutionCleanupManager {
             allClear = false;
         }
 
-        // 4d. Mirror detenido para este UDID
-        boolean mirrorClear = !MirrorService.isStreaming(udid);
-        if (!mirrorClear) {
+        // 4d. Mirror — solo es un fallo si SE DESTRUYÓ la instancia (tornDown=true) y
+        //     aun así el Mirror sigue transmitiendo (contradicción real: estaría
+        //     mostrando frames de un WDA que ya no debería existir). Si tornDown=false,
+        //     el Mirror transmitiendo es precisamente la razón por la que se mantuvo viva.
+        boolean mirrorStreaming = MirrorService.isStreaming(udid);
+        boolean mirrorClear = tornDown ? !mirrorStreaming : true;
+        if (tornDown && mirrorStreaming) {
             client.sendLog(executionId, "ERROR",
-                    "❌ [Cleanup] El Mirror sigue transmitiendo para " + udid + " tras el cleanup.");
+                    "❌ [Cleanup] El Mirror sigue transmitiendo para " + udid + " tras destruir WDA "
+                    + "— estado inconsistente (¿se liberó su referencia sin que release() lo supiera?).");
             allClear = false;
+        } else if (!tornDown && mirrorStreaming) {
+            client.sendLog(executionId, "INFO",
+                    "ℹ️ [Cleanup] Mirror activo para " + udid + " — motivo por el que WDA no se destruyó.");
         }
 
         // 4e. Tunnel CoreDevice — SOLO informativo. Este repo nunca posee ni destruye
@@ -144,12 +183,24 @@ public final class IOSExecutionCleanupManager {
 
         // "Automation Running" no es consultable directamente (Apple no expone esa
         // señal) — su proxy real es "¿sigue vivo el proceso que lo produce en el
-        // dispositivo?", ya verificado en 4b.
-        boolean autoRunningOff = deviceClear;
+        // dispositivo?", ya verificado en 4b (solo aplica cuando tornDown=true).
+        boolean autoRunningOff = tornDown && deviceClear;
 
-        // 5. Reporte estructurado — SIEMPRE visible, nunca omitido.
+        // 5. Reporte estructurado — SIEMPRE visible, nunca omitido. Cuando tornDown=false
+        //    se reporta el estado REAL (sigue activo) con la razón, nunca "0 ✓" falso.
+        String xcodebuildCol = tornDown
+                ? (xcodebuildLeft == 0 ? "0 ✓" : xcodebuildLeft + " ❌")
+                : xcodebuildLeft + " (activo — Mirror en uso, esperado)";
+        String deviceCol = tornDown
+                ? (deviceClear ? "0 ✓" : devicePids.size() + " ❌ " + devicePids)
+                : devicePids.size() + " (activo — Mirror en uso, esperado) " + devicePids;
+        String autoRunningCol = tornDown
+                ? (autoRunningOff ? "OFF ✓" : "ON ❌")
+                : "ON (esperado — Mirror en uso)";
+
         client.sendLog(executionId, allClear ? "INFO" : "ERROR", String.format(
                 "════════ Verificación final de liberación ════════%n"
+                + "  WDA se mantiene vivo : %s%n"
                 + "  xcodebuild (Mac)     : %s%n"
                 + "  WebDriverAgentRunner  : %s%n"
                 + "  XCTest (dispositivo)  : %s%n"
@@ -158,12 +209,13 @@ public final class IOSExecutionCleanupManager {
                 + "  Mirror                : %s%n"
                 + "  Tunnel CoreDevice     : %s (informativo — no gestionado por este Runner)%n"
                 + "═══════════════════════════════════════════════",
-                xcodebuildLeft == 0 ? "0 ✓" : xcodebuildLeft + " ❌",
-                deviceClear ? "0 ✓" : devicePids.size() + " ❌ " + devicePids,
-                deviceClear ? "0 ✓" : devicePids.size() + " ❌ " + devicePids,
-                autoRunningOff ? "OFF ✓" : "ON ❌",
+                tornDown ? "NO" : "SÍ (consumidor activo — ver detalle arriba)",
+                xcodebuildCol,
+                deviceCol,
+                deviceCol,
+                autoRunningCol,
                 appiumOk ? "CERRADA ✓" : "ACTIVA ❌",
-                mirrorClear ? "DETENIDO ✓" : "ACTIVO ❌",
+                mirrorClear ? (tornDown ? "DETENIDO ✓" : "ACTIVO (esperado)") : "ACTIVO ❌",
                 tunnelState));
 
         // 6. Resultado funcional — nunca silencioso: siempre uno de los dos mensajes.

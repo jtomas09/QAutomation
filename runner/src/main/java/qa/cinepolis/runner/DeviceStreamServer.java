@@ -357,28 +357,33 @@ public class DeviceStreamServer {
                             if (++missCount > 12) {
                                 if (deviceGone) break; // dispositivo realmente desconectado (~6s)
 
-                                // Condición objetiva de "WDA no se recuperará dentro de
-                                // esta sesión de stream": WdaLaunchCoordinator.currentOwner()
-                                // (ya existente, sin cambios) es la única fuente de verdad de
-                                // quién tiene el control de lanzamiento de WDA ahora mismo —
-                                // una ejecución real (EXECUTION) o un lanzamiento on-demand de
-                                // este mismo Mirror en curso (MIRROR). provider.start(udid) solo
-                                // se invoca UNA VEZ, al abrir esta conexión (arriba, antes del
-                                // while) — nunca de nuevo dentro de este loop. Si nadie tiene el
-                                // control en este instante, ningún mecanismo de este sistema va
-                                // a revivir WDA para ESTE stream (ni una ejecución en curso lo
-                                // está reconstruyendo, ni el propio Mirror tiene un intento
-                                // on-demand activo) — seguir reintentando sería indefinido por
-                                // definición. Se termina el stream limpiamente (el finally de
-                                // abajo ya libera jpegWriter/provider/MirrorService); una nueva
-                                // petición del cliente abre un Mirror nuevo que vuelve a llamar
-                                // provider.start(udid) y reevalúa desde cero.
-                                if (WdaLaunchCoordinator.currentOwner() == null) break;
+                                // Condición objetiva de "WDA no se recuperará dentro de esta
+                                // sesión de stream": se consulta a WdaLifecycleOwner —única
+                                // autoridad del ciclo de vida— si hay un intento de construir/
+                                // verificar WDA en curso para este UDID AHORA MISMO, sin
+                                // importar quién lo haya solicitado (una ejecución real o una
+                                // solicitud del propio Mirror vía requestForMirror(), que corre
+                                // en su propio hilo de fondo, ver IOSMirrorProvider.start()).
+                                // WdaLaunchCoordinator.isExecutionActive() se conserva además
+                                // porque cubre la ventana entre "ejecución real terminó de
+                                // construir" y "IOSExecutionCleanupManager todavía no llamó
+                                // release()" — un instante en el que INFLIGHT ya está vacío pero
+                                // la ejecución real sigue usando la sesión. provider.start(udid)
+                                // solo se invoca UNA VEZ, al abrir esta conexión (arriba, antes
+                                // del while) — nunca de nuevo dentro de este loop. Si ninguna de
+                                // las dos condiciones se cumple, ningún mecanismo de este sistema
+                                // va a revivir WDA para ESTE stream — seguir reintentando sería
+                                // indefinido por definición. Se termina el stream limpiamente (el
+                                // finally de abajo ya libera jpegWriter/provider/MirrorService);
+                                // una nueva petición del cliente abre un Mirror nuevo que vuelve a
+                                // llamar provider.start(udid) y reevalúa desde cero.
+                                if (WdaLaunchCoordinator.currentOwner() == null
+                                        && !WdaLifecycleOwner.isBuildInFlight(udid)) break;
 
-                                // Alguien tiene el control (ejecución real reconstruyendo WDA, o
-                                // un lanzamiento on-demand de este propio Mirror todavía en
-                                // curso) — WDA puede seguir llegando; se mantiene la misma espera
-                                // ya validada, sin agregar ningún mecanismo nuevo.
+                                // Alguien tiene el control (ejecución real usando WDA, o una
+                                // construcción en curso de cualquier consumidor, incluido el
+                                // propio Mirror) — WDA puede seguir llegando; se mantiene la
+                                // misma espera ya validada, sin agregar ningún mecanismo nuevo.
                                 Thread.sleep(2_000);
                                 continue;
                             }
