@@ -560,6 +560,17 @@ public final class WdaManager {
             if (!teamId.isBlank()) {
                 cmd.add("DEVELOPMENT_TEAM=" + teamId);
                 cmd.add("CODE_SIGN_IDENTITY=Apple Development");
+                // Sin estos dos flags, xcodebuild no autogenera un provisioning profile
+                // para un bundle ID nuevo (uno distinto por UDID, ver generateWdaBundleId())
+                // y falla con "Automatic signing is disabled and unable to generate a
+                // profile" / "No profiles for <bundleId>.xctrunner". Este es el ÚNICO
+                // compilador real de WDA desde 0bdd825 (Appium ya nunca construye WDA por
+                // su cuenta) — antes este mismo problema lo resolvía la capability
+                // allowProvisioningDeviceRegistration de Appium (DriverFactory), que quedó
+                // huérfana al retirar esa ruta. Se agrega aquí, en el único compilador que
+                // sobrevivió, con la misma condición (solo cuando hay teamId real).
+                cmd.add("-allowProvisioningUpdates");
+                cmd.add("-allowProvisioningDeviceRegistration");
             }
             if (!wdaBundleId.isBlank()) {
                 cmd.add("UPDATEDWDABUNDLEID=" + wdaBundleId);
