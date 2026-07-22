@@ -240,6 +240,13 @@ public class IosPreflightManager {
         } else if ("unpaired".equalsIgnoreCase(tunnel.pairingState)) {
             readyForExecution = false;
             notReadyReason    = "Dispositivo no emparejado — desbloquea el iPhone y acepta «Confiar en este Mac»";
+        } else if (!wdaReady) {
+            // wdaResult.reason (no el mapa estático TERMINAL_ERRORS) es la fuente: siempre
+            // viene poblado cuando ready=false, incluyendo el único camino de acquire() que
+            // no pasa por markTerminalError() (future.get() interrumpido esperando un intento
+            // en curso) — evitar ese hueco es la razón de no usar WdaLifecycleOwner.terminalErrorReason() aquí.
+            readyForExecution = false;
+            notReadyReason    = "WDA no confirmado — " + wdaResult.reason;
         } else {
             readyForExecution = true;   // system health confirmed by DependencySelfHealingManager
             notReadyReason    = null;
