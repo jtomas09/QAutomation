@@ -128,6 +128,65 @@ public final class IOSPreSessionRevalidator {
     }
 
     /**
+     * Cuarta validación de unlock, EN VIVO, en el último instante antes de crear
+     * IOSDriver. Reutiliza exactamente el mismo componente que ya usa el Runner para
+     * las otras 3 validaciones de unlock del pipeline (Preflight inicial, Preflight
+     * estabilidad, JobExecutor pre-Gradle) — DeviceScreenLockChecker — pero, al vivir
+     * este método en la JVM de test (proceso Gradle separado, sin dependencia de
+     * compilación sobre el módulo del Runner), lo consulta vía HTTP contra el propio
+     * Runner (GET /api/device/unlock-status), con el mismo patrón exacto ya usado por
+     * {@link #resolveLiveWdaUrl} para webDriverAgentUrl: una sola pregunta síncrona,
+     * sin reintentos ni sleeps, a la única autoridad viva del proceso Runner.
+     *
+     * Cierra la ventana real detectada: iosState.deviceUnlocked (comprobado en
+     * DriverFactory antes de este punto) es la foto tomada en Preflight, minutos/
+     * segundos antes — el arranque de Gradle (JVM sin daemon, JUnit discovery) puede
+     * darle tiempo al auto-lock de iOS de activarse en ese intervalo. Esta consulta
+     * revalida el hecho real, no repite la foto congelada.
+     *
+     * @throws IOSDeviceSynchronizationManager.SyncException con categoría DEVICE_LOCKED
+     *         si el Runner confirma que el dispositivo está bloqueado ahora mismo.
+     *         No lanza nada (no bloquea) si el Runner no responde o no hay puerto de
+     *         control disponible — mismo criterio "optimista" que el resto del
+     *         pipeline usa cuando la consulta en sí falla, nunca cuando SÍ responde
+     *         y confirma bloqueo.
+     */
+    public static void confirmUnlockedOrThrow(String udid, Logger log) {
+        if (udid == null || udid.isBlank()) return;
+
+        String portStr = System.getProperty("runnerControlPort", "");
+        if (portStr.isBlank()) return; // sin autoridad disponible — no bloquea (igual que resolveLiveWdaUrl)
+
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + portStr.trim()
+                            + "/api/device/unlock-status?udid=" + udid))
+                    .timeout(LIVE_WDA_URL_TIMEOUT)
+                    .GET().build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return; // sin respuesta confiable — no bloquea
+
+            boolean unlocked = Boolean.parseBoolean(resp.body().trim());
+            if (unlocked) {
+                log.info("[PreSessionRevalidator] ✅ Unlock confirmado en vivo justo antes de crear IOSDriver.");
+                return;
+            }
+
+            log.error("[PreSessionRevalidator] ❌ Dispositivo bloqueado (revalidación en vivo, "
+                    + "post-Preflight, pre-IOSDriver).");
+            throw new IOSDeviceSynchronizationManager.SyncException(
+                    IOSDeviceSynchronizationManager.SyncCategory.DEVICE_LOCKED,
+                    "[PreSessionRevalidator] Dispositivo bloqueado (revalidación en vivo) — "
+                            + "no se puede crear sesión Appium. Desbloquea el iPhone.",
+                    "Desbloquea el iPhone e inicia la ejecución nuevamente desde el Dashboard.");
+        } catch (IOSDeviceSynchronizationManager.SyncException e) {
+            throw e;
+        } catch (Exception e) {
+            log.debug("[PreSessionRevalidator] Consulta viva de unlock falló: {}", e.getMessage());
+        }
+    }
+
+    /**
      * Registra, sin abortar, exactamente qué cambió entre el snapshot del Runner y el
      * estado recién consultado. Formato deliberadamente explícito (antes → después) para
      * que quede evidencia directa en los logs cuando Appium falle más adelante.

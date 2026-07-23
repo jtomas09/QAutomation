@@ -24,7 +24,14 @@ public final class WdaEventBus {
         STARTING,
         /** Proceso arriba; esperando a que /status responda. */
         VERIFYING,
-        /** WDA respondió y produjo al menos un frame real. */
+        /**
+         * WDA confirmado funcional y listo para consumo — publicado por
+         * WdaLifecycleOwner (única autoridad del ciclo de vida) en el instante en que
+         * acquire() confirma ready=true (WDA ya corriendo y reutilizado, o recién
+         * verificado vía /status), y también, de forma redundante y no exclusiva, por
+         * IOSMirrorProvider al capturar un frame real — ambos reportan el MISMO hecho
+         * a través del mismo evento, nunca dos autoridades distintas.
+         */
         ACTIVE,
         /** El intento de levantar WDA falló (TERMINAL) — reason contiene la causa real. */
         ERROR,
@@ -45,7 +52,11 @@ public final class WdaEventBus {
             case BUILDING     -> IOSMirrorStateTracker.markBuilding(udid);
             case STARTING     -> IOSMirrorStateTracker.markStarting(udid);
             case VERIFYING    -> IOSMirrorStateTracker.markVerifying(udid);
-            case ACTIVE       -> IOSMirrorStateTracker.markActive(udid);
+            case ACTIVE       -> {
+                // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+                System.out.println("[WdaEventBus][TEMP] Mirror received ACTIVE — udid=" + udid);
+                IOSMirrorStateTracker.markActive(udid);
+            }
             case ERROR        -> IOSMirrorStateTracker.markError(udid, reason);
             case STOPPED      -> IOSMirrorStateTracker.clear(udid);
         }

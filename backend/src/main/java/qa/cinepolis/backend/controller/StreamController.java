@@ -48,7 +48,8 @@ public class StreamController {
             ExecutionStatus s = exec.getStatus();
             boolean isTerminal = s == ExecutionStatus.COMPLETED || s == ExecutionStatus.PASSED
                     || s == ExecutionStatus.FAILED  || s == ExecutionStatus.SKIPPED
-                    || s == ExecutionStatus.ABORTED;
+                    || s == ExecutionStatus.ABORTED || s == ExecutionStatus.INCOMPLETE
+                    || s == ExecutionStatus.FAILED_FINALIZATION;
             if (isTerminal) {
                 try {
                     emitter.send(SseEmitter.event().name("done").data(json.writeValueAsString(

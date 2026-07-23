@@ -440,6 +440,15 @@ export default function DeviceMirrorPanel({ device }: Props) {
   const online       = streamMounted && !hasOverlay
   const isLandscape = rotation === 90 || rotation === 270
 
+  // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+  const prevHasOverlayRef = useRef(hasOverlay)
+  useEffect(() => {
+    if (prevHasOverlayRef.current && !hasOverlay) {
+      console.log('[DeviceMirrorPanel][TEMP] Overlay removed', { udid, mirrorStatus })
+    }
+    prevHasOverlayRef.current = hasOverlay
+  }, [hasOverlay, udid, mirrorStatus])
+
   // Overlay de ejecución (Fase 3) — solo datos ya existentes en ExecutionRecord,
   // nada nuevo se le pide al Runner ni al backend.
   const execCfg  = execRecord ? EXEC_STATUS_CFG[execRecord.status] : undefined

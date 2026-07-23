@@ -351,6 +351,15 @@ public class DriverFactory {
             if ("local".equals(mode)) {
                 iosState = IOSPreSessionRevalidator.revalidate(iosState, prop("udid", ""), log);
 
+                // Cuarta validación — unlock EN VIVO, justo antes de new IOSDriver(). El
+                // gate de arriba (iosState.deviceUnlocked) solo conoce la foto tomada en
+                // Preflight; el arranque de Gradle (JVM sin daemon, JUnit discovery) puede
+                // darle tiempo al auto-lock de iOS de activarse en ese intervalo. Reutiliza
+                // el mismo DeviceScreenLockChecker que ya usa el Runner (vía HTTP, ver
+                // IOSPreSessionRevalidator.confirmUnlockedOrThrow) — nunca introduce un
+                // mecanismo de detección de unlock nuevo.
+                IOSPreSessionRevalidator.confirmUnlockedOrThrow(prop("udid", ""), log);
+
                 // Única autoridad, única consulta, para las tres capabilities que dependen
                 // de si existe un WDA ya confirmado y alcanzable en ESTE instante —
                 // webDriverAgentUrl, usePrebuiltWDA y skipServerInstallation se deciden
@@ -394,6 +403,9 @@ public class DriverFactory {
                 IOSDriver d = new IOSDriver(hub, options);
                 d.manage().timeouts().implicitlyWait(Duration.ZERO);
                 log.info("[DriverFactory] IOSDriver OK — sessionId={}", d.getSessionId());
+                // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+                log.info("[DriverFactory][TEMP] IOSDriver session created — udid={}, sessionId={}",
+                        prop("udid", ""), d.getSessionId());
                 // WDA built and installed successfully — persist cache so next run skips compilation
                 markWdaBuilt(
                     prop("udid",              ""),

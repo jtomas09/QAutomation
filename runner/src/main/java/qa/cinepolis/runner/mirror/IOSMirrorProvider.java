@@ -93,6 +93,8 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
         // plano — el stream se abre igual; los frames empezarán a llegar cuando
         // WDA esté listo (ver DeviceStreamServer, que tolera la espera mientras
         // WdaLifecycleOwner.isBuildInFlight(udid) sea true).
+        // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+        System.out.println("[IOSMirrorProvider][TEMP] Mirror waiting — udid=" + udid);
         return true;
     }
 

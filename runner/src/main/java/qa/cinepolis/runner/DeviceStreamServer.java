@@ -159,6 +159,38 @@ public class DeviceStreamServer {
             try (OutputStream out = ex.getResponseBody()) { out.write(body); }
         });
 
+        // Autoridad viva de estado de bloqueo — GET /api/device/unlock-status?udid={udid}
+        //
+        // Mismo patrón que /api/wda/url de arriba: expone vía HTTP la MISMA autoridad
+        // que ya existe en este proceso (DeviceScreenLockChecker, ya usada por
+        // IosPreflightManager y JobExecutor) para que IOSPreSessionRevalidator (JVM de
+        // test, proceso separado, sin acceso directo a las clases del Runner) pueda
+        // consultar el estado de unlock REAL en el último instante antes de crear
+        // IOSDriver — sin duplicar ninguna lógica de detección de bloqueo.
+        server.createContext("/api/device/unlock-status", ex -> {
+            addCorsHeaders(ex);
+            if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
+                ex.sendResponseHeaders(204, -1);
+                return;
+            }
+            if (!"GET".equalsIgnoreCase(ex.getRequestMethod())) {
+                sendText(ex, 405, "Method Not Allowed");
+                return;
+            }
+            String query = ex.getRequestURI().getQuery();
+            String udid = "";
+            if (query != null) {
+                for (String param : query.split("&")) {
+                    if (param.startsWith("udid=")) {
+                        udid = java.net.URLDecoder.decode(param.substring(5), StandardCharsets.UTF_8);
+                        break;
+                    }
+                }
+            }
+            DeviceScreenLockChecker.LockState state = DeviceScreenLockChecker.check(udid);
+            sendText(ex, 200, Boolean.toString(state.unlocked));
+        });
+
         // Recording engine endpoints
         server.createContext("/api/recording/start",   new RecordingStartHandler());
         server.createContext("/api/recording/stop/",   new RecordingStopHandler());

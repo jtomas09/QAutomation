@@ -184,6 +184,15 @@ public class ExecutionService {
             e.setEndTime(java.time.Instant.now());
             if (e.getDeviceUdid() != null) deviceStore.releaseDevice(e.getDeviceUdid());
             sse.broadcast(executionId, "status", Map.of("status", "FAILED_FINALIZATION"));
+            // Sin este "done" (mismo mecanismo/forma que complete()), el frontend nunca
+            // abandona 'running': solo reacciona a "status" para FINALIZING/ABORTING, y
+            // sse.complete() cerraba el emitter en silencio antes de que llegara esta línea.
+            sse.broadcast(executionId, "done", Map.of(
+                    "passed",  e.getPassed(),
+                    "failed",  e.getFailed(),
+                    "skipped", e.getSkipped(),
+                    "total",   e.getTotal()
+            ));
             sse.complete(executionId);
         });
     }

@@ -253,6 +253,9 @@ public final class WdaLifecycleOwner {
             client.sendLog(executionId, "INFO",
                     "✅ [WDA] WebDriverAgent ya está activo — reutilizando, sin reconstruir.");
             resetForRetry(udid);
+            // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+            System.out.println("[WdaLifecycleOwner][TEMP] WDA acquired (cached/reused) — udid=" + udid);
+            publishActive(udid, "reutilizado");
             return new Result(true, null);
         }
 
@@ -373,7 +376,27 @@ public final class WdaLifecycleOwner {
 
         client.sendLog(executionId, "INFO", "✅ [WDA] WebDriverAgent listo.");
         resetForRetry(udid);
+        // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+        System.out.println("[WdaLifecycleOwner][TEMP] WDA verified — udid=" + udid);
+        publishActive(udid, "verificado vía /status");
         return new Result(true, null);
+    }
+
+    /**
+     * Único punto donde WdaLifecycleOwner (única autoridad del ciclo de vida) informa
+     * al Mirror que WDA quedó confirmado funcional — nunca porque {@link #acquire}
+     * simplemente retornó (eso también ocurre cuando ready=false), sino solo en los
+     * dos puntos de este archivo donde ready=true fue realmente determinado: reuso de
+     * una instancia ya corriendo, o verificación real vía WdaManager.waitForWdaReady()
+     * (/status respondió). Antes de este cambio, IOSMirrorProvider.captureFrame() era
+     * el ÚNICO camino capaz de publicar ACTIVE — ahora deja de serlo, sin perder su
+     * propio publish() (ver IOSMirrorProvider): ambos reportan el mismo hecho a través
+     * del mismo WdaEventBus, no hay una segunda autoridad.
+     */
+    private static void publishActive(String udid, String context) {
+        // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
+        System.out.println("[WdaLifecycleOwner][TEMP] Publishing ACTIVE — udid=" + udid + " (" + context + ")");
+        WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ACTIVE);
     }
 
     // ── Detención / limpieza — único punto de entrada ──────────────────────────
