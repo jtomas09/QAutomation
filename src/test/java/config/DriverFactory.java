@@ -708,7 +708,7 @@ public class DriverFactory {
         log.info("[DriverFactory][iOS] updatedWDABundleId: {}", wdaBundleId.isBlank() ? "(auto)"           : wdaBundleId);
         log.info("[DriverFactory][iOS] wdaPrebuilt       : {}", prop("wdaPrebuilt", "false"));
         log.info("[DriverFactory][iOS] webDriverAgentUrl : {} (snapshot Preflight — se revalida en vivo antes de IOSDriver)",
-                wdaUrl.isBlank() ? "(Appium administra WDA)" : wdaUrl);
+                wdaUrl.isBlank() ? "(pendiente de confirmación en vivo — WdaLifecycleOwner es la única autoridad)" : wdaUrl);
         log.info("[DriverFactory][iOS] ════════════════════════════════════════");
 
         return URI.create(finalHub).toURL();
@@ -926,11 +926,13 @@ public class DriverFactory {
      *
      * Runs the full diagnostic (device sync + XCUITest validation + Appium health)
      * but catches SyncException instead of propagating it. The session creation
-     * proceeds regardless — Appium is the final arbiter of whether WDA can start.
+     * proceeds regardless — but WdaLifecycleOwner (Runner), not Appium, remains the
+     * only authority over whether WDA is actually available; if it isn't, session
+     * creation fails later at the WDA-confirmation gate (see attemptCreate()), not here.
      *
      * Used when canAttemptSession()=true but ready=false:
-     * CoreDevice sees the device and it is paired, so Appium has a reasonable
-     * chance of establishing a WDA session even without xctrace confirmation.
+     * CoreDevice sees the device and it is paired, so it's still worth continuing
+     * to the live WDA confirmation instead of aborting on this soft diagnostic alone.
      */
     private static void runIosPreSessionDiagnosticSoft(URL hub, String udid,
                                                         XCUITestOptions options, IOSDeviceState ios) {
@@ -938,7 +940,7 @@ public class DriverFactory {
             runIosPreSessionDiagnostic(hub, udid, options, ios);
         } catch (IOSDeviceSynchronizationManager.SyncException e) {
             log.warn("[DriverFactory][iOS] ⚠️  Sincronización incompleta (categoría={}): {} — "
-                    + "CoreDevice y pairing confirmados; Appium intentará iniciar WDA de todos modos.",
+                    + "CoreDevice y pairing confirmados; se continúa hacia la confirmación en vivo de WDA.",
                     e.category, e.getMessage());
         }
     }

@@ -171,8 +171,8 @@ public class IosPreflightManager {
                 wdaCached = false;
                 client.sendLog(executionId, "INFO",
                         "🔨 [WDA] Recompilación automática — motivo: " + validation.reason + "\n"
-                        + "   DerivedData de WebDriverAgent eliminado. Appium recompilará, "
-                        + "refirmará e reinstalará WDA en la próxima sesión sin intervención manual.");
+                        + "   DerivedData de WebDriverAgent eliminado. El Runner (WdaLifecycleOwner) "
+                        + "recompilará, refirmará e reinstalará WDA en la próxima sesión sin intervención manual.");
             }
         } else {
             wdaBundleId = generateWdaBundleId(udid);
@@ -268,7 +268,7 @@ public class IosPreflightManager {
                 + "   UDID             : " + udid + "  ← appium:udid\n"
                 + "   WDA bundle       : " + wdaBundleId + "\n"
                 + "   WDA caché        : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
-                + "   WDA activo       : " + (wdaReady  ? "sí ✅" : "iniciará con Appium"));
+                + "   WDA activo       : " + (wdaReady  ? "sí ✅" : "❌ FALLÓ — " + wdaResult.reason));
 
         return new IosPreflightResult(
             teamId, iosVersion, wdaBundleId, wdaCached, wdaReady,
