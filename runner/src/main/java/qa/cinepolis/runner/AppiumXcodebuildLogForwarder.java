@@ -157,9 +157,26 @@ public final class AppiumXcodebuildLogForwarder {
      * Línea de fallo real de RemoteXPC (no informativa) — exige tanto la mención de
      * RemoteXPC/port forwarder como una palabra que indique fallo, para no capturar
      * líneas de log benignas que solo mencionen RemoteXPC de paso.
+     *
+     * ── Falso positivo confirmado con evidencia real ──────────────────────────
+     * Appium/XCUITestDriver imprime SIEMPRE, en cada sesión contra un dispositivo
+     * físico, esta línea informativa (no es un fallo — WDA/la sesión funcionan
+     * con normalidad):
+     *   "Failed to create crash reports client: Failed crash reports via
+     *    RemoteXPC for '<udid>' (RemoteXPC is not available for this session).
+     *    Skipping crash logs collection for real devices."
+     * Antes de este fix, esa línea cumplía las dos condiciones de arriba
+     * (menciona "RemoteXPC" + contiene "failed"/"not available") y se reportaba
+     * como si fuera la causa raíz real de un fallo — publicando WdaEvent.ERROR
+     * hacia el Mirror (ver IOSExecutionCleanupManager) después de CADA ejecución,
+     * exitosa o no, dejando el Mirror permanentemente en estado de error. Se
+     * excluye explícitamente por mencionar "crash report(s)"/"crash logs" — el
+     * fallo real de RemoteXPC (confirmado en logs reales, p.ej. "Cannot create
+     * port forwarder via RemoteXPC tunnel...") nunca menciona crash reports.
      */
     private static boolean isRemoteXpcFailureLine(String line) {
         String lower = line.toLowerCase();
+        if (lower.contains("crash report") || lower.contains("crash logs")) return false;
         boolean mentionsRemoteXpc = lower.contains("remotexpc") || lower.contains("port forwarder");
         boolean indicatesFailure  = lower.contains("cannot") || lower.contains("not available")
                                   || lower.contains("error") || lower.contains("fail");
