@@ -162,6 +162,28 @@ public final class WdaLifecycleOwner {
      */
     public static boolean release(Consumer consumer, BackendClient client, String executionId, String udid) {
         Set<Consumer> remaining = unregisterConsumer(udid, consumer);
+
+        // Cuando una ejecución real termina y el ÚNICO consumidor que queda es el
+        // Mirror, el Mirror también suelta su referencia — evidencia real (Fase 18):
+        // el Mirror monta su stream automáticamente en cuanto el Dashboard tiene un
+        // dispositivo seleccionado (ver DeviceMirrorPanel), así que sin esta regla
+        // WDA (y con él la sesión de automatización de iOS, visible como el banner
+        // "Automation Running" en el propio dispositivo) se quedaba adherida
+        // indefinidamente mientras el Dashboard estuviera abierto, aunque el test ya
+        // hubiera terminado o se hubiera abortado. No es un timer ni un poll: se
+        // dispara por el evento real de liberación de JOB_EXECUTION, una sola vez.
+        // El Mirror puede volver a pedir WDA en cualquier momento (requestForMirror()
+        // ya la reconstruye bajo demanda) — esto no le quita esa capacidad, solo deja
+        // de mantenerla viva por defecto cuando ninguna ejecución real la necesita.
+        if (consumer == Consumer.JOB_EXECUTION && remaining.equals(java.util.Set.of(Consumer.MIRROR))) {
+            remaining = unregisterConsumer(udid, Consumer.MIRROR);
+            if (client != null) {
+                client.sendLog(executionId, "INFO",
+                        "ℹ️ [WDA] Ejecución terminada — el Mirror también libera su referencia "
+                        + "(ninguna ejecución real sigue usando WebDriverAgent).");
+            }
+        }
+
         if (!remaining.isEmpty()) {
             if (client != null) {
                 client.sendLog(executionId, "INFO",
