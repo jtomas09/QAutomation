@@ -187,6 +187,37 @@ public final class IOSPreSessionRevalidator {
     }
 
     /**
+     * TEMP INSTRUMENTATION (auditoría de unlock — remover junto con las demás
+     * llamadas [TEMP] tras validar). Solo observa y registra — nunca aborta. Usa la
+     * misma consulta HTTP que {@link #confirmUnlockedOrThrow} (Runner → GET
+     * /api/device/unlock-status → DeviceScreenLockChecker), para localizar en qué
+     * instante exacto, entre Preflight y el primer comando Appium, el dispositivo
+     * cambia de estado.
+     */
+    public static void logUnlockStatus(String label, String udid, Logger log) {
+        if (udid == null || udid.isBlank()) return;
+        String portStr = System.getProperty("runnerControlPort", "");
+        if (portStr.isBlank()) return;
+
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + portStr.trim()
+                            + "/api/device/unlock-status?udid=" + udid))
+                    .timeout(LIVE_WDA_URL_TIMEOUT)
+                    .GET().build();
+            HttpResponse<String> resp = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.info("[UNLOCK][TEMP] Unlock status {}: ? (Runner no respondió)", label);
+                return;
+            }
+            boolean unlocked = Boolean.parseBoolean(resp.body().trim());
+            log.info("[UNLOCK][TEMP] Unlock status {}: {}", label, unlocked ? "YES" : "NO");
+        } catch (Exception e) {
+            log.info("[UNLOCK][TEMP] Unlock status {}: ? (consulta falló: {})", label, e.getMessage());
+        }
+    }
+
+    /**
      * Registra, sin abortar, exactamente qué cambió entre el snapshot del Runner y el
      * estado recién consultado. Formato deliberadamente explícito (antes → después) para
      * que quede evidencia directa en los logs cuando Appium falle más adelante.

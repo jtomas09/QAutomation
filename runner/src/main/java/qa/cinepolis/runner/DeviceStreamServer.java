@@ -334,6 +334,10 @@ public class DeviceStreamServer {
                     return;
                 }
 
+                // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
+                System.out.println("[MirrorStream][TEMP] Mirror connection accepted — udid=" + udid
+                        + " | client: " + ex.getRemoteAddress());
+
                 DeviceMirrorProvider provider = resolveProvider(udid);
                 if (provider != null) provider.start(udid);
 
@@ -347,6 +351,9 @@ public class DeviceStreamServer {
                 ex.getResponseHeaders().set("Connection",         "keep-alive");
                 ex.getResponseHeaders().set("X-Accel-Buffering", "no"); // disable nginx buffering
                 ex.sendResponseHeaders(200, 0);                         // 0 = streaming / unknown length
+
+                // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
+                System.out.println("[MirrorStream][TEMP] MJPEG endpoint initialized — udid=" + udid);
 
                 MirrorService.registerStream(udid);
                 // Fase 6 — optimización de latencia: un único ImageWriter JPEG vive
@@ -362,10 +369,18 @@ public class DeviceStreamServer {
                     }
                     final byte[] crLf = "\r\n".getBytes(StandardCharsets.UTF_8);
                     int missCount = 0;
+                    // TEMP (auditoría Mirror — remover tras validar Problema 1): solo
+                    // instrumenta los primeros frames de cada conexión, para localizar
+                    // en cuál etapa (captura/codificación/envío) se rompe el flujo, sin
+                    // inundar el log durante el resto de la sesión de streaming.
+                    int tempFrameCount = 0;
 
                     while (!Thread.currentThread().isInterrupted()) {
                         long t0 = System.currentTimeMillis();
 
+                        if (tempFrameCount < 3) {
+                            System.out.println("[MirrorStream][TEMP] CaptureFrame() invoked — udid=" + udid);
+                        }
                         byte[] png = provider != null ? provider.captureFrame(udid) : null;
                         if (png == null) {
                             // Fase 6 — optimización de latencia: antes se llamaba a
@@ -423,9 +438,18 @@ public class DeviceStreamServer {
                             continue;
                         }
                         missCount = 0;
+                        tempFrameCount++;
+                        if (tempFrameCount <= 3) {
+                            System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
+                                    + " captured — udid=" + udid + " (" + png.length + " bytes PNG)");
+                        }
 
                         byte[] jpeg = pngToJpeg(png, 0.78f, jpegWriter);
                         if (jpeg == null) continue;
+                        if (tempFrameCount <= 3) {
+                            System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
+                                    + " encoded — udid=" + udid + " (" + jpeg.length + " bytes JPEG)");
+                        }
 
                         byte[] header = ("--" + BOUNDARY + "\r\n" +
                             "Content-Type: image/jpeg\r\n" +
@@ -436,6 +460,10 @@ public class DeviceStreamServer {
                         out.write(jpeg);
                         out.write(crLf);
                         out.flush();
+                        if (tempFrameCount <= 3) {
+                            System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
+                                    + " sent — udid=" + udid);
+                        }
 
                         long elapsed = System.currentTimeMillis() - t0;
                         long sleep   = FRAME_MS - elapsed;

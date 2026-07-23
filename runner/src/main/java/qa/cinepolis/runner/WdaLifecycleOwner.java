@@ -192,6 +192,18 @@ public final class WdaLifecycleOwner {
         registerConsumer(udid, Consumer.MIRROR);
 
         if (WdaManager.isWdaRunning()) {
+            // Mismo fast path que acquire() (arriba) — evidencia real (Fase 16): sin
+            // estas dos líneas, si SOLO el Mirror pide WDA (ninguna ejecución real
+            // vuelve a llamar acquire() después), un TERMINAL_ERROR de una ejecución
+            // anterior quedaba parado para siempre aunque WDA ya estuviera sano de
+            // nuevo — confirmado contra un dispositivo real: el stream MJPEG entregaba
+            // frames JPEG válidos mientras /api/device/status seguía reportando
+            // mirrorPhase=ERROR indefinidamente, porque nada volvía a limpiar
+            // TERMINAL_ERRORS ni a publicar ACTIVE por este camino.
+            resetForRetry(udid);
+            // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
+            System.out.println("[WdaLifecycleOwner][TEMP] WDA acquired (cached/reused, vía Mirror) — udid=" + udid);
+            publishActive(udid, "reutilizado (Mirror)");
             return; // nada que solicitar — ya está arriba (por esta razón o por una ejecución real)
         }
         if (isTerminalError(udid)) {
@@ -302,6 +314,9 @@ public final class WdaLifecycleOwner {
                     : "🔨 [WDA] Compilando WebDriverAgent desde cero para " + udid
                       + " (primera vez en este dispositivo — puede tardar varios minutos)...");
 
+        // TEMP LOG (auditoría Unlock — remover tras validar Problema de unlock)
+        logUnlockStatus(udid, "before xcodebuild");
+
         String projectPath = WdaManager.findWdaProjectPath();
 
         WdaManager.BuildOutcome outcome = wdaCached
@@ -327,6 +342,9 @@ public final class WdaLifecycleOwner {
         }
 
         LAST_LAUNCH_ATTEMPTED.put(udid, true);
+
+        // TEMP LOG (auditoría Unlock — remover tras validar Problema de unlock)
+        logUnlockStatus(udid, "after xcodebuild");
 
         WdaEventBus.publish(udid, WdaEventBus.WdaEvent.STARTING);
         client.sendTechLog(executionId,
@@ -378,6 +396,8 @@ public final class WdaLifecycleOwner {
         resetForRetry(udid);
         // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
         System.out.println("[WdaLifecycleOwner][TEMP] WDA verified — udid=" + udid);
+        // TEMP LOG (auditoría Unlock — remover tras validar Problema de unlock)
+        logUnlockStatus(udid, "after WDA installation");
         publishActive(udid, "verificado vía /status");
         return new Result(true, null);
     }
@@ -393,6 +413,19 @@ public final class WdaLifecycleOwner {
      * propio publish() (ver IOSMirrorProvider): ambos reportan el mismo hecho a través
      * del mismo WdaEventBus, no hay una segunda autoridad.
      */
+    /**
+     * TEMP INSTRUMENTATION (auditoría de unlock — remover junto con las demás
+     * llamadas [TEMP] tras validar). Reutiliza DeviceScreenLockChecker, la misma
+     * autoridad ya usada por IosPreflightManager y JobExecutor — no agrega ninguna
+     * lógica de detección nueva, solo registra el estado en un punto adicional del
+     * ciclo de vida de WDA para localizar exactamente cuándo cambia.
+     */
+    private static void logUnlockStatus(String udid, String label) {
+        DeviceScreenLockChecker.LockState state = DeviceScreenLockChecker.check(udid);
+        System.out.println("[UNLOCK][TEMP] Unlock status " + label + ": "
+                + (state.unlocked ? "YES" : "NO") + " (" + state.method + ")");
+    }
+
     private static void publishActive(String udid, String context) {
         // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
         System.out.println("[WdaLifecycleOwner][TEMP] Publishing ACTIVE — udid=" + udid + " (" + context + ")");

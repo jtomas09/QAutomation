@@ -269,6 +269,9 @@ export default function DeviceMirrorPanel({ device }: Props) {
   }, [])
 
   const handleLoad = useCallback(() => {
+    // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
+    console.log('[Mirror][TEMP] Frame received by frontend', { udid })
+    console.log('[Mirror][TEMP] Image rendered', { udid })
     lastFrameAtRef.current = Date.now()
     setImgError(false)
     if (reconnectingRef.current) {
@@ -283,6 +286,8 @@ export default function DeviceMirrorPanel({ device }: Props) {
   }, [])
 
   const handleError = useCallback(() => {
+    // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
+    console.log('[Mirror][TEMP] Frontend <img> onError — nunca recibió frame o la conexión se cortó', { udid })
     setImgError(true)
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
     retryTimerRef.current = setTimeout(() => {

@@ -75,6 +75,9 @@ public final class IOSMirrorStateTracker {
     static void markActive(String udid) {
         Snapshot current = STATES.get(udid);
         if (current != null && current.phase() == Phase.MIRROR_ACTIVE) return;
+        // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
+        System.out.println("[IOSMirrorStateTracker][TEMP] markActive — udid=" + udid
+                + " (fase anterior: " + (current != null ? current.phase() : "ninguna") + ")");
         STATES.put(udid, new Snapshot(Phase.MIRROR_ACTIVE, null, System.currentTimeMillis()));
     }
 
@@ -100,6 +103,15 @@ public final class IOSMirrorStateTracker {
             // WdaManager) — cualquier fase de WDA/Mirror rastreada queda obsoleta;
             // se limpia para que una futura reconexión arranque en DEVICE_DETECTED
             // en vez de heredar un ERROR/INITIALIZING_WDA de la sesión anterior.
+            Snapshot before = STATES.get(udid);
+            if (before != null && before.phase() == Phase.MIRROR_ACTIVE) {
+                // TEMP LOG (auditoría Mirror — remover tras validar Problema 1): si esto
+                // aparece mientras el dispositivo sigue realmente conectado, "connected"
+                // (IOSDeviceRegistry) tuvo un falso negativo transitorio que está
+                // borrando un estado ACTIVE real.
+                System.out.println("[IOSMirrorStateTracker][TEMP] get() con connected=false borró "
+                        + "MIRROR_ACTIVE — udid=" + udid);
+            }
             clear(udid);
             return new Snapshot(Phase.DEVICE_DISCONNECTED, null, System.currentTimeMillis());
         }

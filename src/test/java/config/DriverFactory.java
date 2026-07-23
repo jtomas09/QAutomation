@@ -399,9 +399,22 @@ public class DriverFactory {
                 }
             }
 
+            // TEMP LOG (auditoría Unlock — remover tras validar Problema de unlock)
+            IOSPreSessionRevalidator.logUnlockStatus("before IOSDriver", prop("udid", ""), log);
+
             try {
                 IOSDriver d = new IOSDriver(hub, options);
+
+                // TEMP LOG (auditoría Unlock — remover tras validar Problema de unlock)
+                IOSPreSessionRevalidator.logUnlockStatus("after IOSDriver", prop("udid", ""), log);
+
                 d.manage().timeouts().implicitlyWait(Duration.ZERO);
+
+                // TEMP LOG (auditoría Unlock — remover tras validar Problema de unlock)
+                // "Primer comando Appium" — implicitlyWait() de arriba ya viajó al
+                // dispositivo vía el protocolo WebDriver; este es el punto correcto.
+                IOSPreSessionRevalidator.logUnlockStatus("after first Appium command", prop("udid", ""), log);
+
                 log.info("[DriverFactory] IOSDriver OK — sessionId={}", d.getSessionId());
                 // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
                 log.info("[DriverFactory][TEMP] IOSDriver session created — udid={}, sessionId={}",
