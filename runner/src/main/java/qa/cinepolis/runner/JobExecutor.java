@@ -512,36 +512,17 @@ public class JobExecutor {
      *  2. Windows: taskkill /F /T /PID para matar subárboles que Java puede perder
      *     (gradlew.bat → cmd.exe → java.exe → java.exe (test fork))
      */
+    /**
+     * Mata el árbol de procesos de forma confiable en Windows y Linux/Mac — delega
+     * en {@link ProcessRegistry#killProcessTree}, la misma utilidad compartida que
+     * ahora usa el registro unificado para git y Gradle (ver ExecutionContext),
+     * para que este camino (shutdown-hook vía killActiveProcess()) cancele el
+     * proceso exactamente igual que un abort en cualquier otra fase.
+     */
     private void forceKillProcessTree(Process process) {
-        long pid = process.pid();
-        boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
-
-        System.out.println("[PROCESS FLOW] forceKillProcessTree() ENTRY — pid=" + pid
+        System.out.println("[PROCESS FLOW] forceKillProcessTree() ENTRY — pid=" + process.pid()
                 + " isAlive=" + process.isAlive());
-
-        // Paso 1: Java ProcessHandle (funciona en todos los SO)
-        try {
-            process.toHandle().descendants().forEach(h -> {
-                System.out.println("[PROCESS FLOW] Runner llama destroyForcibly() sobre descendiente pid=" + h.pid());
-                try { h.destroyForcibly(); } catch (Exception ignored) {}
-            });
-            System.out.println("[PROCESS FLOW] Runner llama destroyForcibly() sobre proceso raíz Gradle pid=" + pid);
-            process.destroyForcibly();
-        } catch (Exception e) {
-            System.err.println("[Executor] Error matando proceso (Java): " + e.getMessage());
-        }
-
-        // Paso 2: Windows taskkill como refuerzo (mata el árbol completo incluyendo cmd.exe wrappers)
-        if (isWindows) {
-            try {
-                new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(pid))
-                    .redirectErrorStream(true)
-                    .start()
-                    .waitFor(5, TimeUnit.SECONDS);
-            } catch (Exception e) {
-                System.err.println("[Executor] taskkill falló: " + e.getMessage());
-            }
-        }
+        ProcessRegistry.killProcessTree(process);
     }
 
     public void execute(JobDto job) {
@@ -572,6 +553,43 @@ public class JobExecutor {
         // se envía desde el catch/finally (fuera del bloque try donde se calcula su valor
         // real); -1 hasta que resolveExpectedCountFromCommand() lo determine más abajo.
         final AtomicInteger expectedCountHolder = new AtomicInteger(-1);
+
+        // ── Ciclo de vida unificado de procesos largos (Fase 20) ────────────────
+        // Causa raíz real: el abort solo vigilaba a Gradle — un abort durante
+        // git clone/fetch o durante el Preflight de WDA no detenía nada, dejando
+        // el proceso huérfano mientras el backend ya marcaba ABORTED (confirmado
+        // en vivo). Este watcher arranca ANTES de tocar el workspace, y cubre por
+        // igual git, WDA y Gradle a través de ExecutionContext/ProcessRegistry —
+        // ver sus Javadocs. Se repite cada 1s MIENTRAS siga marcado como abortado
+        // (no solo una vez) para alcanzar también un reintento posterior de
+        // WorkspaceManager (p.ej. un segundo intento de clone) sin necesitar que
+        // WorkspaceManager sepa nada de abort — su lógica de decisión no se toca.
+        final ExecutionContext execCtx = new ExecutionContext(job.executionId, client);
+        System.out.println("[ExecutionContext][TEMP] Execution created — executionId=" + job.executionId);
+        final AtomicBoolean abortAnnounced = new AtomicBoolean(false);
+        Thread execAbortWatcher = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try { Thread.sleep(1_000); } catch (InterruptedException ie) { return; }
+                if (!execCtx.isAborted()) continue;
+
+                if (abortAnnounced.compareAndSet(false, true)) {
+                    wasAborted.set(true);
+                    System.out.println("[ExecutionContext][TEMP] Abort received — executionId=" + job.executionId);
+                    client.sendLog(job.executionId, "WARN", "🛑 Aborto recibido — deteniendo proceso activo...");
+                    try { client.confirmAbort(job.executionId); } catch (Exception ignored) {}
+                    resultSent.set(true);
+                    client.sendLog(job.executionId, "WARN", "⛔ Ejecución abortada correctamente.");
+                }
+                // Repetido en cada tick: cancela lo que esté registrado AHORA MISMO —
+                // git, Gradle (kill directo) o WDA (release de consumidor, registrado
+                // como cancelable más abajo) — sin importar la fase. Único mecanismo
+                // para los tres, ver ProcessRegistry.killAll().
+                System.out.println("[ExecutionContext][TEMP] Killing process tree — executionId=" + job.executionId);
+                execCtx.killAll();
+            }
+        }, "exec-abort-watcher-" + job.executionId);
+        execAbortWatcher.setDaemon(true);
+        execAbortWatcher.start();
 
         try {
             client.sendLog(job.executionId, "INFO",
@@ -617,8 +635,14 @@ public class JobExecutor {
                     wsDir, runnerCfg.repositoryUrl, runnerCfg.branch, client);
             File projectDir = wsMgr.ensureWorkspace(job.executionId);
             if (projectDir == null) {
-                client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                resultSent.set(true);
+                // Si el fallo fue por un abort (el execAbortWatcher ya mató el proceso
+                // git y llamó confirmAbort()), no hay que enviar un resultado más —
+                // sería un reporte duplicado/contradictorio sobre una ejecución que el
+                // backend ya marcó ABORTED.
+                if (!wasAborted.get()) {
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
+                }
                 return;
             }
             String workDir = projectDir.getAbsolutePath();
@@ -646,8 +670,19 @@ public class JobExecutor {
                 // IOSExecutionCleanupManager.cleanup(), llamado siempre al final de
                 // este método (catch/finally ya lo garantizan).
                 WdaLaunchCoordinator.beginExecutionSession();
-                iosResult = IosPreflightManager.runPreflight(
-                        client, job.executionId, receivedUdid, WdaLifecycleOwner.Consumer.JOB_EXECUTION);
+                // Registrado igual que git/Gradle — ver ExecutionContext. Cancelar aquí
+                // significa "libera tu referencia de consumidor" (WdaLifecycleOwner ya
+                // decide si eso apaga WDA de verdad o lo mantiene vivo para el Mirror),
+                // no un kill directo del proceso xcodebuild.
+                String wdaToken = execCtx.registerCancelable("wda-preflight", () ->
+                        WdaLifecycleOwner.release(WdaLifecycleOwner.Consumer.JOB_EXECUTION,
+                                client, job.executionId, receivedUdid));
+                try {
+                    iosResult = IosPreflightManager.runPreflight(
+                            client, job.executionId, receivedUdid, WdaLifecycleOwner.Consumer.JOB_EXECUTION);
+                } finally {
+                    execCtx.unregister(wdaToken);
+                }
             }
             checkAppiumServer(job.executionId);
 
@@ -877,31 +912,13 @@ public class JobExecutor {
 
             Process process = pb.start();
             activeProcess = process;
+            // Registrado en el mismo ProcessRegistry que git y WDA — ver ExecutionContext.
+            // El execAbortWatcher creado al inicio de execute() ya vigila TODA la
+            // ejecución, no solo esta fase; ya no hace falta un abort-watcher aparte
+            // aquí ni un cast especial para Gradle.
+            String gradleToken = execCtx.registerProcess("gradle", process);
             System.out.println("[PROCESS FLOW] Proceso Gradle iniciado — pid=" + process.pid()
                     + " | executionId=" + job.executionId);
-
-            // Abort watcher — polls backend every 1s; kills Gradle tree si ABORTING/ABORTED
-            Thread abortWatcher = new Thread(() -> {
-                while (process.isAlive()) {
-                    try { Thread.sleep(1_000); } catch (InterruptedException e) { return; }
-                    if (client.isJobAborted(job.executionId)) {
-                        wasAborted.set(true);
-                        client.sendLog(job.executionId, "WARN",
-                            "🛑 Aborto recibido — deteniendo proceso Gradle...");
-                        System.out.println("\n[Executor] Aborto detectado — terminando árbol de procesos Gradle");
-                        System.out.println("[PROCESS FLOW] Runner ejecuta abortRun() (abort-watcher) — "
-                                + "executionId=" + job.executionId + " | pid=" + process.pid());
-                        forceKillProcessTree(process);
-                        // Confirmar al backend que el proceso fue terminado (marca ABORTED + libera device)
-                        client.confirmAbort(job.executionId);
-                        resultSent.set(true); // confirmAbort finalizes the execution — do NOT call sendResult()
-                        client.sendLog(job.executionId, "WARN", "⛔ Ejecución abortada correctamente.");
-                        return;
-                    }
-                }
-            }, "abort-watcher-" + job.executionId);
-            abortWatcher.setDaemon(true);
-            abortWatcher.start();
 
             AtomicInteger streamIncidents = new AtomicInteger(0);
             consumeProcessOutputResilient(job, process, passed, failed, skipped, testCases,
@@ -967,7 +984,7 @@ public class JobExecutor {
                     }
                 }
                 activeProcess = null;
-                abortWatcher.interrupt();
+                execCtx.unregister(gradleToken);
                 // Restaurar el flag para que el bucle job-poll detecte la señal
                 // de parada y salga limpiamente tras el retorno de execute().
                 if (wasInterrupted) Thread.currentThread().interrupt();
@@ -1138,13 +1155,24 @@ public class JobExecutor {
             System.out.println("[Executor] [TIMING] allure (Runner CLI): " + (System.currentTimeMillis() - t4) + " ms");
 
             // [POST-5] Envío de resultado final al Backend (obligatorio)
-            long t5 = System.currentTimeMillis();
-            System.out.println("[Executor] [POST-5] Enviando resultado final al Backend…");
-            client.sendResult(job.executionId,
-                    passed.get(), failed.get(), skipped.get(), allureUrl, testCases,
-                    Math.max(expectedCountHolder.get(), 0));
-            resultSent.set(true);
-            System.out.println("[Executor] [TIMING] backend (sendResult): " + (System.currentTimeMillis() - t5) + " ms");
+            // Guard nuevo (Fase 20): el execAbortWatcher unificado ahora sigue vivo
+            // durante TODO el post-procesamiento (antes se apagaba en cuanto Gradle
+            // salía) — si un abort llega justo en esta ventana, ya llamó a
+            // confirmAbort() y puso resultSent=true; sin este guard, este sendResult()
+            // normal se ejecutaría de todos modos justo después y le pisaría el
+            // estado ABORTED de vuelta a COMPLETED/FAILED en el backend.
+            if (!resultSent.get()) {
+                long t5 = System.currentTimeMillis();
+                System.out.println("[Executor] [POST-5] Enviando resultado final al Backend…");
+                client.sendResult(job.executionId,
+                        passed.get(), failed.get(), skipped.get(), allureUrl, testCases,
+                        Math.max(expectedCountHolder.get(), 0));
+                resultSent.set(true);
+                System.out.println("[Executor] [TIMING] backend (sendResult): " + (System.currentTimeMillis() - t5) + " ms");
+            } else {
+                System.out.println("[Executor] [POST-5] Resultado ya enviado (abort detectado durante el "
+                        + "post-procesamiento) — se omite sendResult() normal.");
+            }
             System.out.println("[Executor] ✓ Finalizado correctamente: " + job.executionId
                     + " — " + summary);
 
@@ -1164,12 +1192,17 @@ public class JobExecutor {
             try { client.sendLog(job.executionId, "ERROR",
                     "❌ Error interno del runner: " + describeException(e)
                     + "\n" + stackTrace.lines().limit(10).reduce("", (a, b) -> a + b + "\n")); } catch (Exception ignored) {}
-            try {
-                client.sendResult(job.executionId,
-                        passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases,
-                        Math.max(expectedCountHolder.get(), 0));
-                resultSent.set(true);
-            } catch (Exception ignored) {}
+            // Mismo guard que POST-5: si el execAbortWatcher ya llamó confirmAbort()
+            // (abort detectado mientras esta excepción se propagaba), no pisar ese
+            // estado con un sendResult() normal.
+            if (!resultSent.get()) {
+                try {
+                    client.sendResult(job.executionId,
+                            passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases,
+                            Math.max(expectedCountHolder.get(), 0));
+                    resultSent.set(true);
+                } catch (Exception ignored) {}
+            }
         } finally {
             // Safety net: guarantees cleanup and execution finalization regardless of what failed above.
             // IOSVideoRecordingManager.stop() is idempotent — no-op if already called.
@@ -1200,6 +1233,20 @@ public class JobExecutor {
                 System.out.println("[Executor] [TIMING] fin Runner — cierre total: "
                         + (System.currentTimeMillis() - closeStartMs) + " ms | " + job.executionId);
             }
+            // Detiene el watcher unificado (ya no hay nada más que vigilar para este
+            // executionId) y hace una barrida final de seguridad: si por cualquier
+            // motivo algo quedó registrado (una excepción no prevista, una rama no
+            // cubierta), se cancela aquí — nunca debe quedar un proceso huérfano
+            // asociado a este executionId una vez que execute() retorna.
+            execAbortWatcher.interrupt();
+            if (execCtx.hasActiveProcesses()) {
+                System.out.println("[ExecutionContext][TEMP] Safety-net: procesos aún registrados al cerrar — "
+                        + "executionId=" + job.executionId + " — cancelando.");
+                execCtx.killAll();
+            }
+            System.out.println("[ExecutionContext][TEMP] Workspace released — executionId=" + job.executionId
+                    + " | procesos vivos restantes: " + execCtx.hasActiveProcesses());
+            System.out.println("[ExecutionContext][TEMP] Execution closed — executionId=" + job.executionId);
             System.out.println("[PROCESS FLOW] JobExecutor.execute() END — executionId=" + job.executionId
                     + " | resultSent=" + resultSent.get() + " | wasAborted=" + wasAborted.get());
         }

@@ -239,9 +239,19 @@ public final class WdaLifecycleOwner {
         }
 
         Thread t = new Thread(() -> {
+            // Mismo registro uniforme que git/WDA/Gradle (ver ExecutionContext/JobExecutor)
+            // — "mirror-{udid}" ya era el pseudo-executionId usado para logs de este
+            // camino; registrarlo aquí también da visibilidad uniforme ("registrado" /
+            // "finalizado") sin agregar ningún mecanismo de cancelación nuevo — nada
+            // llama hoy a ProcessRegistry.killAll("mirror-" + udid), el Mirror sigue
+            // liberándose únicamente cuando su stream se cierra (ver IOSMirrorProvider.stop()).
+            String executionId = "mirror-" + udid;
+            String token = ProcessRegistry.register(executionId, "mirror-request",
+                    () -> release(Consumer.MIRROR, client, executionId, udid));
             try {
-                IosPreflightManager.runPreflight(client, "mirror-" + udid, udid, Consumer.MIRROR);
+                IosPreflightManager.runPreflight(client, executionId, udid, Consumer.MIRROR);
             } finally {
+                ProcessRegistry.unregister(executionId, token);
                 MIRROR_REQUEST_PENDING.remove(udid);
             }
         }, "wda-mirror-request");
