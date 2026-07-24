@@ -23,6 +23,12 @@ export function useExecutionDevices() {
   const [savedUdids,  setSavedUdids]     = useState<string[]>([])
   const [saving,      setSaving]         = useState(false)
 
+  // Persistido en el backend (no localStorage): ver ExecutionDeviceConfig en
+  // api.ts — localStorage es por navegador y Safari lo purga mucho más
+  // agresivo que Chrome, lo que hacía que el toggle pareciera "encendido" en
+  // un navegador y "apagado" en otro.
+  const [videoEnabled, setVideoEnabledState] = useState(false)
+
   // Dispositivo que el panel Mirror debe reflejar. Se sincroniza con la MISMA
   // interacción de selección que ya existe (el toggle "Usar dispositivo" en
   // ConnectedDevices) — no agrega ningún control nuevo en la UI.
@@ -31,6 +37,7 @@ export function useExecutionDevices() {
   // Ref keeps state readable synchronously (avoids stale closure in syncWithLive/saveConfig)
   const configuredRef       = useRef<ConfiguredDevice[]>([])
   const activeDeviceUdidRef = useRef<string | null>(null)
+  const videoEnabledRef     = useRef(false)
 
   function setConfigured(next: ConfiguredDevice[]) {
     configuredRef.current = next
@@ -45,13 +52,23 @@ export function useExecutionDevices() {
   // Load saved config from backend on mount
   useEffect(() => {
     getExecutionDeviceConfig()
-      .then(udids => {
+      .then(({ devices: udids, videoEnabled: savedVideoEnabled }) => {
         // Names will be resolved when ConnectedDevices calls syncWithLive
         const initial = udids.map(u => ({ udid: u, name: u.slice(0, 16), platform: 'UNKNOWN', platformVersion: null }))
         setConfigured(initial)
         setSavedUdids(udids)
+        videoEnabledRef.current = savedVideoEnabled
+        setVideoEnabledState(savedVideoEnabled)
       })
       .catch(() => {})
+  }, [])
+
+  /** Toggle video recording — persiste al backend de inmediato (mismo momento en que antes se escribía a localStorage). */
+  const setVideoEnabled = useCallback((next: boolean) => {
+    videoEnabledRef.current = next
+    setVideoEnabledState(next)
+    saveExecutionDeviceConfig(configuredRef.current.map(d => d.udid), next)
+      .catch(e => console.warn('[useExecutionDevices] setVideoEnabled persist error:', e))
   }, [])
 
   /**
@@ -81,7 +98,7 @@ export function useExecutionDevices() {
     const toSave = configuredRef.current
     setSaving(true)
     try {
-      await saveExecutionDeviceConfig(toSave.map(d => d.udid))
+      await saveExecutionDeviceConfig(toSave.map(d => d.udid), videoEnabledRef.current)
       setSavedUdids(toSave.map(d => d.udid))
     } catch (e) {
       console.warn('[useExecutionDevices] saveConfig error:', e)
@@ -121,6 +138,6 @@ export function useExecutionDevices() {
 
   return {
     configured, configuredUdids, toggleDevice, saveConfig, saving, isDirty, syncWithLive,
-    activeDevice,
+    activeDevice, videoEnabled, setVideoEnabled,
   }
 }

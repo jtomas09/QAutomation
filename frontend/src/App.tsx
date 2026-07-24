@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { ConfirmationProvider } from './hooks/useConfirmation'
 import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES, getRandomSmokeTests } from './data'
 import { useTestRunner }        from './hooks/useTestRunner'
@@ -30,18 +30,11 @@ export default function App() {
   const [suite,      setSuite]      = useState(SUITES[0])
   const [drillSuite,    setDrillSuite]    = useState<string | null>(null)
   const [smokeTests,    setSmokeTests]    = useState(() => getRandomSmokeTests())
-  // Persistido en localStorage: sin esto, un refresh de la página siempre lo
-  // regresaba a Off aunque el usuario lo hubiera activado.
-  const [videoEnabled,  setVideoEnabled]  = useState(() => localStorage.getItem('qa-video-enabled') === 'true')
-
-  useEffect(() => {
-    localStorage.setItem('qa-video-enabled', String(videoEnabled))
-  }, [videoEnabled])
 
   const {
     configured, configuredUdids, toggleDevice: toggleConfigDevice,
     saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
-    activeDevice,
+    activeDevice, videoEnabled, setVideoEnabled,
   } = useExecutionDevices()
 
   const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()

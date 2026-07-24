@@ -82,13 +82,16 @@ public class SettingsController {
 
     @GetMapping("/execution-devices")
     public Map<String, Object> getExecutionDevices() {
-        return Map.of("devices", deviceStore.getDeviceUdids());
+        return Map.of(
+                "devices",      deviceStore.getDeviceUdids(),
+                "videoEnabled", deviceStore.isVideoEnabled());
     }
 
     @PostMapping("/execution-devices")
     public ResponseEntity<Map<String, String>> setExecutionDevices(
             @RequestBody ExecutionDevicesRequest req) {
         deviceStore.setDeviceUdids(req.devices() != null ? req.devices() : List.of());
+        deviceStore.setVideoEnabled(req.videoEnabled());
         return ResponseEntity.ok(Map.of("result", "ok"));
     }
 
@@ -106,5 +109,5 @@ public class SettingsController {
             boolean valid,
             String  checkedAt) {}
 
-    record ExecutionDevicesRequest(List<String> devices) {}
+    record ExecutionDevicesRequest(List<String> devices, boolean videoEnabled) {}
 }

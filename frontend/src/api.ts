@@ -399,15 +399,31 @@ export async function removeDevice(udid: string): Promise<void> {
 
 // ─── Execution device config ──────────────────────────────────────────────────
 
-/** GET /api/settings/execution-devices → string[] of UDIDs */
-export async function getExecutionDeviceConfig(): Promise<string[]> {
-  const data = await httpGet<{ devices: string[] } | string[]>('/api/settings/execution-devices')
-  return Array.isArray(data) ? data : (data as { devices: string[] }).devices ?? []
+export interface ExecutionDeviceConfig {
+  devices:      string[]
+  videoEnabled: boolean
 }
 
-/** POST /api/settings/execution-devices { devices: string[] } */
-export async function saveExecutionDeviceConfig(udids: string[]): Promise<void> {
-  await httpPost<unknown>('/api/settings/execution-devices', { devices: udids })
+/**
+ * GET /api/settings/execution-devices → { devices, videoEnabled }
+ *
+ * videoEnabled se persiste aquí (backend, sin usuario/sesión — app de un solo
+ * inquilino) en vez de localStorage: localStorage es por navegador y Safari lo
+ * purga de forma mucho más agresiva que Chrome (ITP), lo que hacía que el
+ * toggle pareciera "encendido" en un navegador y "apagado" en otro sin que el
+ * usuario hubiera hecho nada distinto.
+ */
+export async function getExecutionDeviceConfig(): Promise<ExecutionDeviceConfig> {
+  const data = await httpGet<{ devices: string[]; videoEnabled?: boolean } | string[]>(
+    '/api/settings/execution-devices',
+  )
+  if (Array.isArray(data)) return { devices: data, videoEnabled: false }
+  return { devices: data.devices ?? [], videoEnabled: data.videoEnabled ?? false }
+}
+
+/** POST /api/settings/execution-devices { devices: string[], videoEnabled: boolean } */
+export async function saveExecutionDeviceConfig(udids: string[], videoEnabled: boolean): Promise<void> {
+  await httpPost<unknown>('/api/settings/execution-devices', { devices: udids, videoEnabled })
 }
 
 // ─── Project path settings ────────────────────────────────────────────────────
