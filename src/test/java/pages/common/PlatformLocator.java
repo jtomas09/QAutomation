@@ -1,5 +1,6 @@
 package pages.common;
 
+import io.appium.java_client.AppiumBy;
 import org.openqa.selenium.By;
 
 import java.util.Objects;
@@ -58,12 +59,20 @@ public final class PlatformLocator {
      * Texto visible EXACTO. Android: @text (UiAutomator2). iOS: @label, @name o @value
      * (Compose Multiplatform puede exponer el mismo nodo semántico bajo cualquiera de
      * los tres, según el tipo de control) — se consultan los tres con "or".
+     *
+     * ── PERF (solo iOS) ──────────────────────────────────────────────────────
+     * El lado iOS se resuelve con NSPredicate (AppiumBy.iOSNsPredicateString) en vez
+     * de XPath. XCUITest/WDA evalúa XPath serializando el árbol de accesibilidad
+     * COMPLETO a XML antes de poder filtrar — con NSPredicate, WDA filtra el árbol
+     * nativo directamente, sin ese volcado. Mismo resultado, mucho más rápido en
+     * pantallas con muchos nodos. Android (@text, UiAutomator2 XPath) no tiene esta
+     * penalización y se deja exactamente igual.
      */
     public static PlatformLocator byExactText(String text) {
         String t = escapeXpath(text);
         return of(
                 By.xpath("//*[@text='" + t + "']"),
-                By.xpath("//*[@label='" + t + "' or @name='" + t + "' or @value='" + t + "']")
+                AppiumBy.iOSNsPredicateString("label == '" + t + "' OR name == '" + t + "' OR value == '" + t + "'")
         );
     }
 
@@ -76,24 +85,29 @@ public final class PlatformLocator {
         );
     }
 
-    /** Texto visible que CONTIENE el fragmento dado (contains()), mismo mapeo de atributos que byExactText. */
+    /**
+     * Texto visible que CONTIENE el fragmento dado (contains()), mismo mapeo de atributos que byExactText.
+     * Lado iOS vía NSPredicate (CONTAINS) — ver nota de rendimiento en {@link #byExactText(String)}.
+     */
     public static PlatformLocator byTextContains(String text) {
         String t = escapeXpath(text);
         return of(
                 By.xpath("//*[contains(@text,'" + t + "')]"),
-                By.xpath("//*[contains(@label,'" + t + "') or contains(@name,'" + t + "') or contains(@value,'" + t + "')]")
+                AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS '" + t + "' OR name CONTAINS '" + t + "' OR value CONTAINS '" + t + "'")
         );
     }
 
     /**
      * Identificador de accesibilidad. Android: @content-desc (UiAutomator2).
      * iOS: @name (XCUITest expone el accessibility identifier / label ahí).
+     * Lado iOS vía NSPredicate — ver nota de rendimiento en {@link #byExactText(String)}.
      */
     public static PlatformLocator byAccessibilityId(String id) {
         String v = escapeXpath(id);
         return of(
                 By.xpath("//*[@content-desc='" + v + "']"),
-                By.xpath("//*[@name='" + v + "']")
+                AppiumBy.iOSNsPredicateString("name == '" + v + "'")
         );
     }
 

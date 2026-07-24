@@ -128,24 +128,31 @@ public class CinemasHelper extends BasePage {
     // ==========================
     // ✅ GUARD: PANTALLA CLUB CINÉPOLIS (LOGIN)
     // ==========================
+    // Lado iOS v\u00eda NSPredicate (AppiumBy.iOSNsPredicateString) en lugar de XPath \u2014 WDA lo
+    // eval\u00faa contra el \u00e1rbol nativo sin serializar el pageSource completo a XML primero.
+    // Ver nota de rendimiento en PlatformLocator.byExactText(). Android sin cambios.
     private static final PlatformLocator CLUB_LOGIN_TITLE = PlatformLocator.of(
             By.xpath("//*[contains(@text,'Inicia sesi\u00f3n') or contains(@text,'Inicia sesion')]"),
-            By.xpath("//*[contains(@label,'Inicia sesi\u00f3n') or contains(@label,'Inicia sesion') " +
-                    "or contains(@value,'Inicia sesi\u00f3n') or contains(@value,'Inicia sesion') " +
-                    "or contains(@name,'Inicia sesi\u00f3n') or contains(@name,'Inicia sesion')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label CONTAINS 'Inicia sesi\u00f3n' OR label CONTAINS 'Inicia sesion' " +
+                    "OR value CONTAINS 'Inicia sesi\u00f3n' OR value CONTAINS 'Inicia sesion' " +
+                    "OR name CONTAINS 'Inicia sesi\u00f3n' OR name CONTAINS 'Inicia sesion'"));
     private static final PlatformLocator CLUB_LOGIN_LOGO = PlatformLocator.of(
             By.xpath("//*[contains(@text,'CLUB') and (contains(@text,'cin\u00e9polis') or contains(@text,'cinepolis'))]"),
-            By.xpath("//*[(contains(@label,'CLUB') or contains(@value,'CLUB') or contains(@name,'CLUB')) " +
-                    "and (contains(@label,'cin\u00e9polis') or contains(@label,'cinepolis') " +
-                    "or contains(@value,'cin\u00e9polis') or contains(@value,'cinepolis') " +
-                    "or contains(@name,'cin\u00e9polis') or contains(@name,'cinepolis'))]"));
+            AppiumBy.iOSNsPredicateString(
+                    "(label CONTAINS 'CLUB' OR value CONTAINS 'CLUB' OR name CONTAINS 'CLUB') " +
+                    "AND (label CONTAINS 'cin\u00e9polis' OR label CONTAINS 'cinepolis' " +
+                    "OR value CONTAINS 'cin\u00e9polis' OR value CONTAINS 'cinepolis' " +
+                    "OR name CONTAINS 'cin\u00e9polis' OR name CONTAINS 'cinepolis')"));
     // Flecha/back de la pantalla — orden de prioridad:
     // 1. ImageButton/ImageView con content-desc "Atrás/Navigate up" (nativo Android) /
     //    @name en iOS (XCUITest no distingue ImageButton/ImageView, se usa * genérico).
+    // iOS v\u00eda NSPredicate \u2014 ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator CLUB_BACK_BUTTON_A11Y = PlatformLocator.of(
             By.xpath("//android.widget.ImageButton[contains(@content-desc,'Atr\u00e1s') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]" +
                     " | //android.widget.ImageView[contains(@content-desc,'Atr\u00e1s') or contains(@content-desc,'Atras') or contains(@content-desc,'Navigate up')]"),
-            By.xpath("//*[contains(@name,'Atr\u00e1s') or contains(@name,'Atras') or contains(@name,'Navigate up') or contains(@name,'Back')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "name CONTAINS 'Atr\u00e1s' OR name CONTAINS 'Atras' OR name CONTAINS 'Navigate up' OR name CONTAINS 'Back'"));
 
     // 2. android.widget.Button con texto VACÍO (la flecha ← no tiene texto;
     //    "Inicia sesión" y "Crear tu Cuenta" SÍ tienen texto → quedan excluidos)
@@ -170,16 +177,19 @@ public class CinemasHelper extends BasePage {
     private static final By CLUB_BACK_BUTTON_XPATH_IOS =
             By.xpath("(//XCUIElementTypeButton[@visible='true' and (not(@name) or @name='' or not(@label) or @label='')])[1]");
     // Tab alterno por content-desc (bottom nav en algunos builds) / @name en iOS.
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator TAB_ALIMENTOS_ALT = PlatformLocator.of(
             By.xpath("//*[@content-desc='Alimentos' or @text='Alimentos']"),
-            By.xpath("//*[@name='Alimentos' or @label='Alimentos' or @value='Alimentos']"));
+            AppiumBy.iOSNsPredicateString("name == 'Alimentos' OR label == 'Alimentos' OR value == 'Alimentos'"));
 
     // ==========================
     // ✅ ICONO/CHIP REAL DE CINES EN HEADER (Compose)
     // ==========================
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator CINES_ICON_VIEW = PlatformLocator.of(
             By.xpath("//android.view.View[contains(@content-desc,'Selecciona uno o más cines') or contains(@content-desc,'cines') or contains(@content-desc,'Cines')]"),
-            By.xpath("//*[contains(@name,'Selecciona uno o más cines') or contains(@name,'cines') or contains(@name,'Cines')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "name CONTAINS 'Selecciona uno o más cines' OR name CONTAINS 'cines' OR name CONTAINS 'Cines'"));
 
     private static final PlatformLocator CINES_TEXT = PlatformLocator.byExactText("Cines");
 
@@ -209,11 +219,14 @@ public class CinemasHelper extends BasePage {
     // ==========================
     private static final PlatformLocator TITLE_SELECCIONAR_CINES = PlatformLocator.byExactText("Seleccionar cines");
 
+    // iOS vía NSPredicate — polling en cada iteración de waitSelectorScreenOrThrow()
+    // (hasta 9s / 150ms por vuelta) — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator SEARCH_HINT = PlatformLocator.of(
             By.xpath("//android.widget.TextView[@text='Busca tu ciudad o tu cine' or @text='Escribe tu ciudad o cine' or @text='Escribe tu ciudad o cine']"),
-            By.xpath("//*[@label='Busca tu ciudad o tu cine' or @label='Escribe tu ciudad o cine' " +
-                    "or @value='Busca tu ciudad o tu cine' or @value='Escribe tu ciudad o cine' " +
-                    "or @name='Busca tu ciudad o tu cine' or @name='Escribe tu ciudad o cine']"));
+            AppiumBy.iOSNsPredicateString(
+                    "label == 'Busca tu ciudad o tu cine' OR label == 'Escribe tu ciudad o cine' " +
+                    "OR value == 'Busca tu ciudad o tu cine' OR value == 'Escribe tu ciudad o cine' " +
+                    "OR name == 'Busca tu ciudad o tu cine' OR name == 'Escribe tu ciudad o cine'"));
 
     private static final PlatformLocator SEARCH_PARENT_ROUNDED = PlatformLocator.byAccessibilityId("Rounded.Search");
 
@@ -264,11 +277,13 @@ public class CinemasHelper extends BasePage {
     // ==========================
     // ✅ DETECCIÓN CINE NO SELECCIONADO (México)
     // ==========================
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator CINES_SIN_SELECCION = PlatformLocator.of(
             By.xpath("//android.widget.TextView[@text='Selecciona uno o más cines']" +
             " | //android.widget.TextView[contains(@text,'Selecciona uno o m')]"),
-            By.xpath("//*[@label='Selecciona uno o más cines' or @value='Selecciona uno o más cines' or @name='Selecciona uno o más cines'" +
-            " or contains(@label,'Selecciona uno o m') or contains(@value,'Selecciona uno o m') or contains(@name,'Selecciona uno o m')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label == 'Selecciona uno o más cines' OR value == 'Selecciona uno o más cines' OR name == 'Selecciona uno o más cines' " +
+                    "OR label CONTAINS 'Selecciona uno o m' OR value CONTAINS 'Selecciona uno o m' OR name CONTAINS 'Selecciona uno o m'"));
 
     // Ancestro clickable del chip (android.view.View clickable=true que envuelve el TextView) —
     // iOS: XCUIElementTypeOther es el contenedor genérico equivalente.
@@ -282,13 +297,15 @@ public class CinemasHelper extends BasePage {
     // ==========================
     // ✅ POPUP CAMBIO DE ZONA/UBICACIÓN (aparece al inicio, no siempre)
     // ==========================
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator POPUP_ZONA_DETECTION = PlatformLocator.of(
             By.xpath("//*[contains(@text,'lejos de') or contains(@text,'cambiar tu cartelera') " +
             "or contains(@text,'cambiar la cartelera') or contains(@text,'Cambiar zona')]"),
-            By.xpath("//*[contains(@label,'lejos de') or contains(@label,'cambiar tu cartelera') " +
-            "or contains(@label,'cambiar la cartelera') or contains(@label,'Cambiar zona') " +
-            "or contains(@value,'lejos de') or contains(@value,'cambiar tu cartelera') " +
-            "or contains(@value,'cambiar la cartelera') or contains(@value,'Cambiar zona')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label CONTAINS 'lejos de' OR label CONTAINS 'cambiar tu cartelera' " +
+                    "OR label CONTAINS 'cambiar la cartelera' OR label CONTAINS 'Cambiar zona' " +
+                    "OR value CONTAINS 'lejos de' OR value CONTAINS 'cambiar tu cartelera' " +
+                    "OR value CONTAINS 'cambiar la cartelera' OR value CONTAINS 'Cambiar zona'"));
 
     private static final PlatformLocator BTN_NO_CAMBIAR = PlatformLocator.of(
             By.xpath("//android.widget.TextView[@text='No cambiar']" +
@@ -298,24 +315,29 @@ public class CinemasHelper extends BasePage {
     // ==========================
     // ✅ Alertas
     // ==========================
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator ALERT_CAMBIAR_CIUDAD_TITLE = PlatformLocator.of(
             By.xpath("//android.widget.TextView[contains(@text,'¿Quieres cambiar la ciudad') or contains(@text,'Quieres cambiar la ciudad')]"),
-            By.xpath("//*[contains(@label,'¿Quieres cambiar la ciudad') or contains(@label,'Quieres cambiar la ciudad') " +
-            "or contains(@value,'¿Quieres cambiar la ciudad') or contains(@value,'Quieres cambiar la ciudad')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label CONTAINS '¿Quieres cambiar la ciudad' OR label CONTAINS 'Quieres cambiar la ciudad' " +
+                    "OR value CONTAINS '¿Quieres cambiar la ciudad' OR value CONTAINS 'Quieres cambiar la ciudad'"));
 
     private static final PlatformLocator ALERT_ACEPTAR_LAST = PlatformLocator.of(
             By.xpath("(//android.widget.TextView[@text='Aceptar'])[last()]"),
             By.xpath("(//*[@label='Aceptar' or @name='Aceptar' or @value='Aceptar'])[last()]"));
 
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final PlatformLocator ALERT_CAMBIAR_CINE_TITLE = PlatformLocator.of(
             By.xpath("//android.widget.TextView[contains(@text,'¿Estás seguro que deseas cambiar de cine') or contains(@text,'Estas seguro que deseas cambiar de cine')]"),
-            By.xpath("//*[contains(@label,'¿Estás seguro que deseas cambiar de cine') or contains(@label,'Estas seguro que deseas cambiar de cine') " +
-            "or contains(@value,'¿Estás seguro que deseas cambiar de cine') or contains(@value,'Estas seguro que deseas cambiar de cine')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label CONTAINS '¿Estás seguro que deseas cambiar de cine' OR label CONTAINS 'Estas seguro que deseas cambiar de cine' " +
+                    "OR value CONTAINS '¿Estás seguro que deseas cambiar de cine' OR value CONTAINS 'Estas seguro que deseas cambiar de cine'"));
 
     private static final PlatformLocator BTN_SI_CAMBIAR_CINE_TEXT = PlatformLocator.of(
             By.xpath("//android.widget.TextView[contains(@text,'Sí, cambiar de cine') or contains(@text,'Si, cambiar de cine') or contains(@text,'cambiar de cine')]"),
-            By.xpath("//*[contains(@label,'Sí, cambiar de cine') or contains(@label,'Si, cambiar de cine') or contains(@label,'cambiar de cine') " +
-            "or contains(@value,'Sí, cambiar de cine') or contains(@value,'Si, cambiar de cine') or contains(@value,'cambiar de cine')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label CONTAINS 'Sí, cambiar de cine' OR label CONTAINS 'Si, cambiar de cine' OR label CONTAINS 'cambiar de cine' " +
+                    "OR value CONTAINS 'Sí, cambiar de cine' OR value CONTAINS 'Si, cambiar de cine' OR value CONTAINS 'cambiar de cine'"));
 
     private static final PlatformLocator BTN_SI_CAMBIAR_CINE_CLICKABLE_ANCESTOR = PlatformLocator.of(
             By.xpath("(//android.widget.TextView[contains(@text,'Sí, cambiar de cine') or contains(@text,'Si, cambiar de cine')])[1]/ancestor::*[@clickable='true'][1]"),
@@ -1133,16 +1155,22 @@ public class CinemasHelper extends BasePage {
         // NOTA-MIGRACION: usaba @text sin condicional de plataforma (bare attribute, sin
         // prefijo android.widget.* — por eso no lo capturó el barrido inicial). En iOS
         // ningún nodo expone @text, por lo que este fallback nunca encontraba nada.
+        // PERF (solo iOS): NSPredicate en vez de XPath — ver nota en PlatformLocator.byExactText().
+        // Este método es el PRIMER check de isClubLoginVisible(), evaluado en cada uno de
+        // los hasta 5 passes de PromosGuard — el fallback más caliente de todo el guard.
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            String attr = isIOS() ? "@label" : "@text";
-            List<WebElement> els = driver.findElements(By.xpath(
-                "//*[contains(" + attr + ",'Inicia sesi')" +
-                " or contains(" + attr + ",'CLUB Cin')" +
-                " or contains(" + attr + ",'Club Cin')" +
-                " or contains(" + attr + ",'Correo electr')" +
-                " or contains(" + attr + ",'Contrase')]"
-            ));
+            By fallback = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                            "label CONTAINS 'Inicia sesi' OR label CONTAINS 'CLUB Cin' OR label CONTAINS 'Club Cin' " +
+                            "OR label CONTAINS 'Correo electr' OR label CONTAINS 'Contrase'")
+                    : By.xpath(
+                            "//*[contains(@text,'Inicia sesi')" +
+                            " or contains(@text,'CLUB Cin')" +
+                            " or contains(@text,'Club Cin')" +
+                            " or contains(@text,'Correo electr')" +
+                            " or contains(@text,'Contrase')]");
+            List<WebElement> els = driver.findElements(fallback);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             for (WebElement el : els) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
@@ -1249,10 +1277,13 @@ public class CinemasHelper extends BasePage {
     // NOTA-MIGRACION: usaba @text sin condicional de plataforma (bare attribute, sin
     // prefijo android.widget.* — por eso no lo capturó el barrido inicial). En iOS
     // ningún nodo expone @text, por lo que la promo Mario nunca se detectaba/cerraba ahí.
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
+    // Llamado en cada pass de PromosGuard (hasta 5 veces por @BeforeEach) — el
+    // candidato de mayor impacto para esta conversión.
     private By marioPromoLocator() {
         return isIOS()
-                ? By.xpath("//*[normalize-space(@label)='CONSULTA CARTELERA' or contains(@label,'CONSULTA CARTELERA') " +
-                        "or normalize-space(@value)='CONSULTA CARTELERA' or contains(@value,'CONSULTA CARTELERA')]")
+                ? AppiumBy.iOSNsPredicateString("label == 'CONSULTA CARTELERA' OR label CONTAINS 'CONSULTA CARTELERA' " +
+                        "OR value == 'CONSULTA CARTELERA' OR value CONTAINS 'CONSULTA CARTELERA'")
                 : By.xpath("//*[normalize-space(@text)='CONSULTA CARTELERA' or contains(@text,'CONSULTA CARTELERA')]");
     }
 
@@ -1453,10 +1484,11 @@ public class CinemasHelper extends BasePage {
             By.xpath("//android.widget.TextView[@text='Cerrar' or @text='No gracias' or @text='Omitir' or @text='Saltar']"),
             By.xpath("//android.widget.ImageButton[@content-desc='Atrás' or @content-desc='Atras' or @content-desc='Navigate up']"),
         };
+        // NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
         By[] dismissLocatorsIOS = {
-            By.xpath("//*[@name='Close' or @name='Cerrar' or @name='close']"),
-            By.xpath("//*[@label='Cerrar' or @label='No gracias' or @label='Omitir' or @label='Saltar']"),
-            By.xpath("//*[@name='Atrás' or @name='Atras' or @name='Navigate up' or @name='Back']"),
+            AppiumBy.iOSNsPredicateString("name == 'Close' OR name == 'Cerrar' OR name == 'close'"),
+            AppiumBy.iOSNsPredicateString("label == 'Cerrar' OR label == 'No gracias' OR label == 'Omitir' OR label == 'Saltar'"),
+            AppiumBy.iOSNsPredicateString("name == 'Atrás' OR name == 'Atras' OR name == 'Navigate up' OR name == 'Back'"),
         };
         By[] dismissLocators = isIOS() ? dismissLocatorsIOS : dismissLocatorsAndroid;
         for (By loc : dismissLocators) {

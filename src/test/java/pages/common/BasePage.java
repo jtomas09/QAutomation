@@ -318,19 +318,22 @@ public class BasePage {
     // NOTA-MIGRACION: usaba @text sin condicional de plataforma (bare attribute, sin
     // prefijo android.widget.* — no lo capturó el barrido inicial). Se resuelve vía
     // PlatformLocator porque este método es alcanzado desde click(), en la ruta crítica.
+    // iOS vía NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
+    // Consultado desde click() en la ruta crítica de cada interacción fallida.
     private static final PlatformLocator PRODUCTO_NO_DISPONIBLE_DIALOG = PlatformLocator.of(
             By.xpath("//*[contains(@text,'no está disponible en el cine') "
                   + "or contains(@text,'no esta disponible en el cine') "
                   + "or contains(@text,'elige otro artículo') "
                   + "or contains(@text,'elige otro articulo')]"),
-            By.xpath("//*[contains(@label,'no está disponible en el cine') "
-                  + "or contains(@label,'no esta disponible en el cine') "
-                  + "or contains(@label,'elige otro artículo') "
-                  + "or contains(@label,'elige otro articulo') "
-                  + "or contains(@value,'no está disponible en el cine') "
-                  + "or contains(@value,'no esta disponible en el cine') "
-                  + "or contains(@value,'elige otro artículo') "
-                  + "or contains(@value,'elige otro articulo')]"));
+            AppiumBy.iOSNsPredicateString(
+                    "label CONTAINS 'no está disponible en el cine' "
+                  + "OR label CONTAINS 'no esta disponible en el cine' "
+                  + "OR label CONTAINS 'elige otro artículo' "
+                  + "OR label CONTAINS 'elige otro articulo' "
+                  + "OR value CONTAINS 'no está disponible en el cine' "
+                  + "OR value CONTAINS 'no esta disponible en el cine' "
+                  + "OR value CONTAINS 'elige otro artículo' "
+                  + "OR value CONTAINS 'elige otro articulo'"));
 
     /**
      * Si el diálogo "Este producto actualmente no está disponible en el cine.
@@ -359,9 +362,10 @@ public class BasePage {
         try {
             PlatformLocator aceptar = PlatformLocator.of(
                     By.xpath("//*[@text='Aceptar' or @text='ACEPTAR' or @text='OK']"),
-                    By.xpath("//*[@label='Aceptar' or @label='ACEPTAR' or @label='OK' " +
-                            "or @name='Aceptar' or @name='ACEPTAR' or @name='OK' " +
-                            "or @value='Aceptar' or @value='ACEPTAR' or @value='OK']"));
+                    AppiumBy.iOSNsPredicateString(
+                            "label == 'Aceptar' OR label == 'ACEPTAR' OR label == 'OK' " +
+                            "OR name == 'Aceptar' OR name == 'ACEPTAR' OR name == 'OK' " +
+                            "OR value == 'Aceptar' OR value == 'ACEPTAR' OR value == 'OK'"));
             if (isVisibleQuick(aceptar)) {
                 WebElement btn = driver.findElement(aceptar.resolve(isIOS()));
                 try { btn.click(); } catch (Exception e) { tapCenterW3C(btn); }
@@ -1044,12 +1048,33 @@ protected List<WebElement> safeFindElements(By locator) {
     // =========== VIEWPORT FINGERPRINT (BasePage2) ============
     // =========================================================
 
+    /**
+     * Locator "primeros N StaticText con valor no vacío", usado por el fingerprint de
+     * viewport en CADA iteración de scroll (oneShotVerticalSearch/oneShotHorizontalSearch
+     * — hasta 20+ veces por búsqueda, ver comentario de findElementsFast() arriba).
+     *
+     * PERF (solo iOS): antes XPath con position()<=N — XCUITest debe serializar el
+     * árbol de accesibilidad COMPLETO a XML para evaluar cualquier XPath, incluida la
+     * limitación por posición; en pantallas con muchos nodos esto se paga en CADA
+     * swipe. Ahora se filtra con NSPredicate (WDA evalúa contra el árbol nativo, sin
+     * ese volcado) y el recorte a los primeros N elementos se hace en Java sobre la
+     * lista ya obtenida — mismo resultado (mismo orden de documento que ya devuelve
+     * driver.findElements()), sin la evaluación XPath de por medio. Android (XPath +
+     * position()) se deja exactamente igual.
+     */
+    private List<WebElement> firstNStaticTextsWithValue(int n) {
+        if (isIOS()) {
+            List<WebElement> all = driver.findElements(
+                    AppiumBy.iOSNsPredicateString("value != nil AND value != ''"));
+            return all.size() <= n ? all : all.subList(0, n);
+        }
+        return driver.findElements(By.xpath(
+                "(//android.widget.TextView[@text and string-length(@text)>0])[position() <= " + n + "]"));
+    }
+
     private String viewportFingerPrint() {
         try {
-            String xpath = isIOS()
-                ? "(//XCUIElementTypeStaticText[@value and string-length(@value)>0])[position() <= 6]"
-                : "(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]";
-            List<WebElement> texts = driver.findElements(By.xpath(xpath));
+            List<WebElement> texts = firstNStaticTextsWithValue(6);
             if (texts == null || texts.isEmpty()) return "EMPTY";
 
             StringBuilder sb = new StringBuilder();
@@ -1064,10 +1089,7 @@ protected List<WebElement> safeFindElements(By locator) {
 
     public String viewportFingerPrintPublic() {
         try {
-            String xpath = isIOS()
-                ? "(//XCUIElementTypeStaticText[@value and string-length(@value)>0])[position() <= 6]"
-                : "(//android.widget.TextView[@text and string-length(@text)>0])[position() <= 6]";
-            List<WebElement> texts = driver.findElements(By.xpath(xpath));
+            List<WebElement> texts = firstNStaticTextsWithValue(6);
             StringBuilder sb = new StringBuilder();
             for (WebElement el : texts) {
                 try { sb.append(el.getText().trim()).append("|"); } catch (Exception ignore) {}
@@ -1079,16 +1101,28 @@ protected List<WebElement> safeFindElements(By locator) {
     }
 
     /**
+     * Locator "primeros N nodos con @value o @label no vacío" para richFingerPrint().
+     * Misma optimización que firstNStaticTextsWithValue() — ver esa nota para el porqué
+     * (llamado en cada iteración de scroll, junto con viewportFingerPrint()).
+     */
+    private List<WebElement> firstNNodesWithValueOrLabel(int n) {
+        if (isIOS()) {
+            List<WebElement> all = driver.findElements(AppiumBy.iOSNsPredicateString(
+                    "(value != nil AND value != '') OR (label != nil AND label != '')"));
+            return all.size() <= n ? all : all.subList(0, n);
+        }
+        return driver.findElements(By.xpath(
+                "(//*[string-length(@text)>0 or string-length(@content-desc)>0])[position()<=" + n + "]"));
+    }
+
+    /**
      * Fingerprint enriquecido para scroll en pantallas Compose/LazyColumn.
      * Captura @text Y @content-desc de los primeros 10 elementos visibles,
      * cubriendo tanto views nativos como nodos Compose que no exponen TextView.
      */
     private String richFingerPrint() {
         try {
-            String xpath = isIOS()
-                ? "(//*[string-length(@value)>0 or string-length(@label)>0])[position()<=10]"
-                : "(//*[string-length(@text)>0 or string-length(@content-desc)>0])[position()<=10]";
-            List<WebElement> els = driver.findElements(By.xpath(xpath));
+            List<WebElement> els = firstNNodesWithValueOrLabel(10);
             if (els == null || els.isEmpty()) return "EMPTY";
             StringBuilder sb = new StringBuilder();
             for (WebElement el : els) {
@@ -1307,18 +1341,27 @@ protected List<WebElement> safeFindElements(By locator) {
     }
 
     protected void findVisibleOrScrollToXpathAndClick(String xpath, int maxSwipesEachDirection) {
+        findVisibleOrScrollToXpathAndClick(By.xpath(xpath), maxSwipesEachDirection);
+    }
+
+    /**
+     * Variante By — permite a los llamadores iOS pasar un locator NSPredicate
+     * (AppiumBy.iOSNsPredicateString) en vez de forzar XPath, sin duplicar la lógica de
+     * scroll/click. Android sigue pasando By.xpath(...) a través del overload de String
+     * de arriba, sin ningún cambio de comportamiento.
+     */
+    protected void findVisibleOrScrollToXpathAndClick(By locator, int maxSwipesEachDirection) {
         long t0 = System.currentTimeMillis();
-        log.info("[BasePage] findVisibleOrScrollToXpathAndClick ENTER maxSwipes={} xpath={}",
-                maxSwipesEachDirection, xpath.length() > 80 ? xpath.substring(0, 80) + "…" : xpath);
+        log.info("[BasePage] findVisibleOrScrollToXpathAndClick ENTER maxSwipes={} locator={}",
+                maxSwipesEachDirection, locator);
         ensureAppIsInForegroundOrRecover();
-        By locator = By.xpath(xpath);
 
         if (!clickIfPresent(locator)) {
             boolean found = oneShotVerticalSearch(locator, maxSwipesEachDirection);
             if (!found) {
                 log.warn("[BasePage] findVisibleOrScrollToXpathAndClick EXIT not found ({}ms)", System.currentTimeMillis() - t0);
                 takeScreenshotOnFailure();
-                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada. XPath: " + xpath);
+                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada. Locator: " + locator);
             }
             click(locator);
         }
@@ -1326,19 +1369,22 @@ protected List<WebElement> safeFindElements(By locator) {
     }
 
     protected void findVisibleOrScrollDownAndRightSlowToXpathAndClick(String xpath, int maxVerticalSwipes, int maxRightSwipesPerRow) {
+        findVisibleOrScrollDownAndRightSlowToXpathAndClick(By.xpath(xpath), maxVerticalSwipes, maxRightSwipesPerRow);
+    }
+
+    /** Variante By — ver nota en {@link #findVisibleOrScrollToXpathAndClick(By, int)}. */
+    protected void findVisibleOrScrollDownAndRightSlowToXpathAndClick(By locator, int maxVerticalSwipes, int maxRightSwipesPerRow) {
         long t0 = System.currentTimeMillis();
-        log.info("[BasePage] findVisibleOrScrollDownAndRight ENTER maxV={} maxH={} xpath={}",
-                maxVerticalSwipes, maxRightSwipesPerRow,
-                xpath.length() > 80 ? xpath.substring(0, 80) + "…" : xpath);
+        log.info("[BasePage] findVisibleOrScrollDownAndRight ENTER maxV={} maxH={} locator={}",
+                maxVerticalSwipes, maxRightSwipesPerRow, locator);
         ensureAppIsInForegroundOrRecover();
-        By locator = By.xpath(xpath);
 
         if (!clickIfPresent(locator)) {
             boolean found = oneShotVerticalAndHorizontal(locator, maxVerticalSwipes, maxRightSwipesPerRow);
             if (!found) {
                 log.warn("[BasePage] findVisibleOrScrollDownAndRight EXIT not found ({}ms)", System.currentTimeMillis() - t0);
                 takeScreenshotOnFailure();
-                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada (V/H). XPath: " + xpath);
+                throw new AssertionError("FAST-FAIL: Elemento NO encontrado tras 1 pasada (V/H). Locator: " + locator);
             }
             click(locator);
         }

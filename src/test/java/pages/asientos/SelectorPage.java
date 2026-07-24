@@ -9,6 +9,7 @@ import org.openqa.selenium.interactions.Sequence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import pages.common.BasePage;
+import pages.common.IOSLocatorDebug;
 import org.openqa.selenium.interactions.Pause;
 
 import java.time.Duration;
@@ -173,18 +174,27 @@ public class SelectorPage extends BasePage {
             }
         }
 
+        // Diagnóstico temporal (no-op salvo -DIOS_LOCATOR_DEBUG=true) — captura el
+        // page source real en el momento exacto del fallo, para investigar por qué
+        // "Ver sinopsis" nunca abre el detalle de la película.
+        if (isIOS()) {
+            IOSLocatorDebug.onFailure(driver, "abrirPeliculaPorVerSinopsis_" + nombrePelicula, null,
+                    new RuntimeException("3 intentos agotados sin abrir detalle para: " + nombrePelicula));
+        }
+
         return false;
     }
     private WebElement encontrarVerSinopsisDeTarjeta(WebElement titulo) {
         try {
             List<WebElement> candidatos;
             if (isIOS()) {
+                // NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
                 candidatos = driver.findElements(
-                        By.xpath("//*[@name='Ver sinopsis' or @value='Ver sinopsis']")
+                        AppiumBy.iOSNsPredicateString("name == 'Ver sinopsis' OR value == 'Ver sinopsis'")
                 );
                 if (candidatos.isEmpty()) {
                     candidatos = driver.findElements(
-                            By.xpath("//*[contains(@name,'Ver sinopsis') or contains(@value,'Ver sinopsis')]")
+                            AppiumBy.iOSNsPredicateString("name CONTAINS 'Ver sinopsis' OR value CONTAINS 'Ver sinopsis'")
                     );
                 }
             } else {
@@ -235,8 +245,9 @@ public class SelectorPage extends BasePage {
         boolean ios = isIOS();
         for (String txt : botonesCerrar) {
             try {
+                // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
                 List<WebElement> btn = ios
-                        ? driver.findElements(By.xpath("//*[@name='" + txt + "' or @value='" + txt + "']"))
+                        ? driver.findElements(AppiumBy.iOSNsPredicateString("name == '" + txt + "' OR value == '" + txt + "'"))
                         : driver.findElements(By.xpath("//*[@text='" + txt + "']"));
                 if (!btn.isEmpty()) btn.get(0).click();
             } catch (Exception ignored) {}
@@ -257,13 +268,20 @@ public class SelectorPage extends BasePage {
         return hora;
     }
 
+    // NSPredicate en iOS (por() abajo) — poll cada 500ms hasta 10s (~20 iteraciones),
+    // más manejarPopupsPosibles() en cada vuelta — ver nota de rendimiento en
+    // PlatformLocator.byExactText().
+    private By detectorCargaCarteleraLocator() {
+        return isIOS()
+                ? AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value.length > 8")
+                : By.xpath("//android.widget.TextView[string-length(@text) > 8]");
+    }
+
     private void esperarCargaCartelera() {
-        String detectXpath = isIOS()
-                ? "//XCUIElementTypeStaticText[string-length(@value) > 8]"
-                : "//android.widget.TextView[string-length(@text) > 8]";
+        By detector = detectorCargaCarteleraLocator();
         long end = System.currentTimeMillis() + 10000;
         while (System.currentTimeMillis() < end) {
-            if (!driver.findElements(By.xpath(detectXpath)).isEmpty()) {
+            if (!driver.findElements(detector).isEmpty()) {
                 return;
             }
             manejarPopupsPosibles();
@@ -273,9 +291,9 @@ public class SelectorPage extends BasePage {
     private void manejarPopupsPosibles() {
         try {
             List<WebElement> popups = isIOS()
-                    ? driver.findElements(By.xpath(
-                            "//*[@name='PERMITIR' or @name='Permitir' or @name='ENTENDIDO'"
-                            + " or @value='PERMITIR' or @value='Permitir' or @value='ENTENDIDO']"))
+                    ? driver.findElements(AppiumBy.iOSNsPredicateString(
+                            "name == 'PERMITIR' OR name == 'Permitir' OR name == 'ENTENDIDO'"
+                            + " OR value == 'PERMITIR' OR value == 'Permitir' OR value == 'ENTENDIDO'"))
                     : driver.findElements(By.xpath(
                             "//*[@text='PERMITIR' or @text='Permitir' or @text='ENTENDIDO']"));
             if (!popups.isEmpty()) popups.get(0).click();
@@ -425,22 +443,23 @@ public class SelectorPage extends BasePage {
         return false;
     }
     private WebElement reubicarTituloPelicula(String nombre) {
-        String primaryXpath = isIOS()
-                ? "//XCUIElementTypeStaticText[@value=\"" + nombre + "\"]"
-                : "//android.widget.TextView[@text=\"" + nombre + "\"]";
-        String fallbackXpath = isIOS()
-                ? "//*[contains(@value,\"" + nombre + "\") or contains(@name,\"" + nombre + "\")]"
-                : "//*[contains(@text,\"" + nombre + "\")]";
+        // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
+        By primaryLocator = isIOS()
+                ? AppiumBy.iOSNsPredicateString("value == '" + nombre + "'")
+                : By.xpath("//android.widget.TextView[@text=\"" + nombre + "\"]");
+        By fallbackLocator = isIOS()
+                ? AppiumBy.iOSNsPredicateString("value CONTAINS '" + nombre + "' OR name CONTAINS '" + nombre + "'")
+                : By.xpath("//*[contains(@text,\"" + nombre + "\")]");
 
         try {
-            List<WebElement> candidatos = driver.findElements(By.xpath(primaryXpath));
+            List<WebElement> candidatos = driver.findElements(primaryLocator);
             for (WebElement el : candidatos) {
                 try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
             }
         } catch (Exception ignored) {}
 
         try {
-            List<WebElement> candidatos = driver.findElements(By.xpath(fallbackXpath));
+            List<WebElement> candidatos = driver.findElements(fallbackLocator);
             for (WebElement el : candidatos) {
                 try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
             }
@@ -496,21 +515,24 @@ public class SelectorPage extends BasePage {
         takeScreenshot("3 asientos - " + result.strategy);
         return seleccionados;
     }
+    // NSPredicate en iOS \u2014 llamado en cada iteraci\u00f3n del poll de esperarDetallePelicula()
+    // (sleep 250ms, hasta ~4-5s) \u2014 ver nota de rendimiento en PlatformLocator.byExactText().
     private boolean estaEnDetalleDePelicula() {
         try {
-            String xpath = isIOS()
-                    ? "//*[contains(@value,'Sinopsis') or contains(@value,'Director') or "
-                        + "contains(@value,'Reparto') or contains(@value,'Clasificaci\u00f3n') or "
-                        + "contains(@value,'Ver horarios') or contains(@value,'VER HORARIOS') or "
-                        + "contains(@value,'Ver tr\u00e1iler') or contains(@value,'Ver trailer') or "
-                        + "contains(@name,'Ver horarios') or contains(@name,'Sinopsis') or "
-                        + "contains(@value,'Ver m\u00e1s')]"
-                    : "//*[contains(@text,'Sinopsis') or contains(@text,'Director') or "
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "value CONTAINS 'Sinopsis' OR value CONTAINS 'Director' OR "
+                        + "value CONTAINS 'Reparto' OR value CONTAINS 'Clasificaci\u00f3n' OR "
+                        + "value CONTAINS 'Ver horarios' OR value CONTAINS 'VER HORARIOS' OR "
+                        + "value CONTAINS 'Ver tr\u00e1iler' OR value CONTAINS 'Ver trailer' OR "
+                        + "name CONTAINS 'Ver horarios' OR name CONTAINS 'Sinopsis' OR "
+                        + "value CONTAINS 'Ver m\u00e1s'")
+                    : By.xpath("//*[contains(@text,'Sinopsis') or contains(@text,'Director') or "
                         + "contains(@text,'Reparto') or contains(@text,'Clasificaci\u00f3n') or "
                         + "contains(@text,'Ver horarios') or contains(@text,'VER HORARIOS') or "
                         + "contains(@text,'Ver tr\u00e1iler') or contains(@text,'Ver trailer') or "
-                        + "contains(@text,'Ver m\u00e1s')]";
-            for (WebElement el : driver.findElements(By.xpath(xpath))) {
+                        + "contains(@text,'Ver m\u00e1s')]");
+            for (WebElement el : driver.findElements(locator)) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
             }
         } catch (Exception ignored) {}
@@ -2127,6 +2149,7 @@ public class SelectorPage extends BasePage {
                 || t.equals("mis compras")
                 || t.equals("más")
                 || t.equals("la perla")
+                || t.equals("horarios en otros cines")
                 || t.startsWith("hoy ")
                 || t.equals("ver sinopsis")
                 || t.equals("ver horarios")
@@ -2187,10 +2210,11 @@ public class SelectorPage extends BasePage {
             String seatXpath = isIOS()
                 ? "//XCUIElementTypeStaticText[@value and string-length(normalize-space(@value)) <= 2]"
                 : "//android.widget.TextView[@text and string-length(normalize-space(@text)) <= 2]";
-            // UIAutomator2 on-device (Android) or XPath (iOS)
+            // UIAutomator2 on-device (Android) / NSPredicate (iOS, ver obtenerCandidatosAsientoIOS()) —
+            // seatXpath se conserva como fallback XPath por si la ruta principal lanza excepción.
             try {
                 List<WebElement> elementos = isIOS()
-                    ? driver.findElements(By.xpath(seatXpath))
+                    ? obtenerCandidatosAsientoIOS()
                     : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
                 for (WebElement el : elementos) {
                     try {
@@ -2239,9 +2263,9 @@ public class SelectorPage extends BasePage {
 
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
-            // UIAutomator2 (Android) / XPath (iOS): filtra asientos numéricos en el mapa
+            // UIAutomator2 (Android) / NSPredicate (iOS, ver obtenerCandidatosAsientoIOS()): filtra asientos numéricos en el mapa
             List<WebElement> candidatos = isIOS()
-                ? driver.findElements(By.xpath("//XCUIElementTypeStaticText[@value and string-length(normalize-space(@value)) <= 2]"))
+                ? obtenerCandidatosAsientoIOS()
                 : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
             for (WebElement el : candidatos) {
                 try {
@@ -2398,11 +2422,36 @@ public class SelectorPage extends BasePage {
         return new SeatMap(raw);
     }
 
-    // UIAutomator2 (Android) / XPath (iOS) — filtra por texto numérico en el mapa de asientos.
+    /**
+     * Candidatos de "número de asiento" en iOS: StaticText con @value no vacío y longitud
+     * (tras trim) &lt;= 2 — mismo criterio que el XPath anterior
+     * ("string-length(normalize-space(@value)) &lt;= 2"), llamado hasta ~240 veces por
+     * escaneo de mapa (esperarYObtenerAsientosDelMapa reintenta cada 250ms hasta 60s).
+     *
+     * PERF (solo iOS): el filtro de tipo+presencia de @value se resuelve con NSPredicate
+     * (WDA evalúa contra el árbol nativo, sin serializar el pageSource completo a XML,
+     * que es lo que exige cualquier XPath) y el recorte por longitud se hace en Java
+     * sobre el resultado ya obtenido — mismo criterio exacto, sin la evaluación XPath.
+     * Android (UiAutomator2, sin cambios) no pasa por aquí.
+     */
+    private List<WebElement> obtenerCandidatosAsientoIOS() {
+        List<WebElement> all = driver.findElements(
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"));
+        List<WebElement> filtrados = new ArrayList<>();
+        for (WebElement el : all) {
+            try {
+                String v = el.getAttribute("value");
+                if (v != null && v.trim().length() <= 2) filtrados.add(el);
+            } catch (Exception ignored) {}
+        }
+        return filtrados;
+    }
+
+    // UIAutomator2 (Android) / NSPredicate (iOS) — filtra por texto numérico en el mapa de asientos.
     private List<WebElement> escanearMapaConUIAutomator(int mapTop, int mapBottom) {
         try {
             List<WebElement> candidatos = isIOS()
-                ? driver.findElements(By.xpath("//XCUIElementTypeStaticText[@value and string-length(normalize-space(@value)) <= 2]"))
+                ? obtenerCandidatosAsientoIOS()
                 : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
             if (candidatos.isEmpty()) return escanearMapaConXPath(mapTop, mapBottom);
 

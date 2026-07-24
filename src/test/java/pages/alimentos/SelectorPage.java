@@ -510,8 +510,9 @@ public class SelectorPage extends BasePage {
     // Candidatos con texto visible en los resultados de búsqueda. Android: TextView
     // con @text no vacío. iOS: cualquier nodo con @label o @value no vacío (XCUITest
     // no tiene un único tipo "texto"; Compose Multiplatform puede usar cualquiera).
+    // NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
     private static final By CANDIDATOS_TEXTO_BUSQUEDA_IOS =
-            By.xpath("//*[string-length(@label) > 0 or string-length(@value) > 0]");
+            AppiumBy.iOSNsPredicateString("label.length > 0 OR value.length > 0");
 
     private WebElement encontrarResultadoTolerante(String nombreProducto) {
         String target = normalizeForSearch(nombreProducto);
@@ -752,13 +753,14 @@ public class SelectorPage extends BasePage {
     private static final By BADGE_CARRITO_ANDROID = By.xpath(
             "//android.widget.TextView[@text='1' or @text='2' or @text='3' " +
             "or @text='4' or @text='5' or @text='6' or @text='7' or @text='8' or @text='9']");
-    private static final By BADGE_CARRITO_IOS = By.xpath(
-            "//*[@label='1' or @label='2' or @label='3' or @label='4' or @label='5' " +
-            "or @label='6' or @label='7' or @label='8' or @label='9' " +
-            "or @name='1' or @name='2' or @name='3' or @name='4' or @name='5' " +
-            "or @name='6' or @name='7' or @name='8' or @name='9' " +
-            "or @value='1' or @value='2' or @value='3' or @value='4' or @value='5' " +
-            "or @value='6' or @value='7' or @value='8' or @value='9']");
+    // NSPredicate — ver nota de rendimiento en PlatformLocator.byExactText().
+    private static final By BADGE_CARRITO_IOS = AppiumBy.iOSNsPredicateString(
+            "label == '1' OR label == '2' OR label == '3' OR label == '4' OR label == '5' " +
+            "OR label == '6' OR label == '7' OR label == '8' OR label == '9' " +
+            "OR name == '1' OR name == '2' OR name == '3' OR name == '4' OR name == '5' " +
+            "OR name == '6' OR name == '7' OR name == '8' OR name == '9' " +
+            "OR value == '1' OR value == '2' OR value == '3' OR value == '4' OR value == '5' " +
+            "OR value == '6' OR value == '7' OR value == '8' OR value == '9'");
 
     private boolean intentarAbrirCarritoInterno(int intento) {
         // Estrategia 1: badge numérico en el header (cualquier número 1-9)
@@ -788,9 +790,11 @@ public class SelectorPage extends BasePage {
         // name/label (iOS — XCUITest no tiene resource-id ni content-desc).
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(2));
+            // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
             By iconLocator = isIOS()
-                    ? By.xpath("//*[@name='Carrito' or @name='Cart' or @name='carrito' or @name='basket' " +
-                        "or @label='Carrito' or @label='Cart' or @label='carrito' or @label='basket']")
+                    ? AppiumBy.iOSNsPredicateString(
+                        "name == 'Carrito' OR name == 'Cart' OR name == 'carrito' OR name == 'basket' " +
+                        "OR label == 'Carrito' OR label == 'Cart' OR label == 'carrito' OR label == 'basket'")
                     : By.xpath("//*[@content-desc='Carrito' or @content-desc='Cart' or " +
                         "contains(@resource-id,'cart') or contains(@resource-id,'carrito') or " +
                         "@content-desc='carrito' or @content-desc='basket']");
@@ -831,16 +835,19 @@ public class SelectorPage extends BasePage {
             "//*[contains(@text,'Carrito') or contains(@text,'carrito') " +
             "or contains(@text,'Continuar') or contains(@text,'Ir a pagar') " +
             "or contains(@text,'tu orden') or contains(@text,'Boletos')]");
-    private static final By SEÑALES_PANTALLA_CARRITO_IOS = By.xpath(
-            "//*[contains(@label,'Carrito') or contains(@label,'carrito') " +
-            "or contains(@label,'Continuar') or contains(@label,'Ir a pagar') " +
-            "or contains(@label,'tu orden') or contains(@label,'Boletos') " +
-            "or contains(@value,'Carrito') or contains(@value,'carrito') " +
-            "or contains(@value,'Continuar') or contains(@value,'Ir a pagar') " +
-            "or contains(@value,'tu orden') or contains(@value,'Boletos') " +
-            "or contains(@name,'Carrito') or contains(@name,'carrito') " +
-            "or contains(@name,'Continuar') or contains(@name,'Ir a pagar') " +
-            "or contains(@name,'tu orden') or contains(@name,'Boletos')]");
+    // NSPredicate — llamado tras cada estrategia de intentarAbrirCarritoInterno() (hasta
+    // 3) × hasta 3 intentos en abrirCarrito() — ver nota de rendimiento en
+    // PlatformLocator.byExactText().
+    private static final By SEÑALES_PANTALLA_CARRITO_IOS = AppiumBy.iOSNsPredicateString(
+            "label CONTAINS 'Carrito' OR label CONTAINS 'carrito' " +
+            "OR label CONTAINS 'Continuar' OR label CONTAINS 'Ir a pagar' " +
+            "OR label CONTAINS 'tu orden' OR label CONTAINS 'Boletos' " +
+            "OR value CONTAINS 'Carrito' OR value CONTAINS 'carrito' " +
+            "OR value CONTAINS 'Continuar' OR value CONTAINS 'Ir a pagar' " +
+            "OR value CONTAINS 'tu orden' OR value CONTAINS 'Boletos' " +
+            "OR name CONTAINS 'Carrito' OR name CONTAINS 'carrito' " +
+            "OR name CONTAINS 'Continuar' OR name CONTAINS 'Ir a pagar' " +
+            "OR name CONTAINS 'tu orden' OR name CONTAINS 'Boletos'");
 
     private boolean estaEnPantallaCarrito() {
         try {
@@ -1115,9 +1122,18 @@ public class SelectorPage extends BasePage {
     }
 
     private boolean tryClickByXpathContains(String xpath, String logLabel) {
+        return tryClickByLocatorContains(By.xpath(xpath), logLabel);
+    }
+
+    /**
+     * Variante By — permite pasar un locator NSPredicate (iOS) en vez de forzar XPath.
+     * Ver nota de rendimiento en PlatformLocator.byExactText(). Llamado hasta 2 veces
+     * por término candidato (hasta 4 términos) en tryFuzzyClick().
+     */
+    private boolean tryClickByLocatorContains(By locator, String logLabel) {
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            java.util.List<WebElement> candidates = driver.findElements(By.xpath(xpath));
+            java.util.List<WebElement> candidates = driver.findElements(locator);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             for (WebElement candidate : candidates) {
                 try {
@@ -1183,18 +1199,21 @@ public class SelectorPage extends BasePage {
         for (String term : searchTerms) {
             String safeT = escapeXpathValue(term);
             log.debug("[Fuzzy] Probando término: '{}'", term);
-            String textXpath = isIOS()
-                    ? "//*[contains(@label, \"" + safeT + "\") or contains(@value, \"" + safeT + "\")]"
-                    : "//*[contains(@text, \"" + safeT + "\")]";
-            if (tryClickByXpathContains(textXpath, targetText)) {
+            // NSPredicate en iOS — literal con comillas dobles porque escapeXpathValue()
+            // garantiza que safeT ya no contiene comillas dobles (pueden quedar simples,
+            // p. ej. "M&M's®"), igual que asumía el XPath original con \"..\".
+            By textLocator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString("label CONTAINS \"" + safeT + "\" OR value CONTAINS \"" + safeT + "\"")
+                    : By.xpath("//*[contains(@text, \"" + safeT + "\")]");
+            if (tryClickByLocatorContains(textLocator, targetText)) {
                 log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-text-contains | Tiempo={}ms | Resultado=ENCONTRADO",
                     targetText, System.currentTimeMillis() - t0);
                 return true;
             }
-            String descXpath = isIOS()
-                    ? "//*[contains(@name, \"" + safeT + "\")]"
-                    : "//*[contains(@content-desc, \"" + safeT + "\")]";
-            if (tryClickByXpathContains(descXpath, targetText)) {
+            By descLocator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString("name CONTAINS \"" + safeT + "\"")
+                    : By.xpath("//*[contains(@content-desc, \"" + safeT + "\")]");
+            if (tryClickByLocatorContains(descLocator, targetText)) {
                 log.info("[BUSQUEDA] Producto='{}' | Estrategia=fuzzy-desc-contains | Tiempo={}ms | Resultado=ENCONTRADO",
                     targetText, System.currentTimeMillis() - t0);
                 return true;
@@ -1281,17 +1300,30 @@ public class SelectorPage extends BasePage {
         long tEntry = System.currentTimeMillis();
         log.info("[ClickCard] ENTER producto='{}' longTimeout={}s", visibleText, longTimeoutSeconds);
 
-        // ✅ 1) Construcción de XPaths Mejorada (Texto exacto o Descripción de accesibilidad)
+        // ✅ 1) Construcción de locators (Texto exacto o Descripción de accesibilidad)
         // Esto cubre tanto el TextView como el contenedor de Compose.
         // Android expone el contenido en @text/@content-desc; iOS (XCUITest) lo expone
-        // en @label/@name/@value — el elemento ya era genérico (*), solo cambian los atributos.
-        String xpathText = isIOS()
+        // en @label/@name/@value.
+        //
+        // PERF (solo iOS): NSPredicate (AppiumBy.iOSNsPredicateString) en vez de XPath —
+        // este método tiene 64 sitios de llamada en este archivo y alimenta directamente
+        // findVisibleOrScrollToXpathAndClick/findVisibleOrScrollDownAndRightSlowToXpathAndClick
+        // (Pasos 3 y 4), que re-evalúan byText/byParent en CADA iteración de scroll — el
+        // mayor volumen de evaluaciones de locator de todo el archivo. Ver overloads By de
+        // esos dos métodos en BasePage (aceptan un By directo, sin forzar XPath). Android
+        // (@text/@content-desc, XPath) se deja exactamente igual.
+        boolean ios = isIOS();
+        By byText = ios
+                ? AppiumBy.iOSNsPredicateString(
+                        "label == \"" + visibleText + "\" OR name == \"" + visibleText + "\" OR value == \"" + visibleText + "\"")
+                : By.xpath("//*[@text=\"" + visibleText + "\" or @content-desc=\"" + visibleText + "\"]");
+        // "Padre del nodo" (XPath "..") no tiene equivalente NSPredicate (no expresa
+        // relaciones de árbol) — se conserva como XPath para AMBAS plataformas en este
+        // caso puntual, igual que antes, para no alterar qué elemento se termina tocando.
+        String xpathTextForParent = ios
                 ? "//*[@label=\"" + visibleText + "\" or @name=\"" + visibleText + "\" or @value=\"" + visibleText + "\"]"
                 : "//*[@text=\"" + visibleText + "\" or @content-desc=\"" + visibleText + "\"]";
-        String xpathParent = xpathText + "/..";
-
-        By byText   = By.xpath(xpathText);
-        By byParent = By.xpath(xpathParent);
+        By byParent = By.xpath(xpathTextForParent + "/..");
 
         // ✅ 2) Fast path MUY corto (tap por coordenadas si está visible)
         // OPTIMIZACIÓN: isVisibleFast() fuerza implicitlyWait=0 durante el chequeo y
@@ -1320,14 +1352,14 @@ public class SelectorPage extends BasePage {
         long t3 = System.currentTimeMillis();
         log.info("[ClickCard] Paso-3 ENTER (vertical ×2 | maxSwipes={})", Math.min(longTimeoutSeconds, 10));
         try {
-            findVisibleOrScrollToXpathAndClick(xpathText, Math.min(longTimeoutSeconds, 10));
-            log.info("[ClickCard] Paso-3 EXIT found xpathText ({}ms)", System.currentTimeMillis() - t3);
+            findVisibleOrScrollToXpathAndClick(byText, Math.min(longTimeoutSeconds, 10));
+            log.info("[ClickCard] Paso-3 EXIT found byText ({}ms)", System.currentTimeMillis() - t3);
             return;
         } catch (Throwable ignored) {}
 
         try {
-            findVisibleOrScrollToXpathAndClick(xpathParent, Math.min(longTimeoutSeconds, 10));
-            log.info("[ClickCard] Paso-3 EXIT found xpathParent ({}ms)", System.currentTimeMillis() - t3);
+            findVisibleOrScrollToXpathAndClick(byParent, Math.min(longTimeoutSeconds, 10));
+            log.info("[ClickCard] Paso-3 EXIT found byParent ({}ms)", System.currentTimeMillis() - t3);
             return;
         } catch (Throwable ignored) {}
         log.info("[ClickCard] Paso-3 EXIT no encontrado ({}ms)", System.currentTimeMillis() - t3);
@@ -1336,14 +1368,14 @@ public class SelectorPage extends BasePage {
         long t4 = System.currentTimeMillis();
         log.info("[ClickCard] Paso-4 ENTER (V/H ×2 | maxV={} maxH=5)", Math.min(longTimeoutSeconds, 10));
         try {
-            findVisibleOrScrollDownAndRightSlowToXpathAndClick(xpathText, Math.min(longTimeoutSeconds, 10), 5);
-            log.info("[ClickCard] Paso-4 EXIT found xpathText ({}ms)", System.currentTimeMillis() - t4);
+            findVisibleOrScrollDownAndRightSlowToXpathAndClick(byText, Math.min(longTimeoutSeconds, 10), 5);
+            log.info("[ClickCard] Paso-4 EXIT found byText ({}ms)", System.currentTimeMillis() - t4);
             return;
         } catch (Throwable ignored) {}
 
         try {
-            findVisibleOrScrollDownAndRightSlowToXpathAndClick(xpathParent, Math.min(longTimeoutSeconds, 10), 5);
-            log.info("[ClickCard] Paso-4 EXIT found xpathParent ({}ms)", System.currentTimeMillis() - t4);
+            findVisibleOrScrollDownAndRightSlowToXpathAndClick(byParent, Math.min(longTimeoutSeconds, 10), 5);
+            log.info("[ClickCard] Paso-4 EXIT found byParent ({}ms)", System.currentTimeMillis() - t4);
             return;
         } catch (Throwable ignored) {}
         log.info("[ClickCard] Paso-4 EXIT no encontrado ({}ms)", System.currentTimeMillis() - t4);
