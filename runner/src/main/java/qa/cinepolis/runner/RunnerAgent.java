@@ -438,7 +438,7 @@ public class RunnerAgent {
             }
 
             // ── 9. Device Stream Server ────────────────────────────────────────
-            streamServer = new DeviceStreamServer(config.streamPort, adbPath);
+            streamServer = new DeviceStreamServer(config.streamPort, adbPath, config.agentDataDir);
             try {
                 streamServer.start();
                 String streamUrl = "http://" + config.hostname + ":" + config.streamPort;

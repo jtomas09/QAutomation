@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
 import qa.cinepolis.runner.mirror.DeviceMirrorProvider;
 import qa.cinepolis.runner.mirror.MirrorProviderRegistry;
 
@@ -14,6 +16,7 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.util.Iterator;
 import java.util.concurrent.*;
 import javax.imageio.IIOImage;
@@ -21,6 +24,8 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
 
 /**
  * Device Stream Service — Live Preview Engine (Phase 10)
@@ -45,16 +50,37 @@ public class DeviceStreamServer {
     private static final String PATH_PREFIX       = "/api/device-stream/";
     private static final String PATH_MIRROR       = "/api/device-mirror/";
 
+    // Contraseña del keystore HTTPS local (certificado autofirmado de solo desarrollo,
+    // generado localmente en {agentDataDir}/certs/runner.p12 — nunca un secreto real,
+    // nunca sale de esta máquina, no protege nada más allá de ese archivo local).
+    private static final String HTTPS_KEYSTORE_PASSWORD = "automationqa";
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final int                    port;
+    private final int                    httpsPort;
+    private final String                 agentDataDir;
     private final RecordingEngine        recordingEngine;
     private final MirrorProviderRegistry providers;
 
-    private HttpServer server;
+    private HttpServer  server;
+    private HttpsServer httpsServer;
 
     public DeviceStreamServer(int port, String adbPath) {
+        this(port, adbPath, null);
+    }
+
+    /**
+     * @param agentDataDir raíz de datos del Runner (p.ej. AGENT_DATA_DIR) — usada
+     *                      únicamente para localizar un keystore HTTPS local opcional
+     *                      en {agentDataDir}/certs/runner.p12 (ver {@link #startHttpsIfAvailable()}).
+     *                      Puede ser null — en ese caso HTTPS simplemente no se habilita,
+     *                      sin afectar en nada el servidor HTTP existente.
+     */
+    public DeviceStreamServer(int port, String adbPath, String agentDataDir) {
         this.port            = port;
+        this.httpsPort       = port + 1;
+        this.agentDataDir    = agentDataDir;
         this.recordingEngine = new RecordingEngine(adbPath);
         this.providers       = new MirrorProviderRegistry(adbPath);
     }
@@ -68,11 +94,33 @@ public class DeviceStreamServer {
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 32);
-        server.createContext(PATH_PREFIX, new StreamHandler());
-        server.createContext(PATH_MIRROR, new MirrorHandler());
+        registerContexts(server);
+        server.setExecutor(Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "device-stream-worker");
+            t.setDaemon(true);
+            return t;
+        }));
+        server.start();
+        System.out.println("[DeviceStream] Server started → http://localhost:" + port + PATH_PREFIX + "{udid}");
+        System.out.println("[DeviceMirror] MJPEG endpoint  → http://localhost:" + port + PATH_MIRROR + "{udid}");
+        System.out.println("[Recording]   Engine endpoint  → http://localhost:" + port + "/api/recording/{start|stop|action|events}");
+
+        startHttpsIfAvailable();
+    }
+
+    /**
+     * Registra EXACTAMENTE los mismos contextos/handlers en el servidor dado — se
+     * usa tanto para el HttpServer plano (existente, sin cambios de comportamiento)
+     * como para el HttpsServer opcional de {@link #startHttpsIfAvailable()}.
+     * HttpsServer extiende HttpServer, así que createContext() funciona igual en
+     * ambos sin duplicar ninguna lógica de los handlers.
+     */
+    private void registerContexts(HttpServer target) {
+        target.createContext(PATH_PREFIX, new StreamHandler());
+        target.createContext(PATH_MIRROR, new MirrorHandler());
 
         // Health check — frontend uses this to detect Runner reachability
-        server.createContext("/health", ex -> {
+        target.createContext("/health", ex -> {
             addCorsHeaders(ex);
             if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
                 ex.sendResponseHeaders(204, -1);
@@ -85,7 +133,7 @@ public class DeviceStreamServer {
         });
 
         // Device mirror status — GET /api/device/status?udid={udid}
-        server.createContext("/api/device/status", ex -> {
+        target.createContext("/api/device/status", ex -> {
             addCorsHeaders(ex);
             if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
                 ex.sendResponseHeaders(204, -1);
@@ -137,7 +185,7 @@ public class DeviceStreamServer {
         // existe (WdaManager, que sigue viva durante toda la ejecución en este mismo
         // proceso Runner) para que quien la necesite la consulte en el instante exacto
         // en que la va a usar, en vez de confiar en una copia hecha minutos antes.
-        server.createContext("/api/wda/url", ex -> {
+        target.createContext("/api/wda/url", ex -> {
             addCorsHeaders(ex);
             if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
                 ex.sendResponseHeaders(204, -1);
@@ -167,7 +215,7 @@ public class DeviceStreamServer {
         // test, proceso separado, sin acceso directo a las clases del Runner) pueda
         // consultar el estado de unlock REAL en el último instante antes de crear
         // IOSDriver — sin duplicar ninguna lógica de detección de bloqueo.
-        server.createContext("/api/device/unlock-status", ex -> {
+        target.createContext("/api/device/unlock-status", ex -> {
             addCorsHeaders(ex);
             if ("OPTIONS".equalsIgnoreCase(ex.getRequestMethod())) {
                 ex.sendResponseHeaders(204, -1);
@@ -192,20 +240,63 @@ public class DeviceStreamServer {
         });
 
         // Recording engine endpoints
-        server.createContext("/api/recording/start",   new RecordingStartHandler());
-        server.createContext("/api/recording/stop/",   new RecordingStopHandler());
-        server.createContext("/api/recording/action/", new RecordingActionHandler());
-        server.createContext("/api/recording/events/", new RecordingEventsHandler());
+        target.createContext("/api/recording/start",   new RecordingStartHandler());
+        target.createContext("/api/recording/stop/",   new RecordingStopHandler());
+        target.createContext("/api/recording/action/", new RecordingActionHandler());
+        target.createContext("/api/recording/events/", new RecordingEventsHandler());
+    }
 
-        server.setExecutor(Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "device-stream-worker");
-            t.setDaemon(true);
-            return t;
-        }));
-        server.start();
-        System.out.println("[DeviceStream] Server started → http://localhost:" + port + PATH_PREFIX + "{udid}");
-        System.out.println("[DeviceMirror] MJPEG endpoint  → http://localhost:" + port + PATH_MIRROR + "{udid}");
-        System.out.println("[Recording]   Engine endpoint  → http://localhost:" + port + "/api/recording/{start|stop|action|events}");
+    /**
+     * Habilita HTTPS en un puerto adicional (port + 1) SOLO si existe un keystore
+     * local en {agentDataDir}/certs/runner.p12 — causa raíz que resuelve: el
+     * Dashboard servido por HTTPS (Railway) no puede conectarse al Runner en
+     * http://localhost:{port} porque los navegadores modernos auto-suben (o
+     * bloquean, sin fallback) cualquier recurso http:// solicitado desde una
+     * página https:// ("mixed content"). El Mirror pedía ese recurso y el
+     * navegador lo bloqueaba en silencio — nunca llegaba una sola conexión real
+     * de navegador al Runner (confirmado: el log solo mostraba conexiones desde
+     * ::1, es decir, pruebas locales, nunca el Dashboard).
+     *
+     * El servidor HTTP existente en {@code port} NO se toca — este listener es
+     * puramente aditivo. Si el keystore no existe (instalación sin certificado
+     * local generado), HTTPS simplemente no se habilita y todo sigue funcionando
+     * exactamente igual que antes para cualquier acceso por HTTP.
+     */
+    private void startHttpsIfAvailable() {
+        if (agentDataDir == null || agentDataDir.isBlank()) return;
+        File keystoreFile = new File(agentDataDir, "certs" + File.separator + "runner.p12");
+        if (!keystoreFile.isFile()) {
+            System.out.println("[DeviceStream] HTTPS deshabilitado — no se encontró keystore local en "
+                    + keystoreFile.getAbsolutePath());
+            return;
+        }
+        try {
+            char[] password = HTTPS_KEYSTORE_PASSWORD.toCharArray();
+            KeyStore keyStore = KeyStore.getInstance("PKCS12");
+            try (InputStream in = new FileInputStream(keystoreFile)) {
+                keyStore.load(in, password);
+            }
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(keyStore, password);
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(kmf.getKeyManagers(), null, null);
+
+            httpsServer = HttpsServer.create(new InetSocketAddress(httpsPort), 32);
+            httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext));
+            registerContexts(httpsServer);
+            httpsServer.setExecutor(Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "device-stream-https-worker");
+                t.setDaemon(true);
+                return t;
+            }));
+            httpsServer.start();
+            System.out.println("[DeviceStream] HTTPS habilitado → https://localhost:" + httpsPort
+                    + PATH_MIRROR + "{udid} (keystore: " + keystoreFile.getAbsolutePath() + ")");
+        } catch (Exception e) {
+            System.err.println("[DeviceStream] No se pudo iniciar HTTPS (se continúa solo con HTTP): "
+                    + e.getMessage());
+            httpsServer = null;
+        }
     }
 
     public void stop() {
@@ -213,9 +304,16 @@ public class DeviceStreamServer {
             server.stop(0);
             System.out.println("[DeviceStream] Server stopped.");
         }
+        if (httpsServer != null) {
+            httpsServer.stop(0);
+            System.out.println("[DeviceStream] HTTPS server stopped.");
+        }
     }
 
     public int getPort() { return port; }
+
+    /** @return el puerto HTTPS opcional (port + 1), habilitado solo si hay un keystore local. */
+    public int getHttpsPort() { return httpsPort; }
 
     // ── HTTP handler ──────────────────────────────────────────────────────────
 

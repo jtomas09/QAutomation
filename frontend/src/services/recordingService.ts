@@ -11,9 +11,11 @@
  *   GET  /api/recording/events/{sessionId} → SSE stream for physical taps
  */
 
-import { RUNNER_STREAM_HOST, RUNNER_STREAM_PORT } from './mirrorService'
+import { runnerBaseUrl } from './mirrorService'
 
-const BASE = `http://${RUNNER_STREAM_HOST}:${RUNNER_STREAM_PORT}`
+// Se resuelve por llamada (no como constante de módulo) para que siempre refleje
+// el protocolo de la página actual — ver runnerBaseUrl() en mirrorService.ts.
+function base(): string { return runnerBaseUrl() }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,7 +36,7 @@ export type RecordingAction =
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export async function startRecording(udid: string): Promise<RecordingSession> {
-  const res = await fetch(`${BASE}/api/recording/start`, {
+  const res = await fetch(`${base()}/api/recording/start`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ udid }),
@@ -45,7 +47,7 @@ export async function startRecording(udid: string): Promise<RecordingSession> {
 
 export async function stopRecording(sessionId: string): Promise<void> {
   try {
-    await fetch(`${BASE}/api/recording/stop/${encodeURIComponent(sessionId)}`, {
+    await fetch(`${base()}/api/recording/stop/${encodeURIComponent(sessionId)}`, {
       method: 'POST',
     })
   } catch {
@@ -63,7 +65,7 @@ export async function sendAction(
 ): Promise<unknown | null> {
   try {
     const res = await fetch(
-      `${BASE}/api/recording/action/${encodeURIComponent(sessionId)}`,
+      `${base()}/api/recording/action/${encodeURIComponent(sessionId)}`,
       {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -90,7 +92,7 @@ export function subscribePhysicalEvents(
   onError?: (err: Event) => void,
 ): () => void {
   const es = new EventSource(
-    `${BASE}/api/recording/events/${encodeURIComponent(sessionId)}`,
+    `${base()}/api/recording/events/${encodeURIComponent(sessionId)}`,
   )
   es.onmessage = (e) => {
     try {
