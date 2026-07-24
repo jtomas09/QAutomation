@@ -506,13 +506,6 @@ public class JobExecutor {
     }
 
     /**
-     * Mata el árbol de procesos de forma confiable en Windows y Linux/Mac.
-     * Estrategia dual:
-     *  1. Java ProcessHandle.descendants().destroyForcibly() (cross-platform)
-     *  2. Windows: taskkill /F /T /PID para matar subárboles que Java puede perder
-     *     (gradlew.bat → cmd.exe → java.exe → java.exe (test fork))
-     */
-    /**
      * Mata el árbol de procesos de forma confiable en Windows y Linux/Mac — delega
      * en {@link ProcessRegistry#killProcessTree}, la misma utilidad compartida que
      * ahora usa el registro unificado para git y Gradle (ver ExecutionContext),
@@ -523,6 +516,25 @@ public class JobExecutor {
         System.out.println("[PROCESS FLOW] forceKillProcessTree() ENTRY — pid=" + process.pid()
                 + " isAlive=" + process.isAlive());
         ProcessRegistry.killProcessTree(process);
+    }
+
+    /**
+     * Única validación usada por TODOS los caminos de salida de execute() antes de
+     * llamar a client.sendResult() (Fase 21 — cierre del Hallazgo #1 de la auditoría
+     * de la Fase 20/21). Evita que un sendResult() normal sobrescriba un estado
+     * terminal que el execAbortWatcher ya fijó vía confirmAbort() — sin este guard,
+     * un abort detectado justo cuando alguno de estos caminos también está fallando
+     * por su cuenta (fallo de red al pedir configuración, ADB, devicectl, etc.)
+     * podía terminar enviando ambos resultados para el mismo executionId.
+     *
+     * wasAborted/resultSent se reciben como parámetros (en vez de ser campos de la
+     * clase) porque siguen siendo variables locales de execute(), scoped a UNA sola
+     * ejecución — promoverlas a campos de instancia introduciría una carrera nueva
+     * entre el execAbortWatcher de una ejecución terminando y el de la siguiente
+     * arrancando, sin aportar ningún beneficio real.
+     */
+    private boolean shouldSendResult(AtomicBoolean wasAborted, AtomicBoolean resultSent) {
+        return !wasAborted.get() && !resultSent.get();
     }
 
     public void execute(JobDto job) {
@@ -565,7 +577,6 @@ public class JobExecutor {
         // WorkspaceManager (p.ej. un segundo intento de clone) sin necesitar que
         // WorkspaceManager sepa nada de abort — su lógica de decisión no se toca.
         final ExecutionContext execCtx = new ExecutionContext(job.executionId, client);
-        System.out.println("[ExecutionContext][TEMP] Execution created — executionId=" + job.executionId);
         final AtomicBoolean abortAnnounced = new AtomicBoolean(false);
         Thread execAbortWatcher = new Thread(() -> {
             while (!Thread.currentThread().isInterrupted()) {
@@ -574,7 +585,6 @@ public class JobExecutor {
 
                 if (abortAnnounced.compareAndSet(false, true)) {
                     wasAborted.set(true);
-                    System.out.println("[ExecutionContext][TEMP] Abort received — executionId=" + job.executionId);
                     client.sendLog(job.executionId, "WARN", "🛑 Aborto recibido — deteniendo proceso activo...");
                     try { client.confirmAbort(job.executionId); } catch (Exception ignored) {}
                     resultSent.set(true);
@@ -584,7 +594,6 @@ public class JobExecutor {
                 // git, Gradle (kill directo) o WDA (release de consumidor, registrado
                 // como cancelable más abajo) — sin importar la fase. Único mecanismo
                 // para los tres, ver ProcessRegistry.killAll().
-                System.out.println("[ExecutionContext][TEMP] Killing process tree — executionId=" + job.executionId);
                 execCtx.killAll();
             }
         }, "exec-abort-watcher-" + job.executionId);
@@ -606,8 +615,10 @@ public class JobExecutor {
             if (runnerCfg == null || !runnerCfg.isConfigured()) {
                 client.sendLog(job.executionId, "ERROR",
                         "❌ No fue posible obtener la configuración del proyecto.");
-                client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                resultSent.set(true);
+                if (shouldSendResult(wasAborted, resultSent)) {
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
+                }
                 return;
             }
             client.sendLog(job.executionId, "INFO", "✅ Configuración recibida.");
@@ -624,8 +635,10 @@ public class JobExecutor {
                 client.sendLog(job.executionId, "ERROR",
                         "❌ La configuración almacenada no coincide con el dispositivo enviado. " +
                         "Verifica que el dispositivo esté conectado y registrado en el Runner.");
-                client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                resultSent.set(true);
+                if (shouldSendResult(wasAborted, resultSent)) {
+                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                    resultSent.set(true);
+                }
                 return;
             }
 
@@ -639,7 +652,7 @@ public class JobExecutor {
                 // git y llamó confirmAbort()), no hay que enviar un resultado más —
                 // sería un reporte duplicado/contradictorio sobre una ejecución que el
                 // backend ya marcó ABORTED.
-                if (!wasAborted.get()) {
+                if (shouldSendResult(wasAborted, resultSent)) {
                     client.sendResult(job.executionId, 0, 0, 0, null, List.of());
                     resultSent.set(true);
                 }
@@ -660,8 +673,10 @@ public class JobExecutor {
                 }
             } else {
                 if (!checkIosXcuitestDriver(job.executionId)) {
-                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                    resultSent.set(true);
+                    if (shouldSendResult(wasAborted, resultSent)) {
+                        client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                        resultSent.set(true);
+                    }
                     return;
                 }
                 // Ejecución real: adquiere la sesión de lanzamiento de WDA de forma
@@ -710,8 +725,10 @@ public class JobExecutor {
                     client.sendLog(job.executionId, "ERROR",
                             "❌ Launcher Activity no encontrada para " + effectivePackage
                             + ". Verifica que la app esté instalada en el dispositivo.");
-                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                    resultSent.set(true);
+                    if (shouldSendResult(wasAborted, resultSent)) {
+                        client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                        resultSent.set(true);
+                    }
                     return;
                 }
                 cmd.add("-DappActivity=" + resolvedActivity);
@@ -843,8 +860,10 @@ public class JobExecutor {
                             "❌ Dispositivo no listo para ejecución — Gradle NO será lanzado.\n"
                             + "   Motivo: " + iosResult.notReadyReason + "\n"
                             + "   Corrige el problema y reintenta desde el Dashboard.");
-                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                    resultSent.set(true);
+                    if (shouldSendResult(wasAborted, resultSent)) {
+                        client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                        resultSent.set(true);
+                    }
                     return;
                 }
 
@@ -857,8 +876,10 @@ public class JobExecutor {
                             "🔒 Dispositivo bloqueado justo antes de lanzar Gradle — ejecución cancelada.\n"
                             + "   El dispositivo se bloqueó entre el Pre-flight y el inicio de la ejecución.\n"
                             + "   Desbloquea el iPhone y reintenta.");
-                    client.sendResult(job.executionId, 0, 0, 0, null, List.of());
-                    resultSent.set(true);
+                    if (shouldSendResult(wasAborted, resultSent)) {
+                        client.sendResult(job.executionId, 0, 0, 0, null, List.of());
+                        resultSent.set(true);
+                    }
                     return;
                 }
                 client.sendLog(job.executionId, "INFO",
@@ -1155,13 +1176,12 @@ public class JobExecutor {
             System.out.println("[Executor] [TIMING] allure (Runner CLI): " + (System.currentTimeMillis() - t4) + " ms");
 
             // [POST-5] Envío de resultado final al Backend (obligatorio)
-            // Guard nuevo (Fase 20): el execAbortWatcher unificado ahora sigue vivo
-            // durante TODO el post-procesamiento (antes se apagaba en cuanto Gradle
-            // salía) — si un abort llega justo en esta ventana, ya llamó a
-            // confirmAbort() y puso resultSent=true; sin este guard, este sendResult()
-            // normal se ejecutaría de todos modos justo después y le pisaría el
-            // estado ABORTED de vuelta a COMPLETED/FAILED en el backend.
-            if (!resultSent.get()) {
+            // El execAbortWatcher unificado sigue vivo durante TODO el post-procesamiento
+            // (antes se apagaba en cuanto Gradle salía) — si un abort llega justo en esta
+            // ventana, ya llamó a confirmAbort() y puso resultSent=true; shouldSendResult()
+            // evita que este sendResult() normal le pise el estado ABORTED de vuelta a
+            // COMPLETED/FAILED en el backend.
+            if (shouldSendResult(wasAborted, resultSent)) {
                 long t5 = System.currentTimeMillis();
                 System.out.println("[Executor] [POST-5] Enviando resultado final al Backend…");
                 client.sendResult(job.executionId,
@@ -1192,10 +1212,10 @@ public class JobExecutor {
             try { client.sendLog(job.executionId, "ERROR",
                     "❌ Error interno del runner: " + describeException(e)
                     + "\n" + stackTrace.lines().limit(10).reduce("", (a, b) -> a + b + "\n")); } catch (Exception ignored) {}
-            // Mismo guard que POST-5: si el execAbortWatcher ya llamó confirmAbort()
+            // Misma validación que POST-5: si el execAbortWatcher ya llamó confirmAbort()
             // (abort detectado mientras esta excepción se propagaba), no pisar ese
             // estado con un sendResult() normal.
-            if (!resultSent.get()) {
+            if (shouldSendResult(wasAborted, resultSent)) {
                 try {
                     client.sendResult(job.executionId,
                             passed.get(), Math.max(failed.get(), 1), skipped.get(), null, testCases,
@@ -1215,7 +1235,7 @@ public class JobExecutor {
             }
             // If neither the happy path nor the catch block sent a result, finalize here.
             // This handles the case where the catch block itself throws before reaching sendResult().
-            if (!resultSent.get() && !wasAborted.get()) {
+            if (shouldSendResult(wasAborted, resultSent)) {
                 System.err.println("[Executor] ⚠ [finally] Ejecución " + job.executionId
                         + " sin resultado previo — ejecutando sendResult de emergencia");
                 try {
@@ -1240,13 +1260,10 @@ public class JobExecutor {
             // asociado a este executionId una vez que execute() retorna.
             execAbortWatcher.interrupt();
             if (execCtx.hasActiveProcesses()) {
-                System.out.println("[ExecutionContext][TEMP] Safety-net: procesos aún registrados al cerrar — "
-                        + "executionId=" + job.executionId + " — cancelando.");
+                System.err.println("[ExecutionContext] ⚠ Procesos aún registrados al cerrar la ejecución — "
+                        + "executionId=" + job.executionId + " — cancelando (no debería ocurrir en un cierre normal).");
                 execCtx.killAll();
             }
-            System.out.println("[ExecutionContext][TEMP] Workspace released — executionId=" + job.executionId
-                    + " | procesos vivos restantes: " + execCtx.hasActiveProcesses());
-            System.out.println("[ExecutionContext][TEMP] Execution closed — executionId=" + job.executionId);
             System.out.println("[PROCESS FLOW] JobExecutor.execute() END — executionId=" + job.executionId
                     + " | resultSent=" + resultSent.get() + " | wasAborted=" + wasAborted.get());
         }

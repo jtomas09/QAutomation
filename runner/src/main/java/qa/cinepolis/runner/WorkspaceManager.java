@@ -80,7 +80,6 @@ public class WorkspaceManager {
 
         switch (insp.state()) {
             case FRESH -> {
-                System.out.println("[Workspace][TEMP] Decision: CLONE (executionId=" + executionId + ")");
                 logWorkspaceStatus(executionId, "📂 Workspace no encontrado", "No existe",
                         "Clonando repositorio...");
                 if (!cloneRepo(executionId)) {
@@ -99,7 +98,6 @@ public class WorkspaceManager {
                 String motivo = insp.detail() != null ? insp.detail()
                         : "git no reconoce el workspace como un repositorio válido "
                         + "(refs corruptas, clon interrumpido, o carpeta .git incompleta).";
-                System.out.println("[Workspace][TEMP] Decision: CLONE (workspace corrupto, executionId=" + executionId + ")");
                 logCorruptedAndReclone(executionId, motivo);
                 if (!cloneRepo(executionId)) {
                     client.sendLog(executionId, "ERROR", "❌ No fue posible sincronizar el repositorio.");
@@ -108,7 +106,6 @@ public class WorkspaceManager {
                 client.sendLog(executionId, "INFO", "✅ Clonación completada.");
             }
             case VALID -> {
-                System.out.println("[Workspace][TEMP] Decision: FETCH (executionId=" + executionId + ")");
                 logWorkspaceStatus(executionId, "📂 Workspace encontrado", "Válido",
                         "Actualizando repositorio...");
                 UpdateResult result = updateRepo(executionId);
@@ -146,20 +143,6 @@ public class WorkspaceManager {
      * dispara un re-clonado automático, sin intervención manual.
      */
     private WorkspaceInspection inspectWorkspace(String executionId) {
-        // TEMP LOG (auditoría Workspace/Procesos — remover tras validar Fase 20)
-        boolean settingsGradle = new File(workspaceDir, "settings.gradle").exists()
-                || new File(workspaceDir, "settings.gradle.kts").exists();
-        boolean gradlewPresent = new File(workspaceDir, "gradlew").exists()
-                || new File(workspaceDir, "gradlew.bat").exists();
-        boolean indexLock      = new File(workspaceDir, ".git/index.lock").exists();
-        System.out.println("[Workspace][TEMP] Workspace path: " + workspaceDir.getAbsolutePath());
-        System.out.println("[Workspace][TEMP] Workspace exists: " + workspaceDir.exists());
-        System.out.println("[Workspace][TEMP] .git exists: " + new File(workspaceDir, ".git").exists());
-        System.out.println("[Workspace][TEMP] settings.gradle exists: " + settingsGradle);
-        System.out.println("[Workspace][TEMP] gradlew exists: " + gradlewPresent);
-        System.out.println("[Workspace][TEMP] .git/index.lock exists: " + indexLock);
-        System.out.println("[Workspace][TEMP] Git process running: " + ProcessRegistry.hasActive(executionId));
-
         File dotGit = new File(workspaceDir, ".git");
         if (!dotGit.exists()) {
             if (workspaceDir.exists() && isValidGradleProject()) {
@@ -330,7 +313,6 @@ public class WorkspaceManager {
             client.sendLog(executionId, "WARN", "⚠️ Error en git clean -fd: " + e.getMessage());
         }
 
-        System.out.println("[Workspace][TEMP] Decision: PULL (executionId=" + executionId + ")");
         client.sendLog(executionId, "INFO", "⬇ git pull --ff-only");
         try {
             if (!runGit(List.of("git", "pull", "--ff-only", "origin", repoBranch),
@@ -482,7 +464,6 @@ public class WorkspaceManager {
 
         if (!valid) return null;
 
-        System.out.println("[Workspace][TEMP] Workspace validado — executionId=" + executionId);
         client.sendLog(executionId, "INFO",
                 "✅ Proyecto Gradle válido: " + workspaceDir.getAbsolutePath());
         return workspaceDir;

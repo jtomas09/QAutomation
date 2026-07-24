@@ -58,18 +58,13 @@ public final class ProcessRegistry {
         String token = label + "#" + TOKEN_SEQ.incrementAndGet();
         BY_EXECUTION.computeIfAbsent(executionId, k -> new ConcurrentHashMap<>())
                 .put(token, new Entry(label, cancelable, pid, System.currentTimeMillis()));
-        System.out.println("[ProcessRegistry][TEMP] Registered process — executionId=" + executionId
-                + " label=" + label + " token=" + token + (pid >= 0 ? " pid=" + pid : ""));
         return token;
     }
 
     /** Conveniencia para procesos del SO (git, Gradle) — cancelar = matar el árbol de procesos. */
     public static String registerProcess(String executionId, String label, Process process) {
         long pid = safePid(process);
-        String token = register(executionId, label, () -> killProcessTree(process), pid);
-        System.out.println("[ProcessRegistry][TEMP] Current process — executionId=" + executionId
-                + " label=" + label + " pid=" + pid);
-        return token;
+        return register(executionId, label, () -> killProcessTree(process), pid);
     }
 
     /** Quita una entrada sin cancelarla — usar cuando el proceso ya terminó por su cuenta. */
@@ -79,7 +74,7 @@ public final class ProcessRegistry {
         if (m == null) return;
         Entry e = m.remove(token);
         if (e != null) {
-            System.out.println("[ProcessRegistry][TEMP] Process terminated — executionId=" + executionId
+            System.out.println("[ProcessRegistry] Process terminated — executionId=" + executionId
                     + " label=" + e.label() + " token=" + token);
         }
         if (m.isEmpty()) BY_EXECUTION.remove(executionId, m);
@@ -95,13 +90,13 @@ public final class ProcessRegistry {
     public static void killAll(String executionId) {
         Map<String, Entry> m = BY_EXECUTION.remove(executionId);
         if (m == null || m.isEmpty()) return;
-        System.out.println("[ProcessRegistry][TEMP] Killing process tree — executionId=" + executionId
+        System.out.println("[ProcessRegistry] Killing process tree — executionId=" + executionId
                 + " count=" + m.size());
         for (Map.Entry<String, Entry> en : m.entrySet()) {
             try {
                 en.getValue().cancelable().cancel();
             } catch (Exception ignored) {}
-            System.out.println("[ProcessRegistry][TEMP] Process terminated — executionId=" + executionId
+            System.out.println("[ProcessRegistry] Process terminated — executionId=" + executionId
                     + " label=" + en.getValue().label() + " token=" + en.getKey());
         }
     }
