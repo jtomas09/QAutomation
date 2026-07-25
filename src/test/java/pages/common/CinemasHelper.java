@@ -26,6 +26,23 @@ public class CinemasHelper extends BasePage {
 
     private static final Logger log = LoggerFactory.getLogger(CinemasHelper.class);
 
+    // ─── Cache por ejecución — SOLO iOS ──────────────────────────────────────────
+    // "¿Este cambio afecta Android?": SÍ (cambia cuántas veces se verifica Club/Mario
+    // dentro del mismo run) → implementación exclusiva iOS, gateada por isIOS() en
+    // cada punto de uso. Android conserva su comportamiento de siempre: re-verifica
+    // Club y Mario en cada llamada a dismissTransientPromosGuard(), sin cache.
+    //
+    // Se reinicia en BaseTest.beforeAllSuite() junto con MEXICO_CINEMA_CHECKED — es
+    // cache POR EJECUCIÓN/SUITE, nunca permanente entre corridas distintas.
+    private static volatile boolean iosClubClosedThisRun  = false;
+    private static volatile boolean iosNoPromosThisRun    = false;
+
+    /** Reinicia el cache por-ejecución de iOS. Llamar SOLO desde BaseTest.beforeAllSuite(). */
+    public static void resetRunCache() {
+        iosClubClosedThisRun = false;
+        iosNoPromosThisRun   = false;
+    }
+
     // ─── Helpers de visibilidad instantánea ──────────────────────────────────────
     //
     // PROBLEMA: firstOrNull→findElements usa implicitlyWait activo (10 s).
@@ -1188,6 +1205,7 @@ public class CinemasHelper extends BasePage {
      * Solo llamar desde dismissTransientPromosGuard tras isClubLoginVisible()=true.
      */
     private void dismissClubWhenAlreadyVisible(String where) {
+        utils.PerfMetrics.startPhase("ClubGuard");
         try {
             log.info("[CinemasHelper][ClubGuard] ENTER where={}", where);
             long t0 = System.currentTimeMillis();
@@ -1199,6 +1217,8 @@ public class CinemasHelper extends BasePage {
             boolean stillVisible = !closedReturn && isClubLoginVisible();
             log.info("[CinemasHelper][ClubGuard] closedReturn={} stillVisible={} tiempo={}ms",
                     closedReturn, stillVisible, System.currentTimeMillis() - t0);
+            utils.PerfMetrics.attempt("ClubGuard", 1, where, System.currentTimeMillis() - t0,
+                    closedReturn ? "OK" : (stillVisible ? "FAIL" : "OK"));
 
             if (stillVisible) {
                 log.warn("[CinemasHelper][ClubGuard] STILL visible -> last resort navigate.back()");
@@ -1208,6 +1228,8 @@ public class CinemasHelper extends BasePage {
             log.info("[CinemasHelper][ClubGuard] EXIT where={}", where);
         } catch (Exception e) {
             log.error("[CinemasHelper][ClubGuard] ERROR where={} msg={}", where, e.getMessage());
+        } finally {
+            utils.PerfMetrics.endPhase("ClubGuard");
         }
     }
 
@@ -1369,7 +1391,12 @@ public class CinemasHelper extends BasePage {
      * Comportamiento funcional: IDÉNTICO al anterior. PromosGuard y ClubGuard
      * coexisten; ninguno se elimina.
      */
+    /** Envuelve el guard real con instrumentación de fase (ver utils.PerfMetrics) — el endPhase() se garantiza vía try/finally sin importar cuál de los múltiples "return" internos se tome. */
     public void dismissTransientPromosGuard(String where) {
+        utils.PerfMetrics.measure("PromosGuard", () -> dismissTransientPromosGuardImpl(where));
+    }
+
+    private void dismissTransientPromosGuardImpl(String where) {
         log.info("[TRACE] Inicio PromosGuard | hilo={} plataforma={} where={} hora={}",
                 Thread.currentThread().getName(), isIOS() ? "iOS" : "Android", where, System.currentTimeMillis());
         log.info("[CinemasHelper][PromosGuard] ENTER where={}", where);
@@ -1382,7 +1409,14 @@ public class CinemasHelper extends BasePage {
 
         // Flag local: una vez cerrado Club no volvemos a verificarlo en este guard.
         // Esto evita que los passes 2-5 gasten ~10 s cada uno en isClubLoginVisible().
-        boolean clubAlreadyDismissed = false;
+        // iOS: se inicializa en true si un llamado ANTERIOR (otro test de la misma
+        // suite) ya confirmó que Club se cerró — cache por-ejecución (Problema:
+        // "Club ya cerrado → no volver a calcularlo"). Android nunca lee este cache;
+        // conserva el comportamiento de siempre (re-verifica en cada llamada).
+        boolean clubAlreadyDismissed = isIOS() && iosClubClosedThisRun;
+        if (clubAlreadyDismissed) {
+            log.debug("[CinemasHelper][PromosGuard] Club ya cerrado en una llamada previa de esta ejecución (cache iOS) — skip total");
+        }
 
         for (int pass = 1; pass <= 5; pass++) {
             boolean dismissed = false;
@@ -1398,6 +1432,7 @@ public class CinemasHelper extends BasePage {
                         dismissClubWhenAlreadyVisible(where + ":club");
                         dismissed = true;
                         clubAlreadyDismissed = true;  // no repetir en passes siguientes
+                        if (isIOS()) iosClubClosedThisRun = true;  // no repetir en llamadas futuras de esta ejecución
 
                         // Poll rápido de Main Nav tras cierre de Club (evita las 4×10 s lentas)
                         long tNav0 = System.currentTimeMillis();
@@ -1423,11 +1458,21 @@ public class CinemasHelper extends BasePage {
             }
 
             // ── Mario Promo ───────────────────────────────────────────────────────
+            // iOS: cache por-ejecución — una vez resuelta (dismisses o confirmada
+            // ausente) en un pase de CUALQUIER llamada previa de esta ejecución, se
+            // asume resuelta para el resto (mismo criterio que Club: overlay de
+            // sesión fresca, no reaparece). Android sin cambios: siempre re-verifica.
             try {
-                if (isMarioPromoVisible()) {
+                if (isIOS() && iosNoPromosThisRun) {
+                    log.debug("[CinemasHelper][PromosGuard] Mario ya resuelto en esta ejecución (cache iOS) — skip check");
+                } else if (isMarioPromoVisible()) {
                     log.info("[CinemasHelper][PromosGuard] pass={} Mario visible -> dismiss", pass);
                     dismissMarioPromoIfPresent();
                     dismissed = true;
+                    if (isIOS()) iosNoPromosThisRun = true;
+                } else if (isIOS() && pass == 1) {
+                    // Confirmado ausente en el primer pase real de esta llamada — cachear.
+                    iosNoPromosThisRun = true;
                 }
             } catch (Exception e) {
                 log.error("[CinemasHelper][PromosGuard] Mario guard error: {}", e.getMessage());
@@ -1698,14 +1743,22 @@ public class CinemasHelper extends BasePage {
      * Escenario 2: cine ya seleccionado → no hace nada.
      * Flujo: navega a Horarios → toca el chip "Selecciona uno o más cines" → busca → aplica.
      */
+    /** CinemaValidation instrumentado (utils.PerfMetrics) — ver ensureMexicoCinemaSelectedImpl() para la lógica real. */
     public void ensureMexicoCinemaSelected() {
+        utils.PerfMetrics.measure("CinemaValidation", this::ensureMexicoCinemaSelectedImpl);
+    }
+
+    private void ensureMexicoCinemaSelectedImpl() {
         log.info("[CinemasHelper][MxCinema] Verificando cine seleccionado para México...");
+        long t0 = System.currentTimeMillis();
 
         // Navegar a Horarios donde vive el chip de selección de cines
         tapIfPresent(TAB_HORARIOS);
         sleep(600);
 
         if (isMexicoCinemaPreSelected()) {
+            utils.PerfMetrics.attempt("CinemaValidation", 1, "cine-ya-seleccionado",
+                    System.currentTimeMillis() - t0, "OK");
             log.info("[CinemasHelper][MxCinema] Escenario 2: cine ya seleccionado -> continua con tests.");
             return;
         }
@@ -1716,6 +1769,8 @@ public class CinemasHelper extends BasePage {
         if (cinemaName == null || cinemaName.isBlank()) {
             log.warn("[CinemasHelper][MxCinema] Archivo '{}' vacío o no encontrado -> se omite selección.",
                     MEXICO_CINEMA_CONFIG);
+            utils.PerfMetrics.attempt("CinemaValidation", 1, "sin-config",
+                    System.currentTimeMillis() - t0, "SKIP");
             return;
         }
 
@@ -1729,8 +1784,10 @@ public class CinemasHelper extends BasePage {
             clickAplicarSeleccion();
             acceptAlertsIfPresent();
             log.info("[CinemasHelper][MxCinema] Cine '{}' seleccionado exitosamente.", cinemaName);
+            utils.PerfMetrics.attempt("CinemaValidation", 1, cinemaName, System.currentTimeMillis() - t0, "OK");
         } catch (Exception e) {
             log.error("[CinemasHelper][MxCinema] Error al seleccionar cine '{}': {}", cinemaName, e.getMessage());
+            utils.PerfMetrics.attempt("CinemaValidation", 1, cinemaName, System.currentTimeMillis() - t0, "FAIL");
         }
     }
 

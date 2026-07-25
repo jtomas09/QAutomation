@@ -90,41 +90,71 @@ public class SelectorPage extends BasePage {
         log.info("[SelectorPage] Alerta de Restricciones aceptada. Continuando...");
     }
 
+    /**
+     * Estrategia: UN solo escaneo de pantalla (MovieDetection), UN solo filtrado a
+     * candidatos válidos (MovieFiltering — descarta banners/publicidad/"Horarios en
+     * otros cines"/tarjetas inválidas vía esTextoNoPelicula(), ya usado dentro de
+     * obtenerPeliculasVisibles()), y luego se intenta abrir cada candidato de la MISMA
+     * lista ya calculada (MovieOpen) — si uno falla, se prueba el siguiente candidato
+     * de la lista en memoria, sin volver a escanear ni recorrer la pantalla completa.
+     * Instrumentado con utils.PerfMetrics (fases + intento/elemento/tiempo/resultado
+     * por película probada) — ver Problema 5.
+     */
     public String abrirPrimerPeliculaDesdeVerSinopsis() {
         driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(isIOS() ? 8 : 3));
 
-        List<WebElement> peliculas = obtenerPeliculasVisibles();
+        // MovieDetection: único escaneo de la pantalla — obtenerPeliculasVisibles()
+        // ya aplica el filtro de candidatos válidos (esTextoNoPelicula) internamente.
+        List<WebElement> peliculas = utils.PerfMetrics.measure("MovieDetection", this::obtenerPeliculasVisibles);
 
         if (peliculas.isEmpty()) {
             throw new RuntimeException("No se detectaron títulos de películas en la pantalla inicial.");
         }
 
-        List<String> nombresPeliculas = new ArrayList<>();
-        for (WebElement el : peliculas) {
-            try {
-                String nombre = obtenerTextoSeguro(el);
-                if (!nombre.isBlank() && !nombresPeliculas.contains(nombre)) {
-                    nombresPeliculas.add(nombre);
+        // MovieFiltering: de los elementos ya escaneados, construir la lista final de
+        // nombres únicos — sin ninguna consulta adicional al driver (0 findElements).
+        List<String> nombresPeliculas = utils.PerfMetrics.measure("MovieFiltering", () -> {
+            List<String> nombres = new ArrayList<>();
+            for (WebElement el : peliculas) {
+                try {
+                    String nombre = obtenerTextoSeguro(el);
+                    if (!nombre.isBlank() && !nombres.contains(nombre)) {
+                        nombres.add(nombre);
+                    }
+                } catch (Exception ignored) {
                 }
-            } catch (Exception ignored) {
             }
-        }
+            return nombres;
+        });
 
-        for (String nombre : nombresPeliculas) {
-            try {
-                log.info("[SelectorPage] Intentando abrir película desde Ver sinopsis: {}", nombre);
+        // MovieOpen: recorre la lista YA calculada — un candidato falla → se prueba el
+        // siguiente de la MISMA lista, nunca se vuelve a escanear ni reiniciar el algoritmo.
+        utils.PerfMetrics.startPhase("MovieOpen");
+        try {
+            int intento = 0;
+            for (String nombre : nombresPeliculas) {
+                intento++;
+                long t0 = System.currentTimeMillis();
+                try {
+                    log.info("[SelectorPage] Intentando abrir película desde Ver sinopsis: {}", nombre);
 
-                if (abrirPeliculaPorVerSinopsis(nombre)) {
-                    log.info("[SelectorPage] Película abierta correctamente: {}", nombre);
-                    return nombre;
+                    if (abrirPeliculaPorVerSinopsis(nombre)) {
+                        utils.PerfMetrics.attempt("MovieOpen", intento, nombre, System.currentTimeMillis() - t0, "OK");
+                        log.info("[SelectorPage] Película abierta correctamente: {}", nombre);
+                        return nombre;
+                    }
+                    utils.PerfMetrics.attempt("MovieOpen", intento, nombre, System.currentTimeMillis() - t0, "FAIL");
+
+                } catch (Exception e) {
+                    utils.PerfMetrics.attempt("MovieOpen", intento, nombre, System.currentTimeMillis() - t0, "ERROR");
+                    log.warn("[SelectorPage] Error abriendo película '{}': {}", nombre, e.getMessage());
                 }
-
-            } catch (Exception e) {
-                log.warn("[SelectorPage] Error abriendo película '{}': {}", nombre, e.getMessage());
             }
-        }
 
-        throw new RuntimeException("Se detectaron películas visibles, pero no se pudo abrir ninguna desde Ver sinopsis.");
+            throw new RuntimeException("Se detectaron películas visibles, pero no se pudo abrir ninguna desde Ver sinopsis.");
+        } finally {
+            utils.PerfMetrics.endPhase("MovieOpen");
+        }
     }
     private boolean abrirPeliculaPorVerSinopsis(String nombrePelicula) {
         for (int intento = 1; intento <= 3; intento++) {
@@ -592,48 +622,63 @@ public class SelectorPage extends BasePage {
         throw new RuntimeException("No se pudo abrir la etiqueta de horarios.");
     }
     public String seleccionarPrimerHorarioDisponibleEnGrid() {
-        if (!esperarPantallaHorarios(5000)) {
-            throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
-        }
-
-        List<WebElement> horarios = obtenerHorariosDisponibles();
-
-        if (horarios.isEmpty()) {
-            throw new RuntimeException("No hay horarios visibles para seleccionar.");
-        }
-
-        for (WebElement horario : horarios) {
-            try {
-                if (!horario.isDisplayed()) continue;
-
-                String hora = obtenerTextoSeguro(horario);
-                if (hora.isBlank()) continue;
-
-                log.info("[SelectorPage] Intentando seleccionar horario disponible: {}", hora);
-
-                if (clicSeguroEnHorario(horario)) {
-                    sleep(800);
-                    aceptarAlertaAtencionSiPresente();
-                    return hora;
-                }
-
-                // fallback con reubicación por texto
-                WebElement relocalizado = reubicarElementoPorTextoExacto(hora);
-                if (relocalizado != null) {
-                    int x = relocalizado.getRect().getX() + (relocalizado.getRect().getWidth() / 2);
-                    int y = relocalizado.getRect().getY() + (relocalizado.getRect().getHeight() / 2);
-                    tapW3C(x, y);
-                    sleep(800);
-                    aceptarAlertaAtencionSiPresente();
-                    return hora;
-                }
-
-            } catch (Exception e) {
-                log.warn("[SelectorPage] Error seleccionando horario: {}", e.getMessage());
+        utils.PerfMetrics.startPhase("ScheduleSelection");
+        try {
+            if (!esperarPantallaHorarios(5000)) {
+                throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
             }
-        }
 
-        throw new RuntimeException("Se detectaron horarios visibles, pero no se pudo seleccionar ninguno.");
+            List<WebElement> horarios = obtenerHorariosDisponibles();
+
+            if (horarios.isEmpty()) {
+                throw new RuntimeException("No hay horarios visibles para seleccionar.");
+            }
+
+            int intento = 0;
+            for (WebElement horario : horarios) {
+                intento++;
+                long t0 = System.currentTimeMillis();
+                try {
+                    if (!horario.isDisplayed()) continue;
+
+                    String hora = obtenerTextoSeguro(horario);
+                    if (hora.isBlank()) continue;
+
+                    log.info("[SelectorPage] Intentando seleccionar horario disponible: {}", hora);
+
+                    // PERF (Problema 5): sleep(800) fijo eliminado — aceptarAlertaAtencionSiPresente()
+                    // ya hace su propio polling interno (implicitlyWait=0, hasta 2000ms) esperando la
+                    // alerta; el sleep previo solo agregaba tiempo muerto sin aportar seguridad extra
+                    // (el caso lento ya está cubierto por ESE polling). Seguro para ambas plataformas:
+                    // el downstream es compartido y su presupuesto de espera no cambia.
+                    if (clicSeguroEnHorario(horario)) {
+                        aceptarAlertaAtencionSiPresente();
+                        utils.PerfMetrics.attempt("ScheduleSelection", intento, hora, System.currentTimeMillis() - t0, "OK");
+                        return hora;
+                    }
+
+                    // fallback con reubicación por texto
+                    WebElement relocalizado = reubicarElementoPorTextoExacto(hora);
+                    if (relocalizado != null) {
+                        int x = relocalizado.getRect().getX() + (relocalizado.getRect().getWidth() / 2);
+                        int y = relocalizado.getRect().getY() + (relocalizado.getRect().getHeight() / 2);
+                        tapW3C(x, y);
+                        aceptarAlertaAtencionSiPresente();
+                        utils.PerfMetrics.attempt("ScheduleSelection", intento, hora, System.currentTimeMillis() - t0, "OK");
+                        return hora;
+                    }
+                    utils.PerfMetrics.attempt("ScheduleSelection", intento, hora, System.currentTimeMillis() - t0, "FAIL");
+
+                } catch (Exception e) {
+                    utils.PerfMetrics.attempt("ScheduleSelection", intento, "?", System.currentTimeMillis() - t0, "ERROR");
+                    log.warn("[SelectorPage] Error seleccionando horario: {}", e.getMessage());
+                }
+            }
+
+            throw new RuntimeException("Se detectaron horarios visibles, pero no se pudo seleccionar ninguno.");
+        } finally {
+            utils.PerfMetrics.endPhase("ScheduleSelection");
+        }
     }
     /**
      * Igual que seleccionarPeliculaRandomYHorario() pero si al seleccionar un horario
@@ -648,61 +693,87 @@ public class SelectorPage extends BasePage {
     }
 
     public String seleccionarPrimerHorarioDescartandoAlertas() {
-        if (!esperarPantallaHorarios(5000)) {
-            throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
-        }
-
-        for (int intento = 0; intento < 10; intento++) {
-            List<WebElement> horarios = obtenerHorariosDisponibles();
-            if (horarios.isEmpty()) break;
-
-            boolean alertaDescartada = false;
-            for (WebElement horario : horarios) {
-                try {
-                    if (!horario.isDisplayed()) continue;
-                    String hora = obtenerTextoSeguro(horario);
-                    if (hora.isBlank()) continue;
-
-                    log.info("[SelectorPage] Intentando horario (descarte-alerta) intento={}: {}", intento, hora);
-
-                    boolean clicOk = clicSeguroEnHorario(horario);
-                    if (!clicOk) {
-                        WebElement rel = reubicarElementoPorTextoExacto(hora);
-                        if (rel != null) {
-                            tapW3C(rel.getRect().getX() + rel.getRect().getWidth() / 2,
-                                   rel.getRect().getY() + rel.getRect().getHeight() / 2);
-                            clicOk = true;
-                        }
-                    }
-                    if (!clicOk) continue;
-
-                    sleep(1000);
-
-                    // Alerta "Atención" (movimientos/vibraciones): aceptar y continuar al flujo de asientos
-                    if (aceptarAlertaAtencionSiPresente()) {
-                        log.info("[SelectorPage] Alerta 'Atención' aceptada para horario '{}'.", hora);
-                        return hora;
-                    }
-
-                    if (hayAlertaHorarioInesperada()) {
-                        log.warn("[SelectorPage] Alerta tras '{}': descartando y probando siguiente horario.", hora);
-                        descartarAlertaHorario();
-                        sleep(600);
-                        alertaDescartada = true;
-                        break;
-                    }
-
-                    return hora;
-
-                } catch (Exception e) {
-                    log.warn("[SelectorPage] Error intentando horario: {}", e.getMessage());
-                }
+        utils.PerfMetrics.startPhase("ScheduleSelection");
+        try {
+            if (!esperarPantallaHorarios(5000)) {
+                throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
             }
 
-            if (!alertaDescartada) break;
-        }
+            int intentoGlobal = 0;
+            for (int intento = 0; intento < 10; intento++) {
+                List<WebElement> horarios = obtenerHorariosDisponibles();
+                if (horarios.isEmpty()) break;
 
-        throw new RuntimeException("No se encontró ningún horario sin alertas inesperadas.");
+                boolean alertaDescartada = false;
+                for (WebElement horario : horarios) {
+                    intentoGlobal++;
+                    long t0 = System.currentTimeMillis();
+                    String hora = "?";
+                    try {
+                        if (!horario.isDisplayed()) continue;
+                        hora = obtenerTextoSeguro(horario);
+                        if (hora.isBlank()) continue;
+
+                        log.info("[SelectorPage] Intentando horario (descarte-alerta) intento={}: {}", intento, hora);
+
+                        boolean clicOk = clicSeguroEnHorario(horario);
+                        if (!clicOk) {
+                            WebElement rel = reubicarElementoPorTextoExacto(hora);
+                            if (rel != null) {
+                                tapW3C(rel.getRect().getX() + rel.getRect().getWidth() / 2,
+                                       rel.getRect().getY() + rel.getRect().getHeight() / 2);
+                                clicOk = true;
+                            }
+                        }
+                        if (!clicOk) {
+                            utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "FAIL");
+                            continue;
+                        }
+
+                        // PERF (Problema 5): sleep(1000) fijo → espera inteligente. aceptarAlertaAtencionSiPresente()
+                        // ya poll-ea por su cuenta (no se puede acortar sin duplicar su lógica), pero
+                        // hayAlertaHorarioInesperada() (más abajo) SOLO hace un chequeo instantáneo sin
+                        // reintento — por eso no se puede simplemente ELIMINAR este sleep (a diferencia del
+                        // caso análogo en seleccionarPrimerHorarioDisponibleEnGrid): se reemplaza por polling
+                        // corto que sale en cuanto cualquiera de las dos alertas aparece, con el mismo tope
+                        // de 1000ms como peor caso — nunca espera más que antes, casi siempre espera menos.
+                        smartWait(() -> !driver.findElements(aceptarYContinuarLocator()).isEmpty()
+                                || estaVisibleAlertaRestricciones(), 1000, 100);
+
+                        // Alerta "Atención" (movimientos/vibraciones): aceptar y continuar al flujo de asientos
+                        if (aceptarAlertaAtencionSiPresente()) {
+                            log.info("[SelectorPage] Alerta 'Atención' aceptada para horario '{}'.", hora);
+                            utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "OK");
+                            return hora;
+                        }
+
+                        if (hayAlertaHorarioInesperada()) {
+                            log.warn("[SelectorPage] Alerta tras '{}': descartando y probando siguiente horario.", hora);
+                            descartarAlertaHorario();
+                            // PERF (Problema 5): sleep(600) fijo → espera inteligente por la condición
+                            // real (la alerta desaparece), mismo tope de 600ms como peor caso.
+                            smartWait(() -> !hayAlertaHorarioInesperada(), 600, 100);
+                            alertaDescartada = true;
+                            utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "SKIP-ALERTA");
+                            break;
+                        }
+
+                        utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "OK");
+                        return hora;
+
+                    } catch (Exception e) {
+                        utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "ERROR");
+                        log.warn("[SelectorPage] Error intentando horario: {}", e.getMessage());
+                    }
+                }
+
+                if (!alertaDescartada) break;
+            }
+
+            throw new RuntimeException("No se encontró ningún horario sin alertas inesperadas.");
+        } finally {
+            utils.PerfMetrics.endPhase("ScheduleSelection");
+        }
     }
 
     private boolean hayAlertaHorarioInesperada() {
@@ -2163,6 +2234,23 @@ public class SelectorPage extends BasePage {
         try {
             Thread.sleep(ms);
         } catch (InterruptedException ignored) {}
+    }
+
+    /**
+     * Espera activa: retorna en cuanto la condición es verdadera o se agota el
+     * timeout — mismo patrón que CinemasHelper.smartWait(), reutilizado aquí para
+     * reemplazar sleeps fijos por polling corto con salida temprana (Problema 5).
+     * Nunca espera MÁS que un sleep(maxMs) equivalente en el peor caso.
+     */
+    private boolean smartWait(java.util.function.BooleanSupplier condition, long maxMs, long pollMs) {
+        long end = System.currentTimeMillis() + maxMs;
+        while (System.currentTimeMillis() < end) {
+            if (condition.getAsBoolean()) return true;
+            long remaining = end - System.currentTimeMillis();
+            if (remaining <= 0) break;
+            sleep(Math.min(pollMs, remaining));
+        }
+        return condition.getAsBoolean();
     }
 
 

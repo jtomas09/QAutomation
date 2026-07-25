@@ -101,6 +101,9 @@ public class BaseTest {
             driverCreatedOnce = false;
             MEXICO_CINEMA_CHECKED.set(false);
             lastAlimentosCinema = null;
+            // Cache por-ejecución de iOS (Club cerrado / sin promos) — nunca permanente
+            // entre suites, ver CinemasHelper.resetRunCache().
+            pages.common.CinemasHelper.resetRunCache();
 
             try { clearDirectory(Paths.get("build", "reportes-pdf")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "reports", "allure-report")); } catch (Exception ignored) {}
