@@ -717,8 +717,13 @@ public class SelectorPage extends BasePage {
 
     private void descartarAlertaHorario() {
         try {
-            List<WebElement> botones = driver.findElements(
-                    By.xpath("//*[@text='Cancelar' or contains(@text,'Cancelar')]"));
+            // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString("label == 'Cancelar' OR label CONTAINS 'Cancelar' " +
+                        "OR name == 'Cancelar' OR name CONTAINS 'Cancelar' " +
+                        "OR value == 'Cancelar' OR value CONTAINS 'Cancelar'")
+                    : By.xpath("//*[@text='Cancelar' or contains(@text,'Cancelar')]");
+            List<WebElement> botones = driver.findElements(locator);
             for (WebElement btn : botones) {
                 try {
                     if (!btn.isDisplayed()) continue;
@@ -734,11 +739,17 @@ public class SelectorPage extends BasePage {
         }
     }
 
+    // PERF/FIX (Problema 5 — irAEtiquetaHorarios): sin rama iOS, @text es exclusivo de
+    // Android — en iOS "Ver horarios" (y cualquier otro texto) NUNCA se encontraba aquí,
+    // aunque el elemento estuviera perfectamente visible. NSPredicate en iOS — ver nota
+    // de rendimiento en PlatformLocator.byExactText().
     private WebElement reubicarElementoPorTexto(String texto) {
         try {
-            List<WebElement> elementos = driver.findElements(
-                    By.xpath("//*[contains(@text,'" + texto + "')]")
-            );
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS \"" + texto + "\" OR name CONTAINS \"" + texto + "\" OR value CONTAINS \"" + texto + "\"")
+                    : By.xpath("//*[contains(@text,'" + texto + "')]");
+            List<WebElement> elementos = driver.findElements(locator);
 
             for (WebElement el : elementos) {
                 try {
@@ -755,9 +766,11 @@ public class SelectorPage extends BasePage {
     }
     private WebElement reubicarElementoPorTextoExacto(String texto) {
         try {
-            List<WebElement> elementos = driver.findElements(
-                    By.xpath("//*[@text='" + texto + "']")
-            );
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label == \"" + texto + "\" OR name == \"" + texto + "\" OR value == \"" + texto + "\"")
+                    : By.xpath("//*[@text='" + texto + "']");
+            List<WebElement> elementos = driver.findElements(locator);
 
             for (WebElement el : elementos) {
                 try {
@@ -910,11 +923,19 @@ public class SelectorPage extends BasePage {
         return resultado;
     }
 
+    // PERF/FIX (Problema 5): sin rama iOS — @text/android.widget.TextView son exclusivos
+    // de Android, así que en iOS esta lista SIEMPRE estaba vacía (0 horarios detectados,
+    // garantizado). El filtro real (regex de hora "7:30 PM") es semántico, no depende de
+    // qué película/función sea — se agrega el equivalente iOS vía NSPredicate, mismo
+    // criterio de regex aplicado después con obtenerTextoSeguro() (ya lee @value en iOS).
     private List<WebElement> obtenerHorariosDisponibles() {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
-        List<By> candidatos = List.of(
+        List<By> candidatos = isIOS() ? List.of(
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"),
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)")
+        ) : List.of(
                 By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"),
                 By.xpath("//android.view.View[@text and normalize-space(@text)!='']")
         );
@@ -958,11 +979,20 @@ public class SelectorPage extends BasePage {
         return resultado;
     }
 
+    // PERF/FIX (Problema 5): esta locator NUNCA tuvo rama iOS (@text es exclusivo de
+    // Android) — en iOS `todos` siempre estaba vacío, así que esperarPantallaHorarios()
+    // agotaba GARANTIZADO su timeout completo (5000ms) en cada una de las hasta ~10
+    // llamadas de irAEtiquetaHorarios()/seleccionarPrimerHorarioDisponibleEnGrid() por
+    // intento de película. El criterio (¿hay un horario tipo "7:30 PM" o "Español"/
+    // "Subtitulada" visible?) es semántico y agnóstico de qué película sea — no
+    // requiere inventar texto específico no verificado, solo exponerlo también para
+    // iOS vía @value/@label (obtenerTextoSeguro() ya sabe leer @value en iOS).
     private boolean estaEnPantallaDeHorarios() {
         try {
-            List<WebElement> todos = driver.findElements(
-                    By.xpath("//*[@text and normalize-space(@text)!='']")
-            );
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString("value != nil OR label != nil")
+                    : By.xpath("//*[@text and normalize-space(@text)!='']");
+            List<WebElement> todos = driver.findElements(locator);
 
             for (WebElement el : todos) {
                 try {
@@ -1467,11 +1497,16 @@ public class SelectorPage extends BasePage {
     /**
      * Devuelve {@code true} si la alerta de Restricciones de Sala Junior está visible.
      */
+    // PERF/FIX (Problema 5 — hayAlertaHorarioInesperada, llamado en cada horario probado):
+    // sin rama iOS, siempre false en iOS. NSPredicate — ver nota en PlatformLocator.byExactText().
     public boolean estaVisibleAlertaRestricciones() {
         try {
-            return !driver.findElements(By.xpath(
-                    "//*[contains(@text,'Restricciones') or contains(@text,'ambiente familiar')]"
-            )).isEmpty();
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'Restricciones' OR label CONTAINS 'ambiente familiar' " +
+                        "OR value CONTAINS 'Restricciones' OR value CONTAINS 'ambiente familiar'")
+                    : By.xpath("//*[contains(@text,'Restricciones') or contains(@text,'ambiente familiar')]");
+            return !driver.findElements(locator).isEmpty();
         } catch (Exception ignored) {}
         return false;
     }
@@ -1550,14 +1585,24 @@ public class SelectorPage extends BasePage {
      *
      * @return true si se detectó y aceptó una alerta.
      */
+    // PERF/FIX (Problema 5 — llamado tras CADA horario tapeado en las dos rutas de
+    // selección): sin rama iOS, "textos" siempre vacío en iOS → el while quemaba
+    // garantizado los 2000ms completos (implicitlyWait=0 ya estaba bien puesto — el
+    // problema era el locator en sí, no la espera). NSPredicate — ver nota en
+    // PlatformLocator.byExactText().
+    private By aceptarYContinuarLocator() {
+        return isIOS()
+                ? AppiumBy.iOSNsPredicateString("label CONTAINS 'Aceptar y continuar' OR value CONTAINS 'Aceptar y continuar'")
+                : By.xpath("//*[contains(@text,'Aceptar y continuar')]");
+    }
+
     public boolean aceptarAlertaAceptarYContinuarSiPresente() {
         final long TIMEOUT_MS = 2000;
         long deadline = System.currentTimeMillis() + TIMEOUT_MS;
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
             while (System.currentTimeMillis() < deadline) {
-                List<WebElement> textos = driver.findElements(
-                    By.xpath("//*[contains(@text,'Aceptar y continuar')]"));
+                List<WebElement> textos = driver.findElements(aceptarYContinuarLocator());
                 for (WebElement txt : textos) {
                     try {
                         if (!txt.isDisplayed()) continue;
@@ -1570,8 +1615,7 @@ public class SelectorPage extends BasePage {
                         // Estrategia 1: tap directo en el texto
                         tapW3C(cx, cy);
                         sleep(400);
-                        if (driver.findElements(By.xpath(
-                                "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) {
+                        if (driver.findElements(aceptarYContinuarLocator()).isEmpty()) {
                             log.info("[SelectorPage] Alerta'{}' aceptada (tap texto).", tituloAlerta);
                             return true;
                         }
@@ -1582,29 +1626,32 @@ public class SelectorPage extends BasePage {
                             tapW3C(parent.getRect().getX() + parent.getRect().getWidth()  / 2,
                                    parent.getRect().getY() + parent.getRect().getHeight() / 2);
                             sleep(400);
-                            if (driver.findElements(By.xpath(
-                                    "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) {
+                            if (driver.findElements(aceptarYContinuarLocator()).isEmpty()) {
                                 log.info("[SelectorPage] Alerta '{}' aceptada (tap padre).", tituloAlerta);
                                 return true;
                             }
                         } catch (Exception ignored) {}
 
                         // Estrategia 3: android.widget.Button hermano (clickable=false pero enabled=true)
-                        try {
-                            WebElement parent = txt.findElement(By.xpath(".."));
-                            List<WebElement> btns = parent.findElements(
-                                By.xpath(".//android.widget.Button"));
-                            for (WebElement btn : btns) {
-                                tapW3C(btn.getRect().getX() + btn.getRect().getWidth()  / 2,
-                                       btn.getRect().getY() + btn.getRect().getHeight() / 2);
-                                sleep(400);
-                                if (driver.findElements(By.xpath(
-                                        "//*[contains(@text,'Aceptar y continuar')]")).isEmpty()) {
-                                    log.info("[SelectorPage] Alerta '{}' aceptada (tap Button).", tituloAlerta);
-                                    return true;
+                        // Exclusivo de Android — Compose expone el botón real como hermano del
+                        // TextView; iOS no tiene este patrón (el elemento tocado ya es el control
+                        // real), por eso esta estrategia solo se intenta en Android.
+                        if (!isIOS()) {
+                            try {
+                                WebElement parent = txt.findElement(By.xpath(".."));
+                                List<WebElement> btns = parent.findElements(
+                                    By.xpath(".//android.widget.Button"));
+                                for (WebElement btn : btns) {
+                                    tapW3C(btn.getRect().getX() + btn.getRect().getWidth()  / 2,
+                                           btn.getRect().getY() + btn.getRect().getHeight() / 2);
+                                    sleep(400);
+                                    if (driver.findElements(aceptarYContinuarLocator()).isEmpty()) {
+                                        log.info("[SelectorPage] Alerta '{}' aceptada (tap Button).", tituloAlerta);
+                                        return true;
+                                    }
                                 }
-                            }
-                        } catch (Exception ignored) {}
+                            } catch (Exception ignored) {}
+                        }
 
                         // Al menos un tap se ejecutó — asumir que funcionó
                         log.info("[SelectorPage] Alerta '{}' tapeada con 'Aceptar y continuar'.", tituloAlerta);
@@ -1621,15 +1668,18 @@ public class SelectorPage extends BasePage {
         return false;
     }
 
-    /** Intenta leer el título del diálogo visible para logging. */
+    /** Intenta leer el título del diálogo visible para logging (best-effort, no bloquea el flujo). */
     private String detectarTituloAlerta() {
         try {
-            // Primeras líneas de texto visibles en el área superior del diálogo
-            List<WebElement> textos = driver.findElements(
-                By.xpath("//*[@text and string-length(@text) > 3 and string-length(@text) < 60]"));
+            // Primeras líneas de texto visibles en el área superior del diálogo.
+            // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString("value.length > 3 AND value.length < 60")
+                    : By.xpath("//*[@text and string-length(@text) > 3 and string-length(@text) < 60]");
+            List<WebElement> textos = driver.findElements(locator);
             for (WebElement el : textos) {
                 try {
-                    String t = el.getText().trim();
+                    String t = obtenerTextoSeguro(el);
                     if (!t.isBlank() && !t.contains("Aceptar") && !t.contains("Cancelar")) {
                         return t.length() > 40 ? t.substring(0, 40) + "…" : t;
                     }
@@ -1723,11 +1773,15 @@ public class SelectorPage extends BasePage {
             throw e;
         }
     }
+    // Mismo hallazgo/fix que obtenerHorariosDisponibles() — sin rama iOS, siempre vacío.
     private List<WebElement> obtenerHorariosVisiblesEnPantallaAsientos() {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
-        List<By> candidatos = List.of(
+        List<By> candidatos = isIOS() ? List.of(
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"),
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)")
+        ) : List.of(
                 By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"),
                 By.xpath("//android.view.View[@text and normalize-space(@text)!='']")
         );

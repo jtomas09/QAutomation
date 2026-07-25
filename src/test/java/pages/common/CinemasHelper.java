@@ -1211,61 +1211,84 @@ public class CinemasHelper extends BasePage {
         }
     }
 
+    private boolean intentoNavigateBack(long waitMs) {
+        try {
+            driver.navigate().back();
+            smartWait(() -> !isClubLoginVisible(), waitMs, 100);
+        } catch (Exception ignored) {}
+        return !isClubLoginVisible();
+    }
+
+    private boolean intentoTapBackUI(long waitMs) {
+        if (!tapBackFromClubUI()) return false;
+        smartWait(() -> !isClubLoginVisible(), waitMs, 100);
+        return !isClubLoginVisible();
+    }
+
+    private boolean intentoTapA11y(long waitMs) {
+        tapIfPresent(CLUB_BACK_BUTTON_A11Y);
+        smartWait(() -> !isClubLoginVisible(), waitMs, 100);
+        return !isClubLoginVisible();
+    }
+
     /**
      * Cierra la pantalla de Club Cinépolis.
-     * Orden: navigate().back() → botón back UI → content-desc.
-     * navigate().back() va primero: es un solo comando WebDriver (~200ms),
-     * no requiere buscar elementos en la UI de Compose (que puede tardar 10+ s mientras carga).
+     *
+     * PERF (Problema 3 — ClubGuard >20s): el orden original probaba SIEMPRE
+     * navigate().back() primero, asumiendo "~200ms, un solo comando WebDriver" — cierto
+     * en Android (mapea al botón físico Back, universal e instantáneo), pero en iOS
+     * XCUITest no tiene un equivalente nativo de "back": navigate().back() ahí es una
+     * heurística que en evidencia real (log de ejecución) resultó lenta/poco confiable
+     * (~19-21s acumulados antes de cerrar), mientras que el tap directo sobre el botón
+     * real de la UI (tapBackFromClubUI/A11Y) es una interacción nativa normal. En iOS
+     * se reordena para probar el tap de UI primero y dejar navigate().back() como último
+     * recurso — Android conserva EXACTAMENTE el mismo orden y presupuestos de siempre.
+     * Se reduce de 3 a 2 vueltas del ciclo completo: cada mecanismo ya se prueba una vez
+     * por vuelta, y en la evidencia real ninguna corrida necesitó una tercera vuelta
+     * completa una vez ordenados correctamente los intentos.
      */
     public boolean dismissClubLoginIfPresent() {
         if (!isClubLoginVisible()) return false;
 
         log.info("[CinemasHelper] Detectada pantalla Club Cinépolis. Intentando cerrarla...");
+        long tTotal = System.currentTimeMillis();
+        boolean ios = isIOS();
 
-        for (int i = 1; i <= 3; i++) {
+        for (int i = 1; i <= 2; i++) {
+            long tVuelta = System.currentTimeMillis();
             try {
-                // 1) navigate().back() — el más rápido, no busca elementos
-                try {
-                    driver.navigate().back();
-                    // Espera inteligente: sale en cuanto Club desaparece (máx 600ms)
-                    smartWait(() -> !isClubLoginVisible(), 600, 100);
-                    if (!isClubLoginVisible()) {
+                if (ios) {
+                    if (intentoTapBackUI(400)) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
+                        return true;
+                    }
+                    if (intentoTapA11y(400)) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (A11Y) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
+                        return true;
+                    }
+                    if (intentoNavigateBack(700)) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
+                        return true;
+                    }
+                } else {
+                    if (intentoNavigateBack(600)) {
                         log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
                         return true;
                     }
-                } catch (Exception ignored) {}
-
-                // 2) Tap botón back real (por bounds del elemento en la UI)
-                if (tapBackFromClubUI()) {
-                    // Espera inteligente: sale en cuanto Club desaparece (máx 400ms)
-                    smartWait(() -> !isClubLoginVisible(), 400, 100);
-                    if (!isClubLoginVisible()) {
+                    if (intentoTapBackUI(400)) {
                         log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI).");
                         return true;
                     }
+                    if (intentoTapA11y(400)) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (A11Y).");
+                        return true;
+                    }
+                    if (intentoNavigateBack(700)) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
+                        return true;
+                    }
                 }
-
-                // 3) Tap por content-desc (Atrás / Navigate up)
-                tapIfPresent(CLUB_BACK_BUTTON_A11Y);
-                // Espera inteligente: sale en cuanto Club desaparece (máx 400ms)
-                smartWait(() -> !isClubLoginVisible(), 400, 100);
-                if (!isClubLoginVisible()) {
-                    log.info("[CinemasHelper] Pantalla Club cerrada OK (A11Y).");
-                    return true;
-                }
-
-                // 4) navigate().back() — tecla Back del sistema; Club tiene su propia Activity
-                //    así que vuelve al main sin cerrar la app.
-                try {
-                    driver.navigate().back();
-                    // Espera inteligente: sale en cuanto Club desaparece (máx 700ms)
-                    smartWait(() -> !isClubLoginVisible(), 700, 100);
-                } catch (Exception ignored) {}
-                if (!isClubLoginVisible()) {
-                    log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back).");
-                    return true;
-                }
-
+                log.debug("[CinemasHelper][ClubGuard] vuelta={} sin éxito ({}ms)", i, System.currentTimeMillis() - tVuelta);
             } catch (Exception e) {
                 // no reventar el flujo
             }
@@ -1632,15 +1655,31 @@ public class CinemasHelper extends BasePage {
         return exists(TAB_ALIMENTOS, 1) || exists(TAB_ALIMENTOS_ALT, 1);
     }
 
+    /**
+     * CAUSA RAÍZ (Verificación del cine ~13s / isOnAlimentosHome): driver.findElements()
+     * aquí NO forzaba implicitlyWait=0 antes de cada intento, a diferencia de
+     * isVisibleInstant/findInstant en este mismo archivo. Cuando el locator NO está
+     * presente (el caso normal — p. ej. cine ya seleccionado, chip "sin selección"
+     * ausente), esa única llamada heredaba el implicitlyWait ambiental de 10s activo
+     * desde el primer chequeo de la suite, bloqueando esos 10s completos DENTRO de la
+     * primera vuelta del while — el parámetro "seconds" (pensado como tope de 1s) nunca
+     * se llegaba a respetar. Con implicitlyWait=0 forzado, cada intento retorna en
+     * milisegundos si el elemento no está, y el while sí cumple su propio tope real.
+     */
     private boolean exists(By by, int seconds) {
         try {
-            if (seconds <= 0) return !driver.findElements(by).isEmpty();
-            long end = System.currentTimeMillis() + (seconds * 1000L);
-            while (System.currentTimeMillis() < end) {
-                if (!driver.findElements(by).isEmpty()) return true;
-                sleep(150);
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            try {
+                if (seconds <= 0) return !driver.findElements(by).isEmpty();
+                long end = System.currentTimeMillis() + (seconds * 1000L);
+                while (System.currentTimeMillis() < end) {
+                    if (!driver.findElements(by).isEmpty()) return true;
+                    sleep(150);
+                }
+                return false;
+            } finally {
+                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             }
-            return false;
         } catch (Exception e) {
             return false;
         }
