@@ -986,27 +986,43 @@ public class SelectorPage extends BasePage {
         throw new RuntimeException("No se encontró un horario disponible para seleccionar.");
     }
 
+    // DIAGNÓSTICO (investigación en curso — ScheduleSelection tarda ~55-56s en un
+    // único paso, de forma consistente en 6 corridas seguidas, sin variar aunque se
+    // corrigió shouldWaitForQuiescence; evidencia de log descarta que el tiempo esté
+    // en aceptarAlertaAtencionSiPresente()/smartWait, que suman como mucho ~3s). Se
+    // agrega timing por estrategia para localizar en cuál de los 4 intentos de click
+    // se consume el tiempo real — puramente aditivo (logging), ningún cambio de
+    // comportamiento ni de orden de las estrategias existentes.
     private boolean clicSeguroEnHorario(WebElement el) {
         String hora = obtenerTextoSeguro(el);
+        long t0 = System.currentTimeMillis();
 
         try {
             el.click();
+            log.info("[SelectorPage][PERF-CLICK] horario='{}' estrategia=click-directo tiempo={}ms",
+                    hora, System.currentTimeMillis() - t0);
             return true;
         } catch (Exception e1) {
             try {
                 WebElement parent = el.findElement(By.xpath(".."));
                 parent.click();
+                log.info("[SelectorPage][PERF-CLICK] horario='{}' estrategia=click-padre tiempo={}ms",
+                        hora, System.currentTimeMillis() - t0);
                 return true;
             } catch (Exception e2) {
                 try {
                     WebElement grandParent = el.findElement(By.xpath("../.."));
                     grandParent.click();
+                    log.info("[SelectorPage][PERF-CLICK] horario='{}' estrategia=click-abuelo tiempo={}ms",
+                            hora, System.currentTimeMillis() - t0);
                     return true;
                 } catch (Exception e3) {
                     try {
                         int centerX = el.getRect().getX() + (el.getRect().getWidth() / 2);
                         int centerY = el.getRect().getY() + (el.getRect().getHeight() / 2);
                         tapW3C(centerX, centerY);
+                        log.info("[SelectorPage][PERF-CLICK] horario='{}' estrategia=tapW3C tiempo={}ms",
+                                hora, System.currentTimeMillis() - t0);
                         return true;
                     } catch (Exception e4) {
                         try {
@@ -1015,12 +1031,16 @@ public class SelectorPage extends BasePage {
                                 int x = horario.getRect().getX() + (horario.getRect().getWidth() / 2);
                                 int y = horario.getRect().getY() + (horario.getRect().getHeight() / 2);
                                 tapW3C(x, y);
+                                log.info("[SelectorPage][PERF-CLICK] horario='{}' estrategia=tapW3C-reubicado tiempo={}ms",
+                                        hora, System.currentTimeMillis() - t0);
                                 return true;
                             }
                         } catch (Exception ignored) {
                         }
 
                         log.warn("[SelectorPage] No se pudo seleccionar horario: {}", hora);
+                        log.info("[SelectorPage][PERF-CLICK] horario='{}' estrategia=NINGUNA-FALLO tiempo={}ms",
+                                hora, System.currentTimeMillis() - t0);
                         return false;
                     }
                 }
