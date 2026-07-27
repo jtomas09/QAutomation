@@ -383,6 +383,23 @@ export default function DeviceMirrorPanel({ device }: Props) {
     }
   }, [])
 
+  // Vigía periódico — independiente de los eventos de arriba. Los eventos de
+  // visibilidad/foco solo cubren "la pestaña estuvo oculta/perdió el foco y
+  // volvió" — si el usuario deja la pestaña visible y en foco todo el tiempo
+  // (el caso típico al monitorear una ejecución real en curso), un stream que
+  // se cuelga por contención con WDA (la sesión real de Appium/XCTest tiene
+  // prioridad sobre las capturas del Mirror — ver IOSMirrorProvider) nunca
+  // dispara ninguno de esos eventos, así que attemptAutoRecovery() jamás se
+  // llama y el <img> queda colgado indefinidamente mostrando su alt text en
+  // vez del video (el bug reportado: "Vista en vivo del dispositivo" fijo en
+  // pantalla). Mismo umbral (STALL_THRESHOLD_MS) y misma función de
+  // recuperación — solo se agrega una segunda vía, más confiable, para
+  // llamarla.
+  useEffect(() => {
+    const id = setInterval(() => attemptAutoRecoveryRef.current(), STALL_THRESHOLD_MS)
+    return () => clearInterval(id)
+  }, [])
+
   const handleScreenshot = useCallback(() => {
     const img = imgRef.current
     if (!img) return
