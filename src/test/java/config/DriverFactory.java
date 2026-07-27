@@ -650,16 +650,26 @@ public class DriverFactory {
         // "Requesting snapshot of accessibility hierarchy" repartidas casi uniformemente
         // cada ~246ms durante toda la fase, sin ninguna otra causa identificable (se
         // descartó contención con el Mirror — no hay logs de éste en esa ventana). Ese
-        // patrón de polling constante es la firma de waitForQuiescence (activado por
-        // default en el driver XCUITest): antes/después de cada acción, WDA espera a que
-        // la app quede "en reposo" (sin animaciones), reconsultando el árbol hasta
+        // patrón de polling constante es la firma de la espera de quiescencia (activada
+        // por default en el driver XCUITest): antes/después de cada acción, WDA espera a
+        // que la app quede "en reposo" (sin animaciones), reconsultando el árbol hasta
         // confirmarlo o agotar su propio timeout — si la pantalla tiene algo animándose
         // de forma continua (banner/shimmer/badge), nunca hay reposo y cada comando se
         // demora cerca de ese tope (un solo click+alerta llegó a tardar 56s él solo).
+        //
+        // FIX de nombre (evidencia de una primera validación en vivo que falló): el
+        // capability real documentado por el driver XCUITest es "shouldWaitForQuiescence"
+        // — "waitForQuiescence" (usado en el primer intento) no es reconocido por el
+        // driver y se ignora en silencio. Confirmado por los números: con el nombre
+        // incorrecto, el total de la fase bajó de ~213-215s a 178845ms (~17%, dentro de
+        // ruido normal de red/WDA), pero el paso del click en sí siguió tardando
+        // 55526ms — prácticamente idéntico a las 4 corridas anteriores (55620-56410ms) —
+        // es decir, la espera de quiescencia nunca se desactivó realmente.
+        //
         // Android ya desactiva animaciones explícitamente (disableWindowAnimation=true,
         // más abajo en buildAndroidOptions) — este es el equivalente para iOS. Exclusivo
         // de iOS: no existe este capability en Android, cero riesgo de afectarlo.
-        o.setCapability("waitForQuiescence", false);
+        o.setCapability("shouldWaitForQuiescence", false);
 
         // ── WebDriverAgent signing + caching ─────────────────────────────────
         // xcodeOrgId and xcodeSigningId are required for physical devices.
