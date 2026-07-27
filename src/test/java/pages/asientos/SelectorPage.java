@@ -111,6 +111,27 @@ public class SelectorPage extends BasePage {
             throw new RuntimeException("No se detectaron títulos de películas en la pantalla inicial.");
         }
 
+        // PERF (evidencia real de métricas — MovieOpen tardó ~80s POR CADA película,
+        // valor sospechosamente constante entre ambos intentos): el implicitlyWait de
+        // isSeconds(8) puesto arriba (necesario solo para tolerar que la cartelera
+        // siguiera cargando durante el escaneo inicial) seguía activo durante TODO
+        // abrirPeliculaPorVerSinopsis() — un ciclo de reintentos (3 intentos ×
+        // reubicarTituloPelicula/encontrarVerSinopsisDeTarjeta/esperarDetallePelicula)
+        // que hace docenas de findElements() esperando encontrar "nada" en el caso
+        // normal. Cada uno de esos "no encontrado" heredaba hasta 8s de espera oculta
+        // — exactamente el mismo bug de fondo que en CinemasHelper.exists() (Problema
+        // 4), aquí con muchísimo más radio de impacto. Una vez confirmado el escaneo
+        // inicial (peliculas no vacío), la pantalla YA está renderizada — no hace falta
+        // tolerancia adicional para el resto del flujo. Se resetea a 0 (mismo criterio
+        // "instantáneo" que isVisibleInstant/findInstant en CinemasHelper): los propios
+        // reintentos (3 intentos, esperarDetallePelicula con su presupuesto de 5000ms)
+        // ya dan la paciencia real necesaria — el implicitlyWait solo agregaba espera
+        // oculta encima de esos presupuestos, nunca una garantía adicional real.
+        // Aplica a ambas plataformas: Android también reutiliza este mismo camino de
+        // reintentos y se beneficia igual (su implicitlyWait aquí era 3s, menor pero
+        // con el mismo problema estructural).
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+
         // MovieFiltering: de los elementos ya escaneados, construir la lista final de
         // nombres únicos — sin ninguna consulta adicional al driver (0 findElements).
         List<String> nombresPeliculas = utils.PerfMetrics.measure("MovieFiltering", () -> {
@@ -154,6 +175,11 @@ public class SelectorPage extends BasePage {
             throw new RuntimeException("Se detectaron películas visibles, pero no se pudo abrir ninguna desde Ver sinopsis.");
         } finally {
             utils.PerfMetrics.endPhase("MovieOpen");
+            // Restaura el ambiente 10s por defecto (convención del proyecto) — el reset a
+            // 0 de arriba es deliberadamente local a este método, para no dejar el driver
+            // en implicitlyWait=0 durante el resto del test (horarios, asientos, etc.),
+            // que pueden depender de esa espera ambiental en sus propios findElements().
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
     }
     private boolean abrirPeliculaPorVerSinopsis(String nombrePelicula) {
@@ -940,13 +966,21 @@ public class SelectorPage extends BasePage {
     }
 
 
+    // PERF (evidencia real de MÉTRICAS — MovieDetection tardó 35384ms en una corrida):
+    // este método (el escaneo inicial de TODA la cartelera, llamado en cada test) seguía
+    // usando XPath para iOS — el candidato de mayor impacto que faltaba convertir de
+    // toda la sesión, ya que corre sobre una pantalla con potencialmente decenas de
+    // elementos de texto/imagen. NSPredicate — ver nota de rendimiento en
+    // PlatformLocator.byExactText(). El filtro de "no vacío tras trim" (normalize-space)
+    // no se replica en el predicate: el bucle de abajo ya descarta texto.isBlank()
+    // inmediatamente después (obtenerTextoSeguro), mismo resultado final.
     private List<WebElement> obtenerPeliculasVisibles() {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
         List<By> candidatos = isIOS() ? List.of(
-                By.xpath("//XCUIElementTypeStaticText[@value and normalize-space(@value)!='']"),
-                By.xpath("//XCUIElementTypeOther[@value and normalize-space(@value)!='']")
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"),
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeOther' AND value != nil")
         ) : List.of(
                 By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"),
                 By.xpath("//android.view.View[@text and normalize-space(@text)!='']")

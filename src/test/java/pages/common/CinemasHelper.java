@@ -1256,18 +1256,21 @@ public class CinemasHelper extends BasePage {
     /**
      * Cierra la pantalla de Club Cinépolis.
      *
-     * PERF (Problema 3 — ClubGuard >20s): el orden original probaba SIEMPRE
-     * navigate().back() primero, asumiendo "~200ms, un solo comando WebDriver" — cierto
-     * en Android (mapea al botón físico Back, universal e instantáneo), pero en iOS
-     * XCUITest no tiene un equivalente nativo de "back": navigate().back() ahí es una
-     * heurística que en evidencia real (log de ejecución) resultó lenta/poco confiable
-     * (~19-21s acumulados antes de cerrar), mientras que el tap directo sobre el botón
-     * real de la UI (tapBackFromClubUI/A11Y) es una interacción nativa normal. En iOS
-     * se reordena para probar el tap de UI primero y dejar navigate().back() como último
-     * recurso — Android conserva EXACTAMENTE el mismo orden y presupuestos de siempre.
-     * Se reduce de 3 a 2 vueltas del ciclo completo: cada mecanismo ya se prueba una vez
-     * por vuelta, y en la evidencia real ninguna corrida necesitó una tercera vuelta
-     * completa una vez ordenados correctamente los intentos.
+     * PERF (Problema 3 — ClubGuard >20s) — CORRECCIÓN basada en evidencia real de
+     * ejecución (métricas [CinemasHelper][ClubGuard]): un primer intento de este fix
+     * reordenó iOS para probar el tap de UI (tapBackFromClubUI/A11Y) antes que
+     * navigate().back(), asumiendo que el tap nativo sería más rápido — la métrica real
+     * mostró lo CONTRARIO: 44160ms en "vuelta=1" antes de cerrar, con
+     * "Pantalla Club cerrada OK (navigate.back)" como mecanismo que realmente funcionó.
+     * tapBackFromClubUI() usa CLUB_BACK_BUTTON_XPATH_IOS, un XPath posicional
+     * (deliberadamente no convertido a NSPredicate por ser posicional — ver
+     * PlatformLocator) que se evalúa DOS veces por intento (bug preexistente en
+     * tapBackFromClubUI, no introducido aquí) y aparentemente nunca encuentra el botón
+     * correcto en iOS — cada intento fallido paga el costo completo de ese XPath antes
+     * de llegar a lo que sí funciona. Se revierte el orden: navigate().back() primero
+     * en AMBAS plataformas (igual que el código original, antes de este Problema 3),
+     * que es lo que la evidencia real confirma que funciona rápido en este dispositivo.
+     * Se conserva la reducción de 3 a 2 vueltas (sigue siendo válida por sí sola).
      */
     public boolean dismissClubLoginIfPresent() {
         if (!isClubLoginVisible()) return false;
@@ -1280,16 +1283,16 @@ public class CinemasHelper extends BasePage {
             long tVuelta = System.currentTimeMillis();
             try {
                 if (ios) {
+                    if (intentoNavigateBack(600)) {
+                        log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
+                        return true;
+                    }
                     if (intentoTapBackUI(400)) {
                         log.info("[CinemasHelper] Pantalla Club cerrada OK (tapBackFromClubUI) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
                         return true;
                     }
                     if (intentoTapA11y(400)) {
                         log.info("[CinemasHelper] Pantalla Club cerrada OK (A11Y) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
-                        return true;
-                    }
-                    if (intentoNavigateBack(700)) {
-                        log.info("[CinemasHelper] Pantalla Club cerrada OK (navigate.back) | vuelta={} total={}ms", i, System.currentTimeMillis() - tTotal);
                         return true;
                     }
                 } else {
@@ -1647,11 +1650,19 @@ public class CinemasHelper extends BasePage {
      */
     private boolean tapBackFromClubUI() {
         try {
-            List<WebElement> candidates = isIOS()
-                ? driver.findElements(CLUB_BACK_BUTTON_XPATH_IOS)
-                : driver.findElements(CLUB_BACK_BUTTON_UIAUTO);
-            if (candidates == null || candidates.isEmpty()) {
-                candidates = driver.findElements(isIOS() ? CLUB_BACK_BUTTON_XPATH_IOS : CLUB_BACK_BUTTON_XPATH);
+            // PERF: en iOS ambas ramas consultaban el MISMO locator posicional
+            // (CLUB_BACK_BUTTON_XPATH_IOS) dos veces cuando la primera no encontraba
+            // nada — consulta redundante, nunca podía dar un resultado distinto la
+            // segunda vez. Se consulta una sola vez en iOS; Android conserva su
+            // fallback real (UIAutomator → XPath, dos locators genuinamente distintos).
+            List<WebElement> candidates;
+            if (isIOS()) {
+                candidates = driver.findElements(CLUB_BACK_BUTTON_XPATH_IOS);
+            } else {
+                candidates = driver.findElements(CLUB_BACK_BUTTON_UIAUTO);
+                if (candidates == null || candidates.isEmpty()) {
+                    candidates = driver.findElements(CLUB_BACK_BUTTON_XPATH);
+                }
             }
 
             for (WebElement el : candidates) {
