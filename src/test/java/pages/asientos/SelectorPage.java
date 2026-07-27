@@ -2402,6 +2402,14 @@ public class SelectorPage extends BasePage {
         log.info("[SelectorPage] {}", map.getSummary());
 
         if (map.isEmpty()) {
+            // Diagnóstico temporal (no-op salvo -DIOS_LOCATOR_DEBUG=true) — captura el
+            // page source real cuando el mapa de asientos aparece vacío, para investigar
+            // con evidencia en vez de seguir adivinando (mismo mecanismo ya usado para
+            // el hallazgo de "Ver sinopsis"/horarios).
+            if (isIOS()) {
+                IOSLocatorDebug.onFailure(driver, "seleccionarAsientoRandomDisponible_mapaVacio", null,
+                        new RuntimeException("buildSeatMap() devolvió vacío tras los 3 niveles de fallback"));
+            }
             throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
         }
 
