@@ -2345,6 +2345,15 @@ public class SelectorPage extends BasePage {
         }
     }
 
+    // FIX real (evidencia capturada con IOSLocatorDebug — mapa de asientos): los
+    // botones de número de asiento en iOS (XCUIElementTypeButton) traen @value VACÍO
+    // — el número real vive en @label/@name. Antes solo se consultaba @value, así
+    // que obtenerTextoSeguro() devolvía "" para CADA botón de asiento, y el filtro
+    // de longitud (<=2) de más abajo nunca los aceptaba como candidatos — el mapa
+    // parecía "vacío" aunque estuviera completamente poblado en pantalla. Se agrega
+    // @label y @name como fallback adicional (en ese orden, después de @value, que
+    // ya funciona correctamente para películas/horarios — @value nunca deja de
+    // usarse primero, esto es puramente aditivo).
     private String obtenerTextoSeguro(WebElement el) {
         try {
             String txt = el.getText();
@@ -2352,6 +2361,10 @@ public class SelectorPage extends BasePage {
             if (isIOS()) {
                 String val = el.getAttribute("value");
                 if (val != null && !val.isBlank()) return val.trim();
+                String label = el.getAttribute("label");
+                if (label != null && !label.isBlank()) return label.trim();
+                String name = el.getAttribute("name");
+                if (name != null && !name.isBlank()) return name.trim();
             }
             return txt == null ? "" : txt.trim();
         } catch (Exception e) {
@@ -2667,14 +2680,26 @@ public class SelectorPage extends BasePage {
      * sobre el resultado ya obtenido — mismo criterio exacto, sin la evaluación XPath.
      * Android (UiAutomator2, sin cambios) no pasa por aquí.
      */
+    // FIX real (evidencia capturada — mapa de asientos "vacío" aunque estaba
+    // completamente poblado en pantalla): los números de asiento son
+    // XCUIElementTypeButton (NO StaticText) con @value vacío — el número real vive
+    // en @name/@label (ver también obtenerTextoSeguro()). El predicate original solo
+    // pedía StaticText+value, así que ningún botón de asiento llegaba siquiera a
+    // evaluarse. Se amplía a ambos tipos y los tres atributos; el filtro por
+    // longitud se hace con obtenerTextoSeguro() (ya sabe leer name/label/value en
+    // el orden correcto) en vez de leer @value directo. Las filas con letra (A, B,
+    // C…) también matchean length<=2 aquí — sin cambio de riesgo: los llamadores
+    // YA filtran por posición (cx < 20) para descartar esa columna, igual que antes.
     private List<WebElement> obtenerCandidatosAsientoIOS() {
         List<WebElement> all = driver.findElements(
-                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"));
+                AppiumBy.iOSNsPredicateString(
+                        "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') "
+                        + "AND (name != nil OR label != nil OR value != nil)"));
         List<WebElement> filtrados = new ArrayList<>();
         for (WebElement el : all) {
             try {
-                String v = el.getAttribute("value");
-                if (v != null && v.trim().length() <= 2) filtrados.add(el);
+                String v = obtenerTextoSeguro(el);
+                if (!v.isBlank() && v.length() <= 2) filtrados.add(el);
             } catch (Exception ignored) {}
         }
         return filtrados;
