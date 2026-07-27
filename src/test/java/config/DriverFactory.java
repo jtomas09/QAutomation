@@ -645,6 +645,22 @@ public class DriverFactory {
         o.setCapability("autoAcceptAlerts",    true);
         o.setCapability("nativeWebScreenshot", true);
 
+        // PERF (evidencia real — investigación de ScheduleSelection tardando ~213-215s
+        // en 4 corridas consecutivas): el log del Runner mostró ~865 peticiones
+        // "Requesting snapshot of accessibility hierarchy" repartidas casi uniformemente
+        // cada ~246ms durante toda la fase, sin ninguna otra causa identificable (se
+        // descartó contención con el Mirror — no hay logs de éste en esa ventana). Ese
+        // patrón de polling constante es la firma de waitForQuiescence (activado por
+        // default en el driver XCUITest): antes/después de cada acción, WDA espera a que
+        // la app quede "en reposo" (sin animaciones), reconsultando el árbol hasta
+        // confirmarlo o agotar su propio timeout — si la pantalla tiene algo animándose
+        // de forma continua (banner/shimmer/badge), nunca hay reposo y cada comando se
+        // demora cerca de ese tope (un solo click+alerta llegó a tardar 56s él solo).
+        // Android ya desactiva animaciones explícitamente (disableWindowAnimation=true,
+        // más abajo en buildAndroidOptions) — este es el equivalente para iOS. Exclusivo
+        // de iOS: no existe este capability en Android, cero riesgo de afectarlo.
+        o.setCapability("waitForQuiescence", false);
+
         // ── WebDriverAgent signing + caching ─────────────────────────────────
         // xcodeOrgId and xcodeSigningId are required for physical devices.
         // They are auto-detected by IosPreflightManager (Runner) and passed
