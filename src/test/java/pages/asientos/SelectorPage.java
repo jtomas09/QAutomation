@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import pages.common.BasePage;
 import pages.common.IOSLocatorDebug;
+import pages.common.PlatformLocator;
 import org.openqa.selenium.interactions.Pause;
 
 import java.time.Duration;
@@ -33,8 +34,21 @@ public class SelectorPage extends BasePage {
         super(driver);
     }
 
+    // FIX real (evidencia de ejecución en vivo — validación del fix de mapa de
+    // asientos): tras seleccionar el asiento, el test fallaba en iOS al tocar
+    // "Continuar" porque este método usaba un XPath fijo de Android
+    // (android.widget.TextView) sin ninguna rama iOS — nunca se había llegado a
+    // ejecutar en iOS antes porque el bug del mapa de asientos fallaba primero.
+    // Se agrega la rama iOS vía NSPredicate; el lado Android se deja BYTE-IDÉNTICO
+    // al original (mismo tipo de elemento android.widget.TextView, no el wildcard
+    // //* que usaría PlatformLocator.byExactText()) para no cambiar su comportamiento.
+    private static final PlatformLocator CONTINUAR_BUTTON = PlatformLocator.of(
+            By.xpath("//android.widget.TextView[@text=\"Continuar\"]"),
+            AppiumBy.iOSNsPredicateString("label == 'Continuar' OR name == 'Continuar' OR value == 'Continuar'")
+    );
+
     public void continuar() {
-        this.click(By.xpath("//android.widget.TextView[@text=\"Continuar\"]"));
+        this.click(CONTINUAR_BUTTON);
     }
 
     public void seleccionarPeliculaRandomYHorario() {
