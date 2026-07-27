@@ -175,7 +175,22 @@ public final class WdaLifecycleOwner {
         // El Mirror puede volver a pedir WDA en cualquier momento (requestForMirror()
         // ya la reconstruye bajo demanda) — esto no le quita esa capacidad, solo deja
         // de mantenerla viva por defecto cuando ninguna ejecución real la necesita.
-        if (consumer == Consumer.JOB_EXECUTION && remaining.equals(java.util.Set.of(Consumer.MIRROR))) {
+        //
+        // FIX (evidencia real — log de ejecución): esta regla forzaba el release del
+        // Mirror INCONDICIONALMENTE, sin importar si en ESE momento había un stream
+        // REAL activo (usuario viendo el Dashboard). Resultado observado: "[Cleanup]
+        // El Mirror sigue transmitiendo ... tras destruir WDA — estado inconsistente"
+        // — WDA se destruía por debajo de un Mirror que seguía sirviendo frames,
+        // dejando "Automation Running" en un estado que el propio dispositivo no
+        // podía cerrar limpiamente (de ahí que a veces sea necesario forzar con los
+        // botones de volumen). El registro de consumidor MIRROR es una señal pasiva
+        // (“el Dashboard tiene este UDID seleccionado”) que puede quedar obsoleta;
+        // MirrorService.isStreaming(udid) es la señal REAL de si hay un viewer activo
+        // en este instante. Solo se auto-libera al Mirror cuando NO hay stream real —
+        // si lo hay, se respeta exactamente igual que cualquier otro consumidor activo
+        // (rama "!remaining.isEmpty()" de abajo), sin necesidad de duplicar esa lógica.
+        if (consumer == Consumer.JOB_EXECUTION && remaining.equals(java.util.Set.of(Consumer.MIRROR))
+                && !MirrorService.isStreaming(udid)) {
             remaining = unregisterConsumer(udid, Consumer.MIRROR);
             if (client != null) {
                 client.sendLog(executionId, "INFO",
