@@ -573,6 +573,17 @@ public class SelectorPage extends BasePage {
     }
     // NSPredicate en iOS \u2014 llamado en cada iteraci\u00f3n del poll de esperarDetallePelicula()
     // (sleep 250ms, hasta ~4-5s) \u2014 ver nota de rendimiento en PlatformLocator.byExactText().
+    /**
+     * FIX real (evidencia capturada con IOSLocatorDebug \u2014 ver page source real de un
+     * fallo): la app ya NO tiene bot\u00f3n "Ver sinopsis" ni pantalla de detalle separada
+     * (Sinopsis/Director/Reparto) \u2014 al tocar la pel\u00edcula, los horarios aparecen
+     * DIRECTAMENTE bajo el t\u00edtulo en la misma tarjeta. El criterio original nunca
+     * pod\u00eda cumplirse porque busca un flujo que la app ya no tiene; se agrega un
+     * segundo criterio de \u00e9xito (equivalente, no excluyente): "\u00bfhay un horario visible
+     * en pantalla?" (mismo patr\u00f3n regex "7:30 PM" ya usado por
+     * estaEnPantallaDeHorarios()/obtenerHorariosDisponibles()). Se mantiene el criterio
+     * original por si alg\u00fan flujo/pa\u00eds todav\u00eda muestra la pantalla de detalle cl\u00e1sica.
+     */
     private boolean estaEnDetalleDePelicula() {
         try {
             By locator = isIOS()
@@ -590,6 +601,24 @@ public class SelectorPage extends BasePage {
                         + "contains(@text,'Ver m\u00e1s')]");
             for (WebElement el : driver.findElements(locator)) {
                 try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return hayHorarioVisible();
+    }
+
+    /** Ver comentario de estaEnDetalleDePelicula() \u2014 mismo criterio de horario que obtenerHorariosDisponibles(). */
+    private boolean hayHorarioVisible() {
+        try {
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)")
+                    : By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"
+                        + " | //android.view.View[@text and normalize-space(@text)!='']");
+            for (WebElement el : driver.findElements(locator)) {
+                try {
+                    if (!el.isDisplayed()) continue;
+                    String txt = obtenerTextoSeguro(el);
+                    if (txt.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) return true;
+                } catch (Exception ignored) {}
             }
         } catch (Exception ignored) {}
         return false;
