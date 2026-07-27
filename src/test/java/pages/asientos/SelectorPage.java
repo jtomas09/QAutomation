@@ -42,12 +42,29 @@ public class SelectorPage extends BasePage {
         seleccionarHorario();
     }
 
-    /** Navigates through initial popups, loads the cartelera, opens a movie, and lands on the horarios tab. */
+    /**
+     * Navigates through initial popups, loads the cartelera, opens a movie, and lands on the horarios tab.
+     *
+     * FIX real (evidencia de ejecución en vivo tras el fix de "Ver sinopsis" — ver
+     * abrirPrimerPeliculaDesdeVerSinopsis()/hayHorarioVisible()): el mismo cambio de
+     * UX de la app que eliminó "Ver sinopsis" también eliminó la etiqueta "Ver
+     * horarios" — ahora los horarios ya están visibles en pantalla justo después de
+     * abrir la película (es exactamente la condición que abrirPrimerPeliculaDesdeVerSinopsis()
+     * ya usa para confirmar éxito). Llamar a irAEtiquetaHorarios() en ese caso buscaba
+     * una etiqueta que ya no existe y fallaba SIEMPRE ("No se pudo abrir la etiqueta de
+     * horarios."), incluso con la película abierta correctamente. Se omite cuando los
+     * horarios ya están visibles; se conserva para cualquier flujo/país que todavía
+     * necesite navegar a una pestaña de horarios separada.
+     */
     public void abrirPeliculaYMostrarHorarios() {
         manejarPopupsIniciales();
         esperarCargaCartelera();
         String pelicula = abrirPrimerPeliculaDesdeVerSinopsis();
-        irAEtiquetaHorarios();
+        if (!hayHorarioVisible()) {
+            irAEtiquetaHorarios();
+        } else {
+            log.debug("[SelectorPage] Horarios ya visibles tras abrir la película — se omite irAEtiquetaHorarios().");
+        }
         log.info("[SelectorPage] Mostrando horarios para: {}", pelicula);
     }
 
@@ -69,7 +86,10 @@ public class SelectorPage extends BasePage {
         String pelicula = abrirPrimerPeliculaDesdeVerSinopsis();
         log.info("[SelectorPage] Película abierta: {}", pelicula);
 
-        irAEtiquetaHorarios();
+        // Ver comentario de abrirPeliculaYMostrarHorarios() — mismo cambio de UX de la app.
+        if (!hayHorarioVisible()) {
+            irAEtiquetaHorarios();
+        }
 
         String horario = seleccionarPrimerHorarioDisponibleEnGrid();
         log.info("[SelectorPage] Horario seleccionado: {}", horario);
