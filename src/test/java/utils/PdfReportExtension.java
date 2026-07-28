@@ -104,6 +104,7 @@ public class PdfReportExtension implements
         context.getTestClass().map(Class::getSimpleName).ifPresent(EXECUTED_CLASSES::add);
 
         TestSteps.startScenario(testName);
+        TestFlowEventPublisher.testStarted(System.getProperty("executionName", ""), testName);
 
         // Register cinema from @Cinema annotation BEFORE @BeforeEach runs, so it's
         // captured in the report even when setup steps fail before ensureCinemaSelectedFromAlimentos().
@@ -128,6 +129,8 @@ public class PdfReportExtension implements
     @Override
     public void testSuccessful(ExtensionContext context) {
         BaseTestStatusRegistry.markPassed(context.getDisplayName());
+        TestFlowEventPublisher.testFinished(
+                System.getProperty("executionName", ""), context.getDisplayName(), true);
         // clear() al final, no en @AfterEach: JUnit 5 invoca TestWatcher DESPUÉS de
         // @AfterEach — limpiar antes (como hacía BaseTest.tearDown()) borra el latch
         // "ya falló"/"ya contado" justo antes de que este callback pudiera leerlo,
@@ -140,6 +143,8 @@ public class PdfReportExtension implements
     @Override
     public void testFailed(ExtensionContext context, Throwable cause) {
         BaseTestStatusRegistry.markFailed(context.getDisplayName(), cause);
+        TestFlowEventPublisher.testFinished(
+                System.getProperty("executionName", ""), context.getDisplayName(), false);
 
         getDriver(context).ifPresent(driver -> {
             String path = TestSteps.captureEvidence(driver, "TEST_FAILED", "TEST_FAILED");
@@ -157,6 +162,8 @@ public class PdfReportExtension implements
     public void testAborted(ExtensionContext context, Throwable cause) {
         // Test abortado vía Assumptions.abort() → se cuenta como skipped, NO como fallido.
         // El conteo skipped se deriva de (total - passed - failed); no incrementar FAILED aquí.
+        TestFlowEventPublisher.testFinished(
+                System.getProperty("executionName", ""), context.getDisplayName(), false);
         // Igual que en testSuccessful()/testFailed(): limpiar aquí, al final del ciclo
         // de vida del test, para no interferir con el latch antes de que se consulte.
         BaseTestStatusRegistry.clear(context.getDisplayName());

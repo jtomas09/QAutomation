@@ -62,6 +62,13 @@ public class TestSteps {
         boolean ios = config.DriverFactory.isIOS();
         log.info("[TRACE] Ejecutando TestSteps.run(\"{}\") | hilo={} plataforma={} hora={}",
                 name, Thread.currentThread().getName(), ios ? "iOS" : "Android", t0);
+        // Arquitectura de eventos — este es el único punto por el que pasa CADA paso
+        // funcional real de cualquier flujo (SeleccionAsientos, FlujosCompraNoLogin,
+        // alimentos, etc.), así que instrumentarlo aquí cubre todos los flujos
+        // existentes de una sola vez, sin tocar cada Page Object por separado.
+        String suite = System.getProperty("executionName", "");
+        String test  = currentTestName.get();
+        TestFlowEventPublisher.stepStarted(suite, test, name);
         final String[] ref = {null};
         try {
             Allure.step(name, () -> {
@@ -72,6 +79,7 @@ public class TestSteps {
             });
             steps.get().add(new StepResult(name, "OK", ref[0]));
             log.info("[TRACE] TestSteps.run(\"{}\") OK | duracionMs={}", name, System.currentTimeMillis() - t0);
+            TestFlowEventPublisher.stepCompleted(suite, test, name);
 
         } catch (TestAbortedException aborted) {
             String screenshotPath = null;
@@ -85,6 +93,7 @@ public class TestSteps {
             } catch (Exception ignored) {}
 
             steps.get().add(new StepResult(name, "SKIPPED", screenshotPath));
+            TestFlowEventPublisher.stepSkipped(suite, test, name, aborted.getMessage());
             throw aborted;
 
         } catch (Throwable t) {
@@ -101,6 +110,7 @@ public class TestSteps {
             }
 
             steps.get().add(new StepResult(name, "ERROR", screenshotPath));
+            TestFlowEventPublisher.stepFailed(suite, test, name, t.getMessage());
 
             log.error("[TestSteps] Step failed: {}", name, t);
             log.error("[TRACE] TestSteps.run(\"{}\") ERROR | plataforma={} duracionMs={} causa={}",

@@ -1714,6 +1714,12 @@ public class JobExecutor {
         if (job.executionId != null && !job.executionId.isBlank()) {
             cmd.add("-DexecutionId=" + job.executionId);
         }
+        // Arquitectura de eventos — permite a utils.TestFlowEventPublisher (módulo de
+        // tests, sin BackendClient propio) publicar TEST_STEP_* directamente al mismo
+        // endpoint /api/events que ya usa el Runner, sin pasar por logs ni por stdout.
+        if (config.backendUrl != null && !config.backendUrl.isBlank()) {
+            cmd.add("-DbackendUrl=" + config.backendUrl);
+        }
 
         // Dynamic device capabilities from Device Farm discovery
         if (job.udid != null && !job.udid.isBlank()) {

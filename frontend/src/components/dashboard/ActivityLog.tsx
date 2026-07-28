@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check, Wrench } from 'lucide-react'
+import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check, Wrench, ListTree, LayoutList } from 'lucide-react'
 import type { LogEntry, ExecutionEvent } from '../../types'
 import { isFunctionalLog } from '../../utils/logFilter'
 import { isVisibleInTimeline } from '../../utils/eventPresentation'
+import { deriveTestCaseFlow } from '../../utils/testFlow'
 import ExecutionTimeline from './ExecutionTimeline'
 import TechnicalConsole from './TechnicalConsole'
+import LauncherEventsStrip from './LauncherEventsStrip'
+import TestCaseFlowTimeline from './TestCaseFlowTimeline'
+import CaseProgressFooter from './CaseProgressFooter'
 
 const LEVEL_COLOR: Record<string, string> = {
   INFO:    '#60a5fa',
@@ -182,12 +186,22 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [showExtract,   setShowExtract]   = useState(false)
   const [showTechModal, setShowTechModal] = useState(false)
+  // 'flow' | 'events' — solo tiene sentido elegir cuando hay flujo de caso real
+  // (ver hasFlow más abajo); si no, el cuerpo se comporta exactamente como antes.
+  const [tab, setTab] = useState<'flow' | 'events'>('flow')
 
   // Fuente de eventos de dominio disponible (ver Props.events) — controla si el
   // cuerpo principal y "Log Técnico" usan la arquitectura de eventos nueva o el
   // comportamiento legacy basado en regex (isFunctionalLog). Ambos caminos
   // conviven a propósito durante la migración — ver eventPresentation.ts.
   const hasEvents = !!events && events.length > 0
+
+  // Flujo del caso de prueba (TEST_STARTED/TEST_STEP_*/TEST_FINISHED) — publicado
+  // desde utils/TestFlowEventPublisher.java. Si la suite en curso todavía no está
+  // instrumentada (steps.length === 0), no se muestran tabs ni el stepper: el
+  // cuerpo cae exactamente al comportamiento previo (solo ExecutionTimeline).
+  const flow = useMemo(() => hasEvents ? deriveTestCaseFlow(events!) : { testName: null, suite: null, steps: [] }, [hasEvents, events])
+  const hasFlow = flow.steps.length > 0
 
   // Recalcula solo cuando `logs` realmente cambia — evita re-filtrar el arreglo
   // completo en cada re-render que no provenga de un nuevo log (p. ej. cuando el
@@ -201,7 +215,7 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
+  }, [logs, events])
 
   return (
     <div
@@ -222,14 +236,24 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
           <div>
             <div className="text-sm font-bold text-slate-100">Actividad en Tiempo Real</div>
             <div className="text-xs text-slate-500 mt-0.5">
-              {visibleEventCount} eventos funcionales
-              {hasEvents
-                ? (events!.length - visibleEventCount) > 0 && (
-                    <span className="text-slate-600"> · {events!.length - visibleEventCount} técnicos ocultos</span>
-                  )
-                : hiddenCount > 0 && (
-                    <span className="text-slate-600"> · {hiddenCount} técnicos ocultos</span>
-                  )}
+              {hasFlow ? (
+                <>
+                  Ejecución en progreso
+                  {flow.suite && <> · Suite: <span className="text-slate-400">{flow.suite}</span></>}
+                  {flow.testName && <> · Caso: <span className="text-slate-400">{flow.testName}</span></>}
+                </>
+              ) : (
+                <>
+                  {visibleEventCount} eventos funcionales
+                  {hasEvents
+                    ? (events!.length - visibleEventCount) > 0 && (
+                        <span className="text-slate-600"> · {events!.length - visibleEventCount} técnicos ocultos</span>
+                      )
+                    : hiddenCount > 0 && (
+                        <span className="text-slate-600"> · {hiddenCount} técnicos ocultos</span>
+                      )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -275,12 +299,46 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
         </div>
       </div>
 
-      {/* Terminal body — ExecutionTimeline (eventos de dominio) o legacy functionalLogs */}
+      {/* Tabs — solo aparecen cuando hay flujo de caso real que mostrar (hasFlow).
+          Sin esto, el cuerpo se comporta exactamente como antes de este cambio. */}
+      {hasFlow && (
+        <div className="flex gap-1 px-3.5 pt-2 flex-shrink-0">
+          <button
+            onClick={() => setTab('flow')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-[11px] font-semibold transition-colors"
+            style={{
+              background: tab === 'flow' ? 'var(--terminal-bg)' : 'transparent',
+              color: tab === 'flow' ? '#fff' : 'var(--text-dim)',
+            }}
+          >
+            <ListTree size={11} />
+            Vista de Flujo
+          </button>
+          <button
+            onClick={() => setTab('events')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-[11px] font-semibold transition-colors"
+            style={{
+              background: tab === 'events' ? 'var(--terminal-bg)' : 'transparent',
+              color: tab === 'events' ? '#fff' : 'var(--text-dim)',
+            }}
+          >
+            <LayoutList size={11} />
+            Solo Eventos
+          </button>
+        </div>
+      )}
+
+      {/* Terminal body — Vista de Flujo (Launcher+Caso) / Solo Eventos / legacy functionalLogs */}
       <div
         className="flex-1 min-h-0 overflow-y-auto px-4 py-3 font-mono text-[11px] leading-relaxed"
         style={{ background: 'var(--terminal-bg)' }}
       >
-        {hasEvents ? (
+        {hasFlow && tab === 'flow' ? (
+          <>
+            <LauncherEventsStrip events={events!} />
+            <TestCaseFlowTimeline events={events!} />
+          </>
+        ) : hasEvents ? (
           <ExecutionTimeline events={events!} />
         ) : functionalLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-600">
@@ -332,6 +390,8 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {hasFlow && <CaseProgressFooter events={events!} />}
 
       {/* ── Modals ────────────────────────────────────────────────────────────── */}
       <AnimatePresence>
