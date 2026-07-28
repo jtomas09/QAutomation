@@ -205,7 +205,28 @@ public class IosPreflightManager {
         //   wasAttempted   = true  → xcodebuild was actually started
         //   !isWdaRunning  = true  → not already alive on the port
         boolean wasAttempted = WdaLifecycleOwner.wasLastLaunchAttempted(udid);
-        if (wdaCached && !wdaReady && wasAttempted && !WdaManager.isWdaRunning()) {
+        // FIX real (evidencia en vivo — loop de reinstalación sin salida): "Timed out
+        // while enabling automation mode" es el prompt nativo de iOS "Enable UI
+        // Automation" pidiendo el passcode del dispositivo — un gate de seguridad que
+        // SOLO un humano puede confirmar tocando la pantalla, nunca recompilando WDA.
+        // Antes, este bloque invalidaba el caché igual que cualquier otro fallo,
+        // forzando una reinstalación con firma nueva en el siguiente intento — y una
+        // reinstalación de WDA es EXACTAMENTE lo que hace que iOS vuelva a pedir ese
+        // mismo prompt, generando un ciclo que nunca se resuelve solo (reinstala →
+        // pide passcode → nadie lo confirma en un pipeline automatizado → falla →
+        // invalida caché → reinstala → …). Se detecta este caso específico y se
+        // evita la invalidación — recompilar no ayuda aquí — mostrando en su lugar
+        // un mensaje claro y accionable en el Timeline (severidad ERROR, visible,
+        // no DEBUG) pidiendo confirmar el prompt físicamente en el dispositivo.
+        boolean isAutomationTrustTimeout = wdaResult.reason != null
+                && wdaResult.reason.toLowerCase().contains("enabling automation mode");
+        if (isAutomationTrustTimeout) {
+            client.sendLog(executionId, "ERROR",
+                    "🔐 iOS está pidiendo confirmar \"Enable UI Automation\" (código del dispositivo) "
+                    + "— desbloquea el iPhone y confírmalo físicamente. No se puede resolver "
+                    + "recompilando WDA — el caché NO se invalida para evitar un ciclo de "
+                    + "reinstalación que solo perpetúa este mismo prompt.");
+        } else if (wdaCached && !wdaReady && wasAttempted && !WdaManager.isWdaRunning()) {
             client.sendTechLog(executionId,
                     "♻️  [WDA] El caché existe pero WDA no respondió tras intentar iniciarlo.\n"
                     + "   Invalidando caché — la próxima ejecución recompilará WDA.");
