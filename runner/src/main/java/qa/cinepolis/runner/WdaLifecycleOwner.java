@@ -517,10 +517,8 @@ public final class WdaLifecycleOwner {
             try {
                 String cmd = h.info().commandLine().orElse("");
                 if (looksLikeOrphanWdaBuild(cmd)) {
-                    h.destroyForcibly();
+                    terminateGracefully(h);
                     killed++;
-                    System.out.println("[WdaLifecycleOwner] Barrido: xcodebuild de WDA "
-                            + "detenido (PID=" + h.pid() + ").");
                 }
             } catch (Exception ignored) {}
         }
@@ -528,6 +526,41 @@ public final class WdaLifecycleOwner {
             System.out.println("[WdaLifecycleOwner] Barrido: sin xcodebuild de WDA huérfanos.");
         }
         return killed;
+    }
+
+    /**
+     * FIX real (hipótesis con fuerte respaldo de evidencia — investigación del prompt
+     * nativo de iOS "Enable UI Automation"/passcode que aparece en la PRIMERA prueba
+     * tras redesplegar el Runner): este barrido antes mataba el xcodebuild huérfano
+     * con destroyForcibly() (SIGKILL) directo, sin darle oportunidad de cerrar su
+     * sesión de automatización XCTest de forma limpia. Un SIGKILL corta esa sesión a
+     * la mitad — iOS parece interpretar esto como una sesión de automatización mal
+     * cerrada y exige re-confirmar el permiso "Enable UI Automation" (con el passcode)
+     * la próxima vez que un nuevo xcodebuild intenta controlar el dispositivo.
+     *
+     * Fix: apagado gradual — SIGTERM primero (destroy()), da tiempo a que
+     * xcodebuild/XCTest cierre la sesión correctamente, y solo escala a SIGKILL
+     * (destroyForcibly()) si el proceso no responde a tiempo. Mismo resultado final
+     * (el huérfano siempre termina detenido), pero por la vía que no debería dejar a
+     * iOS pensando que la sesión de automatización se perdió abruptamente.
+     */
+    private static void terminateGracefully(ProcessHandle h) {
+        long pid = h.pid();
+        h.destroy();
+        try {
+            h.onExit().get(3, java.util.concurrent.TimeUnit.SECONDS);
+            System.out.println("[WdaLifecycleOwner] Barrido: xcodebuild de WDA "
+                    + "cerrado limpiamente (SIGTERM, PID=" + pid + ").");
+        } catch (Exception timeoutOrError) {
+            if (h.isAlive()) {
+                h.destroyForcibly();
+                System.out.println("[WdaLifecycleOwner] Barrido: xcodebuild de WDA "
+                        + "no respondió a SIGTERM — forzado (SIGKILL, PID=" + pid + ").");
+            } else {
+                System.out.println("[WdaLifecycleOwner] Barrido: xcodebuild de WDA "
+                        + "cerrado limpiamente (SIGTERM, PID=" + pid + ").");
+            }
+        }
     }
 
     /**
