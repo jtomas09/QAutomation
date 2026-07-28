@@ -47,13 +47,25 @@ export const SEVERITY_COLOR: Record<string, string> = {
  * BUSINESS y nada más. Nunca se mira `message`.
  *
  * Eventos legacy (type === 'RAW_LOG', puente de BackendClient.sendLog() sin
- * migrar todavía — ver ExecutionService.addLog en el backend): se aplica el
- * clasificador heredado (isFunctionalLog) como fallback transicional, exactamente
- * como describe la Fase 3 de la migración — nunca se descarta narración que
- * hoy es visible solo porque su emisor todavía no fue migrado a
- * ExecutionEventPublisher.
+ * migrar todavía — ver ExecutionService.addLog en el backend):
+ *
+ * FIX real (evidencia en vivo — el Pre-flight de iOS, IosPreflightManager/
+ * AppleDeveloperTeamManager/CoreDeviceTunnelManager, sigue mandando su
+ * narración completa a nivel "INFO" sin migrar todavía a un EventType propio;
+ * el fallback ORIGINAL de esta función delegaba TODO RAW_LOG al clasificador
+ * heredado sin mirar `category`, así que aunque el backend ya clasificara
+ * correctamente un mensaje como DEBUG (fromLegacyLog), esta función lo
+ * ignoraba y lo mostraba igual si el regex heredado no lo reconocía — que es
+ * exactamente el bug original que esta arquitectura debía resolver). Ahora
+ * category SÍ es la primera autoridad también para RAW_LOG: DEBUG/TRACE se
+ * ocultan siempre, sin excepción — nunca fueron pensados para el Timeline. El
+ * regex heredado solo decide en la zona ambigua real (TECHNICAL, es decir
+ * INFO/WARN/ERROR legacy que fromLegacyLog no puede distinguir de narración de
+ * negocio todavía no migrada) — así no se pierde nada que hoy sea visible,
+ * pero DEBUG/TRACE ya no dependen de que el regex adivine bien.
  */
 export function isVisibleInTimeline(e: ExecutionEvent): boolean {
+  if (e.category === 'DEBUG' || e.category === 'TRACE') return false
   if (e.type !== 'RAW_LOG') return e.category === 'BUSINESS'
   return isFunctionalLog({ id: e.id, time: e.timestamp, level: e.severity as any, message: e.message })
 }

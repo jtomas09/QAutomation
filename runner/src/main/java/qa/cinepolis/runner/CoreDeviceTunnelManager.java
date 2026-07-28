@@ -73,7 +73,7 @@ public final class CoreDeviceTunnelManager {
             BackendClient client, String executionId, String physicalUdid) {
 
         if (WdaManager.isWdaRunning()) {
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "✅ [CoreDevice] WebDriverAgent ya activo — omitiendo verificación de tunnel.");
             DeviceConnectionState s = readConnectionState(physicalUdid);
             if (s != null) logState(client, executionId, s);
@@ -81,7 +81,7 @@ public final class CoreDeviceTunnelManager {
                     : new DeviceConnectionState("", physicalUdid, "active/wda-running", "paired", true);
         }
 
-        client.sendLog(executionId, "INFO",
+        client.sendTechLog(executionId,
                 "🔌 [CoreDevice] Verificando estado de conexión del dispositivo...");
 
         DeviceConnectionState state = readConnectionState(physicalUdid);
@@ -90,11 +90,15 @@ public final class CoreDeviceTunnelManager {
             boolean visible = isVisibleInXctrace(physicalUdid);
             DeviceConnectionState fallback = new DeviceConnectionState(
                     "", physicalUdid, "unknown", "unknown", visible);
-            client.sendLog(executionId, visible ? "INFO" : "WARN",
-                    (visible ? "✅" : "⚠️") + " [CoreDevice] devicectl sin datos para " + physicalUdid
-                    + (visible
-                       ? " — dispositivo visible en xctrace, continuando."
-                       : " — dispositivo NO visible en xctrace. Appium puede fallar."));
+            if (visible) {
+                client.sendTechLog(executionId,
+                        "✅ [CoreDevice] devicectl sin datos para " + physicalUdid
+                        + " — dispositivo visible en xctrace, continuando.");
+            } else {
+                client.sendLog(executionId, "WARN",
+                        "⚠️ [CoreDevice] devicectl sin datos para " + physicalUdid
+                        + " — dispositivo NO visible en xctrace. Appium puede fallar.");
+            }
             return fallback;
         }
 
@@ -102,7 +106,7 @@ public final class CoreDeviceTunnelManager {
 
         // Log DevicectlParser findings to main activity log for validation evidence.
         // This confirms the parser found the device via hardwareProperties.udid (not potentialHostnames).
-        client.sendLog(executionId, "INFO",
+        client.sendTechLog(executionId,
                 "🔍 [DevicectlParser] Dispositivo identificado:\n"
                 + "   Physical UDID   : " + state.physicalUdid + "  ← appium:udid\n"
                 + "   CoreDevice UUID : " + (state.coreDeviceId.isBlank()
@@ -112,7 +116,7 @@ public final class CoreDeviceTunnelManager {
                 + "   Pairing State   : " + state.pairingState);
 
         if (state.isReadyForAppium()) {
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "✅ [CoreDevice] Tunnel activo — dispositivo listo para Appium.");
             return state;
         }
@@ -147,7 +151,7 @@ public final class CoreDeviceTunnelManager {
 
         DevicectlParser.TransportType transport = initial.transportType;
 
-        client.sendLog(executionId, "INFO",
+        client.sendTechLog(executionId,
                 "══════════════ CoreDevice Recovery ══════════════\n"
                 + "   TransportType  : " + transport + "\n"
                 + "   Physical UDID  : " + physicalUdid + "\n"
@@ -160,33 +164,33 @@ public final class CoreDeviceTunnelManager {
 
         if (transport == DevicectlParser.TransportType.WIRED) {
             // USB: killall -9 remotedeviced restarts the daemon cleanly
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "   Recovery Strategy: WIRED → reiniciando daemon remotedeviced (killall -9)...");
             runSilent("killall", "-9", "remotedeviced");
             sleep(4_000);
             DeviceConnectionState afterRestart = readConnectionState(physicalUdid);
             if (afterRestart != null) last = afterRestart;
             if (last.isReadyForAppium()) {
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "   Resultado: CONNECTED ✅ (daemon reiniciado, 4s)\n"
                         + "═════════════════════════════════════════════════");
                 logState(client, executionId, last);
                 return last;
             }
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "   Daemon reiniciado — dispositivo aún offline. Iniciando polling...");
 
         } else if (transport == DevicectlParser.TransportType.LOCAL_NETWORK) {
             // WiFi: NEVER kill remotedeviced — it destroys the Bonjour/mDNS session
             // Only action: devicectl device connection connect
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "   Recovery Strategy: LOCAL_NETWORK → devicectl connection connect\n"
                     + "   (remotedeviced NO reiniciado — destruiría la sesión Bonjour/WiFi)");
             if (!initial.coreDeviceId.isBlank()) {
                 // Capture stdout/stderr/exitCode for diagnostic evidence
                 String[] cr = runCapture("xcrun", "devicectl", "device", "connection", "connect",
                         "--device", initial.coreDeviceId);
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "   Comando ejecutado:\n"
                         + "   $ xcrun devicectl device connection connect --device "
                         + initial.coreDeviceId + "\n"
@@ -198,7 +202,7 @@ public final class CoreDeviceTunnelManager {
                 DeviceConnectionState afterConnect = readConnectionState(physicalUdid);
                 if (afterConnect != null) last = afterConnect;
                 // Log explicit after-state regardless of outcome
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "   Estado después de connection connect:\n"
                         + "   CoreDevice UUID : " + (last.coreDeviceId.isBlank()
                                                       ? "(no detectado)" : last.coreDeviceId) + "\n"
@@ -206,13 +210,13 @@ public final class CoreDeviceTunnelManager {
                         + "   tunnelState     : " + last.tunnelState + "\n"
                         + "   pairingState    : " + last.pairingState);
                 if (last.isReadyForAppium()) {
-                    client.sendLog(executionId, "INFO",
+                    client.sendTechLog(executionId,
                             "   Resultado: CONNECTED ✅ (connection connect, 3s)\n"
                             + "═════════════════════════════════════════════════");
                     logState(client, executionId, last);
                     return last;
                 }
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "   Dispositivo aún offline después de connection connect. Iniciando polling...");
             } else {
                 client.sendLog(executionId, "WARN",
@@ -222,7 +226,7 @@ public final class CoreDeviceTunnelManager {
 
         } else {
             // UNKNOWN: no destructive actions
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "   Recovery Strategy: UNKNOWN transport — polling pasivo (sin acciones destructivas)");
         }
 
@@ -243,7 +247,7 @@ public final class CoreDeviceTunnelManager {
             if (current != null) last = current;
 
             if (last.isReadyForAppium()) {
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "   Resultado: CONNECTED ✅ (~" + (attempt * POLL_INTERVAL_SECONDS) + "s)\n"
                         + "═════════════════════════════════════════════════");
                 logState(client, executionId, last);
@@ -252,7 +256,7 @@ public final class CoreDeviceTunnelManager {
 
             if (attempt % 5 == 0) {
                 long remaining = (deadline - System.currentTimeMillis()) / 1_000;
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "   ⏳ Esperando... (" + remaining + "s restantes)"
                         + "  pairing=" + last.pairingState
                         + "  xctrace=" + (last.xctraceVisible ? "visible" : "no visible"));
@@ -335,7 +339,7 @@ public final class CoreDeviceTunnelManager {
         client.sendTechLog(executionId,
                 "🔌 [CoreDevice] Estado del dispositivo:" + stateDetail(s));
         if (s.isReadyForAppium()) {
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "✅ [CoreDevice] Dispositivo conectado y listo para Appium.");
         }
     }

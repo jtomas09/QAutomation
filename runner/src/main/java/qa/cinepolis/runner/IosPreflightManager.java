@@ -109,13 +109,18 @@ public class IosPreflightManager {
         qa.cinepolis.runner.mirror.WdaEventBus.publish(
                 udid, qa.cinepolis.runner.mirror.WdaEventBus.WdaEvent.INITIALIZING);
 
-        client.sendLog(executionId, "INFO",
+        client.sendTechLog(executionId,
                 "🍎 ══════════════ iOS Pre-flight ══════════════");
 
         // 0. Screen lock — initial check before any long operation.
         //    A locked device at the start means the user hasn't prepared for the run.
         DeviceScreenLockChecker.LockState initialLock = DeviceScreenLockChecker.check(udid);
-        client.sendLog(executionId, initialLock.unlocked ? "INFO" : "WARN",
+        // PERF/UX (evidencia real — "Device unlocked" listado explícitamente como ruido
+        // desde el primer reporte de esta investigación): detalle de diagnóstico, no
+        // narración de negocio — DEVICE_PREPARE_START/DONE (JobExecutor) ya cubren el
+        // hito visible; si el dispositivo termina bloqueado, la verificación de
+        // estabilidad más abajo sigue reportando el fallo real.
+        client.sendTechLog(executionId,
                 initialLock.unlocked
                         ? "🔓 Pantalla desbloqueada al inicio del Pre-flight. ✅"
                         : "⚠️  Pantalla bloqueada al inicio del Pre-flight — desbloquea el iPhone para continuar.");
@@ -149,9 +154,9 @@ public class IosPreflightManager {
 
             if (validation.valid) {
                 wdaCached = true;
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "✅ WebDriverAgent precompilado y validado — saltando recompilación.");
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "🔎 [WDA validación] Team: " + validation.profileTeamId
                         + " | Certificado: " + AppleSigningUtils.shortSha(validation.certSha1)
                         + " | Expira: " + validation.expirationDate);
@@ -164,12 +169,12 @@ public class IosPreflightManager {
                 // Nunca se pide intervención manual: se borra el cache, el DerivedData de
                 // WebDriverAgent, y se fuerza wdaCached=false para que Appium reconstruya,
                 // refirme e reinstale WDA por su cuenta en la sesión que sigue.
-                client.sendLog(executionId, "WARN",
+                client.sendTechLog(executionId,
                         "♻️  [WDA] Caché inválido — motivo: " + validation.reason);
                 invalidateWdaCache(udid);
                 cleanupStaleDerivedData(client, executionId);
                 wdaCached = false;
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "🔨 [WDA] Recompilación automática — motivo: " + validation.reason + "\n"
                         + "   DerivedData de WebDriverAgent eliminado. El Runner (WdaLifecycleOwner) "
                         + "recompilará, refirmará e reinstalará WDA en la próxima sesión sin intervención manual.");
@@ -177,7 +182,7 @@ public class IosPreflightManager {
         } else {
             wdaBundleId = generateWdaBundleId(udid);
             wdaCached   = false;
-            client.sendLog(executionId, "INFO",
+            client.sendTechLog(executionId,
                     "🔨 WebDriverAgent se compilará e instalará automáticamente en este dispositivo.");
             client.sendTechLog(executionId,
                     "[WDA build] bundle: " + wdaBundleId
@@ -201,7 +206,7 @@ public class IosPreflightManager {
         //   !isWdaRunning  = true  → not already alive on the port
         boolean wasAttempted = WdaLifecycleOwner.wasLastLaunchAttempted(udid);
         if (wdaCached && !wdaReady && wasAttempted && !WdaManager.isWdaRunning()) {
-            client.sendLog(executionId, "WARN",
+            client.sendTechLog(executionId,
                     "♻️  [WDA] El caché existe pero WDA no respondió tras intentar iniciarlo.\n"
                     + "   Invalidando caché — la próxima ejecución recompilará WDA.");
             invalidateWdaCache(udid);
@@ -215,11 +220,17 @@ public class IosPreflightManager {
         try { Thread.sleep(1_500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
         DeviceScreenLockChecker.LockState stabilityLock = DeviceScreenLockChecker.check(udid);
         boolean deviceUnlocked = stabilityLock.unlocked;
-        client.sendLog(executionId, deviceUnlocked ? "INFO" : "ERROR",
-                deviceUnlocked
-                        ? "🔓 Device unlocked: YES ✅ — pantalla desbloqueada confirmada al final del Pre-flight."
-                        : "🔒 Device unlocked: NO ❌ — pantalla bloqueada durante el Pre-flight."
-                        + "\n   Desbloquea el iPhone antes de iniciar la ejecución.");
+        // UX: el caso feliz (desbloqueado) es detalle de diagnóstico — a Log Técnico.
+        // El caso de fallo real (bloqueado, bloquea toda la ejecución) SÍ es una alerta
+        // accionable y se mantiene visible en el Timeline (severidad ERROR).
+        if (deviceUnlocked) {
+            client.sendTechLog(executionId,
+                    "🔓 Device unlocked: YES ✅ — pantalla desbloqueada confirmada al final del Pre-flight.");
+        } else {
+            client.sendLog(executionId, "ERROR",
+                    "🔒 Device unlocked: NO ❌ — pantalla bloqueada durante el Pre-flight."
+                    + "\n   Desbloquea el iPhone antes de iniciar la ejecución.");
+        }
 
         // ── Compute Runner readiness decision — mirrors DeviceReadinessEvaluator logic ──
         // This determination is final: the Framework must not attempt recovery when
@@ -255,7 +266,7 @@ public class IosPreflightManager {
         String tunnelSummary = "connected".equalsIgnoreCase(tunnel.tunnelState)
                 ? tunnel.tunnelState + " ✅"
                 : tunnel.tunnelState + " ⚠️";
-        client.sendLog(executionId, "INFO",
+        client.sendTechLog(executionId,
                 "🍎 ════════════ iOS Pre-flight completo ════════════\n"
                 + "   Team ID          : " + (teamId.isBlank()    ? "no detectado ⚠️" : teamId + " ✅") + "\n"
                 + "   iOS              : " + (iosVersion.isBlank() ? "desconocida"     : iosVersion) + "\n"
@@ -293,16 +304,16 @@ public class IosPreflightManager {
             String out = new String(p.getInputStream().readAllBytes()).trim();
             p.waitFor(15, TimeUnit.SECONDS);
             if (out.startsWith("Xcode")) {
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "✅ " + out.replace("\n", " | "));
             } else {
-                client.sendLog(executionId, "WARN",
+                client.sendTechLog(executionId,
                         "⚠️  Xcode no encontrado. Instala desde App Store y ejecuta:\n"
                         + "   sudo xcode-select --switch /Applications/Xcode.app\n"
                         + "   xcodebuild -runFirstLaunch");
             }
         } catch (Exception e) {
-            client.sendLog(executionId, "WARN",
+            client.sendTechLog(executionId,
                     "⚠️  No se pudo verificar Xcode: " + e.getMessage());
         }
     }
@@ -342,7 +353,7 @@ public class IosPreflightManager {
             p.waitFor(10, TimeUnit.SECONDS);
             DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
             if (info != null && !info.osVersion.isBlank()) {
-                client.sendLog(executionId, "INFO", "📱 iOS " + info.osVersion);
+                client.sendTechLog(executionId, "📱 iOS " + info.osVersion);
                 client.sendTechLog(executionId, "[iOS version] fuente: devicectl JSON (DevicectlParser)");
                 return info.osVersion;
             }
@@ -364,7 +375,7 @@ public class IosPreflightManager {
             Matcher em = exact.matcher(out);
             if (em.find()) {
                 String v = em.group(1);
-                client.sendLog(executionId, "INFO", "📱 iOS " + v + " (vía xctrace)");
+                client.sendTechLog(executionId, "📱 iOS " + v + " (vía xctrace)");
                 return v;
             }
 
@@ -382,17 +393,17 @@ public class IosPreflightManager {
                 Matcher dm = physLine.matcher(trimmed);
                 if (dm.matches()) {
                     String v = dm.group(1);
-                    client.sendLog(executionId, "INFO",
+                    client.sendTechLog(executionId,
                             "📱 iOS " + v + " (vía xctrace — primer dispositivo físico conectado)");
                     return v;
                 }
             }
 
-            client.sendLog(executionId, "WARN",
+            client.sendTechLog(executionId,
                     "⚠️  Versión iOS no detectada para " + udid
                     + " — Appium la detectará automáticamente del dispositivo.");
         } catch (Exception e) {
-            client.sendLog(executionId, "WARN", "⚠️  xcrun no respondió: " + e.getMessage());
+            client.sendTechLog(executionId, "⚠️  xcrun no respondió: " + e.getMessage());
         }
         return "";
     }
@@ -411,10 +422,10 @@ public class IosPreflightManager {
             DevicectlParser.DeviceInfo info = DevicectlParser.findByUdid(json, udid);
             if (info == null) return;
             if (info.developerModeEnabled) {
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "✅ Developer Mode activo en el dispositivo");
             } else {
-                client.sendLog(executionId, "WARN",
+                client.sendTechLog(executionId,
                         "⚠️  Developer Mode INACTIVO.\n"
                         + "   Actívalo: Ajustes → Privacidad y seguridad → Modo desarrollador\n"
                         + "   Sin él, xcodebuild no puede instalar WebDriverAgent.");
@@ -454,7 +465,7 @@ public class IosPreflightManager {
             if (!currentIosVersion.isBlank() && !cachedVersion.isBlank()
                     && !currentIosVersion.equals(cachedVersion)) {
                 f.delete();
-                client.sendLog(executionId, "INFO",
+                client.sendTechLog(executionId,
                         "♻️  iOS actualizado (" + cachedVersion + " → " + currentIosVersion
                         + ") — WDA se recompilará para esta versión.");
                 return null;

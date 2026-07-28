@@ -173,7 +173,7 @@ final class AppleDeveloperTeamManager {
         boolean changed = !previouslyUsed.isBlank() && !selection.candidate().teamId().equals(previouslyUsed);
         persist(selection.candidate(), selection.reason());
 
-        client.sendLog(executionId, "INFO",
+        client.sendTechLog(executionId,
                 "──────────────────────────────\n"
                 + "Team seleccionado\n\n"
                 + selection.candidate().teamId()
@@ -261,7 +261,7 @@ final class AppleDeveloperTeamManager {
             r.teamNamesById().forEach((teamId, name) ->
                     sb.append("✔ Team: ").append(teamId).append(" (").append(name).append(")\n"));
         }
-        client.sendLog(executionId, "INFO", sb.toString().stripTrailing());
+        client.sendTechLog(executionId, sb.toString().stripTrailing());
     }
 
     private static void logCertificates(BackendClient client, String executionId, List<CertLogEntry> entries) {
@@ -277,7 +277,7 @@ final class AppleDeveloperTeamManager {
             if (e.note() != null) sb.append("   Motivo: ").append(e.note()).append('\n');
             sb.append('\n');
         }
-        client.sendLog(executionId, "INFO", sb.toString().stripTrailing());
+        client.sendTechLog(executionId, sb.toString().stripTrailing());
     }
 
     // ── Persistencia ──────────────────────────────────────────────────────────
