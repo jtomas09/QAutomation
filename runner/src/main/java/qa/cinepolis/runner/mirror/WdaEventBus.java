@@ -52,11 +52,13 @@ public final class WdaEventBus {
             case BUILDING     -> IOSMirrorStateTracker.markBuilding(udid);
             case STARTING     -> IOSMirrorStateTracker.markStarting(udid);
             case VERIFYING    -> IOSMirrorStateTracker.markVerifying(udid);
-            case ACTIVE       -> {
-                // TEMP LOG (auditoría Mirror/WDA — remover tras validar Problema 2)
-                System.out.println("[WdaEventBus][TEMP] Mirror received ACTIVE — udid=" + udid);
-                IOSMirrorStateTracker.markActive(udid);
-            }
+            // FIX real (evidencia en vivo — investigación de "Automation Running" persistente):
+            // este log TEMP (de una auditoría anterior, ya validada) se publica UNA VEZ POR CADA
+            // FRAME capturado mientras el Mirror transmite — con el Mirror abierto varios
+            // minutos, esto generó 47,000+ líneas en una sola sesión, sin aportar nada nuevo ya
+            // que el patrón que auditaba (Mirror manteniendo WDA vivo intencionalmente) ya está
+            // confirmado y documentado en WdaLifecycleOwner/IOSExecutionCleanupManager.
+            case ACTIVE       -> IOSMirrorStateTracker.markActive(udid);
             case ERROR        -> IOSMirrorStateTracker.markError(udid, reason);
             case STOPPED      -> IOSMirrorStateTracker.clear(udid);
         }
