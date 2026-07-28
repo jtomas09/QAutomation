@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check, Wrench } from 'lucide-react'
-import type { LogEntry } from '../../types'
+import type { LogEntry, ExecutionEvent } from '../../types'
 import { isFunctionalLog } from '../../utils/logFilter'
+import { isVisibleInTimeline } from '../../utils/eventPresentation'
+import ExecutionTimeline from './ExecutionTimeline'
+import TechnicalConsole from './TechnicalConsole'
 
 const LEVEL_COLOR: Record<string, string> = {
   INFO:    '#60a5fa',
@@ -26,6 +29,15 @@ const LEVEL_BG: Record<string, string> = {
 
 interface Props {
   logs:      LogEntry[]
+  /**
+   * Opcional — arquitectura de eventos (ver eventPresentation.ts). Cuando hay
+   * eventos disponibles, el cuerpo principal usa ExecutionTimeline (filtrado
+   * por category/type, sin regex) en vez de isFunctionalLog(logs); "Log Técnico"
+   * usa TechnicalConsole (con chips por categoría) en vez del dump de texto
+   * plano. Si no se pasa (o llega vacío), el comportamiento es idéntico al
+   * anterior — ningún caller existente se rompe.
+   */
+  events?:    ExecutionEvent[]
   onClear:   () => void
   onViewAll?: () => void
 }
@@ -166,15 +178,25 @@ function LogModal({
   )
 }
 
-function ActivityLog({ logs, onClear, onViewAll }: Props) {
+function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [showExtract,   setShowExtract]   = useState(false)
   const [showTechModal, setShowTechModal] = useState(false)
+
+  // Fuente de eventos de dominio disponible (ver Props.events) — controla si el
+  // cuerpo principal y "Log Técnico" usan la arquitectura de eventos nueva o el
+  // comportamiento legacy basado en regex (isFunctionalLog). Ambos caminos
+  // conviven a propósito durante la migración — ver eventPresentation.ts.
+  const hasEvents = !!events && events.length > 0
 
   // Recalcula solo cuando `logs` realmente cambia — evita re-filtrar el arreglo
   // completo en cada re-render que no provenga de un nuevo log (p. ej. cuando el
   // Dashboard padre se re-renderiza por otro estado no relacionado).
   const functionalLogs = useMemo(() => logs.filter(isFunctionalLog), [logs])
+  const visibleEventCount = useMemo(
+    () => hasEvents ? events!.filter(isVisibleInTimeline).length : functionalLogs.length,
+    [hasEvents, events, functionalLogs]
+  )
   const hiddenCount    = logs.length - functionalLogs.length
 
   useEffect(() => {
@@ -200,10 +222,14 @@ function ActivityLog({ logs, onClear, onViewAll }: Props) {
           <div>
             <div className="text-sm font-bold text-slate-100">Actividad en Tiempo Real</div>
             <div className="text-xs text-slate-500 mt-0.5">
-              {functionalLogs.length} eventos funcionales
-              {hiddenCount > 0 && (
-                <span className="text-slate-600"> · {hiddenCount} técnicos ocultos</span>
-              )}
+              {visibleEventCount} eventos funcionales
+              {hasEvents
+                ? (events!.length - visibleEventCount) > 0 && (
+                    <span className="text-slate-600"> · {events!.length - visibleEventCount} técnicos ocultos</span>
+                  )
+                : hiddenCount > 0 && (
+                    <span className="text-slate-600"> · {hiddenCount} técnicos ocultos</span>
+                  )}
             </div>
           </div>
         </div>
@@ -249,12 +275,14 @@ function ActivityLog({ logs, onClear, onViewAll }: Props) {
         </div>
       </div>
 
-      {/* Terminal body — functional logs only */}
+      {/* Terminal body — ExecutionTimeline (eventos de dominio) o legacy functionalLogs */}
       <div
         className="flex-1 min-h-0 overflow-y-auto px-4 py-3 font-mono text-[11px] leading-relaxed"
         style={{ background: 'var(--terminal-bg)' }}
       >
-        {functionalLogs.length === 0 ? (
+        {hasEvents ? (
+          <ExecutionTimeline events={events!} />
+        ) : functionalLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-600">
             <Terminal size={28} className="opacity-30" />
             <span className="text-xs text-center">
@@ -323,16 +351,20 @@ function ActivityLog({ logs, onClear, onViewAll }: Props) {
 
       <AnimatePresence>
         {showTechModal && (
-          <LogModal
-            title="Log Técnico"
-            subtitle={`${logs.length} entradas — infraestructura completa`}
-            icon={<Wrench size={15} />}
-            iconBg="rgba(249,115,22,0.15)"
-            iconColor="#f97316"
-            entries={logs}
-            onClose={() => setShowTechModal(false)}
-            filenamePrefix="log_tecnico"
-          />
+          hasEvents ? (
+            <TechnicalConsole events={events!} onClose={() => setShowTechModal(false)} />
+          ) : (
+            <LogModal
+              title="Log Técnico"
+              subtitle={`${logs.length} entradas — infraestructura completa`}
+              icon={<Wrench size={15} />}
+              iconBg="rgba(249,115,22,0.15)"
+              iconColor="#f97316"
+              entries={logs}
+              onClose={() => setShowTechModal(false)}
+              filenamePrefix="log_tecnico"
+            />
+          )
         )}
       </AnimatePresence>
     </div>

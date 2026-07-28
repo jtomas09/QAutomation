@@ -30,6 +30,33 @@ export interface LogEntry {
   message: string;
 }
 
+// ─── Execution events (arquitectura de eventos — Actividad en Tiempo Real) ────
+
+export type EventCategory = 'BUSINESS' | 'TECHNICAL' | 'DEBUG' | 'TRACE';
+export type EventSeverity = 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
+
+export interface ExecutionEventProgress {
+  current: number;
+  total: number;
+}
+
+export interface ExecutionEvent {
+  id: string;
+  executionId: string;
+  timestamp: string;
+  severity: EventSeverity;
+  category: EventCategory;
+  source: string;
+  /** Vocabulario cerrado del Runner (ver EventType.java), p.ej. "CASE_PASSED". "RAW_LOG" = puente legacy. */
+  type: string;
+  message: string;
+  details?: string | null;
+  progress?: ExecutionEventProgress | null;
+  suite?: string | null;
+  test?: string | null;
+  device?: string | null;
+}
+
 export interface RunState {
   status: RunStatus;
   passed: number;
@@ -40,6 +67,7 @@ export interface RunState {
   totalExpected: number;
   lastRun: string | null;
   logs: LogEntry[];
+  events: ExecutionEvent[];
   activeSuite: string | null;
   executionId: string | null;
 }

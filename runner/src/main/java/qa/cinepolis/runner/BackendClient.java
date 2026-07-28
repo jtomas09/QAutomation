@@ -72,6 +72,15 @@ public class BackendClient {
         sendLog(executionId, "DEBUG", message);
     }
 
+    /** Publica un ExecutionEvent de dominio — ver qa.cinepolis.runner.events.ExecutionEventPublisher. */
+    public void sendEvent(qa.cinepolis.runner.events.ExecutionEvent event) {
+        try {
+            post("/api/events", json.writeValueAsString(event));
+        } catch (Exception e) {
+            System.err.println("[BackendClient] sendEvent error: " + e.getMessage());
+        }
+    }
+
     public boolean isJobAborted(String executionId) {
         try {
             HttpRequest req = HttpRequest.newBuilder()

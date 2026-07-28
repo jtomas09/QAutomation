@@ -55,6 +55,19 @@ public class ExecutionService {
             e.getLogs().add(log);
             sse.broadcast(executionId, "log", log);
         });
+        // Puente de compatibilidad (ver arquitectura de eventos): todo lo que llega por
+        // el canal legacy /api/logs también se expone como ExecutionEventDTO — el
+        // frontend nuevo consume un solo stream ("execution-event") sin importar si el
+        // emisor ya migró a ExecutionEventPublisher o sigue en BackendClient.sendLog().
+        addEvent(ExecutionEventDTO.fromLegacyLog(executionId, level, message));
+    }
+
+    /** Evento de dominio real — ver ExecutionEventDTO. Persistido (en memoria) + reenviado por SSE. */
+    public void addEvent(ExecutionEventDTO event) {
+        store.findById(event.executionId()).ifPresent(e -> {
+            e.getEvents().add(event);
+            sse.broadcast(event.executionId(), "execution-event", event);
+        });
     }
 
     /**

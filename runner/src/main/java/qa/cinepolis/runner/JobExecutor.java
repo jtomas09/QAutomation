@@ -341,6 +341,7 @@ public class JobExecutor {
     private final RunnerConfig   config;
     private final BackendClient  client;
     private final AppiumManager  appiumMgr;
+    private final qa.cinepolis.runner.events.ExecutionEventPublisher events;
 
     private volatile Process activeProcess;
 
@@ -352,6 +353,7 @@ public class JobExecutor {
         this.config    = config;
         this.client    = client;
         this.appiumMgr = appiumMgr;
+        this.events    = new qa.cinepolis.runner.events.BackendEventPublisher(client);
     }
 
     /**
@@ -606,6 +608,9 @@ public class JobExecutor {
                     + "  |  Env: "    + job.env
                     + "  |  Device: " + job.device
                     + "  |  País: "   + job.country);
+            events.suite(job.executionId, qa.cinepolis.runner.events.EventType.SUITE_START,
+                    qa.cinepolis.runner.events.EventSeverity.INFO, job.suite,
+                    "Ejecutando Suite " + job.suite);
             client.sendLog(job.executionId, "INFO",
                     "📹 Grabación de video: " + (job.videoEnabled ? "ACTIVA" : "INACTIVA"));
 
@@ -665,6 +670,8 @@ public class JobExecutor {
             client.sendLog(job.executionId, "INFO",
                     "🖥  Plataforma detectada: " + (isAndroid ? "Android" : "iOS")
                     + " | UDID: " + receivedUdid);
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.DEVICE_PREPARE_START,
+                    "Preparando dispositivo…");
             IosPreflightManager.IosPreflightResult iosResult = null;
             if (isAndroid) {
                 checkAdbDevices(job.executionId);
@@ -699,7 +706,13 @@ public class JobExecutor {
                     execCtx.unregister(wdaToken);
                 }
             }
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.DEVICE_PREPARE_DONE,
+                    "Dispositivo listo");
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.APPIUM_START,
+                    "Iniciando Appium…");
             checkAppiumServer(job.executionId);
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.APPIUM_READY,
+                    "Appium listo");
 
             // ── Pre-clean locked test-results to avoid file-lock failures ────
             preCleanTestResults(job.executionId, workDir);
@@ -930,6 +943,8 @@ public class JobExecutor {
 
             // ── STARTING → RUNNING: Gradle arrancó, tests en ejecución activa ──
             try { client.sendRunning(job.executionId); } catch (Exception ignored) {}
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.DRIVER_CREATE_START,
+                    "Creando Driver…");
 
             Process process = pb.start();
             activeProcess = process;
@@ -1193,6 +1208,10 @@ public class JobExecutor {
                 System.out.println("[Executor] [POST-5] Resultado ya enviado (abort detectado durante el "
                         + "post-procesamiento) — se omite sendResult() normal.");
             }
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.EXECUTION_FINISHED,
+                    failed.get() > 0 ? qa.cinepolis.runner.events.EventSeverity.WARN
+                                     : qa.cinepolis.runner.events.EventSeverity.SUCCESS,
+                    "Ejecución finalizada — " + summary);
             System.out.println("[Executor] ✓ Finalizado correctamente: " + job.executionId
                     + " — " + summary);
 
@@ -1395,12 +1414,54 @@ public class JobExecutor {
         client.sendLog(job.executionId, level, line);
         System.out.println("[" + level + "] " + line);
         boolean isCaseResult = false;
-        if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); isCaseResult = true; }
-        else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); isCaseResult = true; }
-        else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); isCaseResult = true; }
+        qa.cinepolis.runner.events.EventType caseType = null;
+        if      ("PASS".equals(level)) { passed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "PASS")); isCaseResult = true; caseType = qa.cinepolis.runner.events.EventType.CASE_PASSED; }
+        else if ("FAIL".equals(level)) { failed.incrementAndGet();  testCases.add(new TestCaseResult(extractTestName(line), "FAIL")); isCaseResult = true; caseType = qa.cinepolis.runner.events.EventType.CASE_FAILED; }
+        else if ("SKIP".equals(level)) { skipped.incrementAndGet(); testCases.add(new TestCaseResult(extractTestName(line), "SKIP")); isCaseResult = true; caseType = qa.cinepolis.runner.events.EventType.CASE_SKIPPED; }
         if (isCaseResult) {
-            logCaseProgress(job, process, passed.get() + failed.get() + skipped.get(),
-                    expectedCount, streamIncidents.get());
+            int executed = passed.get() + failed.get() + skipped.get();
+            int planned  = expectedCount > 0 ? expectedCount : executed;
+            String testName = extractTestName(line);
+            qa.cinepolis.runner.events.EventSeverity sev = caseType == qa.cinepolis.runner.events.EventType.CASE_FAILED
+                    ? qa.cinepolis.runner.events.EventSeverity.ERROR
+                    : caseType == qa.cinepolis.runner.events.EventType.CASE_SKIPPED
+                            ? qa.cinepolis.runner.events.EventSeverity.WARN
+                            : qa.cinepolis.runner.events.EventSeverity.SUCCESS;
+            String msg = caseType == qa.cinepolis.runner.events.EventType.CASE_PASSED ? "Caso aprobado"
+                    : caseType == qa.cinepolis.runner.events.EventType.CASE_FAILED ? "Caso falló"
+                    : "Caso omitido";
+            events.caseProgress(job.executionId, caseType, sev, testName, executed, planned,
+                    msg + (testName != null && !testName.isBlank() ? " — " + testName : ""));
+            logCaseProgress(job, process, executed, expectedCount, streamIncidents.get());
+        }
+        publishBridgedEvents(job, line);
+    }
+
+    /**
+     * Puente pragmático (fase de migración, ver arquitectura de eventos) — detecta un
+     * pequeño número de líneas ESTABLES conocidas, emitidas por AllureReportSender/
+     * DriverFactory (módulo de tests, sin acceso directo al backend), y las traduce a
+     * eventos de negocio. No es un clasificador de texto genérico: son 5 marcadores
+     * exactos, cada uno correspondiente a un momento único del ciclo de vida — a
+     * diferencia de detectLevel()/isTechnicalLine(), esto NUNCA decide qué es "ruido",
+     * solo traduce puntos de anclaje ya estables y de una sola ocurrencia.
+     */
+    private void publishBridgedEvents(JobDto job, String line) {
+        if (line.contains("Driver creado en intento")) {
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.DRIVER_CREATE_DONE,
+                    "Driver listo");
+        } else if (line.contains("Running gradlew allureReport")) {
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.REPORT_GENERATING,
+                    "Generando reporte…");
+        } else if (line.contains("gradlew allureReport completed successfully")) {
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.REPORT_READY,
+                    "Reporte listo");
+        } else if (line.contains("Sending final suite email")) {
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.MAIL_SENDING,
+                    "Enviando correo…");
+        } else if (line.contains("Email sent successfully to")) {
+            events.business(job.executionId, qa.cinepolis.runner.events.EventType.MAIL_SENT,
+                    "Correo enviado");
         }
     }
 

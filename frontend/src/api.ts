@@ -18,7 +18,7 @@
  *   POST   /api/results           → finalize execution (runner)
  */
 
-import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice, DeviceAppConfig, VideoSuiteSummary, VideoQueryResult } from './types'
+import type { LogLevel, ExecutionSummary, Runner, RunnerDevice, PhysicalDevice, DeviceAppConfig, VideoSuiteSummary, VideoQueryResult, ExecutionEvent } from './types'
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 
@@ -119,6 +119,7 @@ export interface RunResult {
 }
 
 type AddLog    = (level: LogLevel, message: string) => void
+type AddEvent  = (event: ExecutionEvent) => void
 
 /**
  * POST /api/run — enqueues a new execution.
@@ -146,6 +147,7 @@ export function streamExecution(
   addLog:      AddLog,
   onDone:      (result: RunResult) => void,
   onError:     (message: string)   => void,
+  addEvent?:   AddEvent,
 ): () => void {
   const url = `${API_URL}/api/run/${executionId}/stream`
 
@@ -191,6 +193,19 @@ export function streamExecution(
         addLog('WARN', `Unexpected SSE event: ${e.data}`)
       }
     })
+
+    // 'execution-event' — arquitectura de eventos de dominio (ver ExecutionEvent).
+    // Convive con 'log': el backend reenvía CADA log legacy también como evento
+    // (category=TECHNICAL/DEBUG, type=RAW_LOG) — ver ExecutionService.addLog().
+    // Opcional (addEvent puede ser undefined) para no romper llamadores existentes.
+    if (addEvent) {
+      es.addEventListener('execution-event', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as Omit<ExecutionEvent, 'id'>
+          addEvent({ id: Math.random().toString(36).slice(2), ...data })
+        } catch { /* ignore malformed events */ }
+      })
+    }
 
     es.addEventListener('status', (e: MessageEvent) => {
       try {

@@ -19,8 +19,9 @@ public class Execution {
     private int             skipped;
     private int             total;
     private int             expectedCount; // planificado por el Runner; 0 = desconocido
-    private List<LogEvent>       logs      = new CopyOnWriteArrayList<>();
-    private List<TestCaseResult> testCases = new CopyOnWriteArrayList<>();
+    private List<LogEvent>          logs      = new CopyOnWriteArrayList<>();
+    private List<ExecutionEventDTO> events    = new CopyOnWriteArrayList<>();
+    private List<TestCaseResult>    testCases = new CopyOnWriteArrayList<>();
     private String               allureUrl;
     private boolean         videoEnabled;
     private String          testClass;
@@ -56,6 +57,8 @@ public class Execution {
     public void            setExpectedCount(int v)       { this.expectedCount = v; }
     public List<LogEvent>       getLogs()                          { return logs; }
     public void                 setLogs(List<LogEvent> v)          { this.logs = v; }
+    public List<ExecutionEventDTO> getEvents()                        { return events; }
+    public void                    setEvents(List<ExecutionEventDTO> v){ this.events = v; }
     public List<TestCaseResult> getTestCases()                     { return testCases; }
     public void                 setTestCases(List<TestCaseResult> v){ this.testCases = v; }
     public String               getAllureUrl()                      { return allureUrl; }

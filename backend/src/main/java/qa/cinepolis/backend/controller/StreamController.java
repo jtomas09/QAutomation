@@ -44,6 +44,13 @@ public class StreamController {
                 } catch (Exception ignored) {}
             });
 
+            // Replay accumulated domain events — mismo mecanismo que los logs legacy.
+            exec.getEvents().forEach(event -> {
+                try {
+                    emitter.send(SseEmitter.event().name("execution-event").data(json.writeValueAsString(event)));
+                } catch (Exception ignored) {}
+            });
+
             // If already finished, flush done event and close
             ExecutionStatus s = exec.getStatus();
             boolean isTerminal = s == ExecutionStatus.COMPLETED || s == ExecutionStatus.PASSED

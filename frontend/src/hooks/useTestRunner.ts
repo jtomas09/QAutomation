@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import type { RunState, LogLevel, LogEntry } from '../types'
+import type { RunState, LogLevel, LogEntry, ExecutionEvent } from '../types'
 import { postRun, streamExecution, stopExecution, ApiError } from '../api'
 import { executionTrackingService } from '../services/ExecutionTrackingService'
 
@@ -27,6 +27,10 @@ function extractTestNameFromLog(line: string): string {
 // antiguas se descartan igual que en un buffer de scrollback de terminal.
 const MAX_LOG_ENTRIES = 2000
 
+// Mismo criterio que MAX_LOG_ENTRIES — tope de ring-buffer para no crecer sin
+// límite durante ejecuciones largas.
+const MAX_EVENT_ENTRIES = 2000
+
 const initState: RunState = {
   status:        'idle',
   passed:        0,
@@ -36,6 +40,7 @@ const initState: RunState = {
   totalExpected: 0,
   lastRun:       null,
   logs:          [],
+  events:        [],
   activeSuite:   null,
   executionId:   null,
 }
@@ -86,6 +91,18 @@ export function useTestRunner() {
         : [...prev.logs, entry]
 
       return { ...prev, logs, passed, failed, skipped, total, totalExpected }
+    })
+  }, [])
+
+  // Mismo ring-buffer que addLog, para el stream nuevo de eventos de dominio
+  // (ver arquitectura de eventos) — no recalcula passed/failed/skipped aquí
+  // tampoco: esa autoridad sigue siendo únicamente el evento 'done' de la SSE.
+  const addEvent = useCallback((event: ExecutionEvent) => {
+    setState(prev => {
+      const events = prev.events.length >= MAX_EVENT_ENTRIES
+        ? [...prev.events.slice(prev.events.length - MAX_EVENT_ENTRIES + 1), event]
+        : [...prev.events, event]
+      return { ...prev, events }
     })
   }, [])
 
@@ -215,6 +232,7 @@ export function useTestRunner() {
               setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
             }
           },
+          addEvent,
         )
       })
 
@@ -231,7 +249,7 @@ export function useTestRunner() {
       addLog('ERROR', `❌ Error al iniciar ejecución: ${msg}`)
       setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
     }
-  }, [addLog])
+  }, [addLog, addEvent])
 
   const stopTest = useCallback(() => {
     if (closeStreamRef.current) {
@@ -247,7 +265,7 @@ export function useTestRunner() {
   }, [addLog])
 
   const clearLog = useCallback(() => {
-    setState(prev => ({ ...prev, logs: [] }))
+    setState(prev => ({ ...prev, logs: [], events: [] }))
   }, [])
 
   const attachToExecution = useCallback((executionId: string, suiteName: string) => {
@@ -262,6 +280,7 @@ export function useTestRunner() {
       activeSuite:   suiteName,
       executionId,
       logs:          [],
+      events:        [],
     }))
     addLog('INFO', `📡 Ejecución programada detectada: ${executionId} — suite: ${suiteName}`)
 
@@ -307,12 +326,13 @@ export function useTestRunner() {
         addLog('ERROR', errMsg)
         setState(prev => ({ ...prev, status: 'idle', activeSuite: null, executionId: null }))
       },
+      addEvent,
     )
     closeStreamRef.current = () => {
       unsubscribe()
       executionTrackingService.cancelExecution(rec.id)
     }
-  }, [addLog])
+  }, [addLog, addEvent])
 
   return { state, runTest, stopTest, clearLog, attachToExecution }
 }

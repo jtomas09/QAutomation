@@ -42,6 +42,7 @@ public class WorkspaceManager {
     private final String        repoUrl;
     private final String        repoBranch;
     private final BackendClient client;
+    private final qa.cinepolis.runner.events.ExecutionEventPublisher events;
 
     public WorkspaceManager(File workspaceDir, String repoUrl, String repoBranch,
                             BackendClient client) {
@@ -49,6 +50,7 @@ public class WorkspaceManager {
         this.repoUrl      = (repoUrl != null) ? repoUrl.trim() : "";
         this.repoBranch   = (repoBranch != null && !repoBranch.isBlank()) ? repoBranch.trim() : "main";
         this.client       = client;
+        this.events       = new qa.cinepolis.runner.events.BackendEventPublisher(client);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -62,11 +64,15 @@ public class WorkspaceManager {
      * Returns the workspace directory on success, null on failure (logs already sent).
      */
     public File ensureWorkspace(String executionId) {
+        events.business(executionId, qa.cinepolis.runner.events.EventType.REPO_CLONE_START,
+                "Clonando repositorio…");
         if (repoUrl.isBlank()) {
             // No URL configured — use existing workspace if valid
             if (workspaceDir.exists() && isValidGradleProject()) {
                 client.sendLog(executionId, "INFO",
                         "✅ Usando workspace local: " + workspaceDir.getAbsolutePath());
+                events.business(executionId, qa.cinepolis.runner.events.EventType.REPO_CLONE_DONE,
+                        "Repositorio listo");
                 return workspaceDir;
             }
             client.sendLog(executionId, "ERROR",
@@ -129,6 +135,8 @@ public class WorkspaceManager {
             }
         }
 
+        events.business(executionId, qa.cinepolis.runner.events.EventType.REPO_CLONE_DONE,
+                "Repositorio listo");
         return validateAndReturn(executionId);
     }
 
