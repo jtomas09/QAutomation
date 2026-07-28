@@ -1,12 +1,15 @@
 import type { ExecutionEvent } from '../types'
-import { isFunctionalLog } from './logFilter'
 
 /**
- * Lookup por TIPO de evento — no regex sobre el mensaje. A diferencia de
- * logFilter.ts (que sigue existiendo solo como fallback para eventos legacy
- * "RAW_LOG", ver isVisibleInTimeline más abajo), esto nunca intenta adivinar
- * nada a partir de texto: el Runner ya decidió qué es cada evento en el
- * momento en que lo publicó (ver qa.cinepolis.runner.events.EventType).
+ * Lookup por TIPO de evento — nunca regex sobre el mensaje. El canal
+ * "execution-event" ya no recibe NADA derivado de un log (ver
+ * ExecutionService.addLog en el backend — el puente que traducía cada log a
+ * un evento fue eliminado): todo lo que llega aquí fue publicado
+ * explícitamente por el Runner en su origen real (ver
+ * qa.cinepolis.runner.events.ExecutionEventPublisher), así que no hace falta
+ * ningún clasificador heredado como fallback — logFilter.ts/isFunctionalLog
+ * queda reservado exclusivamente para el modo legacy de ActivityLog (cuando
+ * no hay `events` disponible en absoluto).
  */
 export const EVENT_ICON: Record<string, string> = {
   REPO_CLONE_START:     'GitBranch',
@@ -43,29 +46,13 @@ export const SEVERITY_COLOR: Record<string, string> = {
 /**
  * ¿Este evento pertenece al Timeline principal ("Actividad")?
  *
- * Eventos ya migrados (type !== 'RAW_LOG'): decisión pura por category —
- * BUSINESS y nada más. Nunca se mira `message`.
- *
- * Eventos legacy (type === 'RAW_LOG', puente de BackendClient.sendLog() sin
- * migrar todavía — ver ExecutionService.addLog en el backend):
- *
- * FIX real (evidencia en vivo — el Pre-flight de iOS, IosPreflightManager/
- * AppleDeveloperTeamManager/CoreDeviceTunnelManager, sigue mandando su
- * narración completa a nivel "INFO" sin migrar todavía a un EventType propio;
- * el fallback ORIGINAL de esta función delegaba TODO RAW_LOG al clasificador
- * heredado sin mirar `category`, así que aunque el backend ya clasificara
- * correctamente un mensaje como DEBUG (fromLegacyLog), esta función lo
- * ignoraba y lo mostraba igual si el regex heredado no lo reconocía — que es
- * exactamente el bug original que esta arquitectura debía resolver). Ahora
- * category SÍ es la primera autoridad también para RAW_LOG: DEBUG/TRACE se
- * ocultan siempre, sin excepción — nunca fueron pensados para el Timeline. El
- * regex heredado solo decide en la zona ambigua real (TECHNICAL, es decir
- * INFO/WARN/ERROR legacy que fromLegacyLog no puede distinguir de narración de
- * negocio todavía no migrada) — así no se pierde nada que hoy sea visible,
- * pero DEBUG/TRACE ya no dependen de que el regex adivine bien.
+ * Ya no hay zona ambigua ni fallback por regex: el canal "execution-event"
+ * solo contiene eventos publicados explícitamente (ver EventPublisher/
+ * ExecutionEventPublisher), así que `category === 'BUSINESS'` es la única
+ * pregunta que hace falta — nunca se mira `message` ni ningún patrón de texto.
+ * Esta función existe igual (en vez de solo `events` directo) por si en el
+ * futuro se agrega alguna categoría no-BUSINESS a este mismo canal.
  */
 export function isVisibleInTimeline(e: ExecutionEvent): boolean {
-  if (e.category === 'DEBUG' || e.category === 'TRACE') return false
-  if (e.type !== 'RAW_LOG') return e.category === 'BUSINESS'
-  return isFunctionalLog({ id: e.id, time: e.timestamp, level: e.severity as any, message: e.message })
+  return e.category === 'BUSINESS'
 }

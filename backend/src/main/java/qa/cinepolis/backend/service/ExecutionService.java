@@ -49,20 +49,33 @@ public class ExecutionService {
         });
     }
 
+    // FIX real (evidencia en vivo — el Timeline seguía mostrando stdout crudo de
+    // Gradle/JUnit: "base.BaseTest", "PdfSuiteMerger", "[Test worker] INFO
+    // config.DriverFactory...", etc.): esta clase antes traducía CADA log legacy a
+    // un ExecutionEventDTO ("puente de compatibilidad") y lo mandaba al MISMO canal
+    // de eventos que la narración de negocio real — el frontend intentaba
+    // reclasificarlo después con un regex heredado, que nunca pudo reconocer de
+    // forma confiable texto crudo de estas herramientas (ese regex es precisamente
+    // el enfoque que se descartó: "no quiero ocultar líneas mediante regex").
+    //
+    // Ahora los dos canales son independientes DESDE EL ORIGEN, no por filtrado
+    // posterior: addLog()/"log" sigue siendo el canal de Developer Log — TODO
+    // stdout/stderr, sin excepción, exactamente igual que siempre. addEvent()/
+    // "execution-event" SOLO recibe lo que un emisor publica explícitamente vía
+    // ExecutionEventPublisher (ver Runner) — nunca se deriva de una línea de texto.
     public void addLog(String executionId, String level, String message) {
         store.findById(executionId).ifPresent(e -> {
             LogEvent log = LogEvent.of(level, message);
             e.getLogs().add(log);
             sse.broadcast(executionId, "log", log);
         });
-        // Puente de compatibilidad (ver arquitectura de eventos): todo lo que llega por
-        // el canal legacy /api/logs también se expone como ExecutionEventDTO — el
-        // frontend nuevo consume un solo stream ("execution-event") sin importar si el
-        // emisor ya migró a ExecutionEventPublisher o sigue en BackendClient.sendLog().
-        addEvent(ExecutionEventDTO.fromLegacyLog(executionId, level, message));
     }
 
-    /** Evento de dominio real — ver ExecutionEventDTO. Persistido (en memoria) + reenviado por SSE. */
+    /**
+     * Evento de negocio real — ver ExecutionEventDTO. Persistido (en memoria) +
+     * reenviado por SSE. Único punto de entrada al canal "execution-event": solo
+     * lo alimenta ExecutionEventPublisher.publish() del Runner, nunca addLog().
+     */
     public void addEvent(ExecutionEventDTO event) {
         store.findById(event.executionId()).ifPresent(e -> {
             e.getEvents().add(event);

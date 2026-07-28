@@ -194,9 +194,10 @@ export function streamExecution(
       }
     })
 
-    // 'execution-event' — arquitectura de eventos de dominio (ver ExecutionEvent).
-    // Convive con 'log': el backend reenvía CADA log legacy también como evento
-    // (category=TECHNICAL/DEBUG, type=RAW_LOG) — ver ExecutionService.addLog().
+    // 'execution-event' — canal de eventos de NEGOCIO, independiente de 'log'.
+    // Nunca contiene nada derivado de stdout/stderr: solo lo que el Runner
+    // publica explícitamente (ver ExecutionEventPublisher/EventType). 'log'
+    // sigue siendo, sin ningún cambio, el canal de Developer Log completo.
     // Opcional (addEvent puede ser undefined) para no romper llamadores existentes.
     if (addEvent) {
       es.addEventListener('execution-event', (e: MessageEvent) => {

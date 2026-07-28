@@ -47,7 +47,7 @@ export interface ExecutionEvent {
   severity: EventSeverity;
   category: EventCategory;
   source: string;
-  /** Vocabulario cerrado del Runner (ver EventType.java), p.ej. "CASE_PASSED". "RAW_LOG" = puente legacy. */
+  /** Vocabulario cerrado del Runner (ver EventType.java), p.ej. "CASE_PASSED" — solo valores publicados explícitamente. */
   type: string;
   message: string;
   details?: string | null;

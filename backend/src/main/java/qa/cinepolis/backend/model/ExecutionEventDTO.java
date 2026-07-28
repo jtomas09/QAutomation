@@ -1,18 +1,19 @@
 package qa.cinepolis.backend.model;
 
-import java.time.Instant;
-
 /**
- * Evento de dominio para el panel "Actividad en Tiempo Real". Reemplaza gradualmente
- * a {@link LogEvent} como forma de comunicar narración de negocio (clonar repo,
- * preparar dispositivo, iniciar suite, caso N/total, PASS/FAIL, reporte, correo,
- * fin de ejecución) — el frontend decide qué mostrar mirando {@code category}/{@code type},
- * nunca parseando texto.
+ * Evento de NEGOCIO para el panel "Actividad en Tiempo Real" — canal completamente
+ * independiente de {@link LogEvent} (Developer Log: TODO stdout/stderr/Gradle/JUnit,
+ * sin excepción, sin cambios). No existe ninguna traducción automática de un log a
+ * un ExecutionEventDTO — la única forma de que algo llegue aquí es que un emisor lo
+ * publique explícitamente (ver qa.cinepolis.runner.events.ExecutionEventPublisher).
+ * Si esta clase alguna vez tienta a alguien a "derivar" un evento a partir de una
+ * línea de log, es la señal de que ese caso debería ser, en cambio, un nuevo
+ * EventType publicado explícitamente en su origen real.
  *
  * {@code category}/{@code severity}/{@code type} son Strings libres (no enums del lado
  * backend) a propósito: el Runner es quien define el vocabulario real (ver
  * qa.cinepolis.runner.events.EventType/EventCategory/EventSeverity) y el backend solo
- * transporta y reenvía — igual que {@code level} en {@link LogEvent} hoy.
+ * transporta y reenvía.
  *
  * {@code timestamp} es String (ISO-8601), no java.time.Instant — el Runner lo serializa
  * con un ObjectMapper plano sin JavaTimeModule; mismo criterio que LogEvent.time.
@@ -32,15 +33,4 @@ public record ExecutionEventDTO(
         String device
 ) {
     public record ProgressDTO(int current, int total) {}
-
-    /** Traduce un LogEvent legacy a un evento TECHNICAL/RAW_LOG — puente de compatibilidad (ver ExecutionService.addLog). */
-    public static ExecutionEventDTO fromLegacyLog(String executionId, String level, String message) {
-        String category = switch (level == null ? "" : level.toUpperCase()) {
-            case "PASS", "FAIL", "SKIP" -> "BUSINESS";
-            case "DEBUG" -> "DEBUG";
-            default -> "TECHNICAL";
-        };
-        return new ExecutionEventDTO(executionId, Instant.now().toString(), level, category,
-                "runner", "RAW_LOG", message, null, null, null, null, null);
-    }
 }

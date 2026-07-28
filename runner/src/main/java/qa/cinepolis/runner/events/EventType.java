@@ -5,8 +5,11 @@ package qa.cinepolis.runner.events;
  * que el usuario reconoce en el panel "Actividad en Tiempo Real". El frontend mapea
  * ícono/color a partir de ESTO, nunca del contenido de {@code message}.
  *
- * RAW_LOG es el puente de compatibilidad hacia BackendClient.sendLog() legacy — nunca
- * se usa para narración nueva (ver ExecutionEventPublisher).
+ * Sin puente legacy: ya no existe ningún EventType "genérico" que reciba texto de
+ * log traducido — cada valor se publica explícitamente en su origen real (ver
+ * ExecutionEventPublisher). Si un momento nuevo necesita aparecer en el Timeline,
+ * la respuesta es agregar un EventType aquí y publicarlo donde ocurre — nunca
+ * inferirlo de una línea de stdout ya emitida por otro proceso.
  */
 public enum EventType {
     REPO_CLONE_START, REPO_CLONE_DONE,
@@ -17,6 +20,5 @@ public enum EventType {
     CASE_START, CASE_PASSED, CASE_FAILED, CASE_SKIPPED, CASE_RETRY,
     REPORT_GENERATING, REPORT_READY,
     MAIL_SENDING, MAIL_SENT,
-    EXECUTION_FINISHED,
-    RAW_LOG
+    EXECUTION_FINISHED
 }
