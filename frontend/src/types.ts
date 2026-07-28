@@ -21,7 +21,10 @@ export interface Country {
 
 export type RunStatus = 'idle' | 'running' | 'finished';
 
-export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'PASS' | 'FAIL' | 'SKIP';
+// DEBUG incluido a propósito: JobExecutor.detectLevel() (Runner) clasifica toda
+// línea técnica (DriverFactory, HTTP, stack frames, etc.) como "DEBUG" antes de
+// enviarla — Log Técnico (Canal B / TechnicalLogBus) depende de este valor.
+export type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'PASS' | 'FAIL' | 'SKIP' | 'DEBUG';
 
 export interface LogEntry {
   id: string;

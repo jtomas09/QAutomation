@@ -213,6 +213,21 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
   )
   const hiddenCount    = logs.length - functionalLogs.length
 
+  // "Extraer Log" — Canal A (BusinessEventBus) puro cuando hay eventos
+  // disponibles, adaptado a la forma LogEntry que ya sabe render/copiar/
+  // descargar LogModal. Sin esto, seguiría exportando `functionalLogs`
+  // (clasificador heredado por regex) aunque el resto de la tarjeta ya
+  // muestre el canal de negocio real — mismo contenido visible, misma fuente.
+  const functionalEntries: LogEntry[] = useMemo(() => {
+    if (!hasEvents) return functionalLogs
+    return events!.filter(isVisibleInTimeline).map(e => ({
+      id:      `${e.timestamp}-${e.type}`,
+      time:    e.timestamp?.slice(11, 19) ?? '',
+      level:   (e.severity === 'SUCCESS' ? 'PASS' : e.severity === 'ERROR' ? 'FAIL' : e.severity) as LogEntry['level'],
+      message: e.message,
+    }))
+  }, [hasEvents, events, functionalLogs])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs, events])
@@ -398,33 +413,24 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
         {showExtract && (
           <LogModal
             title="Extraer Log Funcional"
-            subtitle={`${functionalLogs.length} eventos de prueba`}
+            subtitle={`${functionalEntries.length} eventos de prueba`}
             icon={<FileText size={15} />}
             iconBg="rgba(16,185,129,0.15)"
             iconColor="#10b981"
-            entries={functionalLogs}
+            entries={functionalEntries}
             onClose={() => setShowExtract(false)}
             filenamePrefix="log_funcional"
           />
         )}
       </AnimatePresence>
 
+      {/* Log Técnico consume ÚNICAMENTE `logs` (Canal B / TechnicalLogBus) — nunca
+          `events` (Canal A, solo negocio). Siempre disponible, con o sin eventos
+          de negocio, porque `logs` recibe TODO desde /api/logs sin depender de
+          la arquitectura de eventos en absoluto. */}
       <AnimatePresence>
         {showTechModal && (
-          hasEvents ? (
-            <TechnicalConsole events={events!} onClose={() => setShowTechModal(false)} />
-          ) : (
-            <LogModal
-              title="Log Técnico"
-              subtitle={`${logs.length} entradas — infraestructura completa`}
-              icon={<Wrench size={15} />}
-              iconBg="rgba(249,115,22,0.15)"
-              iconColor="#f97316"
-              entries={logs}
-              onClose={() => setShowTechModal(false)}
-              filenamePrefix="log_tecnico"
-            />
-          )
+          <TechnicalConsole logs={logs} onClose={() => setShowTechModal(false)} />
         )}
       </AnimatePresence>
     </div>

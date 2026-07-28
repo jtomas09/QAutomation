@@ -1,44 +1,61 @@
 import React, { useMemo, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Wrench, Copy, Download, X, Check } from 'lucide-react'
-import type { ExecutionEvent, EventCategory } from '../../types'
+import type { LogEntry, LogLevel } from '../../types'
 
-const CHIPS: EventCategory[] = ['TECHNICAL', 'DEBUG', 'TRACE']
+// Canal B (TechnicalLogBus) — LogEntry no tiene `category` (eso es exclusivo del
+// canal de negocio, ExecutionEvent); aquí se filtra por `level`, que es el único
+// campo que JobExecutor.detectLevel() ya asigna a CADA línea de stdout/stderr.
+const CHIPS: LogLevel[] = ['DEBUG', 'INFO', 'WARN', 'ERROR']
 
-const SEVERITY_TEXT_COLOR: Record<string, string> = {
+const LEVEL_TEXT_COLOR: Record<string, string> = {
   ERROR: '#f43f5e',
   WARN:  '#f59e0b',
+  DEBUG: '#5f6a67',
   INFO:  '#8fa39d',
+  PASS:  '#34d399',
+  FAIL:  '#f43f5e',
+  SKIP:  '#f59e0b',
 }
 
-function buildPlainText(entries: ExecutionEvent[]): string {
+function buildPlainText(entries: LogEntry[]): string {
   return entries
-    .map(e => `[${e.timestamp?.slice(11, 19) ?? ''}] ${e.category.padEnd(9)} ${e.message}`)
+    .map(e => `[${e.time}] ${e.level.padEnd(6)} ${e.message}`)
     .join('\n')
 }
 
 interface Props {
-  events: ExecutionEvent[]
+  logs: LogEntry[]
   onClose: () => void
 }
 
 /**
- * Reemplaza el modal "Log Técnico" cuando hay eventos de dominio disponibles —
- * mismo contenido completo (nada se pierde: TECHNICAL/DEBUG/TRACE siguen todos
- * ahí), pero filtrable por categoría con chips en vez de un dump de texto plano
- * sin estructura. BUSINESS no aparece aquí — ya vive en el Timeline principal.
+ * Modal "Log Técnico" — consume ÚNICAMENTE el canal de logs (Canal B /
+ * TechnicalLogBus: LogEntry vía /api/logs, "log" SSE). Recibe absolutamente
+ * TODO — stdout, stderr, SLF4J, Gradle, JUnit, Appium, Xcode, DriverFactory,
+ * Allure, PdfReportExtension, PerfMetrics, BaseTest, etc. — sin ningún
+ * filtrado por defecto; los chips solo ACOTAN la vista, nunca ocultan datos
+ * que no se hayan recibido.
+ *
+ * FIX real (evidencia: el modal mostraba "0 de 0 entradas" siempre): la
+ * versión anterior leía por error el canal de NEGOCIO (ExecutionEvent[],
+ * ahora 100% category='BUSINESS' tras separar los dos canales — ver
+ * ExecutionService.addLog()/addEvent() en el backend) en vez de `logs`, que
+ * es donde realmente vive todo el contenido técnico y nunca dejó de recibirlo.
  */
-function TechnicalConsole({ events, onClose }: Props) {
-  const [active, setActive] = useState<Set<EventCategory>>(new Set(CHIPS))
+function TechnicalConsole({ logs, onClose }: Props) {
+  const [active, setActive] = useState<Set<LogLevel>>(new Set(CHIPS))
   const [copied, setCopied] = useState(false)
 
-  const technical = useMemo(() => events.filter(e => e.category !== 'BUSINESS'), [events])
-  const filtered   = useMemo(() => technical.filter(e => active.has(e.category)), [technical, active])
+  const filtered = useMemo(
+    () => logs.filter(e => active.has(e.level as LogLevel) || !CHIPS.includes(e.level as LogLevel)),
+    [logs, active]
+  )
 
-  const toggle = useCallback((cat: EventCategory) => {
+  const toggle = useCallback((level: LogLevel) => {
     setActive(prev => {
       const next = new Set(prev)
-      next.has(cat) ? next.delete(cat) : next.add(cat)
+      next.has(level) ? next.delete(level) : next.add(level)
       return next
     })
   }, [])
@@ -83,7 +100,7 @@ function TechnicalConsole({ events, onClose }: Props) {
             </div>
             <div>
               <div className="text-sm font-bold text-slate-100">Log Técnico</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">{filtered.length} de {technical.length} entradas — infraestructura completa</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">{filtered.length} de {logs.length} entradas — infraestructura completa</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -108,28 +125,30 @@ function TechnicalConsole({ events, onClose }: Props) {
         </div>
 
         <div className="flex items-center gap-2 px-5 py-2.5 flex-shrink-0" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          {CHIPS.map(cat => (
+          {CHIPS.map(level => (
             <button
-              key={cat}
-              onClick={() => toggle(cat)}
+              key={level}
+              onClick={() => toggle(level)}
               className="text-[10.5px] font-semibold px-2.5 py-1 rounded-full font-mono transition-colors"
-              style={active.has(cat)
+              style={active.has(level)
                 ? { background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc' }
                 : { background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: '#64748b' }}
             >
-              {cat}
+              {level}
             </button>
           ))}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {filtered.length === 0 ? (
-            <div className="flex items-center justify-center h-40 text-xs text-slate-600">Sin entradas para las categorías seleccionadas</div>
+            <div className="flex items-center justify-center h-40 text-xs text-slate-600">
+              {logs.length === 0 ? 'Sin actividad aún' : 'Sin entradas para los niveles seleccionados'}
+            </div>
           ) : (
             <pre className="p-5 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-all select-all" style={{ color: '#8fa39d' }}>
               {filtered.map((e, i) => (
-                <div key={`${e.timestamp}-${i}`} style={{ color: SEVERITY_TEXT_COLOR[e.severity] ?? '#8fa39d' }}>
-                  [{e.timestamp?.slice(11, 19) ?? ''}] {e.category.padEnd(9)} {e.message}
+                <div key={`${e.id}-${i}`} style={{ color: LEVEL_TEXT_COLOR[e.level] ?? '#8fa39d' }}>
+                  [{e.time}] {e.level.padEnd(6)} {e.message}
                 </div>
               ))}
             </pre>
