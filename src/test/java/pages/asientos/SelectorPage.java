@@ -1199,10 +1199,26 @@ public class SelectorPage extends BasePage {
     // "Subtitulada" visible?) es semántico y agnóstico de qué película sea — no
     // requiere inventar texto específico no verificado, solo exponerlo también para
     // iOS vía @value/@label (obtenerTextoSeguro() ya sabe leer @value en iOS).
+    // PERF (Iteración 3 — auditoría confirmada, no supuesta): el predicate iOS anterior
+    // ("value != nil OR label != nil") matchea CUALQUIER nodo con texto accesible en
+    // pantalla (título, sinopsis, reparto, precio, cine, etc.) — el mismo patrón "traer
+    // todo y filtrar después" que ya se identificó como el mayor costo de MovieDetection.
+    // Se acota a nodos que contengan "AM"/"PM" (mayúsculas/minúsculas) o sean uno de los
+    // dos tags de idioma exactos — una propiedad que el propio regex Java de la línea
+    // 1215 YA exige de cualquier horario válido (termina en AM/PM), así que esto nunca
+    // puede excluir un horario real: solo reduce drásticamente cuántos elementos llegan
+    // al filtrado en Java. No se intenta replicar el regex preciso dentro de NSPredicate
+    // (evita depender de que el motor ICU regex de iOS traduzca \d/anchors idéntico a
+    // Java sin poder validarlo en el dispositivo) — el regex Java sigue siendo la única
+    // autoridad real sobre "¿esto es un horario válido?", sin ningún cambio.
     private boolean estaEnPantallaDeHorarios() {
         try {
             By locator = isIOS()
-                    ? AppiumBy.iOSNsPredicateString("value != nil OR label != nil")
+                    ? AppiumBy.iOSNsPredicateString(
+                        "(value CONTAINS[c] 'AM' OR value CONTAINS[c] 'PM' "
+                        + "OR label CONTAINS[c] 'AM' OR label CONTAINS[c] 'PM' "
+                        + "OR value ==[c] 'español' OR label ==[c] 'español' "
+                        + "OR value ==[c] 'subtitulada' OR label ==[c] 'subtitulada')")
                     : By.xpath("//*[@text and normalize-space(@text)!='']");
             List<WebElement> todos = driver.findElements(locator);
 
