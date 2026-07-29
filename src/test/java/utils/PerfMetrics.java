@@ -72,6 +72,15 @@ public final class PerfMetrics {
     }
 
     /**
+     * Registra la duración de una sub-etapa dentro de una fase (p. ej. "busqueda",
+     * "candidatos", "click", "fallback" dentro de "SeatSelection") — mismo espíritu que
+     * {@link #attempt}, pero para etapas nombradas en vez de intentos numerados.
+     */
+    public static void stage(String phase, String stageName, long tiempoMs) {
+        log.info("[METRICS][{}] etapa={} tiempo={}ms", phase, stageName, tiempoMs);
+    }
+
+    /**
      * Envuelve una fase completa (start/end automático) alrededor de un bloque de código
      * que devuelve un valor — evita olvidar el endPhase() en algún camino de retorno o
      * excepción. El endPhase() se ejecuta siempre, incluso si el bloque lanza.

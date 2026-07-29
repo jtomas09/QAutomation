@@ -404,35 +404,47 @@ public class SelectorPage extends BasePage {
     }
 
     public List<String> seleccionar3AsientosRandomDisponibles() {
-        SeatMap map = buildSeatMap();
-        log.info("[SelectorPage] {}", map.getSummary());
+        utils.PerfMetrics.startPhase("SeatSelection");
+        try {
+            SeatMap map = buildSeatMap();
+            log.info("[SelectorPage] {}", map.getSummary());
 
-        SeatMap.SelectionResult result = map.selectAnyN(3);
-        if (result == null) {
-            org.junit.jupiter.api.Assumptions.abort(
-                "Menos de 3 asientos disponibles. Se omite la prueba.");
-            return null;
-        }
-
-        log.info("[SelectorPage] Estrategia: {}", result.strategy);
-
-        List<String> seleccionados = new ArrayList<>();
-        for (SeatMap.Seat seat : result.seats) {
-            if (tapRapidoEnButacaDesdeLabel(seat.element)) {
-                sleep(80);
-                seleccionados.add(seat.toString());
-                log.info("[SelectorPage] Asiento agregado: {}", seat);
+            long tCandidatos = System.currentTimeMillis();
+            SeatMap.SelectionResult result = map.selectAnyN(3);
+            utils.PerfMetrics.stage("SeatSelection", "candidatos", System.currentTimeMillis() - tCandidatos);
+            if (result == null) {
+                org.junit.jupiter.api.Assumptions.abort(
+                    "Menos de 3 asientos disponibles. Se omite la prueba.");
+                return null;
             }
-        }
 
-        if (seleccionados.size() < 3) {
-            throw new RuntimeException(
-                "Solo se pudieron seleccionar " + seleccionados.size() + " de 3 asientos.");
-        }
+            log.info("[SelectorPage] Estrategia: {}", result.strategy);
 
-        log.info("[SelectorPage] 3 asientos seleccionados: {}", seleccionados);
-        takeScreenshot("3 asientos seleccionados");
-        return seleccionados;
+            List<String> seleccionados = new ArrayList<>();
+            int intento = 0;
+            for (SeatMap.Seat seat : result.seats) {
+                intento++;
+                long tClick = System.currentTimeMillis();
+                boolean ok = tapRapidoEnButacaDesdeLabel(seat.element);
+                utils.PerfMetrics.attempt("SeatSelection", intento, seat.toString(), System.currentTimeMillis() - tClick, ok ? "OK" : "FAIL");
+                if (ok) {
+                    sleep(80);
+                    seleccionados.add(seat.toString());
+                    log.info("[SelectorPage] Asiento agregado: {}", seat);
+                }
+            }
+
+            if (seleccionados.size() < 3) {
+                throw new RuntimeException(
+                    "Solo se pudieron seleccionar " + seleccionados.size() + " de 3 asientos.");
+            }
+
+            log.info("[SelectorPage] 3 asientos seleccionados: {}", seleccionados);
+            takeScreenshot("3 asientos seleccionados");
+            return seleccionados;
+        } finally {
+            utils.PerfMetrics.endPhase("SeatSelection");
+        }
     }
     public String seleccionarPrimerPeliculaVisible() {
         driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(3));
@@ -590,33 +602,45 @@ public class SelectorPage extends BasePage {
         return false;
     }
     public List<String> seleccionar3AsientosConsecutivosDisponibles() {
-        SeatMap map = buildSeatMap();
-        log.info("[SelectorPage] {}", map.getSummary());
-        map.logMap();
+        utils.PerfMetrics.startPhase("SeatSelection");
+        try {
+            SeatMap map = buildSeatMap();
+            log.info("[SelectorPage] {}", map.getSummary());
+            map.logMap();
 
-        SeatMap.SelectionResult result = map.selectN(3);
-        if (result == null) {
-            org.junit.jupiter.api.Assumptions.abort(
-                "Menos de 3 asientos disponibles. Se omite la prueba.");
-            return null;
-        }
-
-        log.info("[SelectorPage] Estrategia aplicada: {}", result.strategy);
-
-        List<String> seleccionados = new ArrayList<>();
-        for (SeatMap.Seat seat : result.seats) {
-            if (tapRapidoEnButacaDesdeLabel(seat.element)) {
-                sleep(80);
-                seleccionados.add(seat.toString());
-                log.info("[SelectorPage] Asiento seleccionado OK: {}", seat);
-            } else {
-                throw new RuntimeException("No se pudo seleccionar el asiento: " + seat);
+            long tCandidatos = System.currentTimeMillis();
+            SeatMap.SelectionResult result = map.selectN(3);
+            utils.PerfMetrics.stage("SeatSelection", "candidatos", System.currentTimeMillis() - tCandidatos);
+            if (result == null) {
+                org.junit.jupiter.api.Assumptions.abort(
+                    "Menos de 3 asientos disponibles. Se omite la prueba.");
+                return null;
             }
-        }
 
-        log.info("[SelectorPage] 3 asientos seleccionados ({}): {}", result.strategy, seleccionados);
-        takeScreenshot("3 asientos - " + result.strategy);
-        return seleccionados;
+            log.info("[SelectorPage] Estrategia aplicada: {}", result.strategy);
+
+            List<String> seleccionados = new ArrayList<>();
+            int intento = 0;
+            for (SeatMap.Seat seat : result.seats) {
+                intento++;
+                long tClick = System.currentTimeMillis();
+                boolean ok = tapRapidoEnButacaDesdeLabel(seat.element);
+                utils.PerfMetrics.attempt("SeatSelection", intento, seat.toString(), System.currentTimeMillis() - tClick, ok ? "OK" : "FAIL");
+                if (ok) {
+                    sleep(80);
+                    seleccionados.add(seat.toString());
+                    log.info("[SelectorPage] Asiento seleccionado OK: {}", seat);
+                } else {
+                    throw new RuntimeException("No se pudo seleccionar el asiento: " + seat);
+                }
+            }
+
+            log.info("[SelectorPage] 3 asientos seleccionados ({}): {}", result.strategy, seleccionados);
+            takeScreenshot("3 asientos - " + result.strategy);
+            return seleccionados;
+        } finally {
+            utils.PerfMetrics.endPhase("SeatSelection");
+        }
     }
     // NSPredicate en iOS \u2014 llamado en cada iteraci\u00f3n del poll de esperarDetallePelicula()
     // (sleep 250ms, hasta ~4-5s) \u2014 ver nota de rendimiento en PlatformLocator.byExactText().
@@ -2511,38 +2535,48 @@ public class SelectorPage extends BasePage {
     // =========================
 
     public String seleccionarAsientoRandomDisponible() {
-        SeatMap map = buildSeatMap();
-        log.info("[SelectorPage] {}", map.getSummary());
+        utils.PerfMetrics.startPhase("SeatSelection");
+        try {
+            SeatMap map = buildSeatMap();
+            log.info("[SelectorPage] {}", map.getSummary());
 
-        if (map.isEmpty()) {
-            // Diagnóstico temporal (no-op salvo -DIOS_LOCATOR_DEBUG=true) — captura el
-            // page source real cuando el mapa de asientos aparece vacío, para investigar
-            // con evidencia en vez de seguir adivinando (mismo mecanismo ya usado para
-            // el hallazgo de "Ver sinopsis"/horarios).
-            if (isIOS()) {
-                IOSLocatorDebug.onFailure(driver, "seleccionarAsientoRandomDisponible_mapaVacio", null,
-                        new RuntimeException("buildSeatMap() devolvió vacío tras los 3 niveles de fallback"));
+            if (map.isEmpty()) {
+                // Diagnóstico temporal (no-op salvo -DIOS_LOCATOR_DEBUG=true) — captura el
+                // page source real cuando el mapa de asientos aparece vacío, para investigar
+                // con evidencia en vez de seguir adivinando (mismo mecanismo ya usado para
+                // el hallazgo de "Ver sinopsis"/horarios).
+                if (isIOS()) {
+                    IOSLocatorDebug.onFailure(driver, "seleccionarAsientoRandomDisponible_mapaVacio", null,
+                            new RuntimeException("buildSeatMap() devolvió vacío tras los 3 niveles de fallback"));
+                }
+                throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
             }
-            throw new RuntimeException("No se encontraron asientos visibles en el mapa.");
-        }
 
-        List<SeatMap.Seat> seats = map.allSeats();
-        Collections.shuffle(seats);
+            long tCandidatos = System.currentTimeMillis();
+            List<SeatMap.Seat> seats = map.allSeats();
+            Collections.shuffle(seats);
+            utils.PerfMetrics.stage("SeatSelection", "candidatos", System.currentTimeMillis() - tCandidatos);
 
-        int maxIntentos = Math.min(6, seats.size());
-        for (int i = 0; i < maxIntentos; i++) {
-            SeatMap.Seat seat = seats.get(i);
-            log.info("[SelectorPage] Intentando seleccionar asiento rápido: {}", seat);
+            int maxIntentos = Math.min(6, seats.size());
+            for (int i = 0; i < maxIntentos; i++) {
+                SeatMap.Seat seat = seats.get(i);
+                log.info("[SelectorPage] Intentando seleccionar asiento rápido: {}", seat);
 
-            if (tapRapidoEnButacaDesdeLabel(seat.element)) {
-                sleep(150);
-                log.info("[SelectorPage] Asiento seleccionado OK: {}", seat);
-                takeScreenshot("Asiento seleccionado");
-                return seat.toString();
+                long tClick = System.currentTimeMillis();
+                boolean ok = tapRapidoEnButacaDesdeLabel(seat.element);
+                utils.PerfMetrics.attempt("SeatSelection", i + 1, seat.toString(), System.currentTimeMillis() - tClick, ok ? "OK" : "FAIL");
+                if (ok) {
+                    sleep(150);
+                    log.info("[SelectorPage] Asiento seleccionado OK: {}", seat);
+                    takeScreenshot("Asiento seleccionado");
+                    return seat.toString();
+                }
             }
-        }
 
-        throw new RuntimeException("Se detectaron asientos, pero no se pudo seleccionar ninguno.");
+            throw new RuntimeException("Se detectaron asientos, pero no se pudo seleccionar ninguno.");
+        } finally {
+            utils.PerfMetrics.endPhase("SeatSelection");
+        }
     }
     private List<WebElement> obtenerAsientosDelMapaAmplio() {
         Map<String, WebElement> unicos = new LinkedHashMap<>();
@@ -2762,9 +2796,20 @@ public class SelectorPage extends BasePage {
      * Ejecuta el escaneo principal y dos fallbacks antes de devolver el modelo.
      */
     private SeatMap buildSeatMap() {
+        long t0 = System.currentTimeMillis();
         List<WebElement> raw = esperarYObtenerAsientosDelMapa();
-        if (raw.isEmpty()) raw = obtenerAsientosDisponiblesVisibles();
-        if (raw.isEmpty()) raw = obtenerAsientosDelMapaAmplio();
+        utils.PerfMetrics.stage("SeatSelection", "busqueda", System.currentTimeMillis() - t0);
+
+        if (raw.isEmpty()) {
+            long tFallback1 = System.currentTimeMillis();
+            raw = obtenerAsientosDisponiblesVisibles();
+            utils.PerfMetrics.stage("SeatSelection", "fallback-visibles", System.currentTimeMillis() - tFallback1);
+        }
+        if (raw.isEmpty()) {
+            long tFallback2 = System.currentTimeMillis();
+            raw = obtenerAsientosDelMapaAmplio();
+            utils.PerfMetrics.stage("SeatSelection", "fallback-amplio", System.currentTimeMillis() - tFallback2);
+        }
         return new SeatMap(raw);
     }
 
