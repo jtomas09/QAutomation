@@ -985,15 +985,32 @@ public class CinemasHelper extends BasePage {
      * @param pollMs    intervalo de polling en ms
      * @return true si la condición se cumplió antes del timeout
      */
+    // PERF (Iteración 2 — auditoría de smartWait, confirmada por evidencia, no supuesta):
+    // el `return condition.getAsBoolean()` final del código original volvía a invocar la
+    // condición COMPLETA al salir del bucle, sin importar que la última iteración ya la
+    // hubiera evaluado (con resultado false, sin que nada cambiara entre medio) — una
+    // llamada WDA duplicada e innecesaria en cada timeout que expira. Se reemplaza por
+    // `do-while` que guarda el último resultado calculado y lo reutiliza en vez de
+    // reevaluar — preserva la garantía de "al menos una evaluación" para el caso borde
+    // maxMs≈0 (donde un `while` normal no correría ni una vez), sin la reevaluación extra.
+    //
+    // Limitación NO corregida aquí (fuera de alcance — requeriría tocar el cliente HTTP
+    // de DriverFactory, otra clase): el deadline solo se revisa ENTRE invocaciones de
+    // `condition`, nunca la interrumpe. Si una sola llamada a `condition.getAsBoolean()`
+    // tarda más que `maxMs` (p. ej. isClubLoginVisible() con varios findElements lentos),
+    // el presupuesto ya se excedió en esa única invocación — el cap es un límite de
+    // "cuántas veces reintentar", no un techo absoluto de tiempo transcurrido.
     private boolean smartWait(java.util.function.BooleanSupplier condition, long maxMs, long pollMs) {
         long end = System.currentTimeMillis() + maxMs;
-        while (System.currentTimeMillis() < end) {
-            if (condition.getAsBoolean()) return true;
+        boolean lastResult;
+        do {
+            lastResult = condition.getAsBoolean();
+            if (lastResult) return true;
             long remaining = end - System.currentTimeMillis();
             if (remaining <= 0) break;
             safeSleep(Math.min(pollMs, remaining));
-        }
-        return condition.getAsBoolean();
+        } while (System.currentTimeMillis() < end);
+        return lastResult;
     }
     private void acceptAlertsIfPresent() {
         long end = System.currentTimeMillis() + 4500;
