@@ -2866,10 +2866,22 @@ public class SelectorPage extends BasePage {
     // C…) también matchean length<=2 aquí — sin cambio de riesgo: los llamadores
     // YA filtran por posición (cx < 20) para descartar esa columna, igual que antes.
     private List<WebElement> obtenerCandidatosAsientoIOS() {
+        // Instrumentación (Iteración 7 — sin cambiar el predicate ni el criterio de
+        // filtrado): separa cuánto tarda la ÚNICA llamada nativa findElements(NSPredicate)
+        // de cuánto tarda el loop Java que llama obtenerTextoSeguro() por cada candidato
+        // (hasta 4 round-trips WDA por elemento: getText + getAttribute(value/label/name)).
+        // Objetivo: confirmar si los ~115-228s observados en vivo en SeatSelection→busqueda
+        // vienen del propio findElements() (costo de evaluar el NSPredicate contra el árbol
+        // nativo) o del loop Java haciendo N round-trips adicionales — antes de decidir qué
+        // optimizar.
+        long t0 = System.currentTimeMillis();
         List<WebElement> all = driver.findElements(
                 AppiumBy.iOSNsPredicateString(
                         "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') "
                         + "AND (name != nil OR label != nil OR value != nil)"));
+        long tFindElements = System.currentTimeMillis() - t0;
+
+        long t1 = System.currentTimeMillis();
         List<WebElement> filtrados = new ArrayList<>();
         for (WebElement el : all) {
             try {
@@ -2877,6 +2889,12 @@ public class SelectorPage extends BasePage {
                 if (!v.isBlank() && v.length() <= 2) filtrados.add(el);
             } catch (Exception ignored) {}
         }
+        long tFiltroJava = System.currentTimeMillis() - t1;
+
+        utils.PerfMetrics.note("SeatSelection", String.format(
+                "obtenerCandidatosAsientoIOS findElements=%dms candidatosCrudos=%d filtroJava=%dms filtrados=%d",
+                tFindElements, all.size(), tFiltroJava, filtrados.size()));
+
         return filtrados;
     }
 
