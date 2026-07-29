@@ -2773,12 +2773,32 @@ public class SelectorPage extends BasePage {
         // implicitlyWait=0 una sola vez antes del loop, se restaura en finally
         driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         long end = System.currentTimeMillis() + timeoutMs;
+        long loopStart = System.currentTimeMillis();
+
+        // Instrumentación (Iteración 6 — sin cambiar el comportamiento del loop):
+        // separa "cuánto tiempo se fue en llamadas reales a WDA" de "cuánto tiempo
+        // se fue durmiendo entre intentos", para saber si el costo real observado en
+        // vivo (busqueda=228s en una corrida, 94s en otra — muy por encima del cap
+        // nominal de 60s) viene de MUCHAS iteraciones normales (la app tarda en
+        // renderizar números de asiento) o de POCAS llamadas anormalmente lentas a
+        // WDA (mismo patrón ya documentado en smartWait: el deadline solo se revisa
+        // ENTRE llamadas, nunca interrumpe una en curso).
+        int iteraciones = 0;
+        long sumaScanMs = 0;
+        long maxScanMs = 0;
         try {
             while (System.currentTimeMillis() < end) {
+                iteraciones++;
+                long tScan = System.currentTimeMillis();
                 // UIAutomator2 filtra en el dispositivo: 1 round-trip en vez de getText() × N
                 List<WebElement> asientos = escanearMapaConUIAutomator(mapTop, mapBottom);
+                long scanMs = System.currentTimeMillis() - tScan;
+                sumaScanMs += scanMs;
+                if (scanMs > maxScanMs) maxScanMs = scanMs;
+
                 if (!asientos.isEmpty()) {
                     log.debug("[SelectorPage] Mapa listo: {} asientos.", asientos.size());
+                    logResumenEscaneoMapa(iteraciones, sumaScanMs, maxScanMs, System.currentTimeMillis() - loopStart, "OK");
                     return asientos;
                 }
                 try { Thread.sleep(250); } catch (InterruptedException ignored) {}
@@ -2787,8 +2807,18 @@ public class SelectorPage extends BasePage {
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
 
+        logResumenEscaneoMapa(iteraciones, sumaScanMs, maxScanMs, System.currentTimeMillis() - loopStart, "TIMEOUT");
         log.warn("[SelectorPage] Tiempo agotado escaneando el mapa.");
         return Collections.emptyList();
+    }
+
+    private void logResumenEscaneoMapa(int iteraciones, long sumaScanMs, long maxScanMs, long elapsedTotalMs, String resultado) {
+        long sleepTotalMs = elapsedTotalMs - sumaScanMs;
+        long promScanMs = iteraciones > 0 ? sumaScanMs / iteraciones : 0;
+        utils.PerfMetrics.note("SeatSelection", String.format(
+                "resumenBusqueda resultado=%s iteraciones=%d tiempoEscaneoTotal=%dms "
+                + "tiempoEscaneoProm=%dms tiempoEscaneoMax=%dms tiempoSleepTotal=%dms elapsedTotal=%dms",
+                resultado, iteraciones, sumaScanMs, promScanMs, maxScanMs, sleepTotalMs, elapsedTotalMs));
     }
 
     /**

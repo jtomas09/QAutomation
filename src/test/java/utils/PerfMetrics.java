@@ -81,6 +81,15 @@ public final class PerfMetrics {
     }
 
     /**
+     * Registra una nota de diagnóstico de formato libre dentro de una fase, bajo el
+     * mismo tag [METRICS] que el resto (para que quede incluida en cualquier
+     * {@code grep "[METRICS]"} sobre el log del Runner).
+     */
+    public static void note(String phase, String detalle) {
+        log.info("[METRICS][{}] {}", phase, detalle);
+    }
+
+    /**
      * Envuelve una fase completa (start/end automático) alrededor de un bloque de código
      * que devuelve un valor — evita olvidar el endPhase() en algún camino de retorno o
      * excepción. El endPhase() se ejecuta siempre, incluso si el bloque lanza.
