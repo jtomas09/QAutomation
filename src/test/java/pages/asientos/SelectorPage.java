@@ -712,6 +712,19 @@ public class SelectorPage extends BasePage {
     }
     public String seleccionarPrimerHorarioDisponibleEnGrid() {
         utils.PerfMetrics.startPhase("ScheduleSelection");
+        // PERF (Iteración 1 — evidencia de auditoría de código, confirmada, no
+        // supuesta): MovieOpen restaura implicitlyWait a 10s en su finally (línea 216)
+        // "para horarios, asientos, etc." — pero ScheduleSelection nunca lo vuelve a
+        // poner en 0 antes de este método, así que hereda esos 10s durante TODA la
+        // fase. Mismo bug de fondo ya corregido en abrirPrimerPeliculaDesdeVerSinopsis()
+        // (MovieOpen: ~80s→~34s) y en el escaneo de asientos (líneas 2488/2544/2641/2674,
+        // que YA resetean a 0 explícitamente antes de escanear) — la suposición original
+        // de que horarios "puede depender" de la espera ambiental queda contradicha por
+        // el propio código de asientos, que no la necesita y ya la resetea por su cuenta.
+        // Los presupuestos propios de este método (esperarPantallaHorarios: 5000ms,
+        // aceptarAlertaAtencionSiPresente: 2000ms) ya dan la paciencia real necesaria —
+        // el implicitlyWait solo agrega espera oculta encima, nunca una garantía extra.
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
             if (!esperarPantallaHorarios(5000)) {
                 throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
@@ -767,6 +780,9 @@ public class SelectorPage extends BasePage {
             throw new RuntimeException("Se detectaron horarios visibles, pero no se pudo seleccionar ninguno.");
         } finally {
             utils.PerfMetrics.endPhase("ScheduleSelection");
+            // Restaura el ambiente 10s por defecto (convención del proyecto) — el reset a
+            // 0 de arriba es deliberadamente local a este método, mismo criterio que MovieOpen.
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
     }
     /**
@@ -783,6 +799,11 @@ public class SelectorPage extends BasePage {
 
     public String seleccionarPrimerHorarioDescartandoAlertas() {
         utils.PerfMetrics.startPhase("ScheduleSelection");
+        // PERF (Iteración 1 — mismo hallazgo y mismo fix que seleccionarPrimerHorarioDisponibleEnGrid();
+        // ver el comentario completo ahí). Esta es la variante realmente usada por el flujo medido
+        // en las corridas en vivo de esta sesión (SeleccionAsientos → seleccionarPeliculaRandomYHorarioDescartandoAlertas()),
+        // donde ScheduleSelection promedió ~200s con implicitlyWait=10s heredado de MovieOpen.
+        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
         try {
             if (!esperarPantallaHorarios(5000)) {
                 throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
@@ -862,6 +883,9 @@ public class SelectorPage extends BasePage {
             throw new RuntimeException("No se encontró ningún horario sin alertas inesperadas.");
         } finally {
             utils.PerfMetrics.endPhase("ScheduleSelection");
+            // Restaura el ambiente 10s por defecto (convención del proyecto) — el reset a
+            // 0 de arriba es deliberadamente local a este método, mismo criterio que MovieOpen.
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
     }
 
