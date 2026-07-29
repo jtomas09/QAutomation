@@ -30,6 +30,19 @@ public class SelectorPage extends BasePage {
 
     private static final int RANDOM_PICK_TIMEOUT_SECONDS = 10;
 
+    // Iteración 4 (auditoría de rendimiento — MovieOpen): estaEnDetalleDePelicula()
+    // ya evalúa hayHorarioVisible() como parte de su propio criterio de éxito (línea
+    // ~640) justo antes de que abrirPeliculaYMostrarHorarios()/seleccionarPeliculaYHorarioSalaJunior()
+    // lo vuelvan a llamar milisegundos después para decidir si omiten irAEtiquetaHorarios().
+    // Este campo cachea únicamente el resultado POSITIVO (nunca el negativo) por una
+    // ventana corta, para no pagar dos veces el escaneo completo de pantalla + filtrado
+    // Java cuando la respuesta ya se confirmó como "sí" hace instantes. Al no cachear
+    // nunca un resultado negativo, el polling de esperarDetallePelicula() (que depende
+    // de detectar una transición false→true) queda intacto: siempre reevalúa de verdad
+    // mientras la respuesta sea false.
+    private long horarioVisibleCachedAtMs = 0;
+    private static final long HORARIO_VISIBLE_CACHE_TTL_MS = 2000;
+
     public SelectorPage(AppiumDriver driver) {
         super(driver);
     }
@@ -640,8 +653,18 @@ public class SelectorPage extends BasePage {
         return hayHorarioVisible();
     }
 
-    /** Ver comentario de estaEnDetalleDePelicula() \u2014 mismo criterio de horario que obtenerHorariosDisponibles(). */
+    /**
+     * Ver comentario de estaEnDetalleDePelicula() \u2014 mismo criterio de horario que obtenerHorariosDisponibles().
+     *
+     * Iteraci\u00f3n 4: reutiliza un resultado POSITIVO reciente (menos de
+     * HORARIO_VISIBLE_CACHE_TTL_MS) en vez de repetir el escaneo completo \u2014 ver
+     * comentario del campo horarioVisibleCachedAtMs. Nunca cachea "false".
+     */
     private boolean hayHorarioVisible() {
+        if (horarioVisibleCachedAtMs > 0
+                && System.currentTimeMillis() - horarioVisibleCachedAtMs < HORARIO_VISIBLE_CACHE_TTL_MS) {
+            return true;
+        }
         try {
             By locator = isIOS()
                     ? AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)")
@@ -651,7 +674,10 @@ public class SelectorPage extends BasePage {
                 try {
                     if (!el.isDisplayed()) continue;
                     String txt = obtenerTextoSeguro(el);
-                    if (txt.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) return true;
+                    if (txt.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) {
+                        horarioVisibleCachedAtMs = System.currentTimeMillis();
+                        return true;
+                    }
                 } catch (Exception ignored) {}
             }
         } catch (Exception ignored) {}
