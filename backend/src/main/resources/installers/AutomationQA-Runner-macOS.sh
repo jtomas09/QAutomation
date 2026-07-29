@@ -2,13 +2,14 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Automation QA Agent — Instalador macOS Enterprise v5.0.0
 #
-#  Autosuficiente: Java 17, Node.js, Appium, ADB — todo embebido.
-#  El usuario NO necesita instalar Java, Node, Android Studio, ni Appium.
+#  Autosuficiente: Java 17, Node.js, Appium, ADB, ffmpeg — todo embebido.
+#  El usuario NO necesita instalar Java, Node, Android Studio, Appium ni ffmpeg.
 #
 #  V5: Appium y drivers pre-empaquetados en el bundle (.app/Contents/Appium/).
 #      npm install NUNCA se ejecuta en produccion.
 #      Solo se usa el JRE embebido — JAVA_HOME y java del sistema ignorados.
 #      APPIUM_HOME exportado al LaunchAgent para drivers pre-instalados.
+#      ffmpeg embebido (grabacion de video iOS via avfoundation, Xcode 26+).
 #
 #  Dependencias externas PERMITIDAS (solo para iOS, impuesto por Apple):
 #    - Xcode + Command Line Tools  (obligatorio para xcrun / iOS)
@@ -28,6 +29,7 @@ RUNTIME_DIR="$BASE_DIR/runtime"
 JRE_DIR="$RUNTIME_DIR/jre17"
 NODE_DIR="$RUNTIME_DIR/node"
 APPIUM_DIR="$RUNTIME_DIR/appium"
+FFMPEG_DIR="$RUNTIME_DIR/ffmpeg"
 PLATFORM_TOOLS_DIR="$BASE_DIR/platform-tools"
 RUNNER_DIR="$BASE_DIR/runner"
 LOGS_DIR="$BASE_DIR/logs"
@@ -37,6 +39,7 @@ PLIST_FILE="$PLIST_DIR/com.automationqa.runner.plist"
 PLIST_LABEL="com.automationqa.runner"
 
 NODE_VERSION="v20.19.2"
+FFMPEG_VERSION="8.1.2"
 
 # Directorio donde los drivers pre-instalados (APPIUM_HOME) se almacenan
 APPIUM_HOME_DIR="$RUNTIME_DIR/appium-home"
@@ -56,6 +59,7 @@ JRE_OK=false
 NODE_OK=false
 APPIUM_OK=false
 ADB_OK=false
+FFMPEG_OK=false
 JAR_OK=false
 
 # ── Utilidades de salida ───────────────────────────────────────────────────────
@@ -165,10 +169,10 @@ print_header() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [1/6] Java Runtime 17 — embebido, no usa /usr/bin/java ni JAVA_HOME
+# [1/7] Java Runtime 17 — embebido, no usa /usr/bin/java ni JAVA_HOME
 # ══════════════════════════════════════════════════════════════════════════════
 install_jre() {
-    echo "  [1/6] Java Runtime 17 (embebido)..."
+    echo "  [1/7] Java Runtime 17 (embebido)..."
 
     # Ya instalado
     if [ -x "$JRE_DIR/bin/java" ]; then
@@ -242,10 +246,10 @@ install_jre() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [2/6] Node.js 20 LTS — embebido, requerido por Appium
+# [2/7] Node.js 20 LTS — embebido, requerido por Appium
 # ══════════════════════════════════════════════════════════════════════════════
 install_node() {
-    echo "  [2/6] Node.js $NODE_VERSION LTS (embebido)..."
+    echo "  [2/7] Node.js $NODE_VERSION LTS (embebido)..."
 
     if [ -x "$NODE_DIR/bin/node" ]; then
         local ver
@@ -362,7 +366,7 @@ validate_appium_full() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [3/6] Appium Server + drivers — pre-empaquetado (V5: sin npm en produccion)
+# [3/7] Appium Server + drivers — pre-empaquetado (V5: sin npm en produccion)
 #
 # Orden de busqueda:
 #   1. Bundle .app (Contents/Appium/) — PREFERIDO para distribuciones enterprise
@@ -373,7 +377,7 @@ validate_appium_full() {
 # No se considera instalado si el servidor no puede arrancar.
 # ══════════════════════════════════════════════════════════════════════════════
 install_appium() {
-    echo "  [3/6] Appium Server + drivers..."
+    echo "  [3/7] Appium Server + drivers..."
 
     local appium_bin="$APPIUM_DIR/node_modules/.bin/appium"
 
@@ -573,10 +577,10 @@ install_drivers_fallback() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [4/6] Android Platform Tools (ADB) — embebido, sin ANDROID_HOME
+# [4/7] Android Platform Tools (ADB) — embebido, sin ANDROID_HOME
 # ══════════════════════════════════════════════════════════════════════════════
 install_adb() {
-    echo "  [4/6] Android Platform Tools (ADB)..."
+    echo "  [4/7] Android Platform Tools (ADB)..."
 
     if [ -x "$PLATFORM_TOOLS_DIR/adb" ]; then
         local ver
@@ -633,10 +637,80 @@ install_adb() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [5/6] Runner JAR — desde paquete de instalacion o backend
+# [5/7] ffmpeg — embebido, requerido para grabacion de video iOS (Xcode 26+)
+#
+# xcrun devicectl device recordVideo fue eliminado en Xcode 26 / devicectl 518+.
+# El reemplazo (ver IOSVideoRecordingManager.java) es "ffmpeg -f avfoundation":
+# un iPhone/iPad conectado y de confianza aparece como dispositivo de captura de
+# video para macOS (mismo mecanismo que QuickTime "New Movie Recording"). Se
+# embebe el build portatil de evermeet.cx (estatico, sin dependencias dylib
+# externas — pensado explicitamente para redistribucion). Es un binario x86_64;
+# no existe build arm64 nativo de evermeet, pero corre via Rosetta 2 sin
+# problema (confirmado funcional — la grabacion no es CPU-bound). Rosetta 2 ya
+# suele estar presente en Macs de desarrollo (Xcode y otras herramientas Intel
+# lo requieren); si no lo esta, se avisa como hacerlo.
+# ══════════════════════════════════════════════════════════════════════════════
+install_ffmpeg() {
+    echo "  [5/7] ffmpeg $FFMPEG_VERSION (embebido, grabacion de video iOS)..."
+
+    if [ -x "$FFMPEG_DIR/ffmpeg" ]; then
+        local ver
+        ver=$("$FFMPEG_DIR/ffmpeg" -version 2>/dev/null | head -1)
+        ok "ffmpeg ya instalado: $ver"
+        FFMPEG_OK=true
+        return
+    fi
+
+    mkdir -p "$FFMPEG_DIR"
+
+    # URL versionada y estable (no depende de la API "latest" de evermeet.cx) —
+    # mismo criterio de reproducibilidad que NODE_VERSION.
+    local url="https://evermeet.cx/ffmpeg/ffmpeg-${FFMPEG_VERSION}.zip"
+    local tmp
+    tmp="$(mktemp /tmp/qa_ffmpeg_XXXXXX.zip)"
+
+    info "Descargando ffmpeg $FFMPEG_VERSION..."
+    if curl -fL --max-time 180 --progress-bar "$url" -o "$tmp" 2>/dev/null; then
+        local sz
+        sz=$(wc -c < "$tmp" | tr -d ' ')
+        if [ "$sz" -gt 5000000 ]; then
+            info "Extrayendo ffmpeg..."
+            if unzip -q -o "$tmp" -d "$FFMPEG_DIR" 2>/dev/null; then
+                chmod +x "$FFMPEG_DIR/ffmpeg" 2>/dev/null || true
+                if [ -x "$FFMPEG_DIR/ffmpeg" ]; then
+                    # Verifica que realmente ejecute (Rosetta 2 disponible) antes de declarar OK
+                    if "$FFMPEG_DIR/ffmpeg" -version >/dev/null 2>&1; then
+                        local ver
+                        ver=$("$FFMPEG_DIR/ffmpeg" -version 2>/dev/null | head -1)
+                        ok "ffmpeg instalado: $ver"
+                        FFMPEG_OK=true
+                        write_sha256_sidecar "$FFMPEG_DIR/ffmpeg"
+                    else
+                        warn "ffmpeg descargado pero no ejecuta (falta Rosetta 2)."
+                        info "Ejecuta: softwareupdate --install-rosetta --agree-to-license"
+                        info "Grabacion de video iOS quedara deshabilitada hasta entonces."
+                    fi
+                else
+                    warn "ZIP extraido pero ffmpeg no encontrado."
+                fi
+            else
+                warn "Error al extraer ffmpeg."
+            fi
+        else
+            warn "Descarga de ffmpeg parece invalida (${sz} bytes)."
+        fi
+    else
+        warn "No se pudo descargar ffmpeg. Grabacion de video iOS quedara deshabilitada."
+        info "Vuelve a ejecutar este instalador con conexion a internet para reintentar."
+    fi
+    rm -f "$tmp"
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# [6/7] Runner JAR — desde paquete de instalacion o backend
 # ══════════════════════════════════════════════════════════════════════════════
 install_jar() {
-    echo "  [5/6] Automation QA Agent (runner JAR)..."
+    echo "  [6/7] Automation QA Agent (runner JAR)..."
 
     mkdir -p "$RUNNER_DIR"
 
@@ -690,10 +764,10 @@ install_jar() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# [6/6] LaunchAgent — inicio automatico con rutas embebidas en -D props
+# [7/7] LaunchAgent — inicio automatico con rutas embebidas en -D props
 # ══════════════════════════════════════════════════════════════════════════════
 install_launch_agent() {
-    echo "  [6/6] Configurando inicio automatico (LaunchAgent)..."
+    echo "  [7/7] Configurando inicio automatico (LaunchAgent)..."
 
     mkdir -p "$LOGS_DIR"
 
@@ -720,6 +794,7 @@ install_launch_agent() {
 
     local appium_bin="$APPIUM_DIR/node_modules/.bin/appium"
     local node_bin="$NODE_DIR/bin/node"
+    local ffmpeg_bin="$FFMPEG_DIR/ffmpeg"
 
     # Detener servicio anterior si existe
     launchctl unload -w "$PLIST_FILE" 2>/dev/null || true
@@ -744,6 +819,7 @@ install_launch_agent() {
         <string>-DAPPIUM_BIN=${appium_bin}</string>
         <string>-DNODE_BIN=${node_bin}</string>
         <string>-DAPPIUM_HOME=${APPIUM_HOME_DIR}</string>
+        <string>-DFFMPEG_BIN=${ffmpeg_bin}</string>
         <string>-DPOLL_INTERVAL_MS=30000</string>
         <string>-jar</string>
         <string>${JAR_DST}</string>
@@ -786,6 +862,8 @@ print_summary() {
     else                echo "   Appium 2 + drivers    [WARN] Agent modo DEGRADED — reintentara"; fi
     if $ADB_OK;    then echo "   Android ADB           [OK]"
     else                echo "   Android ADB           [WARN] Agent modo DEGRADED — reintentara"; fi
+    if $FFMPEG_OK; then echo "   ffmpeg (video iOS)    [OK]"
+    else                echo "   ffmpeg (video iOS)    [WARN] Grabacion de video iOS deshabilitada"; fi
     if $JAR_OK;    then echo "   Runner JAR            [OK]"; fi
     echo ""
     echo "   APPIUM_HOME:  $APPIUM_HOME_DIR"
@@ -806,6 +884,7 @@ install_jre
 install_node
 install_appium
 install_adb
+install_ffmpeg
 install_jar
 install_launch_agent
 print_summary

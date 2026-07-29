@@ -44,7 +44,11 @@ public final class IOSVideoRecordingManager {
 
     /** Rutas donde Homebrew instala ffmpeg — un LaunchAgent no hereda el PATH
      *  interactivo del usuario (no incluye /opt/homebrew/bin ni /usr/local/bin),
-     *  así que "ffmpeg" a secas puede no resolverse aunque SÍ esté instalado. */
+     *  así que "ffmpeg" a secas puede no resolverse aunque SÍ esté instalado.
+     *  Se conservan como fallback de desarrollo (máquina con Homebrew manual);
+     *  la ruta embebida (AGENT_DATA_DIR/runtime/ffmpeg/ffmpeg, ver
+     *  resolveFfmpegBin()) es la resolución primaria en producción — el usuario
+     *  final NUNCA instala nada manualmente, igual que Node/Appium/JRE. */
     private static final String[] FFMPEG_CANDIDATES = {
             "/opt/homebrew/bin/ffmpeg", // Homebrew, Apple Silicon
             "/usr/local/bin/ffmpeg",    // Homebrew, Intel
@@ -70,22 +74,49 @@ public final class IOSVideoRecordingManager {
         return xcodeVersion;
     }
 
-    /** Resuelve y cachea la ruta absoluta de ffmpeg — null si no está instalado en ninguna ruta conocida. */
+    /**
+     * Resuelve y cachea la ruta absoluta de ffmpeg — null si no está instalado en
+     * ninguna ruta conocida. Mismo orden de resolución que NODE_BIN/APPIUM_BIN
+     * (ver AppiumManager.resolveNodeBin()):
+     *   1. AGENT_DATA_DIR/runtime/ffmpeg/ffmpeg  (embebido por el instalador — primario)
+     *   2. FFMPEG_BIN system property            (override explícito)
+     *   3. Rutas de Homebrew / PATH del proceso  (fallback de desarrollo)
+     */
     private static String resolveFfmpegBin() {
         if (ffmpegBin != null) return ffmpegBin;
+
+        String agentDataDir = System.getProperty("AGENT_DATA_DIR", "");
+        if (!agentDataDir.isBlank()) {
+            String embedded = agentDataDir + "/runtime/ffmpeg/ffmpeg";
+            if (probarFfmpeg(embedded)) {
+                ffmpegBin = embedded;
+                return ffmpegBin;
+            }
+        }
+
+        String prop = System.getProperty("FFMPEG_BIN", "");
+        if (!prop.isBlank() && probarFfmpeg(prop)) {
+            ffmpegBin = prop;
+            return ffmpegBin;
+        }
+
         for (String candidate : FFMPEG_CANDIDATES) {
-            try {
-                Process p = new ProcessBuilder(candidate, "-version").redirectErrorStream(true).start();
-                p.getInputStream().readAllBytes(); // drenar para no bloquear
-                if (p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0) {
-                    ffmpegBin = candidate;
-                    return ffmpegBin;
-                }
-            } catch (Exception ignored) {
-                // binario no encontrado en esta ruta — probar la siguiente
+            if (probarFfmpeg(candidate)) {
+                ffmpegBin = candidate;
+                return ffmpegBin;
             }
         }
         return null;
+    }
+
+    private static boolean probarFfmpeg(String candidate) {
+        try {
+            Process p = new ProcessBuilder(candidate, "-version").redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes(); // drenar para no bloquear
+            return p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0;
+        } catch (Exception e) {
+            return false; // binario no encontrado/ejecutable en esta ruta
+        }
     }
 
     // Formato real de "ffmpeg -f avfoundation -list_devices true -i ''":
