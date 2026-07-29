@@ -2865,20 +2865,28 @@ public class SelectorPage extends BasePage {
     // el orden correcto) en vez de leer @value directo. Las filas con letra (A, B,
     // C…) también matchean length<=2 aquí — sin cambio de riesgo: los llamadores
     // YA filtran por posición (cx < 20) para descartar esa columna, igual que antes.
+    // Iteración 8 (evidencia de Iteración 7, en vivo): findElements=29.2s +
+    // filtroJava=57.75s sobre candidatosCrudos=178, de los cuales solo 60 pasaban el
+    // filtro Java de longitud ≤2 (obtenerTextoSeguro().length() <= 2). Se agrega la
+    // MISMA condición de longitud al NSPredicate (name/label/value MATCHES '.{1,2}',
+    // regex ICU de longitud exacta 1-2, equivalente a la condición Java) para que WDA
+    // descarte del lado nativo los candidatos que Java iba a rechazar de todas formas
+    // — nunca puede excluir un elemento que el filtro Java habría aceptado, porque es
+    // la MISMA condición de longitud, solo evaluada antes. Se conserva "!= nil" como
+    // guarda explícita para no evaluar MATCHES sobre un atributo ausente.
     private List<WebElement> obtenerCandidatosAsientoIOS() {
-        // Instrumentación (Iteración 7 — sin cambiar el predicate ni el criterio de
-        // filtrado): separa cuánto tarda la ÚNICA llamada nativa findElements(NSPredicate)
-        // de cuánto tarda el loop Java que llama obtenerTextoSeguro() por cada candidato
-        // (hasta 4 round-trips WDA por elemento: getText + getAttribute(value/label/name)).
-        // Objetivo: confirmar si los ~115-228s observados en vivo en SeatSelection→busqueda
-        // vienen del propio findElements() (costo de evaluar el NSPredicate contra el árbol
-        // nativo) o del loop Java haciendo N round-trips adicionales — antes de decidir qué
-        // optimizar.
+        // Instrumentación (Iteración 7, se conserva): separa cuánto tarda la ÚNICA
+        // llamada nativa findElements(NSPredicate) de cuánto tarda el loop Java que
+        // llama obtenerTextoSeguro() por cada candidato — permite comparar en vivo el
+        // candidatosCrudos/tiempos de antes (178 / 29.2s+57.75s) contra los de después
+        // de este fix.
         long t0 = System.currentTimeMillis();
         List<WebElement> all = driver.findElements(
                 AppiumBy.iOSNsPredicateString(
                         "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') "
-                        + "AND (name != nil OR label != nil OR value != nil)"));
+                        + "AND ((name != nil AND name MATCHES '.{1,2}') "
+                        + "OR (label != nil AND label MATCHES '.{1,2}') "
+                        + "OR (value != nil AND value MATCHES '.{1,2}'))"));
         long tFindElements = System.currentTimeMillis() - t0;
 
         long t1 = System.currentTimeMillis();
