@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Trash2, ExternalLink, Terminal, FileText, Copy, Download, X, Check, Wrench, ListTree, LayoutList } from 'lucide-react'
-import type { LogEntry, ExecutionEvent } from '../../types'
+import type { LogEntry, ExecutionEvent, RunStatus } from '../../types'
 import { isFunctionalLog } from '../../utils/logFilter'
 import { isVisibleInTimeline } from '../../utils/eventPresentation'
 import { deriveTestCaseFlow } from '../../utils/testFlow'
@@ -42,6 +42,9 @@ interface Props {
    * anterior — ningún caller existente se rompe.
    */
   events?:    ExecutionEvent[]
+  /** Estado de la ejecución activa — se reenvía a CaseProgressFooter para que
+   * su cronómetro deje de avanzar en cuanto la ejecución ya no está 'running'. */
+  status:     RunStatus
   onClear:   () => void
   onViewAll?: () => void
 }
@@ -182,7 +185,7 @@ function LogModal({
   )
 }
 
-function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
+function ActivityLog({ logs, events, status, onClear, onViewAll }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [showExtract,   setShowExtract]   = useState(false)
   const [showTechModal, setShowTechModal] = useState(false)
@@ -406,7 +409,7 @@ function ActivityLog({ logs, events, onClear, onViewAll }: Props) {
         <div ref={bottomRef} />
       </div>
 
-      {hasFlow && <CaseProgressFooter events={events!} />}
+      {hasFlow && <CaseProgressFooter events={events!} status={status} />}
 
       {/* ── Modals ────────────────────────────────────────────────────────────── */}
       <AnimatePresence>

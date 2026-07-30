@@ -1,8 +1,9 @@
 import React from 'react'
-import type { ExecutionEvent, ExecutionEventProgress } from '../../types'
+import type { ExecutionEvent, ExecutionEventProgress, RunStatus } from '../../types'
 
 interface Props {
   events: ExecutionEvent[]
+  status: RunStatus
 }
 
 function formatElapsed(ms: number): string {
@@ -18,13 +19,22 @@ function formatElapsed(ms: number): string {
  * tiempo transcurrido desde el primer evento de esta ejecución. Todo derivado
  * de `events`, ningún estado propio nuevo salvo el tick del reloj.
  */
-function CaseProgressFooter({ events }: Props) {
+function CaseProgressFooter({ events, status }: Props) {
   const [now, setNow] = React.useState(() => Date.now())
 
+  // FIX real (evidencia en vivo — el cronómetro seguía corriendo minutos
+  // después de que la ejecución ya había terminado): este intervalo no
+  // dependía del estado de la ejecución, así que nunca se detenía por sí
+  // solo. Ahora solo corre mientras status === 'running'; al salir de ese
+  // estado (finished/idle) se limpia el intervalo y `now` queda congelado en
+  // su último valor — el tiempo transcurrido deja de avanzar. Al iniciar una
+  // ejecución nueva (status vuelve a 'running'), se resincroniza de inmediato.
   React.useEffect(() => {
+    if (status !== 'running') return
+    setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
-  }, [])
+  }, [status])
 
   const progress: ExecutionEventProgress | null = React.useMemo(() => {
     for (let i = events.length - 1; i >= 0; i--) {
