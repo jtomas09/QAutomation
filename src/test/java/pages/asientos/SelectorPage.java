@@ -2649,6 +2649,12 @@ public class SelectorPage extends BasePage {
                 : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
             for (WebElement el : candidatos) {
                 try {
+                    // FIX real (mismo hallazgo que esperarYObtenerAsientosDelMapa(): sin
+                    // esto, este fallback puede aceptar etiquetas de fila de una letra
+                    // como si fueran asientos, exactamente el mismo bug — este chequeo ya
+                    // existía en obtenerAsientosDelMapaAmplio(), aquí faltaba.
+                    if (isIOS() && !obtenerTextoSeguro(el).matches("^\\d{1,2}$")) continue;
+
                     org.openqa.selenium.Rectangle r = el.getRect();
                     int cy = r.getY() + r.getHeight() / 2;
                     int cx = r.getX() + r.getWidth() / 2;
@@ -2796,7 +2802,19 @@ public class SelectorPage extends BasePage {
                 sumaScanMs += scanMs;
                 if (scanMs > maxScanMs) maxScanMs = scanMs;
 
-                if (!asientos.isEmpty()) {
+                // FIX real (evidencia de 2 corridas en vivo — "Filas=1 | Total=2 | Con
+                // número=0" seguido de un tap por coordenadas que nunca registra un
+                // asiento real, haciendo fallar "Continuar"): en iOS, las etiquetas de
+                // fila (A, B, C…) a veces quedan consultables por WDA ANTES que los
+                // botones de asiento numerados terminen de renderizar — ambos matchean
+                // el mismo predicate de longitud ≤2 (necesario para que las etiquetas de
+                // fila sigan siendo candidatos válidos, ver obtenerCandidatosAsientoIOS()).
+                // Aceptar el primer resultado no vacío sin validar contenido puede
+                // "confirmar" el mapa con 1-2 etiquetas huérfanas antes de que exista
+                // ningún asiento real. Las corridas exitosas de referencia SIEMPRE
+                // muestran "Con número" == Total (nunca cero) — se exige ese mismo
+                // invariante aquí antes de aceptar el escaneo como listo.
+                if (!asientos.isEmpty() && tieneAlMenosUnAsientoNumerado(asientos)) {
                     log.debug("[SelectorPage] Mapa listo: {} asientos.", asientos.size());
                     logResumenEscaneoMapa(iteraciones, sumaScanMs, maxScanMs, System.currentTimeMillis() - loopStart, "OK");
                     return asientos;
@@ -2810,6 +2828,22 @@ public class SelectorPage extends BasePage {
         logResumenEscaneoMapa(iteraciones, sumaScanMs, maxScanMs, System.currentTimeMillis() - loopStart, "TIMEOUT");
         log.warn("[SelectorPage] Tiempo agotado escaneando el mapa.");
         return Collections.emptyList();
+    }
+
+    /**
+     * Un escaneo solo cuenta como "el mapa ya cargó" si al menos un candidato tiene
+     * un número de asiento real — ver comentario en esperarYObtenerAsientosDelMapa().
+     * En Android esto siempre es true de inmediato: los candidatos ya llegan
+     * pre-filtrados a solo dígitos (UiSelector().textMatches / escanearMapaConXPath),
+     * así que esta validación no agrega latencia ni cambia comportamiento ahí.
+     */
+    private boolean tieneAlMenosUnAsientoNumerado(List<WebElement> asientos) {
+        for (WebElement el : asientos) {
+            try {
+                if (obtenerTextoSeguro(el).matches("^\\d{1,2}$")) return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 
     private void logResumenEscaneoMapa(int iteraciones, long sumaScanMs, long maxScanMs, long elapsedTotalMs, String resultado) {
