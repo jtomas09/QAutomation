@@ -129,6 +129,26 @@ export interface PhysicalDevice {
   notReadyReason?:    string | null
 }
 
+/**
+ * Unión entre ConfiguredDevice (preferencia persistida — solo identidad, ver
+ * useExecutionDevices.ts) y el inventario real (PhysicalDevice.status) en el
+ * momento del último poll. NUNCA se persiste — se recalcula en cada refresh
+ * de dispositivos (ver reconcile() en useExecutionDevices.ts). isReady=true
+ * es el único estado que participa en el ExecutionPlan.
+ */
+export interface ReconciledDevice {
+  udid:            string
+  name:            string
+  platform:        string
+  platformVersion: string | null
+  /** 'UNKNOWN' cuando el UDID configurado no aparece en el inventario actual
+   *  (p. ej. el Runner que lo registró está caído) — se trata igual que OFFLINE
+   *  para efectos de isReady, pero se distingue para mensajes más precisos. */
+  liveStatus: DeviceStatus | 'UNKNOWN'
+  /** true solo cuando liveStatus === 'AVAILABLE' — el único estado ejecutable. */
+  isReady: boolean
+}
+
 // ─── Runner Manager ──────────────────────────────────────────────────────────
 
 export type RunnerStatus = 'ONLINE' | 'OFFLINE' | 'BUSY' | 'STARTING' | 'STOPPING' | 'DEGRADED'

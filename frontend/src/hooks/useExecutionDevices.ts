@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
-import type { PhysicalDevice } from '../types'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import type { PhysicalDevice, ReconciledDevice } from '../types'
 import { getExecutionDeviceConfig, saveExecutionDeviceConfig } from '../api'
 
 export interface ConfiguredDevice {
@@ -18,10 +18,34 @@ function toConfigured(device: PhysicalDevice): ConfiguredDevice {
   }
 }
 
+/**
+ * Reconciliación — capa 3 del modelo (Configuración persistida → Inventario →
+ * Reconcile() → ReconciledDevice → readyDevices → ExecutionPlan). Función
+ * pura, sin estado propio: se recalcula en cada poll de `liveDevices`, nunca
+ * se persiste. `configured` NUNCA pierde un dispositivo por estar OFFLINE —
+ * eso es exactamente el requisito "la configuración persiste, la
+ * disponibilidad no".
+ */
+export function reconcile(
+  configured: ConfiguredDevice[],
+  liveDevices: PhysicalDevice[],
+): ReconciledDevice[] {
+  const liveMap = new Map(liveDevices.map(d => [d.udid, d]))
+  return configured.map(cfg => {
+    const live = liveMap.get(cfg.udid)
+    const liveStatus = live?.status ?? 'UNKNOWN'
+    return { ...cfg, liveStatus, isReady: liveStatus === 'AVAILABLE' }
+  })
+}
+
 export function useExecutionDevices() {
   const [configured, setConfiguredState] = useState<ConfiguredDevice[]>([])
   const [savedUdids,  setSavedUdids]     = useState<string[]>([])
   const [saving,      setSaving]         = useState(false)
+
+  // Último snapshot del inventario real (poblado por syncWithLive en cada poll de
+  // 15s) — insumo de reconcile(). Nunca se persiste; es puro estado derivado.
+  const [lastLiveDevices, setLastLiveDevices] = useState<PhysicalDevice[]>([])
 
   // Persistido en el backend (no localStorage): ver ExecutionDeviceConfig en
   // api.ts — localStorage es por navegador y Safari lo purga mucho más
@@ -126,6 +150,7 @@ export function useExecutionDevices() {
       })
 
     setConfigured(kept)
+    setLastLiveDevices(liveDevices)
     if (removed.some(d => d.udid === activeDeviceUdidRef.current)) {
       setActiveDeviceUdid(kept[0]?.udid ?? null)
     }
@@ -136,8 +161,22 @@ export function useExecutionDevices() {
   const isDirty = [...configuredUdids].sort().join(',') !== [...savedUdids].sort().join(',')
   const activeDevice = configured.find(d => d.udid === activeDeviceUdid) ?? null
 
+  // Capa 3 (Plan de Ejecución): reconciled se recalcula automáticamente en cada
+  // poll — un dispositivo que vuelve a AVAILABLE pasa a isReady=true sin que el
+  // usuario reconfigure nada. readyUdids es lo único que debe alimentar el
+  // ExecutionPlan — nunca configuredUdids directamente.
+  const reconciled = useMemo(
+    () => reconcile(configured, lastLiveDevices),
+    [configured, lastLiveDevices],
+  )
+  const readyUdids = useMemo(
+    () => reconciled.filter(d => d.isReady).map(d => d.udid),
+    [reconciled],
+  )
+
   return {
     configured, configuredUdids, toggleDevice, saveConfig, saving, isDirty, syncWithLive,
     activeDevice, videoEnabled, setVideoEnabled,
+    reconciled, readyUdids,
   }
 }

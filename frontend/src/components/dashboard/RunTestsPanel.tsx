@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import ReactCountryFlag from 'react-country-flag'
 import { ENVIRONMENTS, SUITES, COUNTRIES } from '../../data'
-import type { RunStatus } from '../../types'
-import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
+import type { RunStatus, ReconciledDevice, DeviceStatus } from '../../types'
 import { RefreshCw, X, ChevronDown, Video, Check, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { PlatformIcon } from '../PlatformIcon'
 import { executionTrackingService } from '../../services/ExecutionTrackingService'
@@ -12,7 +11,7 @@ import type { ExecutionRecord } from '../../services/ExecutionTrackingService'
 interface Props {
   suite:              string
   env:                string
-  configuredDevices:  ConfiguredDevice[]
+  configuredDevices:  ReconciledDevice[]
   country:            string
   status:             RunStatus
   executionId:        string | null
@@ -70,7 +69,19 @@ function ProgressBar({ completed, total, passed, failed, skipped }: {
 
 // ── Configured devices read-only panel ────────────────────────────────────────
 
-function ConfiguredDevicesPanel({ devices, onConfigure }: { devices: ConfiguredDevice[]; onConfigure: () => void }) {
+// Etiqueta/color por liveStatus — mismo criterio que ConnectedDevices.tsx (ver
+// STATUS ahí), en una versión mínima (solo pill de texto, sin icono) para esta
+// lista compacta de solo-lectura.
+const READINESS_LABEL: Record<DeviceStatus | 'UNKNOWN', { label: string; color: string }> = {
+  AVAILABLE:   { label: 'Listo',         color: '#10b981' },
+  BUSY:        { label: 'En uso',        color: '#6366f1' },
+  OFFLINE:     { label: 'Offline',       color: '#f43f5e' },
+  MAINTENANCE: { label: 'Mantenimiento', color: '#94a3b8' },
+  DISCOVERED:  { label: 'Descubierto',   color: '#f59e0b' },
+  UNKNOWN:     { label: 'Offline',       color: '#f43f5e' },
+}
+
+function ConfiguredDevicesPanel({ devices, onConfigure }: { devices: ReconciledDevice[]; onConfigure: () => void }) {
   if (devices.length === 0) {
     return (
       <div
@@ -121,6 +132,18 @@ function ConfiguredDevicesPanel({ devices, onConfigure }: { devices: ConfiguredD
                   {isIos ? 'iOS' : 'Android'} {device.platformVersion ?? '—'}
                 </div>
               </div>
+              {/* Badge de readiness — Problema 3/4: el usuario ve, sin abrir otra
+                  pantalla, cuáles de sus dispositivos configurados van a participar
+                  en la próxima ejecución. */}
+              <span
+                className="flex-shrink-0 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wide"
+                style={{
+                  color:      READINESS_LABEL[device.liveStatus].color,
+                  background: `${READINESS_LABEL[device.liveStatus].color}22`,
+                }}
+              >
+                {READINESS_LABEL[device.liveStatus].label}
+              </span>
             </div>
           )
         })}
@@ -219,7 +242,10 @@ export default function RunTestsPanel(props: Props) {
   const [advanced, setAdvanced] = useState(false)
   const running   = status === 'running'
   const completed = passed + failed + skipped
-  const canRun    = configuredDevices.length > 0
+  // Problema 4: bloquear la ejecución SOLO si no hay configurados, o si TODOS
+  // los configurados están offline — nunca por tener alguno offline entre varios.
+  const readyCount = configuredDevices.filter(d => d.isReady).length
+  const canRun     = readyCount > 0
 
   // Track active execution for live cases panel
   const [activeExec, setActiveExec] = useState<ExecutionRecord | null>(null)
@@ -353,7 +379,9 @@ export default function RunTestsPanel(props: Props) {
 
             {!canRun && !running && (
               <p className="text-center text-[10px] font-semibold" style={{ color: '#f43f5e' }}>
-                Seleccione al menos un dispositivo en Dispositivos Conectados
+                {configuredDevices.length === 0
+                  ? 'Seleccione al menos un dispositivo en Dispositivos Conectados'
+                  : 'No hay dispositivos disponibles: todos los configurados están desconectados'}
               </p>
             )}
 

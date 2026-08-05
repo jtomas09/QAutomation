@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Calendar, Layers3, CheckCircle2, Package } from 'lucide-react'
-import type { RunState } from '../types'
+import type { RunState, ReconciledDevice } from '../types'
 import type { ConfiguredDevice } from '../hooks/useExecutionDevices'
 import { getExecutions } from '../api'
 import { suiteService } from '../services/SuiteService'
@@ -19,6 +19,7 @@ interface Props {
   suite:              string
   env:                string
   configured:         ConfiguredDevice[]
+  reconciled:         ReconciledDevice[]
   activeDevice:       ConfiguredDevice | null
   country:            string
   videoEnabled:       boolean
@@ -49,7 +50,7 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, configured, activeDevice, country, videoEnabled,
+  state, suite, env, configured, reconciled, activeDevice, country, videoEnabled,
   saving, isDirty,
   onSuiteChange, onEnvChange, onCountryChange,
   onVideoToggle, onToggleDevice, onSaveConfig, onSyncLive,
@@ -250,7 +251,7 @@ export default function Dashboard({
           <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
             <RunTestsPanel
               suite={suite}                 env={env}
-              configuredDevices={configured}
+              configuredDevices={reconciled}
               country={country}
               status={state.status}         executionId={state.executionId ?? null}
               videoEnabled={videoEnabled}   onVideoToggle={onVideoToggle}

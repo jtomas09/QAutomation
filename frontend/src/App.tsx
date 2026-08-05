@@ -1,4 +1,6 @@
 import React, { useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { AlertTriangle } from 'lucide-react'
 import { ConfirmationProvider } from './hooks/useConfirmation'
 import { ENVIRONMENTS, SUITES, ALIMENTOS_TESTS, SUITE_TESTS, COUNTRY_SUITES, getRandomSmokeTests } from './data'
 import { useTestRunner }        from './hooks/useTestRunner'
@@ -32,7 +34,7 @@ export default function App() {
   const [smokeTests,    setSmokeTests]    = useState(() => getRandomSmokeTests())
 
   const {
-    configured, configuredUdids, toggleDevice: toggleConfigDevice,
+    configured, reconciled, readyUdids, toggleDevice: toggleConfigDevice,
     saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
     activeDevice, videoEnabled, setVideoEnabled,
   } = useExecutionDevices()
@@ -43,9 +45,40 @@ export default function App() {
   const runnerOnline  = useRunnerStatus()
   const runningCount  = state.status === 'running' ? 1 : 0
 
+  // Toast de exclusión (Problema 4) — mismo patrón visual ya usado en SuitesPage.tsx.
+  const [deviceToast, setDeviceToast] = useState<string | null>(null)
+  function showDeviceToast(msg: string) {
+    setDeviceToast(msg)
+    setTimeout(() => setDeviceToast(null), 4500)
+  }
+
+  /**
+   * Plan de Ejecución (capa 3): construye la lista de dispositivos a partir de
+   * readyUdids/reconciled — NUNCA de configuredUdids crudo. Único punto usado
+   * por los 4 lugares de la app que disparan una ejecución (evita duplicar esta
+   * validación en cada uno). Bloquea solo si NINGÚN dispositivo está listo;
+   * si algunos sí y otros no, avisa con un toast pero ejecuta igual.
+   */
+  function runReady(suiteId: string) {
+    if (configured.length === 0) return // sin dispositivos configurados — nada que avisar aquí
+    const notReadyCount = reconciled.length - readyUdids.length
+    if (readyUdids.length === 0) {
+      showDeviceToast('Ningún dispositivo configurado está disponible ahora mismo.')
+      return
+    }
+    if (notReadyCount > 0) {
+      showDeviceToast(
+        notReadyCount === 1
+          ? '1 dispositivo fue excluido automáticamente por no estar disponible.'
+          : `${notReadyCount} dispositivos fueron excluidos automáticamente por no estar disponibles.`
+      )
+    }
+    const readyLabels = reconciled.filter(d => d.isReady).map(d => d.name)
+    runTest(suiteId, env, readyUdids, country, videoEnabled, readyLabels)
+  }
+
   function handleRun() {
-    const labels = configured.map(d => d.name)
-    runTest(suite, env, configuredUdids, country, videoEnabled, labels)
+    runReady(suite)
   }
 
   function handleCountryChange(c: string) {
@@ -81,6 +114,7 @@ export default function App() {
               state={state}
               suite={suite}              env={env}
               configured={configured}
+              reconciled={reconciled}
               activeDevice={activeDevice}
               country={country}
               videoEnabled={videoEnabled}
@@ -170,8 +204,8 @@ export default function App() {
                   disabled={state.status === 'running'}
                   activeId={state.activeSuite}
                   onBack={() => setDrillSuite(null)}
-                  onRun={id => runTest(id, env, configuredUdids, country, videoEnabled, configured.map(d => d.name))}
-                  onRunAll={() => runTest(drillSuite, env, configuredUdids, country, videoEnabled, configured.map(d => d.name))}
+                  onRun={id => runReady(id)}
+                  onRunAll={() => runReady(drillSuite)}
                 />
               )
             }
@@ -183,7 +217,7 @@ export default function App() {
               } else if (SUITE_TESTS[id]) {
                 setDrillSuite(id)
               } else {
-                runTest(id, env, configuredUdids, country, videoEnabled, configured.map(d => d.name))
+                runReady(id)
               }
             }
 
@@ -236,6 +270,28 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Toast de exclusión de dispositivos (Problema 4) */}
+      <AnimatePresence>
+        {deviceToast && (
+          <motion.div
+            key="device-toast"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            style={{
+              position: 'fixed', bottom: 28, right: 28, zIndex: 999,
+              background: '#1e293b', border: '1px solid rgba(245,158,11,0.35)',
+              borderRadius: 10, padding: '10px 18px',
+              fontSize: 12, fontWeight: 600, color: '#fbbf24',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              display: 'flex', alignItems: 'center', gap: 8, maxWidth: 360,
+            }}
+          >
+            <AlertTriangle size={13} style={{ flexShrink: 0 }} /> {deviceToast}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
     </ConfirmationProvider>
   )

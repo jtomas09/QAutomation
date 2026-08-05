@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Settings, Wifi, WifiOff, Activity, Save, Check } from 'lucide-react'
+import { Settings, Wifi, WifiOff, Activity, Save, Check, Wrench } from 'lucide-react'
 import { getDevices, getAllDeviceAppConfigs } from '../../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../../types'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
@@ -30,21 +30,23 @@ function accentFor(device: PhysicalDevice) {
   return { color: '#3DDC84', glow: 'rgba(61,220,132,0.35)' }
 }
 
-type CardStatus = 'available' | 'inuse' | 'offline' | 'discovered'
+type CardStatus = 'available' | 'inuse' | 'offline' | 'maintenance' | 'discovered'
 
 function mapStatus(raw: string): CardStatus {
   const u = (raw ?? '').toUpperCase()
   if (u === 'AVAILABLE')              return 'available'
   if (u === 'BUSY' || u === 'INUSE') return 'inuse'
+  if (u === 'MAINTENANCE')           return 'maintenance'
   if (u === 'DISCOVERED')            return 'discovered'
   return 'offline'
 }
 
 const STATUS: Record<CardStatus, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
-  available:  { label: 'Disponible',  color: '#10b981', bg: 'rgba(16,185,129,0.12)',  Icon: Wifi     },
-  inuse:      { label: 'En uso',      color: '#6366f1', bg: 'rgba(99,102,241,0.12)',  Icon: Activity },
-  offline:    { label: 'Offline',     color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   Icon: WifiOff  },
-  discovered: { label: 'Descubierto', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', Icon: Wifi     },
+  available:   { label: 'Disponible',    color: '#10b981', bg: 'rgba(16,185,129,0.12)',  Icon: Wifi     },
+  inuse:       { label: 'En uso',        color: '#6366f1', bg: 'rgba(99,102,241,0.12)',  Icon: Activity },
+  offline:     { label: 'Offline',       color: '#f43f5e', bg: 'rgba(244,63,94,0.12)',   Icon: WifiOff  },
+  maintenance: { label: 'Mantenimiento', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', Icon: Wrench   },
+  discovered:  { label: 'Descubierto',   color: '#f59e0b', bg: 'rgba(245,158,11,0.12)',  Icon: Wifi     },
 }
 
 // ─── Notification banner ──────────────────────────────────────────────────────
@@ -177,11 +179,20 @@ export default function ConnectedDevices({
     return () => clearInterval(id)
   }, [refresh])
 
-  // Only show devices that are actually reachable — OFFLINE/MAINTENANCE devices are
-  // excluded so users cannot configure a device that is no longer connected.
+  // Dispositivos alcanzables normalmente — se siguen usando para las estadísticas
+  // del header (disponibles/en uso/descubiertos) y para NO ofrecer un dispositivo
+  // desconectado sin configurar como si fuera seleccionable.
   const onlineDevices = devices.filter(d => d.status !== 'OFFLINE' && d.status !== 'MAINTENANCE')
 
   const configuredSet = new Set(configured.map(d => d.udid))
+
+  // Problema 3 (arquitectura de dispositivos): un dispositivo YA CONFIGURADO nunca
+  // desaparece de la grilla por estar OFFLINE/MAINTENANCE — de lo contrario el
+  // usuario no puede ver por qué dejó de ejecutarse ni desmarcarlo. Uno que jamás
+  // se configuró y está offline sigue sin mostrarse (no tiene sentido ofrecerlo).
+  const visibleDevices = devices.filter(d =>
+    (d.status !== 'OFFLINE' && d.status !== 'MAINTENANCE') || configuredSet.has(d.udid)
+  )
   const available     = onlineDevices.filter(d => mapStatus(d.status) === 'available').length
   const inuse         = onlineDevices.filter(d => mapStatus(d.status) === 'inuse').length
   const discovered    = onlineDevices.filter(d => mapStatus(d.status) === 'discovered').length
@@ -258,7 +269,7 @@ export default function ConnectedDevices({
       </AnimatePresence>
 
       {/* Device cards */}
-      {onlineDevices.length === 0 ? (
+      {visibleDevices.length === 0 ? (
         <div className="flex items-center justify-center py-10 text-xs text-slate-600">
           {devices.length > 0
             ? 'Todos los dispositivos detectados están offline'
@@ -267,7 +278,7 @@ export default function ConnectedDevices({
       ) : (
         <div className="grid grid-cols-5 gap-3 p-4">
           <AnimatePresence mode="popLayout">
-            {onlineDevices.map((device, i) => (
+            {visibleDevices.map((device, i) => (
               <DeviceCard
                 key={device.udid}
                 device={device}
@@ -297,7 +308,12 @@ function DeviceCard({
 }) {
   const statusKey    = mapStatus(device.status)
   const s            = STATUS[statusKey]
-  const isSelectable = statusKey !== 'discovered'
+  // Problema 3: el botón "Usar dispositivo" permanece deshabilitado mientras el
+  // dispositivo esté OFFLINE/MAINTENANCE — nunca se puede activar/desactivar un
+  // dispositivo que no está realmente disponible. 'discovered' (Wi-Fi sin túnel)
+  // ya estaba deshabilitado, sin cambios ahí.
+  const isOffline     = statusKey === 'offline' || statusKey === 'maintenance'
+  const isSelectable  = statusKey !== 'discovered' && !isOffline
   const { color, glow } = accentFor(device)
   const img       = pickImage(device)
   const name      = device.deviceName || device.model || 'Dispositivo'
@@ -449,11 +465,27 @@ function DeviceCard({
         )}
       </AnimatePresence>
 
+      {/* Problema 3: dispositivo configurado pero desconectado — se conserva la
+          configuración, pero se avisa explícitamente que no participará en la
+          siguiente ejecución (en vez de solo deshabilitar el toggle en silencio). */}
+      {selected && isOffline && (
+        <div className="text-center leading-tight" style={{ color: '#94a3b8' }}>
+          <div className="text-[8px] font-semibold">Configuración conservada</div>
+          <div className="text-[8px]">No participará en la siguiente ejecución.</div>
+        </div>
+      )}
+
       {/* Toggle button */}
       <button
         onClick={isSelectable ? onToggle : undefined}
         disabled={!isSelectable}
-        title={!isSelectable ? 'Detectado por Wi-Fi — sin túnel activo, no puede iniciar sesión Appium' : undefined}
+        title={
+          isOffline
+            ? 'Dispositivo desconectado — se reactivará solo al reconectarse'
+            : statusKey === 'discovered'
+            ? 'Detectado por Wi-Fi — sin túnel activo, no puede iniciar sesión Appium'
+            : undefined
+        }
         className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[9px] font-bold transition-all mt-0.5"
         style={{
           background:   selected ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
@@ -485,7 +517,7 @@ function DeviceCard({
         >
           {selected && <Check size={8} color="white" />}
         </div>
-        {isSelectable ? 'Usar dispositivo' : 'Wi-Fi sin túnel'}
+        {isSelectable ? 'Usar dispositivo' : isOffline ? 'No disponible' : 'Wi-Fi sin túnel'}
       </button>
     </motion.div>
   )
