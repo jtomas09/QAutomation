@@ -74,6 +74,25 @@ public class DeviceStore {
      * Returns empty if no AVAILABLE device matches.
      */
     public synchronized Optional<Device> claimDevice(String preferredUdidOrName, String platform, String executionId) {
+        Optional<Device> candidate = findAvailableCandidate(preferredUdidOrName);
+        candidate.ifPresent(d -> {
+            d.setStatus(DeviceStatus.BUSY);
+            d.setActiveExecutionId(executionId);
+        });
+        return candidate;
+    }
+
+    /**
+     * Read-only lookup — misma prioridad de matching que claimDevice() (UDID exacto →
+     * nombre exacto → nombre parcial), pero SIN mutar el estado del dispositivo.
+     * Extraído de claimDevice() para que DeviceReadinessService pueda preguntar
+     * "¿hay un dispositivo AVAILABLE que matchee esto?" sin reclamarlo — evita
+     * duplicar esta lógica de 3 niveles en un segundo lugar.
+     *
+     * NO implicit fallback to "any available device" — if the requested device is not
+     * found the caller must handle the empty result (not silently pick a random device).
+     */
+    public Optional<Device> findAvailableCandidate(String preferredUdidOrName) {
         if (preferredUdidOrName == null || preferredUdidOrName.isBlank()) return Optional.empty();
 
         // 0) Exact UDID match — highest priority
@@ -103,11 +122,6 @@ public class DeviceStore {
         }
 
         // No step 3 — never pick a random device as fallback.
-
-        candidate.ifPresent(d -> {
-            d.setStatus(DeviceStatus.BUSY);
-            d.setActiveExecutionId(executionId);
-        });
         return candidate;
     }
 

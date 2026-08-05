@@ -150,6 +150,32 @@ public class ExecutionService {
     }
 
     /**
+     * Marca la ejecución como FAILED sin que haya llegado a correr — caso de carrera
+     * (Problema 5): un dispositivo estaba AVAILABLE al encolar (POST /api/run) pero
+     * se desconectó antes de que el Runner pidiera el job (GET /api/jobs/next).
+     * A diferencia de complete()/confirmAbort(), nunca hubo un dispositivo realmente
+     * reclamado (claimDevice() ya devolvió empty), así que no hay nada que liberar en
+     * DeviceStore. El broadcast "done" (misma forma que complete()) es necesario para
+     * que el frontend salga de status='running' — sin él el timer de "Actividad en
+     * Tiempo Real" seguiría corriendo indefinidamente (mismo bug ya corregido antes).
+     */
+    public void failWithReason(String executionId, String reason) {
+        store.findById(executionId).ifPresent(e -> {
+            e.setStatus(ExecutionStatus.FAILED);
+            e.setFailureReason(reason);
+            e.setEndTime(Instant.now());
+            sse.broadcast(executionId, "done", Map.of(
+                    "passed",  0,
+                    "failed",  0,
+                    "skipped", 0,
+                    "total",   0,
+                    "failureReason", reason
+            ));
+            sse.complete(executionId);
+        });
+    }
+
+    /**
      * Marca la ejecución como ABORTING (señal al runner para que detenga el proceso).
      * El runner cambia el estado a ABORTED cuando confirma que Gradle fue terminado.
      * Si no hay runner activo (ejecución QUEUED), pasa directo a ABORTED.

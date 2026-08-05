@@ -60,22 +60,30 @@ public class JobController {
 
         Optional<Device> deviceOpt = deviceStore.claimDevice(requestedDevice, platform, exec.getExecutionId());
 
-        String assignedPlatform = "";
-        if (deviceOpt.isPresent()) {
-            Device d = deviceOpt.get();
-            exec.setDeviceUdid(d.getUdid());
-            exec.setDevicePlatformVersion(d.getPlatformVersion());
-            exec.setDevice(d.getDeviceName() != null ? d.getDeviceName() : requestedDevice);
-            exec.setAssignedRunnerId(runnerId);
-            assignedPlatform = d.getPlatform() != null ? d.getPlatform() : "";
-
-            log.info("[JobController] DISPOSITIVO ASIGNADO: {} / {} / {}",
-                    exec.getDevice(), assignedPlatform, d.getUdid());
-        } else {
-            log.warn("[JobController] DISPOSITIVO NO DISPONIBLE: '{}' no encontrado en Device Farm. " +
-                    "Verifica que el dispositivo esté conectado y el Runner activo. executionId={}",
+        // Problema 5 — carrera: el dispositivo estaba AVAILABLE cuando se creó la
+        // Execution (ver RunController), pero se desconectó antes de este despacho.
+        // Antes: se construía y devolvía igual un job con udid="" (HTTP 200), y el
+        // Runner lo descubría tarde. Ahora: se marca la Execution como FAILED con
+        // motivo, y se responde 204 — el Runner nunca ve un job con dispositivo vacío,
+        // simplemente sigue con su siguiente poll.
+        if (deviceOpt.isEmpty()) {
+            String reason = "Dispositivo desconectado antes de poder ejecutarse: " + requestedDevice;
+            log.warn("[JobController] DISPOSITIVO NO DISPONIBLE — marcando ejecución como FAILED. " +
+                    "'{}' no encontrado en Device Farm. executionId={}",
                     requestedDevice, exec.getExecutionId());
+            execService.failWithReason(exec.getExecutionId(), reason);
+            return ResponseEntity.noContent().build();
         }
+
+        Device d = deviceOpt.get();
+        exec.setDeviceUdid(d.getUdid());
+        exec.setDevicePlatformVersion(d.getPlatformVersion());
+        exec.setDevice(d.getDeviceName() != null ? d.getDeviceName() : requestedDevice);
+        exec.setAssignedRunnerId(runnerId);
+        String assignedPlatform = d.getPlatform() != null ? d.getPlatform() : "";
+
+        log.info("[JobController] DISPOSITIVO ASIGNADO: {} / {} / {}",
+                exec.getDevice(), assignedPlatform, d.getUdid());
 
         Map<String, Object> job = new java.util.LinkedHashMap<>();
         job.put("executionId",     exec.getExecutionId());

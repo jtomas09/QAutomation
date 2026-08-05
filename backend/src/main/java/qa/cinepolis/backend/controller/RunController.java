@@ -2,10 +2,12 @@ package qa.cinepolis.backend.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import qa.cinepolis.backend.model.Execution;
 import qa.cinepolis.backend.model.RunRequest;
+import qa.cinepolis.backend.service.DeviceReadinessService;
 import qa.cinepolis.backend.service.ExecutionService;
 import qa.cinepolis.backend.store.ExecutionDeviceStore;
 
@@ -20,12 +22,15 @@ public class RunController {
 
     private static final Logger log = LoggerFactory.getLogger(RunController.class);
 
-    private final ExecutionService    execService;
-    private final ExecutionDeviceStore deviceConfigStore;
+    private final ExecutionService        execService;
+    private final ExecutionDeviceStore    deviceConfigStore;
+    private final DeviceReadinessService  readiness;
 
-    public RunController(ExecutionService execService, ExecutionDeviceStore deviceConfigStore) {
+    public RunController(ExecutionService execService, ExecutionDeviceStore deviceConfigStore,
+                          DeviceReadinessService readiness) {
         this.execService       = execService;
         this.deviceConfigStore = deviceConfigStore;
+        this.readiness         = readiness;
     }
 
     @PostMapping("/run")
@@ -39,6 +44,23 @@ public class RunController {
         if (!configured.isEmpty() && !configured.contains(request.getDevice())) {
             log.warn("[RunController] ⚠ La configuración almacenada no coincide con el dispositivo enviado. " +
                     "Configurado={} | Recibido={}", configured, request.getDevice());
+        }
+
+        // Problema 5 — nunca crear una Execution destinada a fallar: se valida
+        // disponibilidad ANTES de encolar, con el mismo criterio (AVAILABLE) que
+        // JobController usará después vía DeviceStore.claimDevice(). Esto no
+        // elimina la carrera "se desconectó justo después de encolar" (ver
+        // JobController) — solo evita el caso común (dispositivo ya offline
+        // desde antes de intentar ejecutar).
+        if (!readiness.isReady(request.getDevice())) {
+            String reason = readiness.notReadyReason(request.getDevice());
+            log.warn("[RunController] ❌ Ejecución rechazada — dispositivo no listo: {} ({})",
+                    request.getDevice(), reason);
+            Map<String, Object> rejected = new LinkedHashMap<>();
+            rejected.put("success", false);
+            rejected.put("message", reason);
+            rejected.put("device",  request.getDevice());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(rejected);
         }
 
         Execution exec = execService.create(

@@ -28,6 +28,9 @@ public class Execution {
     private String          deviceUdid;
     private String          devicePlatformVersion;
     private String          assignedRunnerId;
+    /** Motivo legible cuando la ejecución falla sin haber llegado a correr (p. ej.
+     *  dispositivo desconectado entre encolar y despachar) — ver ExecutionService.failWithReason(). */
+    private String          failureReason;
 
     public String          getExecutionId()              { return executionId; }
     public void            setExecutionId(String v)      { this.executionId = v; }
@@ -73,4 +76,6 @@ public class Execution {
     public void            setDevicePlatformVersion(String v)   { this.devicePlatformVersion = v; }
     public String          getAssignedRunnerId()                { return assignedRunnerId; }
     public void            setAssignedRunnerId(String v)        { this.assignedRunnerId = v; }
+    public String          getFailureReason()                   { return failureReason; }
+    public void            setFailureReason(String v)           { this.failureReason = v; }
 }
