@@ -202,6 +202,18 @@ public class SelectorPage extends BasePage {
             int intento = 0;
             for (String nombre : nombresPeliculas) {
                 intento++;
+
+                // FIX real (Problemas 3/4/5 — fail-fast): segunda capa de defensa, además
+                // del filtro ya aplicado en obtenerPeliculasVisibles(). Si por cualquier
+                // motivo un candidato inválido (texto de Club Cinépolis/login/banner)
+                // llegara hasta aquí, se descarta en <1ms en vez de invertir el ciclo
+                // completo de reintentos (~183s observados en vivo por candidato inválido).
+                if (esTextoNoPelicula(nombre)) {
+                    utils.PerfMetrics.attempt("MovieOpen", intento, nombre, 0, "SKIP-INVALIDO");
+                    log.debug("[SelectorPage] Candidato descartado (no es una película): {}", nombre);
+                    continue;
+                }
+
                 long t0 = System.currentTimeMillis();
                 try {
                     log.info("[SelectorPage] Intentando abrir película desde Ver sinopsis: {}", nombre);
@@ -690,8 +702,21 @@ public class SelectorPage extends BasePage {
             return true;
         }
         try {
+            // FIX real (Problema 3 — causa raíz de los ~183s/intento observados en vivo):
+            // este método se invoca hasta 6 veces por candidato dentro del poll de
+            // esperarDetallePelicula() (cada 250ms), y su predicate anterior matcheaba
+            // CUALQUIER botón con texto accesible — con la cartelera completa todavía
+            // visible (docenas de botones) tras tocar un candidato inválido, cada llamada
+            // pagaba el costo de evaluar y traer todos esos botones. Mismo patrón ya
+            // corregido en estaEnPantallaDeHorarios() (Iteración 3, esta sesión) — aquí se
+            // acota exactamente a la condición que el regex Java de abajo exige (termina
+            // en AM/PM): nunca puede excluir un horario real, solo reduce drásticamente
+            // cuántos elementos llegan al filtrado Java.
             By locator = isIOS()
-                    ? AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)")
+                    ? AppiumBy.iOSNsPredicateString(
+                        "type == 'XCUIElementTypeButton' AND "
+                        + "(value CONTAINS[c] 'AM' OR value CONTAINS[c] 'PM' "
+                        + "OR label CONTAINS[c] 'AM' OR label CONTAINS[c] 'PM')")
                     : By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"
                         + " | //android.view.View[@text and normalize-space(@text)!='']");
             for (WebElement el : driver.findElements(locator)) {
@@ -1135,9 +1160,15 @@ public class SelectorPage extends BasePage {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
+        // PERF (Problema 2 — MovieDetection ~50-60s, mismo patrón ya validado en vivo
+        // esta sesión para asientos: "value != nil" matchea CUALQUIER texto accesible en
+        // pantalla, obligando a traer todos los candidatos a Java antes de descartar por
+        // longitud. Se empuja la MISMA condición de longitud (5-80) que el filtro Java de
+        // abajo ya exige — nunca puede excluir un candidato que el filtro actual aceptaría,
+        // solo reduce cuántos elementos WDA devuelve y Java tiene que iterar.
         List<By> candidatos = isIOS() ? List.of(
-                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"),
-                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeOther' AND value != nil")
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil AND value MATCHES '.{5,80}'"),
+                AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeOther' AND value != nil AND value MATCHES '.{5,80}'")
         ) : List.of(
                 By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"),
                 By.xpath("//android.view.View[@text and normalize-space(@text)!='']")
@@ -2133,6 +2164,21 @@ public class SelectorPage extends BasePage {
      * si no, reintenta con distintas posiciones de tap sobre la fila.
      */
     private void seleccionarFiltroGenerico(String textoFiltro) {
+        // FIX real (Problema 6 — evidencia: seleccionarFiltro3D()/seleccionarFiltroSalaJunior()
+        // se llaman ANTES de abrir cualquier película, es decir, en la pantalla de
+        // cartelera — no de horarios). Buscar "Filtros" sin validar primero que la
+        // cartelera realmente cargó con tarjetas de película reales producía un fallo
+        // tardío y confuso (timeout genérico de waitAndGet). Se reutiliza
+        // obtenerPeliculasVisibles() (MovieDetection, ya corregido arriba) como señal de
+        // "contexto correcto" — si no hay ninguna tarjeta real detectable, se detiene el
+        // flujo de inmediato con un motivo claro en vez de seguir buscando elementos que
+        // no existen en esta pantalla.
+        if (obtenerPeliculasVisibles().isEmpty()) {
+            throw new org.opentest4j.TestAbortedException(
+                    "No se puede seleccionar el filtro '" + textoFiltro
+                    + "': la cartelera no muestra películas — contexto incorrecto para buscar 'Filtros'.");
+        }
+
         By btnFiltros = By.xpath("//*[contains(@text,'Filtros') or contains(@content-desc,'Filtros')]");
         By btnAplicar = By.xpath("//*[contains(@text,'Aplicar')]");
 
@@ -2496,8 +2542,32 @@ public class SelectorPage extends BasePage {
         }
     }
 
+    // FIX real (Problema 1 — evidencia: abrirPrimerPeliculaDesdeVerSinopsis() intentaba
+    // abrir "Inicia sesión o crea una cuenta", "¿Ya tienes tu cuenta digital con QR?",
+    // "Si tienes una tarjeta física...", "crea una cuenta..." como si fueran películas —
+    // hasta 4 intentos × ~3 min c/u = >12 min perdidos en un solo caso). Estos textos de
+    // Club Cinépolis/login pasaban el filtro anterior porque era una lista de
+    // coincidencias EXACTAS que nunca los incluyó. Se agregan dos capas:
+    //   1) Palabras clave inequívocas de Club Cinépolis/login/promocional (CONTAINS,
+    //      no exact-match — cubre variantes de redacción del mismo banner).
+    //   2) Heurística estructural: ningún título real de película en esta cartelera
+    //      contiene "?"/"¿" (son preguntas) ni "..." (elipsis de copy promocional) —
+    //      esto generaliza a CUALQUIER banner futuro con esa forma, sin depender de
+    //      conocer su texto exacto de antemano.
+    private static final String[] PALABRAS_CLAVE_NO_PELICULA = {
+            "inicia sesión", "inicia sesion", "crea una cuenta", "creación de cuenta",
+            "cuenta digital", "tarjeta física", "tarjeta fisica", "código qr", "codigo qr",
+            "club cinépolis", "club cinepolis", "regístrate", "registrate",
+            "recuperar contraseña", "recuperar contrasena", "cerrar sesión", "cerrar sesion",
+    };
+
     private boolean esTextoNoPelicula(String txt) {
         String t = txt == null ? "" : txt.trim().toLowerCase();
+
+        if (t.contains("?") || t.contains("¿") || t.contains("...")) return true;
+        for (String clave : PALABRAS_CLAVE_NO_PELICULA) {
+            if (t.contains(clave)) return true;
+        }
 
         return t.isBlank()
                 || t.equals("cartelera")
