@@ -150,9 +150,15 @@ public class SelectorPage extends BasePage {
     public String abrirPrimerPeliculaDesdeVerSinopsis() {
         driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(isIOS() ? 8 : 3));
 
-        // MovieDetection: único escaneo de la pantalla — obtenerPeliculasVisibles()
-        // ya aplica el filtro de candidatos válidos (esTextoNoPelicula) internamente.
-        List<WebElement> peliculas = utils.PerfMetrics.measure("MovieDetection", this::obtenerPeliculasVisibles);
+        // MovieDetection: obtenerPeliculasVisibles() ya aplica el filtro de candidatos
+        // válidos (esTextoNoPelicula) internamente. Se envuelve en un poll corto (ver
+        // esperarPeliculasVisibles) — evidencia real: la cartelera puede seguir
+        // renderizando tarjetas después de que esperarCargaCartelera() confirma solo un
+        // primer texto largo, y un único escaneo sin reintento podía correr una fracción
+        // de segundo antes de que las tarjetas específicas terminaran de montarse, aunque
+        // WDA sí las detectaba momentos después (mismas películas confirmadas en vivo:
+        // "Nimrods: Una Comedia De Green Day", "Katseye: Wild Hearts En Cines", etc.).
+        List<WebElement> peliculas = utils.PerfMetrics.measure("MovieDetection", () -> esperarPeliculasVisibles(5000));
 
         if (peliculas.isEmpty()) {
             throw new RuntimeException("No se detectaron títulos de películas en la pantalla inicial.");
@@ -457,117 +463,6 @@ public class SelectorPage extends BasePage {
         } finally {
             utils.PerfMetrics.endPhase("SeatSelection");
         }
-    }
-    public String seleccionarPrimerPeliculaVisible() {
-        driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(3));
-
-        List<WebElement> peliculasVisibles = obtenerPeliculasVisibles();
-
-        if (peliculasVisibles.isEmpty()) {
-            throw new RuntimeException("No se detectaron títulos de películas en la pantalla inicial.");
-        }
-
-        // Guardamos solo textos, no WebElements, para evitar stale
-        List<String> nombresPeliculas = new ArrayList<>();
-        for (WebElement el : peliculasVisibles) {
-            try {
-                String nombre = obtenerTextoSeguro(el);
-                if (!nombre.isBlank() && !nombresPeliculas.contains(nombre)) {
-                    nombresPeliculas.add(nombre);
-                }
-            } catch (Exception ignored) {
-            }
-        }
-
-        for (String nombre : nombresPeliculas) {
-            try {
-                log.info("[SelectorPage] Intentando abrir película: {}", nombre);
-
-                boolean abierta = intentarAbrirPeliculaPorNombre(nombre);
-
-                if (abierta) {
-                    log.info("[SelectorPage] Película abierta correctamente: {}", nombre);
-                    return nombre;
-                }
-
-                log.warn("[SelectorPage] No se pudo abrir la película: {}", nombre);
-
-            } catch (Exception e) {
-                log.warn("[SelectorPage] Error intentando abrir película '{}': {}", nombre, e.getMessage());
-            }
-        }
-
-        throw new RuntimeException("Se detectaron películas visibles, pero no se pudo abrir ninguna.");
-    }
-    private boolean intentarAbrirPeliculaPorNombre(String nombre) {
-        for (int intento = 1; intento <= 3; intento++) {
-            try {
-                WebElement titulo = reubicarTituloPelicula(nombre);
-
-                if (titulo == null) {
-                    log.warn("[SelectorPage] No se pudo reubicar la película: {}", nombre);
-                    return false;
-                }
-
-                int centerX = titulo.getRect().getX() + (titulo.getRect().getWidth() / 2);
-                int titleTopY = titulo.getRect().getY();
-                int titleCenterY = titulo.getRect().getY() + (titulo.getRect().getHeight() / 2);
-
-                // Intento A: tap en póster arriba del título
-                try {
-                    int posterTapY = titleTopY - 140;
-                    if (posterTapY < 80) {
-                        posterTapY = titleCenterY;
-                    }
-
-                    log.debug("[SelectorPage] Tap película intento {} (poster) -> {} X={} Y={}", intento, nombre, centerX, posterTapY);
-
-                    tapW3C(centerX, posterTapY);
-
-                    if (esperarDetallePelicula(4000)) {
-                        return true;
-                    }
-                } catch (Exception e) {
-                    log.warn("[SelectorPage] Falló tap poster para: {} -> {}", nombre, e.getMessage());
-                }
-
-                // Intento B: tap directo al texto reubicado
-                try {
-                    titulo = reubicarTituloPelicula(nombre);
-                    if (titulo != null) {
-                        int x = titulo.getRect().getX() + (titulo.getRect().getWidth() / 2);
-                        int y = titulo.getRect().getY() + (titulo.getRect().getHeight() / 2);
-
-                        log.debug("[SelectorPage] Tap película intento {} (texto) -> {} X={} Y={}", intento, nombre, x, y);
-
-                        tapW3C(x, y);
-
-                        if (esperarDetallePelicula(4000)) {
-                            return true;
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("[SelectorPage] Falló tap texto para: {} -> {}", nombre, e.getMessage());
-                }
-
-                // Intento C: click seguro sobre el elemento reubicado
-                try {
-                    titulo = reubicarTituloPelicula(nombre);
-                    if (titulo != null && clicSeguroEnElemento(titulo)) {
-                        if (esperarDetallePelicula(4000)) {
-                            return true;
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("[SelectorPage] Falló clicSeguroEnElemento para: {} -> {}", nombre, e.getMessage());
-                }
-
-            } catch (Exception e) {
-                log.warn("[SelectorPage] intentoAbrirPeliculaPorNombre error con '{}': {}", nombre, e.getMessage());
-            }
-        }
-
-        return false;
     }
     private WebElement reubicarTituloPelicula(String nombre) {
         // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
@@ -1147,6 +1042,30 @@ public class SelectorPage extends BasePage {
         }
     }
 
+
+    /**
+     * FIX real (causa raíz de "No se detectaron títulos de películas en la pantalla
+     * inicial" pese a que WDA sí detectaba tarjetas reales — evidencia en vivo:
+     * "Nimrods: Una Comedia De Green Day", "Katseye: Wild Hearts En Cines", etc.):
+     * obtenerPeliculasVisibles() se llamaba una sola vez, sin reintento.
+     * esperarCargaCartelera() (llamada antes, en abrirPeliculaYMostrarHorarios())
+     * solo confirma que ALGÚN texto largo ya renderizó — no que las tarjetas de
+     * película específicas ya lo hicieron; la cartelera puede seguir montándose
+     * progresivamente después de ese primer texto. Único punto de entrada para
+     * "¿hay tarjetas de película reales visibles ahora?" — reutilizado por
+     * abrirPrimerPeliculaDesdeVerSinopsis() (MovieDetection) y por
+     * seleccionarFiltroGenerico() (validación de contexto de cartelera) — nunca
+     * se duplica esta espera en más de un lugar.
+     */
+    private List<WebElement> esperarPeliculasVisibles(long timeoutMs) {
+        long end = System.currentTimeMillis() + timeoutMs;
+        List<WebElement> peliculas = obtenerPeliculasVisibles();
+        while (peliculas.isEmpty() && System.currentTimeMillis() < end) {
+            sleep(400);
+            peliculas = obtenerPeliculasVisibles();
+        }
+        return peliculas;
+    }
 
     // PERF (evidencia real de MÉTRICAS — MovieDetection tardó 35384ms en una corrida):
     // este método (el escaneo inicial de TODA la cartelera, llamado en cada test) seguía
@@ -2169,11 +2088,12 @@ public class SelectorPage extends BasePage {
         // cartelera — no de horarios). Buscar "Filtros" sin validar primero que la
         // cartelera realmente cargó con tarjetas de película reales producía un fallo
         // tardío y confuso (timeout genérico de waitAndGet). Se reutiliza
-        // obtenerPeliculasVisibles() (MovieDetection, ya corregido arriba) como señal de
-        // "contexto correcto" — si no hay ninguna tarjeta real detectable, se detiene el
-        // flujo de inmediato con un motivo claro en vez de seguir buscando elementos que
-        // no existen en esta pantalla.
-        if (obtenerPeliculasVisibles().isEmpty()) {
+        // esperarPeliculasVisibles() (mismo helper que usa MovieDetection — evita
+        // repetir aquí un segundo escaneo de un solo intento) como señal de "contexto
+        // correcto": si no hay ninguna tarjeta real detectable ni con reintento, se
+        // detiene el flujo de inmediato con un motivo claro en vez de seguir buscando
+        // elementos que no existen en esta pantalla.
+        if (esperarPeliculasVisibles(5000).isEmpty()) {
             throw new org.opentest4j.TestAbortedException(
                     "No se puede seleccionar el filtro '" + textoFiltro
                     + "': la cartelera no muestra películas — contexto incorrecto para buscar 'Filtros'.");
