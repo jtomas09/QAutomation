@@ -1044,22 +1044,38 @@ public class SelectorPage extends BasePage {
 
 
     /**
-     * FIX real (causa raíz de "No se detectaron títulos de películas en la pantalla
-     * inicial" pese a que WDA sí detectaba tarjetas reales — evidencia en vivo:
-     * "Nimrods: Una Comedia De Green Day", "Katseye: Wild Hearts En Cines", etc.):
-     * obtenerPeliculasVisibles() se llamaba una sola vez, sin reintento.
-     * esperarCargaCartelera() (llamada antes, en abrirPeliculaYMostrarHorarios())
-     * solo confirma que ALGÚN texto largo ya renderizó — no que las tarjetas de
-     * película específicas ya lo hicieron; la cartelera puede seguir montándose
-     * progresivamente después de ese primer texto. Único punto de entrada para
-     * "¿hay tarjetas de película reales visibles ahora?" — reutilizado por
-     * abrirPrimerPeliculaDesdeVerSinopsis() (MovieDetection) y por
-     * seleccionarFiltroGenerico() (validación de contexto de cartelera) — nunca
-     * se duplica esta espera en más de un lugar.
+     * FIX real — causa raíz CONFIRMADA con evidencia forense en vivo (ver instrumentación
+     * [SelectorPage][FORENSE] en obtenerPeliculasVisibles()): de 72 candidatos crudos,
+     * 68 — incluyendo TODOS los títulos reales de película ("Spider-Man: Un Nuevo Día",
+     * "Toy Story 5", "La Odisea", etc.) y hasta la barra de navegación ("Filtros",
+     * "Cines", "Fechas") — quedaban "DESCARTADO (no visible)". Solo los 4 elementos del
+     * banner de Club Cinépolis ("Inicia sesión o crea una cuenta en...") SÍ eran
+     * visibles (correctamente filtrados por esTextoNoPelicula). Es decir: el banner
+     * ocupa la parte superior de la pantalla y empuja el resto de la cartelera fuera
+     * del viewport visible — no un problema de timing/renderizado progresivo (la
+     * hipótesis anterior), sino de posición de scroll. Esto ocurre tras el
+     * relanzamiento de la app entre tests (@AfterEach → relaunchAppSafe(), no
+     * modificado) y nada en el flujo hacía scroll para revelarlo.
+     *
+     * Corrección mínima: si el primer intento queda vacío, UN solo scroll
+     * (slowSwipeUp(), heredado de BasePage — mismo gesto que ya usa este archivo para
+     * el mismo propósito en horarios, ver hacerScrollHorarios()) antes de reintentar.
+     * En el caso normal (primer intento no vacío) el scroll nunca se ejecuta — cero
+     * cambio de comportamiento ahí. Único punto de entrada para "¿hay tarjetas de
+     * película reales visibles ahora?" — reutilizado por abrirPrimerPeliculaDesdeVerSinopsis()
+     * (MovieDetection) y por seleccionarFiltroGenerico() (validación de contexto de
+     * cartelera) — nunca se duplica esta espera en más de un lugar.
      */
     private List<WebElement> esperarPeliculasVisibles(long timeoutMs) {
-        long end = System.currentTimeMillis() + timeoutMs;
         List<WebElement> peliculas = obtenerPeliculasVisibles();
+        if (!peliculas.isEmpty()) return peliculas;
+
+        try {
+            slowSwipeUp();
+        } catch (Exception ignored) {}
+
+        long end = System.currentTimeMillis() + timeoutMs;
+        peliculas = obtenerPeliculasVisibles();
         while (peliculas.isEmpty() && System.currentTimeMillis() < end) {
             sleep(400);
             peliculas = obtenerPeliculasVisibles();
