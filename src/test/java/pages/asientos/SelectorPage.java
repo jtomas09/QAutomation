@@ -1093,28 +1093,66 @@ public class SelectorPage extends BasePage {
                 By.xpath("//android.view.View[@text and normalize-space(@text)!='']")
         );
 
+        // Instrumentación forense — investigación "No se detectaron títulos de
+        // películas" pese a que WDA sí detecta títulos reales. IMPORTANTE: log.debug()
+        // de este archivo NUNCA aparece en los logs de producción de este proyecto
+        // (confirmado: 0 apariciones en una corrida real de 21k líneas, incluso en el
+        // caso exitoso) — por eso se usa log.info() aquí. Cero costo adicional en el
+        // camino exitoso (solo se acumulan strings en memoria con datos YA calculados
+        // por el propio filtro; nunca se imprimen si resultado no queda vacío). Solo
+        // cuando el resultado final queda vacío se vuelca el detalle completo — que es
+        // exactamente cuando se necesita para diagnosticar.
+        List<String> diagnostico = new ArrayList<>();
+        List<WebElement> primerLoteCrudo = null;
+        int totalCandidatosCrudos = 0;
+
         for (By locator : candidatos) {
             try {
                 List<WebElement> elementos = driver.findElements(locator);
+                if (primerLoteCrudo == null) primerLoteCrudo = elementos;
+                totalCandidatosCrudos += elementos.size();
 
                 for (WebElement el : elementos) {
                     try {
-                        if (!el.isDisplayed()) continue;
+                        boolean visible;
+                        try { visible = el.isDisplayed(); } catch (Exception e) { visible = false; }
+
+                        if (!visible) {
+                            diagnostico.add("DESCARTADO (no visible)");
+                            continue;
+                        }
 
                         String texto = obtenerTextoSeguro(el);
-                        if (texto.isBlank()) continue;
-                        if (texto.length() < 5) continue;
-                        if (esTextoNoPelicula(texto)) continue;
+                        if (texto.isBlank()) {
+                            diagnostico.add("DESCARTADO (texto vacío)");
+                            continue;
+                        }
+                        if (texto.length() < 5) {
+                            diagnostico.add("DESCARTADO (longitud<5) texto='" + texto + "'");
+                            continue;
+                        }
+                        if (esTextoNoPelicula(texto)) {
+                            diagnostico.add("DESCARTADO (esTextoNoPelicula) texto='" + texto + "'");
+                            continue;
+                        }
 
                         // Evitar horarios
-                        if (texto.matches("^([01]?\\d|2[0-3]):[0-5]\\d(\\s?(AM|PM|am|pm))?$")) continue;
+                        if (texto.matches("^([01]?\\d|2[0-3]):[0-5]\\d(\\s?(AM|PM|am|pm))?$")) {
+                            diagnostico.add("DESCARTADO (es horario) texto='" + texto + "'");
+                            continue;
+                        }
 
                         // Evitar textos demasiado largos que no suelen ser títulos
-                        if (texto.length() > 80) continue;
+                        if (texto.length() > 80) {
+                            diagnostico.add("DESCARTADO (longitud>80) texto='" + texto.substring(0, 60) + "...'");
+                            continue;
+                        }
 
+                        diagnostico.add("ACEPTADO texto='" + texto + "'");
                         unicos.putIfAbsent(texto.trim(), el);
 
-                    } catch (Exception ignored) {
+                    } catch (Exception e) {
+                        diagnostico.add("DESCARTADO (excepción: " + e.getMessage() + ")");
                     }
                 }
 
@@ -1127,9 +1165,31 @@ public class SelectorPage extends BasePage {
 
         resultado.addAll(unicos.values());
 
-        log.debug("[SelectorPage] Películas visibles detectadas: {}", resultado.size());
-        for (WebElement el : resultado) {
-            log.debug(" - {}", obtenerTextoSeguro(el));
+        if (resultado.isEmpty()) {
+            log.info("[SelectorPage][FORENSE] obtenerPeliculasVisibles() NO encontró películas — "
+                    + "candidatosCrudos={} evaluados={}", totalCandidatosCrudos, diagnostico.size());
+            for (String linea : diagnostico) {
+                log.info("[SelectorPage][FORENSE]   {}", linea);
+            }
+            // Detalle extendido (type/name/label/value) solo para diagnóstico de fallo —
+            // acotado a los primeros 30 candidatos crudos (mismo criterio de "no volcar
+            // todo el árbol" que ya usa IOSLocatorDebug) para no sumar demasiada latencia
+            // extra a un camino que ya está fallando.
+            if (isIOS() && primerLoteCrudo != null) {
+                int limite = Math.min(30, primerLoteCrudo.size());
+                for (int i = 0; i < limite; i++) {
+                    WebElement el = primerLoteCrudo.get(i);
+                    try {
+                        log.info("[SelectorPage][FORENSE]   [{}] type={} name={} label={} value={}",
+                                i, el.getAttribute("type"), el.getAttribute("name"),
+                                el.getAttribute("label"), el.getAttribute("value"));
+                    } catch (Exception e) {
+                        log.info("[SelectorPage][FORENSE]   [{}] error leyendo atributos: {}", i, e.getMessage());
+                    }
+                }
+            }
+        } else {
+            log.info("[SelectorPage] Películas visibles detectadas: {}", resultado.size());
         }
 
         return resultado;
