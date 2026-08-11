@@ -427,35 +427,19 @@ public class SelectorPage extends BasePage {
             SeatMap map = buildSeatMap();
             log.info("[SelectorPage] {}", map.getSummary());
 
-            long tCandidatos = System.currentTimeMillis();
-            SeatMap.SelectionResult result = map.selectAnyN(3);
-            utils.PerfMetrics.stage("SeatSelection", "candidatos", System.currentTimeMillis() - tCandidatos);
-            if (result == null) {
+            if (map.getTotalSeats() < 3) {
                 org.junit.jupiter.api.Assumptions.abort(
                     "Menos de 3 asientos disponibles. Se omite la prueba.");
                 return null;
             }
 
-            log.info("[SelectorPage] Estrategia: {}", result.strategy);
-
-            List<String> seleccionados = new ArrayList<>();
-            int intento = 0;
-            for (SeatMap.Seat seat : result.seats) {
-                intento++;
-                long tClick = System.currentTimeMillis();
-                boolean ok = tapRapidoEnButacaDesdeLabel(seat.element);
-                utils.PerfMetrics.attempt("SeatSelection", intento, seat.toString(), System.currentTimeMillis() - tClick, ok ? "OK" : "FAIL");
-                if (ok) {
-                    sleep(80);
-                    seleccionados.add(seat.toString());
-                    log.info("[SelectorPage] Asiento agregado: {}", seat);
-                }
-            }
-
-            if (seleccionados.size() < 3) {
-                throw new RuntimeException(
-                    "Solo se pudieron seleccionar " + seleccionados.size() + " de 3 asientos.");
-            }
+            // FIX real (evidencia forense — ver SeatSelectionEngine): el mapa ya NO se
+            // fija una sola vez antes de los 3 taps. SeatSelectionEngine reconstruye el
+            // SeatMap antes de cada candidato y confirma la selección real después del
+            // tap, en vez de reutilizar WebElement de este escaneo inicial (solo usado
+            // aquí para el chequeo rápido de "hay al menos 3 asientos").
+            List<String> seleccionados = new SeatSelectionEngine(this)
+                .select(3, SeatSelectionEngine.CUALQUIERA);
 
             log.info("[SelectorPage] 3 asientos seleccionados: {}", seleccionados);
             takeScreenshot("3 asientos seleccionados");
@@ -2745,7 +2729,9 @@ public class SelectorPage extends BasePage {
 
 
 
-    private boolean tapRapidoEnButacaDesdeLabel(WebElement el) {
+    // Sin modificador (package-private): reutilizado por SeatSelectionEngine — ver
+    // comentario de buildSeatMap().
+    boolean tapRapidoEnButacaDesdeLabel(WebElement el) {
         try {
             org.openqa.selenium.Rectangle r = el.getRect();
 
@@ -2925,7 +2911,9 @@ public class SelectorPage extends BasePage {
      * Construye un {@link SeatMap} a partir del estado actual del mapa de asientos.
      * Ejecuta el escaneo principal y dos fallbacks antes de devolver el modelo.
      */
-    private SeatMap buildSeatMap() {
+    // Sin modificador (package-private): SeatSelectionEngine, en el mismo paquete,
+    // necesita reconstruir el mapa entre cada tap sin duplicar este método.
+    SeatMap buildSeatMap() {
         long t0 = System.currentTimeMillis();
         List<WebElement> raw = esperarYObtenerAsientosDelMapa();
         utils.PerfMetrics.stage("SeatSelection", "busqueda", System.currentTimeMillis() - t0);
