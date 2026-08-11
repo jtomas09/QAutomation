@@ -29,6 +29,30 @@ export interface RunnerStatusEvent {
   runners: Runner[]
 }
 
+// Menor valor = más saludable. El backend devuelve los runners en orden
+// arbitrario (ConcurrentHashMap sin sort), así que si hay más de uno
+// registrado (p.ej. un runner viejo de otra máquina que nunca se limpió)
+// no podemos asumir que el primero del array es el que importa.
+const STATUS_PRIORITY: Record<RunnerStatus, number> = {
+  ONLINE:   0,
+  BUSY:     1,
+  DEGRADED: 2,
+  STARTING: 3,
+  STOPPING: 4,
+  OFFLINE:  5,
+}
+
+function pickPrimary(runners: Runner[]): Runner | null {
+  if (runners.length === 0) return null
+  return runners.reduce((best, r) => {
+    const byStatus = STATUS_PRIORITY[r.status] - STATUS_PRIORITY[best.status]
+    if (byStatus !== 0) return byStatus < 0 ? r : best
+    const bestSeen = best.lastSeen ? Date.parse(best.lastSeen) : 0
+    const rSeen    = r.lastSeen    ? Date.parse(r.lastSeen)    : 0
+    return rSeen > bestSeen ? r : best
+  })
+}
+
 // ── Service ───────────────────────────────────────────────────────────────────
 
 class RunnerLifecycleServiceImpl {
@@ -91,7 +115,7 @@ class RunnerLifecycleServiceImpl {
       this._initialized       = true
       this._runners           = runners
 
-      const primary           = runners.length > 0 ? runners[0] : null
+      const primary           = pickPrimary(runners)
       this._runner            = primary
 
       const newStatus: RunnerLifecycleStatus = primary
