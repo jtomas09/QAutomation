@@ -1,5 +1,6 @@
 package pages.asientos;
 
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,25 +14,32 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * Único responsable de refrescar el mapa de asientos entre cada tap.
+ * Único responsable de la lógica de selección incremental de asientos.
  *
- * FIX real (evidencia forense — ejecución 2026-08-11 11:18:58, log
- * automationqa-runner.log líneas ~1705900-1706193): antes, cada método de
- * selección múltiple construía el SeatMap UNA sola vez y reutilizaba los
- * mismos WebElement para los N taps. El log de WebDriverAgent muestra que,
- * tras el primer tap, el árbol XCUI se invalida ("Find the '2' Button
- * (retry 1)", "(retry 2)", fallback "Get all elements bound by index") y los
- * WebElement restantes ya no se pueden resolver de forma confiable. Además,
- * "tap sin excepción" nunca implicó "asiento seleccionado" — no existía
- * ninguna verificación posterior.
+ * Historia (evidencia forense — ejecución 2026-08-11 11:18:58, log
+ * automationqa-runner.log líneas ~1705900-1706193): la versión ORIGINAL
+ * construía el SeatMap UNA sola vez y reutilizaba los mismos WebElement para
+ * los N taps — tras el primer tap el árbol XCUI se invalidaba y los taps
+ * siguientes fallaban ("Find the 'N' Button (retry 1/2)" + fallback antes de
+ * fallar). Se corrigió reconstruyendo el mapa completo antes y después de
+ * CADA asiento — pero esa versión introdujo una regresión de rendimiento
+ * severa: cada reconstrucción cuesta ~160s con ~143 candidatos (evidencia:
+ * "obtenerCandidatosAsientoIOS findElements=40596ms ... filtroJava=64306ms"),
+ * y con 2 reconstrucciones por asiento un caso de 3 asientos pasaba de
+ * minutos a más de una hora.
  *
- * Este motor reconstruye el mapa antes de elegir cada candidato y vuelve a
- * reconstruirlo después del tap para confirmar el estado "selected" real del
- * mismo número de asiento — nunca reutiliza un WebElement de un escaneo
- * anterior. Es el único lugar donde vive esta lógica de refresco; cualquier
- * método de SelectorPage que seleccione N asientos (random, consecutivos,
- * VIP, etc.) debe apoyarse en {@link #select(int, SeatPicker)} en vez de
- * repetirla.
+ * Esta versión hace UN solo escaneo completo por llamada a {@link #select}
+ * (no por asiento). Los WebElement de los asientos NO tocados no tienen
+ * motivo para invalidarse solo porque se tocó otro; el estado del asiento
+ * recién tocado se revalida leyendo sus atributos directamente sobre el
+ * mismo handle (sin findElements). Solo si esa lectura lanza
+ * {@link StaleElementReferenceException} se hace una relocalización DIRIGIDA
+ * a ese único número (nunca un reescaneo de los ~143 candidatos) vía
+ * {@link SelectorPage#reubicarAsientoPorNumero(int)}.
+ *
+ * Es el único lugar donde vive esta lógica; cualquier método de SelectorPage
+ * que seleccione N asientos (random, consecutivos, VIP, etc.) debe apoyarse
+ * en {@link #select(int, SeatPicker)} en vez de repetirla.
  */
 final class SeatSelectionEngine {
 
@@ -64,21 +72,28 @@ final class SeatSelectionEngine {
     }
 
     /**
-     * Selecciona {@code count} asientos, reconstruyendo el mapa antes de cada
-     * candidato y confirmando la selección real antes de continuar con el
-     * siguiente. Nunca reintenta un número ya confirmado o descartado.
+     * Selecciona {@code count} asientos con UN solo escaneo completo inicial.
+     * Cada asiento se revalida leyendo directamente su propio WebElement (sin
+     * volver a escanear toda la pantalla); solo se relocaliza de forma
+     * dirigida (un único número, nunca los ~143 candidatos) si ese handle
+     * quedó obsoleto. Nunca reintenta un número ya confirmado o descartado.
      *
      * @throws RuntimeException si se agotan los candidatos disponibles antes
      *         de reunir {@code count} asientos confirmados.
      */
     List<String> select(int count, SeatPicker picker) {
+        long tEscaneo = System.currentTimeMillis();
+        SeatMap mapa = page.buildSeatMap();                 // ÚNICO escaneo completo de toda la selección
+        utils.PerfMetrics.stage("SeatSelection", "escaneoInicial", System.currentTimeMillis() - tEscaneo);
+        log.info("[SeatSelectionEngine] Escaneo inicial: {} asiento(s) numerado(s) disponibles.",
+            mapa.allNumberedSeats().size());
+
         List<String> seleccionados = new ArrayList<>();
         Set<Integer> excluidos = new HashSet<>();
         int intento = 0;
 
         while (seleccionados.size() < count) {
-            SeatMap mapaActual = page.buildSeatMap();
-            SeatMap.Seat candidato = picker.pick(mapaActual, excluidos);
+            SeatMap.Seat candidato = picker.pick(mapa, excluidos);
             if (candidato == null) {
                 log.warn("[SeatSelectionEngine] Sin más candidatos ({}/{} confirmados, {} descartados).",
                     seleccionados.size(), count, excluidos.size());
@@ -92,18 +107,37 @@ final class SeatSelectionEngine {
 
             long tClick = System.currentTimeMillis();
             boolean tapOk = page.tapRapidoEnButacaDesdeLabel(candidato.element);
-            long tiempoMs = System.currentTimeMillis() - tClick;
+            long tiempoTap = System.currentTimeMillis() - tClick;
 
+            long tValidacion = System.currentTimeMillis();
+            boolean reubicado = false;
             boolean confirmado = false;
+            String estadoFinal = "no se validó (tap falló)";
             if (tapOk) {
-                page.sleep(150);
-                WebElement reubicado = localizarPorNumero(page.buildSeatMap(), candidato.number);
-                confirmado = reubicado != null && estaSeleccionado(reubicado);
-                log.info("[SeatSelectionEngine] Después del tap A{} → {}", candidato.number,
-                    reubicado != null ? describir(reubicado) : "no se pudo relocalizar el asiento");
+                page.sleep(400);
+                WebElement objetivo = candidato.element;
+                try {
+                    confirmado = estaSeleccionado(objetivo);
+                    estadoFinal = describir(objetivo);
+                } catch (StaleElementReferenceException stale) {
+                    reubicado = true;
+                    objetivo = page.reubicarAsientoPorNumero(candidato.number);
+                    if (objetivo != null) {
+                        confirmado = estaSeleccionado(objetivo);
+                        estadoFinal = describir(objetivo);
+                    } else {
+                        estadoFinal = "no se pudo relocalizar A" + candidato.number + " (búsqueda dirigida, sin escaneo completo)";
+                    }
+                }
             }
+            long tiempoValidacion = System.currentTimeMillis() - tValidacion;
 
-            utils.PerfMetrics.attempt("SeatSelection", intento, "A" + candidato.number, tiempoMs,
+            log.info("[SeatSelectionEngine] Después del tap A{} → {} (relocalizado={})",
+                candidato.number, estadoFinal, reubicado);
+            utils.PerfMetrics.note("SeatSelection", String.format(
+                "intento=%d asiento=A%d tap=%dms validacion=%dms relocalizado=%s",
+                intento, candidato.number, tiempoTap, tiempoValidacion, reubicado));
+            utils.PerfMetrics.attempt("SeatSelection", intento, "A" + candidato.number, tiempoTap,
                 confirmado ? "OK" : "FAIL");
 
             if (confirmado) {
@@ -111,7 +145,7 @@ final class SeatSelectionEngine {
                 log.info("[SeatSelectionEngine] Asiento confirmado: A{}", candidato.number);
             } else {
                 log.warn("[SeatSelectionEngine] Asiento A{} descartado (tapOk={}, confirmado=false) — "
-                    + "se reconstruye el mapa y se intenta otro candidato.", candidato.number, tapOk);
+                    + "se intenta otro candidato del mismo escaneo inicial (sin reescanear).", candidato.number, tapOk);
             }
         }
 
@@ -122,26 +156,16 @@ final class SeatSelectionEngine {
         return seleccionados;
     }
 
-    private static WebElement localizarPorNumero(SeatMap map, int numero) {
-        return map.allNumberedSeats().stream()
-            .filter(s -> s.number == numero)
-            .map(s -> s.element)
-            .findFirst()
-            .orElse(null);
-    }
-
     private static boolean estaSeleccionado(WebElement el) {
-        try {
-            return "true".equalsIgnoreCase(el.getAttribute("selected"));
-        } catch (Exception e) {
-            return false;
-        }
+        return "true".equalsIgnoreCase(el.getAttribute("selected"));
     }
 
     private static String describir(WebElement el) {
-        return String.format("label=%s value=%s enabled=%s selected=%s frame=%s",
+        return String.format("label=%s value=%s name=%s type=%s enabled=%s selected=%s frame=%s",
             safe(() -> el.getAttribute("label")),
             safe(() -> el.getAttribute("value")),
+            safe(() -> el.getAttribute("name")),
+            safe(() -> el.getAttribute("type")),
             safe(() -> String.valueOf(el.isEnabled())),
             safe(() -> el.getAttribute("selected")),
             safe(() -> String.valueOf(el.getRect())));

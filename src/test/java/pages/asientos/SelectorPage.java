@@ -2911,6 +2911,33 @@ public class SelectorPage extends BasePage {
      * Construye un {@link SeatMap} a partir del estado actual del mapa de asientos.
      * Ejecuta el escaneo principal y dos fallbacks antes de devolver el modelo.
      */
+    // FIX real (optimización de rendimiento — ver informe SeatSelectionEngine):
+    // reconstruir el SeatMap completo (~143 elementos, ~160s) para revalidar UN solo
+    // asiento tras un tap es lo que hacía crecer el tiempo de "varios minutos" a
+    // "una hora". Esta relocalización es exclusiva del asiento que SeatSelectionEngine
+    // necesita revalidar (StaleElementReferenceException sobre su WebElement original)
+    // — nunca vuelve a escanear los demás candidatos. Mismo par de atributos
+    // (label/name) ya documentado como el lugar real donde vive el número de asiento
+    // en iOS; en Android reutiliza el mismo patrón UiSelector().text() ya usado en
+    // otros escaneos de este archivo.
+    WebElement reubicarAsientoPorNumero(int numero) {
+        try {
+            String num = String.valueOf(numero);
+            List<WebElement> encontrados = isIOS()
+                ? driver.findElements(AppiumBy.iOSNsPredicateString(
+                    "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') AND "
+                    + "(label == '" + num + "' OR name == '" + num + "')"))
+                : driver.findElements(AppiumBy.androidUIAutomator(
+                    "new UiSelector().text(\"" + num + "\")"));
+            for (WebElement el : encontrados) {
+                try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
+            }
+            return encontrados.isEmpty() ? null : encontrados.get(0);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     // Sin modificador (package-private): SeatSelectionEngine, en el mismo paquete,
     // necesita reconstruir el mapa entre cada tap sin duplicar este método.
     SeatMap buildSeatMap() {
@@ -2981,7 +3008,7 @@ public class SelectorPage extends BasePage {
         List<WebElement> filtrados = new ArrayList<>();
         for (WebElement el : all) {
             try {
-                String v = obtenerTextoSeguro(el);
+                String v = textoAsientoRapido(el);
                 if (!v.isBlank() && v.length() <= 2) filtrados.add(el);
             } catch (Exception ignored) {}
         }
@@ -2992,6 +3019,26 @@ public class SelectorPage extends BasePage {
                 tFindElements, all.size(), tFiltroJava, filtrados.size()));
 
         return filtrados;
+    }
+
+    // FIX real (evidencia — filtroJava=64306ms para 143 elementos, ver informe de
+    // rendimiento SeatSelectionEngine): la causa no era cómputo Java, eran hasta 4
+    // viajes HTTP secuenciales a WDA por elemento dentro de obtenerTextoSeguro()
+    // (getText + value + label + name). La evidencia de ESTE mismo log confirma que
+    // los botones de asiento siempre resuelven en @label (o @name si @label viene
+    // vacío) — nunca en getText()/@value. Ruta rápida exclusiva de detección de
+    // candidatos de asiento (máx. 2 viajes/elemento en vez de hasta 4); NO se toca
+    // obtenerTextoSeguro(), que usan películas/horarios con su propio orden de
+    // prioridad y no debe cambiar.
+    private String textoAsientoRapido(WebElement el) {
+        try {
+            String label = el.getAttribute("label");
+            if (label != null && !label.isBlank()) return label.trim();
+            String name = el.getAttribute("name");
+            return name == null ? "" : name.trim();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // UIAutomator2 (Android) / NSPredicate (iOS) — filtra por texto numérico en el mapa de asientos.
