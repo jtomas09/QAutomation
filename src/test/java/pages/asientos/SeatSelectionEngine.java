@@ -97,12 +97,38 @@ final class SeatSelectionEngine {
         List<String> seleccionados = new ArrayList<>();
         Set<Integer> excluidos = new HashSet<>();
         int intento = 0;
+        // Freno de seguridad INDEPENDIENTE de `confirmado`/`selected` — evidencia (log
+        // 2026-08-12, 3 corridas consecutivas): tapOk=true en el 100% de los intentos
+        // (12/12, 12/13, 20/20) mientras confirmado=false en el 100% — el motor seguía
+        // tapeando candidato tras candidato hasta agotar los ~15-20 numerados del mapa,
+        // ejecutando muchos más taps reales en la app que los `count` solicitados
+        // (observado visualmente: la app terminaba con más de 3 asientos seleccionados).
+        // Este contador NO decide qué cuenta como "seleccionado" (eso sigue siendo
+        // exclusivamente `confirmado`) — solo acota cuántos taps reales se permiten
+        // como máximo, mientras el verdadero indicador de selección (SeatUiSnapshot)
+        // sigue en investigación.
+        int tapsExitosos = 0;
 
         while (seleccionados.size() < count) {
+            if (tapsExitosos >= count) {
+                log.warn("[SeatSelectionEngine] DETENIDO por freno de seguridad: ya se ejecutaron {} "
+                    + "tap(s) exitoso(s) (>= {} solicitados) aunque el motor solo confirmó {} — no se "
+                    + "intentan más candidatos para no seguir seleccionando asientos reales de más en "
+                    + "la app mientras el indicador de confirmación sigue en investigación.",
+                    tapsExitosos, count, seleccionados.size());
+                break;
+            }
+
+            int candidatosRestantes = mapa.allNumberedSeats().size() - excluidos.size();
+            log.info("[SeatSelectionEngine] Estado antes del intento {}: confirmados(motor)={} "
+                + "descartados={} candidatosRestantes={} tapsExitosos={} objetivo={}",
+                intento + 1, seleccionados.size(), intento - seleccionados.size(),
+                candidatosRestantes, tapsExitosos, count);
+
             SeatMap.Seat candidato = picker.pick(mapa, excluidos);
             if (candidato == null) {
-                log.warn("[SeatSelectionEngine] Sin más candidatos ({}/{} confirmados, {} descartados).",
-                    seleccionados.size(), count, excluidos.size());
+                log.warn("[SeatSelectionEngine] Sin más candidatos ({}/{} confirmados, {} descartados, {} taps exitosos).",
+                    seleccionados.size(), count, excluidos.size(), tapsExitosos);
                 break;
             }
 
@@ -137,6 +163,7 @@ final class SeatSelectionEngine {
             long tClick = System.currentTimeMillis();
             boolean tapOk = page.tapRapidoEnButacaDesdeLabel(objetivo);
             long tiempoTap = System.currentTimeMillis() - tClick;
+            if (tapOk) tapsExitosos++;
 
             long tValidacion = System.currentTimeMillis();
             boolean confirmado = false;
