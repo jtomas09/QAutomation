@@ -2732,6 +2732,31 @@ public class SelectorPage extends BasePage {
     // Sin modificador (package-private): reutilizado por SeatSelectionEngine — ver
     // comentario de buildSeatMap().
     boolean tapRapidoEnButacaDesdeLabel(WebElement el) {
+        if (!SeatUiSnapshot.ENABLED) return tapRapidoEnButacaDesdeLabelInterno(el);
+
+        // Instrumentación exclusiva de investigación (SEAT_SNAPSHOT_DEBUG=true, OFF por
+        // defecto) — captura TODO el árbol + pantalla antes/después de este tap, guarda
+        // ambos en disco (before/after .xml/.png) y registra el diff, para encontrar con
+        // evidencia real qué cambia cuando un asiento queda seleccionado (no solo el
+        // propio botón). No participa en la decisión de negocio: el resultado del tap es
+        // exactamente el mismo que sin esta instrumentación.
+        String pageSourceAntes = safePageSource();
+        byte[] screenshotAntes = takeScreenshot();
+        boolean resultado = tapRapidoEnButacaDesdeLabelInterno(el);
+        sleep(400);
+        String pageSourceDespues = safePageSource();
+        byte[] screenshotDespues = takeScreenshot();
+        int screenHeight = driver.manage().window().getSize().getHeight();
+        SeatUiSnapshot.investigarTap("tap_tapOk-" + resultado, pageSourceAntes, screenshotAntes,
+                pageSourceDespues, screenshotDespues, screenHeight);
+        return resultado;
+    }
+
+    private String safePageSource() {
+        try { return driver.getPageSource(); } catch (Exception e) { return ""; }
+    }
+
+    private boolean tapRapidoEnButacaDesdeLabelInterno(WebElement el) {
         try {
             org.openqa.selenium.Rectangle r = el.getRect();
 
