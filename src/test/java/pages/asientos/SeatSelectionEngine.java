@@ -1,6 +1,5 @@
 package pages.asientos;
 
-import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,13 +28,20 @@ import java.util.stream.Collectors;
  * minutos a más de una hora.
  *
  * Esta versión hace UN solo escaneo completo por llamada a {@link #select}
- * (no por asiento). Los WebElement de los asientos NO tocados no tienen
- * motivo para invalidarse solo porque se tocó otro; el estado del asiento
- * recién tocado se revalida leyendo sus atributos directamente sobre el
- * mismo handle (sin findElements). Solo si esa lectura lanza
- * {@link StaleElementReferenceException} se hace una relocalización DIRIGIDA
- * a ese único número (nunca un reescaneo de los ~143 candidatos) vía
- * {@link SelectorPage#reubicarAsientoPorNumero(int)}.
+ * (no por asiento) — pero ESE escaneo solo sirve para enumerar qué números
+ * de asiento existen. El {@code WebElement} que trae cada {@code Seat} del
+ * escaneo inicial NUNCA se usa directamente para tapear ni para leer sus
+ * atributos: evidencia en vivo (log 2026-08-11 17:36-17:38) demostró que, en
+ * cuanto se tapea el primer asiento, el árbol de accesibilidad se invalida
+ * por completo y CUALQUIER WebElement restante de ese mismo escaneo queda
+ * muerto — usarlo directamente hacía que "antes del tap" ya apareciera como
+ * label=N/D value=N/D name=N/D... (el método describir() atrapa la
+ * StaleElementReferenceException real y la disfraza de "N/D" en vez de
+ * reportarla). Por eso cada asiento se resuelve de nuevo, por número, contra
+ * el árbol ACTUAL vía {@link SelectorPage#reubicarAsientoPorNumero(int)} —
+ * una consulta dirigida a un solo número, nunca un reescaneo de los ~143
+ * candidatos — inmediatamente antes de tapear y otra vez después, para
+ * confirmar la selección real.
  *
  * Es el único lugar donde vive esta lógica; cualquier método de SelectorPage
  * que seleccione N asientos (random, consecutivos, VIP, etc.) debe apoyarse
@@ -102,41 +108,58 @@ final class SeatSelectionEngine {
 
             intento++;
             excluidos.add(candidato.number);
-            log.info("[SeatSelectionEngine] Intento {} → candidato A{} antes del tap: {}",
-                intento, candidato.number, describir(candidato.element));
+            String locator = page.locatorAsientoPorNumero(candidato.number);
+
+            // Resolución OBLIGATORIA contra el árbol actual — nunca candidato.element
+            // (proviene del escaneo inicial y puede llevar minutos/varios taps de
+            // antigüedad). Consulta dirigida a UN número, jamás un reescaneo completo.
+            long tResolver = System.currentTimeMillis();
+            WebElement objetivo = page.reubicarAsientoPorNumero(candidato.number);
+            long tiempoResolver = System.currentTimeMillis() - tResolver;
+
+            if (objetivo == null) {
+                log.warn("[SeatSelectionEngine] Intento {} → A{} NO se pudo resolver (locator={}, {}ms) — "
+                    + "se descarta SIN tapear.", intento, candidato.number, locator, tiempoResolver);
+                utils.PerfMetrics.attempt("SeatSelection", intento, "A" + candidato.number, tiempoResolver, "FAIL-NO-RESUELTO");
+                continue;
+            }
+            if (!respondeAtributosBasicos(objetivo)) {
+                log.warn("[SeatSelectionEngine] Intento {} → A{} se encontró pero no respondió label/enabled "
+                    + "(locator={}, {}ms) — elemento no confiable, se descarta SIN tapear.",
+                    intento, candidato.number, locator, tiempoResolver);
+                utils.PerfMetrics.attempt("SeatSelection", intento, "A" + candidato.number, tiempoResolver, "FAIL-ATRIBUTOS-INVALIDOS");
+                continue;
+            }
+
+            log.info("[SeatSelectionEngine] Intento {} → A{} resuelto (locator={}, {}ms) antes del tap: {}",
+                intento, candidato.number, locator, tiempoResolver, describir(objetivo));
 
             long tClick = System.currentTimeMillis();
-            boolean tapOk = page.tapRapidoEnButacaDesdeLabel(candidato.element);
+            boolean tapOk = page.tapRapidoEnButacaDesdeLabel(objetivo);
             long tiempoTap = System.currentTimeMillis() - tClick;
 
             long tValidacion = System.currentTimeMillis();
-            boolean reubicado = false;
             boolean confirmado = false;
             String estadoFinal = "no se validó (tap falló)";
             if (tapOk) {
                 page.sleep(400);
-                WebElement objetivo = candidato.element;
-                try {
-                    confirmado = estaSeleccionado(objetivo);
-                    estadoFinal = describir(objetivo);
-                } catch (StaleElementReferenceException stale) {
-                    reubicado = true;
-                    objetivo = page.reubicarAsientoPorNumero(candidato.number);
-                    if (objetivo != null) {
-                        confirmado = estaSeleccionado(objetivo);
-                        estadoFinal = describir(objetivo);
-                    } else {
-                        estadoFinal = "no se pudo relocalizar A" + candidato.number + " (búsqueda dirigida, sin escaneo completo)";
-                    }
+                // Se vuelve a resolver — NUNCA se reutiliza `objetivo` para la
+                // validación post-tap, por la misma razón por la que no se reutiliza
+                // candidato.element: el tap puede haber invalidado el árbol de nuevo.
+                WebElement revalidado = page.reubicarAsientoPorNumero(candidato.number);
+                if (revalidado != null) {
+                    confirmado = estaSeleccionado(revalidado);
+                    estadoFinal = describir(revalidado);
+                } else {
+                    estadoFinal = "no se pudo revalidar A" + candidato.number + " tras el tap (búsqueda dirigida, sin escaneo completo)";
                 }
             }
             long tiempoValidacion = System.currentTimeMillis() - tValidacion;
 
-            log.info("[SeatSelectionEngine] Después del tap A{} → {} (relocalizado={})",
-                candidato.number, estadoFinal, reubicado);
+            log.info("[SeatSelectionEngine] Después del tap A{} → {}", candidato.number, estadoFinal);
             utils.PerfMetrics.note("SeatSelection", String.format(
-                "intento=%d asiento=A%d tap=%dms validacion=%dms relocalizado=%s",
-                intento, candidato.number, tiempoTap, tiempoValidacion, reubicado));
+                "intento=%d asiento=A%d locator=%s resolverMs=%d tapMs=%d validacionMs=%d",
+                intento, candidato.number, locator, tiempoResolver, tiempoTap, tiempoValidacion));
             utils.PerfMetrics.attempt("SeatSelection", intento, "A" + candidato.number, tiempoTap,
                 confirmado ? "OK" : "FAIL");
 
@@ -158,6 +181,22 @@ final class SeatSelectionEngine {
 
     private static boolean estaSeleccionado(WebElement el) {
         return "true".equalsIgnoreCase(el.getAttribute("selected"));
+    }
+
+    /**
+     * Valida que el elemento resuelto responde de verdad contra el árbol ACTUAL
+     * antes de tapear — si label/enabled lanzan excepción (StaleElementReferenceException
+     * u otra), el handle no es confiable aunque reubicarAsientoPorNumero() lo haya
+     * devuelto no-nulo un instante antes.
+     */
+    private static boolean respondeAtributosBasicos(WebElement el) {
+        try {
+            el.getAttribute("label");
+            el.isEnabled();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static String describir(WebElement el) {

@@ -2922,13 +2922,9 @@ public class SelectorPage extends BasePage {
     // otros escaneos de este archivo.
     WebElement reubicarAsientoPorNumero(int numero) {
         try {
-            String num = String.valueOf(numero);
             List<WebElement> encontrados = isIOS()
-                ? driver.findElements(AppiumBy.iOSNsPredicateString(
-                    "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') AND "
-                    + "(label == '" + num + "' OR name == '" + num + "')"))
-                : driver.findElements(AppiumBy.androidUIAutomator(
-                    "new UiSelector().text(\"" + num + "\")"));
+                ? driver.findElements(AppiumBy.iOSNsPredicateString(predicadoAsientoPorNumero(numero)))
+                : driver.findElements(AppiumBy.androidUIAutomator(uiSelectorAsientoPorNumero(numero)));
             for (WebElement el : encontrados) {
                 try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
             }
@@ -2936,6 +2932,23 @@ public class SelectorPage extends BasePage {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Locator exacto usado por reubicarAsientoPorNumero() — solo para instrumentación/logs. */
+    String locatorAsientoPorNumero(int numero) {
+        return isIOS()
+            ? "iOSNsPredicate: " + predicadoAsientoPorNumero(numero)
+            : "androidUIAutomator: " + uiSelectorAsientoPorNumero(numero);
+    }
+
+    private String predicadoAsientoPorNumero(int numero) {
+        String num = String.valueOf(numero);
+        return "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') AND "
+            + "(label == '" + num + "' OR name == '" + num + "')";
+    }
+
+    private String uiSelectorAsientoPorNumero(int numero) {
+        return "new UiSelector().text(\"" + numero + "\")";
     }
 
     // Sin modificador (package-private): SeatSelectionEngine, en el mismo paquete,
