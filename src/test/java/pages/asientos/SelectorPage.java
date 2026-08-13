@@ -3061,6 +3061,16 @@ public class SelectorPage extends BasePage {
     // — nunca puede excluir un elemento que el filtro Java habría aceptado, porque es
     // la MISMA condición de longitud, solo evaluada antes. Se conserva "!= nil" como
     // guarda explícita para no evaluar MATCHES sobre un atributo ausente.
+    // Predicado compartido — usado por obtenerCandidatosAsientoIOS() (camino lento,
+    // siempre disponible) Y por intentarEscaneoRapidoConPageSource() (camino rápido,
+    // ver más abajo), para garantizar que ambos identifiquen EXACTAMENTE el mismo
+    // conjunto de candidatos crudos. Nunca diverge entre los dos caminos.
+    private static final String PREDICADO_CANDIDATOS_ASIENTO_IOS =
+            "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') "
+            + "AND ((name != nil AND name MATCHES '.{1,2}') "
+            + "OR (label != nil AND label MATCHES '.{1,2}') "
+            + "OR (value != nil AND value MATCHES '.{1,2}'))";
+
     private List<WebElement> obtenerCandidatosAsientoIOS() {
         // Instrumentación (Iteración 7, se conserva): separa cuánto tarda la ÚNICA
         // llamada nativa findElements(NSPredicate) de cuánto tarda el loop Java que
@@ -3069,11 +3079,7 @@ public class SelectorPage extends BasePage {
         // de este fix.
         long t0 = System.currentTimeMillis();
         List<WebElement> all = driver.findElements(
-                AppiumBy.iOSNsPredicateString(
-                        "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') "
-                        + "AND ((name != nil AND name MATCHES '.{1,2}') "
-                        + "OR (label != nil AND label MATCHES '.{1,2}') "
-                        + "OR (value != nil AND value MATCHES '.{1,2}'))"));
+                AppiumBy.iOSNsPredicateString(PREDICADO_CANDIDATOS_ASIENTO_IOS));
         long tFindElements = System.currentTimeMillis() - t0;
 
         long t1 = System.currentTimeMillis();
@@ -3124,8 +3130,93 @@ public class SelectorPage extends BasePage {
             System.getProperty("SEAT_SCAN_TIMING_DEBUG",
                     System.getenv().getOrDefault("SEAT_SCAN_TIMING_DEBUG", "false")));
 
+    // FIX real (evidencia — RUN-1012, SEAT_SCAN_TIMING_DEBUG: 187 candidatos, cada
+    // getRect()/getAttribute() individual entre 242-747ms, SIN outliers — el costo es
+    // parejo por elemento, no un subconjunto bloqueando WDA. Esos ~137s en total
+    // (filtroJava + getRect, uno por candidato) son N viajes de red secuenciales para
+    // leer texto/posición que YA están en el page source completo). Este método
+    // reemplaza esos N viajes por UNA sola llamada a driver.getPageSource() (misma
+    // API ya usada por SeatUiSnapshot/IOSLocatorDebug en este mismo paquete),
+    // emparejando cada nodo del XML con el WebElement correspondiente por ORDEN de
+    // documento (mismo predicado exacto en ambos lados — PREDICADO_CANDIDATOS_ASIENTO_IOS).
+    //
+    // Nunca confía ciegamente en ese orden: (1) exige que el conteo de nodos del XML
+    // coincida EXACTO con el de findElements(); (2) verifica una muestra real (primeros
+    // y últimos 3 candidatos) comparando el texto ya obtenido del XML contra una
+    // llamada real a getAttribute() sobre ESE MISMO índice. Si cualquiera de las dos
+    // verificaciones falla, devuelve null — el llamador cae al camino ya probado
+    // (elemento por elemento), sin arriesgar la detección de asientos.
+    private List<WebElement> intentarEscaneoRapidoConPageSource(int mapTop, int mapBottom) {
+        try {
+            List<WebElement> crudos = driver.findElements(
+                    AppiumBy.iOSNsPredicateString(PREDICADO_CANDIDATOS_ASIENTO_IOS));
+            if (crudos.isEmpty()) return null;
+
+            List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(driver.getPageSource()).nodos;
+            List<SeatUiSnapshot.Nodo> nodosFiltrados = new ArrayList<>();
+            for (SeatUiSnapshot.Nodo n : nodos) {
+                if (!"XCUIElementTypeButton".equals(n.tag) && !"XCUIElementTypeStaticText".equals(n.tag)) continue;
+                String texto = textoDeNodo(n);
+                if (!texto.isBlank() && texto.length() <= 2) nodosFiltrados.add(n);
+            }
+
+            int n = crudos.size();
+            if (nodosFiltrados.size() != n) {
+                utils.PerfMetrics.note("SeatSelection", String.format(
+                        "escaneoRapido descartado: conteo no coincide (findElements=%d, pageSource=%d)",
+                        n, nodosFiltrados.size()));
+                return null;
+            }
+
+            Set<Integer> muestra = new HashSet<>();
+            for (int i = 0; i < Math.min(3, n); i++) muestra.add(i);
+            for (int i = Math.max(0, n - 3); i < n; i++) muestra.add(i);
+            for (int i : muestra) {
+                String textoReal = textoAsientoRapido(crudos.get(i));
+                String textoXml = textoDeNodo(nodosFiltrados.get(i));
+                if (!textoReal.equals(textoXml)) {
+                    utils.PerfMetrics.note("SeatSelection", String.format(
+                            "escaneoRapido descartado: desajuste de orden en idx=%d real='%s' xml='%s'",
+                            i, textoReal, textoXml));
+                    return null;
+                }
+            }
+
+            Map<String, WebElement> unicos = new LinkedHashMap<>();
+            for (int i = 0; i < n; i++) {
+                SeatUiSnapshot.Nodo nodo = nodosFiltrados.get(i);
+                double x = nodo.num("x"), y = nodo.num("y"), w = nodo.num("width"), h = nodo.num("height");
+                if (Double.isNaN(x) || Double.isNaN(y) || Double.isNaN(w) || Double.isNaN(h)) continue;
+                int cy = (int) (y + h / 2);
+                int cx = (int) (x + w / 2);
+                if (cy < mapTop || cy > mapBottom || cx < 20) continue;
+                unicos.putIfAbsent((int) x + "|" + (int) y, crudos.get(i));
+            }
+
+            utils.PerfMetrics.note("SeatSelection", String.format(
+                    "escaneoRapido OK: %d candidatos -> %d filtrados (sin getRect/getAttribute individuales)",
+                    n, unicos.size()));
+            return new ArrayList<>(unicos.values());
+        } catch (Exception e) {
+            utils.PerfMetrics.note("SeatSelection", "escaneoRapido descartado por excepción: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private String textoDeNodo(SeatUiSnapshot.Nodo n) {
+        String label = n.attrs.get("label");
+        if (label != null && !label.isBlank()) return label.trim();
+        String name = n.attrs.get("name");
+        return name == null ? "" : name.trim();
+    }
+
     private List<WebElement> escanearMapaConUIAutomator(int mapTop, int mapBottom) {
         try {
+            if (isIOS()) {
+                List<WebElement> rapido = intentarEscaneoRapidoConPageSource(mapTop, mapBottom);
+                if (rapido != null) return rapido;
+            }
+
             List<WebElement> candidatos = isIOS()
                 ? obtenerCandidatosAsientoIOS()
                 : driver.findElements(AppiumBy.androidUIAutomator("new UiSelector().textMatches(\"^\\\\d{1,2}$\")"));
