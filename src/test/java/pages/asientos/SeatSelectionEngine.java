@@ -91,6 +91,18 @@ final class SeatSelectionEngine {
         long tEscaneo = System.currentTimeMillis();
         SeatMap mapa = page.buildSeatMap();                 // ÚNICO escaneo completo de toda la selección
         utils.PerfMetrics.stage("SeatSelection", "escaneoInicial", System.currentTimeMillis() - tEscaneo);
+        return select(count, picker, mapa);
+    }
+
+    /**
+     * Igual que {@link #select(int, SeatPicker)} pero reutilizando un {@link SeatMap}
+     * ya construido por el llamador (p. ej. el que usó para validar "¿hay al menos
+     * N asientos?" antes de invocar este método) — evita un segundo escaneo completo
+     * idéntico. Evidencia (log 2026-08-13 14:07-14:18): sin este overload, el mismo
+     * escaneo (~190s con ~190 candidatos) se ejecutaba dos veces seguidas por cada
+     * caso, duplicando innecesariamente más de 3 minutos por corrida.
+     */
+    List<String> select(int count, SeatPicker picker, SeatMap mapa) {
         log.info("[SeatSelectionEngine] Escaneo inicial: {} asiento(s) numerado(s) disponibles.",
             mapa.allNumberedSeats().size());
 

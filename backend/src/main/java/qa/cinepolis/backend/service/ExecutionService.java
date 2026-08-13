@@ -128,9 +128,16 @@ public class ExecutionService {
             // de stream, etc.) nunca debe verse como "Completado" solo porque los pocos casos
             // que sí corrieron pasaron — expectedCount=0 (Runner no lo pudo calcular) preserva
             // el comportamiento anterior (failed==0 ? COMPLETED : FAILED).
+            //
+            // FIX real (reporte del Dashboard — ejecución con passed=0 failed=0 skipped=1 se
+            // veía como "Completado" en verde, indistinguible de un PASS real): si nada pasó y
+            // nada falló pero sí hubo al menos un test omitido (p. ej. Assumptions.abort por
+            // "menos de 3 asientos disponibles"), el estado real es SKIPPED, no COMPLETED. No
+            // afecta el caso con al menos 1 passed (sigue siendo COMPLETED, sin cambios).
             ExecutionStatus status = (expectedCount > 0 && total < expectedCount)
                     ? ExecutionStatus.INCOMPLETE
-                    : (failed == 0 ? ExecutionStatus.COMPLETED : ExecutionStatus.FAILED);
+                    : (failed > 0 ? ExecutionStatus.FAILED
+                        : (passed == 0 && skipped > 0 ? ExecutionStatus.SKIPPED : ExecutionStatus.COMPLETED));
             e.setStatus(status);
             e.setEndTime(Instant.now());
             if (allureUrl  != null && !allureUrl.isBlank())  e.setAllureUrl(allureUrl);

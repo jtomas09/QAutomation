@@ -433,13 +433,14 @@ public class SelectorPage extends BasePage {
                 return null;
             }
 
-            // FIX real (evidencia forense — ver SeatSelectionEngine): el mapa ya NO se
-            // fija una sola vez antes de los 3 taps. SeatSelectionEngine reconstruye el
-            // SeatMap antes de cada candidato y confirma la selección real después del
-            // tap, en vez de reutilizar WebElement de este escaneo inicial (solo usado
-            // aquí para el chequeo rápido de "hay al menos 3 asientos").
+            // FIX real (evidencia de rendimiento — log 2026-08-13 14:07-14:18: el mismo
+            // escaneo de ~190s se ejecutaba DOS veces por caso, aquí y otra vez dentro de
+            // SeatSelectionEngine.select()): se reutiliza el MISMO SeatMap ya construido
+            // arriba (solo usado antes para el chequeo "hay al menos 3 asientos") en vez
+            // de dejar que el motor repita el escaneo completo. El resto de la lógica del
+            // motor (resolución por número, freno de seguridad, confirmación) no cambia.
             List<String> seleccionados = new SeatSelectionEngine(this)
-                .select(3, SeatSelectionEngine.CUALQUIERA);
+                .select(3, SeatSelectionEngine.CUALQUIERA, map);
 
             log.info("[SelectorPage] 3 asientos seleccionados: {}", seleccionados);
             takeScreenshot("3 asientos seleccionados");
@@ -3113,6 +3114,16 @@ public class SelectorPage extends BasePage {
     }
 
     // UIAutomator2 (Android) / NSPredicate (iOS) — filtra por texto numérico en el mapa de asientos.
+    // Diagnóstico exclusivo de investigación (SEAT_SCAN_TIMING_DEBUG=true, OFF por
+    // defecto — no-op inmediato, cero impacto en el flujo normal): instrumenta cada
+    // getRect()/getAttribute() del bucle de abajo para determinar si TODAS las
+    // llamadas a WDA son lentas por igual o si un subconjunto de elementos bloquea
+    // WebDriverAgent. Deliberadamente NO activo durante la validación funcional del
+    // fix de escaneo duplicado — mide, no optimiza.
+    private static final boolean SCAN_TIMING_DEBUG = "true".equalsIgnoreCase(
+            System.getProperty("SEAT_SCAN_TIMING_DEBUG",
+                    System.getenv().getOrDefault("SEAT_SCAN_TIMING_DEBUG", "false")));
+
     private List<WebElement> escanearMapaConUIAutomator(int mapTop, int mapBottom) {
         try {
             List<WebElement> candidatos = isIOS()
@@ -3121,9 +3132,23 @@ public class SelectorPage extends BasePage {
             if (candidatos.isEmpty()) return escanearMapaConXPath(mapTop, mapBottom);
 
             Map<String, WebElement> unicos = new LinkedHashMap<>();
+            int idx = 0;
             for (WebElement el : candidatos) {
+                idx++;
                 try {
+                    long tRect = SCAN_TIMING_DEBUG ? System.currentTimeMillis() : 0;
                     org.openqa.selenium.Rectangle r = el.getRect();
+                    long msRect = SCAN_TIMING_DEBUG ? System.currentTimeMillis() - tRect : 0;
+
+                    if (SCAN_TIMING_DEBUG) {
+                        long tAttr = System.currentTimeMillis();
+                        String etiqueta = textoAsientoRapido(el);
+                        long msAttr = System.currentTimeMillis() - tAttr;
+                        utils.PerfMetrics.note("SeatSelection", String.format(
+                                "getRectDetalle idx=%d asiento=%s getRectMs=%d getAttributeMs=%d",
+                                idx, etiqueta.isBlank() ? "?" : etiqueta, msRect, msAttr));
+                    }
+
                     int cy = r.getY() + r.getHeight() / 2;
                     int cx = r.getX() + r.getWidth() / 2;
                     if (cy < mapTop || cy > mapBottom || cx < 20) continue;
