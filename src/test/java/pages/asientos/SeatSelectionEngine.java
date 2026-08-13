@@ -97,6 +97,14 @@ final class SeatSelectionEngine {
         List<String> seleccionados = new ArrayList<>();
         Set<Integer> excluidos = new HashSet<>();
         int intento = 0;
+        // FIX real (evidencia — build/seat-diagnostics/tap_tapOk-true_*, capturada con
+        // SeatUiSnapshot en 3 taps consecutivos: A5→"Continuar, 1", A1→"Continuar, 2",
+        // A2→"Continuar, 3"): getAttribute("selected") del propio botón de asiento
+        // NUNCA cambia — pero el botón "Continuar" sí refleja el conteo REAL de
+        // asientos seleccionados en la app. -1 significa "sin evidencia en esta
+        // plataforma" (solo se investigó iOS) — en ese caso se conserva el criterio
+        // anterior (selected) como fallback, sin asumir el mismo indicador sin prueba.
+        int contadorPrevio = page.contarAsientosSeleccionadosPorBotonContinuar();
         // Freno de seguridad INDEPENDIENTE de `confirmado`/`selected` — evidencia (log
         // 2026-08-12, 3 corridas consecutivas): tapOk=true en el 100% de los intentos
         // (12/12, 12/13, 20/20) mientras confirmado=false en el 100% — el motor seguía
@@ -170,15 +178,28 @@ final class SeatSelectionEngine {
             String estadoFinal = "no se validó (tap falló)";
             if (tapOk) {
                 page.sleep(400);
-                // Se vuelve a resolver — NUNCA se reutiliza `objetivo` para la
-                // validación post-tap, por la misma razón por la que no se reutiliza
-                // candidato.element: el tap puede haber invalidado el árbol de nuevo.
-                WebElement revalidado = page.reubicarAsientoPorNumero(candidato.number);
-                if (revalidado != null) {
-                    confirmado = estaSeleccionado(revalidado);
-                    estadoFinal = describir(revalidado);
+                if (contadorPrevio >= 0) {
+                    // Mecanismo real: el contador del botón "Continuar" debe subir
+                    // exactamente en 1 — no depende de qué asiento se tocó.
+                    int contadorNuevo = page.contarAsientosSeleccionadosPorBotonContinuar();
+                    confirmado = contadorNuevo == contadorPrevio + 1;
+                    estadoFinal = String.format("contador Continuar %d -> %d (esperado %d)",
+                        contadorPrevio, contadorNuevo, contadorPrevio + 1);
+                    if (!confirmado && contadorNuevo != contadorPrevio) {
+                        log.warn("[SeatSelectionEngine] Anomalía: contador Continuar cambió de forma "
+                            + "inesperada ({} -> {}) tras A{}.", contadorPrevio, contadorNuevo, candidato.number);
+                    }
+                    contadorPrevio = contadorNuevo; // resincroniza siempre con el valor real observado
                 } else {
-                    estadoFinal = "no se pudo revalidar A" + candidato.number + " tras el tap (búsqueda dirigida, sin escaneo completo)";
+                    // Sin evidencia del indicador en esta plataforma (no-iOS) — se conserva
+                    // el criterio anterior en vez de asumir el mismo indicador sin prueba.
+                    WebElement revalidado = page.reubicarAsientoPorNumero(candidato.number);
+                    if (revalidado != null) {
+                        confirmado = estaSeleccionado(revalidado);
+                        estadoFinal = describir(revalidado);
+                    } else {
+                        estadoFinal = "no se pudo revalidar A" + candidato.number + " tras el tap (búsqueda dirigida, sin escaneo completo)";
+                    }
                 }
             }
             long tiempoValidacion = System.currentTimeMillis() - tValidacion;

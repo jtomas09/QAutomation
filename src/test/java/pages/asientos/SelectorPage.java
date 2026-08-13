@@ -2966,6 +2966,39 @@ public class SelectorPage extends BasePage {
             : "androidUIAutomator: " + uiSelectorAsientoPorNumero(numero);
     }
 
+    private static final java.util.regex.Pattern CONTADOR_CONTINUAR =
+            java.util.regex.Pattern.compile("^Continuar,\\s*(\\d+)$");
+
+    // FIX real (evidencia — build/seat-diagnostics/tap_tapOk-true_*, capturada con
+    // SeatUiSnapshot): getAttribute("selected") del propio botón de asiento NUNCA
+    // cambia (confirmado en 3 taps consecutivos, antes y después, siempre
+    // selected=false) — pero el botón "Continuar" SÍ refleja el conteo real de la
+    // app: sin asientos seleccionados no existe ("Continuar" a secas o ausente);
+    // con 1/2/3 seleccionados su @label/@name es literalmente "Continuar, 1" /
+    // "Continuar, 2" / "Continuar, 3" (verificado: A5→"Continuar, 1", A1→
+    // "Continuar, 2", A2→"Continuar, 3"). Es el único indicador que de verdad
+    // refleja el estado de la app, y no depende de qué asiento se tocó — sirve
+    // igual para 1, N o VIP. Solo iOS (única evidencia recolectada); en Android no
+    // se ha investigado este botón, así que no se asume el mismo formato.
+    int contarAsientosSeleccionadosPorBotonContinuar() {
+        if (!isIOS()) return -1; // sin evidencia en Android — el llamador decide el fallback
+        try {
+            List<WebElement> candidatos = driver.findElements(AppiumBy.iOSNsPredicateString(
+                    "type == 'XCUIElementTypeButton' AND (label BEGINSWITH 'Continuar' OR name BEGINSWITH 'Continuar')"));
+            for (WebElement el : candidatos) {
+                for (String attr : new String[]{"label", "name"}) {
+                    try {
+                        String texto = el.getAttribute(attr);
+                        if (texto == null) continue;
+                        java.util.regex.Matcher m = CONTADOR_CONTINUAR.matcher(texto.trim());
+                        if (m.matches()) return Integer.parseInt(m.group(1));
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
+        return 0; // botón "Continuar, N" no encontrado → 0 asientos seleccionados según la app
+    }
+
     private String predicadoAsientoPorNumero(int numero) {
         String num = String.valueOf(numero);
         return "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') AND "
