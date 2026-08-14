@@ -7002,9 +7002,9 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             style={{ borderBottom: '1px solid var(--panel-divide)' }}
           >
             {[
-              { label: 'Resolución', value: '1080 × 2400' },
+              { label: 'Resolución', value: selectedDevice ? '1080 × 2400' : '—' },
               { label: 'Latencia',   value: mirrorConnMs != null ? `${mirrorConnMs} ms` : '—' },
-              { label: 'FPS',        value: String(deviceFps) },
+              { label: 'FPS',        value: selectedDevice ? String(deviceFps) : '—' },
             ].map(({ label, value }) => (
               <div key={label} className="flex flex-col">
                 <span className="text-[9px] uppercase tracking-wider text-slate-600 font-bold">{label}</span>
@@ -7148,7 +7148,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                 </span>
               </div>
               <span className="text-[9px] text-slate-700">
-                {selectedDevice?.platform ?? 'ANDROID'}
+                {selectedDevice?.platform ?? '—'}
               </span>
             </div>
 
@@ -7156,100 +7156,109 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               {/* Name */}
               <DeviceInfoRow
                 label="Nombre"
-                value={selectedDevice ? resolveDeviceDisplayName(selectedDevice).title : 'Samsung Galaxy A52'}
+                value={selectedDevice ? resolveDeviceDisplayName(selectedDevice).title : '—'}
                 valueColor="#e2e8f0"
               />
               {/* Platform chip */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px' }}>
                 <span style={{ fontSize: 10, color: '#475569' }}>Plataforma</span>
-                <span
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 600,
-                    color: (selectedDevice?.platform ?? 'ANDROID') === 'IOS' ? '#a78bfa' : '#34d399',
-                    background: (selectedDevice?.platform ?? 'ANDROID') === 'IOS'
-                      ? 'rgba(167,139,250,0.1)'
-                      : 'rgba(52,211,153,0.1)',
-                    border: `1px solid ${(selectedDevice?.platform ?? 'ANDROID') === 'IOS' ? 'rgba(167,139,250,0.25)' : 'rgba(52,211,153,0.25)'}`,
-                    padding: '1px 7px',
-                    borderRadius: 20,
-                  }}
-                >
-                  {selectedDevice?.platform ?? 'ANDROID'}
-                </span>
+                {selectedDevice ? (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      color: selectedDevice.platform === 'IOS' ? '#a78bfa' : '#34d399',
+                      background: selectedDevice.platform === 'IOS'
+                        ? 'rgba(167,139,250,0.1)'
+                        : 'rgba(52,211,153,0.1)',
+                      border: `1px solid ${selectedDevice.platform === 'IOS' ? 'rgba(167,139,250,0.25)' : 'rgba(52,211,153,0.25)'}`,
+                      padding: '1px 7px',
+                      borderRadius: 20,
+                    }}
+                  >
+                    {selectedDevice.platform}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 10, color: '#475569' }}>—</span>
+                )}
               </div>
-              {/* Model (real cuando el backend lo reporta; mismo fallback de antes si no) */}
+              {/* Model (real cuando el backend lo reporta; '—' si no hay dispositivo) */}
               <DeviceInfoRow
                 label="Modelo"
-                value={selectedDevice?.model ?? (selectedDevice?.platform === 'IOS' ? 'iPhone' : 'Galaxy A52')}
+                value={selectedDevice?.model ?? '—'}
                 valueColor="#94a3b8"
               />
-              {/* Version (real cuando el backend lo reporta; mismo fallback de antes si no) */}
+              {/* Version (real cuando el backend lo reporta; '—' si no hay dispositivo) */}
               <DeviceInfoRow
                 label="Versión"
-                value={
-                  selectedDevice?.platformVersion
-                    ?? ((selectedDevice?.platform ?? 'ANDROID') === 'IOS' ? 'iOS 17.4' : 'Android 13')
-                }
+                value={selectedDevice?.platformVersion ?? '—'}
                 valueColor="#94a3b8"
               />
               {/* Resolution */}
-              <DeviceInfoRow label="Resolución" value="1080 × 2400" valueColor="#94a3b8" mono />
+              <DeviceInfoRow label="Resolución" value={selectedDevice ? '1080 × 2400' : '—'} valueColor="#94a3b8" mono />
               {/* FPS */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px' }}>
                 <span style={{ fontSize: 10, color: '#475569' }}>FPS</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ fontSize: 10, color: '#60a5fa', fontWeight: 600, fontFamily: 'monospace' }}>
-                    {deviceFps}
-                  </span>
-                  <div style={{ display: 'flex', gap: 2 }}>
-                    {[...Array(5)].map((_, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          width: 3,
-                          height: 4 + i * 2,
-                          borderRadius: 1,
-                          backgroundColor: i < 4 ? '#60a5fa' : 'rgba(96,165,250,0.3)',
-                        }}
-                      />
-                    ))}
+                {selectedDevice ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ fontSize: 10, color: '#60a5fa', fontWeight: 600, fontFamily: 'monospace' }}>
+                      {deviceFps}
+                    </span>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      {[...Array(5)].map((_, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            width: 3,
+                            height: 4 + i * 2,
+                            borderRadius: 1,
+                            backgroundColor: i < 4 ? '#60a5fa' : 'rgba(96,165,250,0.3)',
+                          }}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace' }}>—</span>
+                )}
               </div>
               {/* Battery */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px' }}>
                 <span style={{ fontSize: 10, color: '#475569' }}>Batería</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div
-                    style={{
-                      width: 28,
-                      height: 12,
-                      borderRadius: 3,
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      position: 'relative',
-                      overflow: 'hidden',
-                    }}
-                  >
+                {selectedDevice ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <div
                       style={{
-                        position: 'absolute',
-                        left: 1,
-                        top: 1,
-                        width: `${deviceBattery - 4}%`,
-                        height: 'calc(100% - 2px)',
-                        background: deviceBattery > 20
-                          ? 'linear-gradient(90deg, #34d399, #4ade80)'
-                          : '#ef4444',
-                        borderRadius: 2,
-                        transition: 'width 0.3s',
+                        width: 28,
+                        height: 12,
+                        borderRadius: 3,
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        position: 'relative',
+                        overflow: 'hidden',
                       }}
-                    />
+                    >
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: 1,
+                          top: 1,
+                          width: `${deviceBattery - 4}%`,
+                          height: 'calc(100% - 2px)',
+                          background: deviceBattery > 20
+                            ? 'linear-gradient(90deg, #34d399, #4ade80)'
+                            : '#ef4444',
+                          borderRadius: 2,
+                          transition: 'width 0.3s',
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
+                      {deviceBattery}%
+                    </span>
                   </div>
-                  <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
-                    {deviceBattery}%
-                  </span>
-                </div>
+                ) : (
+                  <span style={{ fontSize: 10, color: '#475569', fontFamily: 'monospace' }}>—</span>
+                )}
               </div>
               {/* Orientation */}
               <DeviceInfoRow
