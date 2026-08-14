@@ -7063,9 +7063,22 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             style={{
               padding: isLandscape ? '10px 16px' : '20px 16px',
               overflow: 'hidden',
-              background: 'var(--terminal-bg)',
+              background: 'radial-gradient(ellipse 75% 65% at 50% 38%, rgba(99,102,241,0.12), transparent 72%), var(--terminal-bg)',
             }}
           >
+            {/* Glow ambiental detrás del teléfono — puramente decorativo, no toca el contenido del mirror */}
+            <div
+              aria-hidden
+              className="absolute rounded-full pointer-events-none"
+              style={{
+                width: isLandscape ? 460 : 280,
+                height: isLandscape ? 460 : 480,
+                background: 'radial-gradient(closest-side, rgba(99,102,241,0.38), rgba(129,140,248,0.12) 55%, rgba(99,102,241,0) 75%)',
+                filter: 'blur(38px)',
+                zIndex: 0,
+              }}
+            />
+
             {/* Capture flash overlay */}
             <AnimatePresence>
               {captureFlash && (
@@ -7092,6 +7105,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               initial={{ opacity: 0.4 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
+              style={{ position: 'relative', zIndex: 1 }}
             >
               {/* Phone with rotation animation */}
               <motion.div
