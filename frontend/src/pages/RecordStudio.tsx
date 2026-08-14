@@ -24,7 +24,7 @@ import { suiteService } from '../services/SuiteService'
 import type { SuiteStep } from '../services/SuiteService'
 import showtimesPlaceholder from '../assets/record-studio/showtimes-placeholder.png'
 import {
-  MIRROR_STATUS_CFG, NO_STREAM_STATUSES, NO_OVERLAY_STATUSES,
+  MIRROR_STATUS_CFG, NO_OVERLAY_STATUSES,
   computeMirrorStatus, computeErrorBodyMessage,
 } from '../utils/mirrorStatus'
 
@@ -6087,9 +6087,17 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     mirrorPhase,
   }), [selectedDevice, previewState, imgError, mirrorPhase])
 
-  // El stream se monta con la única condición real (URL + no en NO_STREAM_STATUSES)
-  // — nunca depende de mirrorPhase (ver comentario en utils/mirrorStatus.ts).
-  const streamMounted = !!previewUrl && !NO_STREAM_STATUSES.has(mirrorStatus)
+  // El stream se monta con la ÚNICA condición real: el Runner responde (ver
+  // useMirrorStream — previewUrl ya es null si el Runner no es alcanzable).
+  // A diferencia del Dashboard, aquí NO se resta NO_STREAM_STATUSES: ese set
+  // incluye 'desconectado', alcanzable vía mirrorPhase === DEVICE_DISCONNECTED
+  // — un falso positivo de ese status (p.ej. el endpoint /api/device/status
+  // reportando desconexión aunque el dispositivo sí esté disponible) bloqueaba
+  // el montaje del <img> aunque el stream en sí habría funcionado. Antes de
+  // que este archivo consumiera mirrorPhase, el mirror se mostraba con solo
+  // seleccionar el dispositivo — este es exactamente ese comportamiento,
+  // restaurado. mirrorPhase sigue decidiendo el overlay, nunca el montaje.
+  const streamMounted = !!previewUrl
   const hasMirrorOverlay = !NO_OVERLAY_STATUSES.has(mirrorStatus)
   const mirrorOverlayCfg = MIRROR_STATUS_CFG[mirrorStatus]
   const mirrorOverlayMessage = mirrorStatus === 'ios-error-wda'
