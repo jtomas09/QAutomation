@@ -1201,7 +1201,20 @@ public class SelectorPage extends BasePage {
     // garantizado). El filtro real (regex de hora "7:30 PM") es semántico, no depende de
     // qué película/función sea — se agrega el equivalente iOS vía NSPredicate, mismo
     // criterio de regex aplicado después con obtenerTextoSeguro() (ya lee @value en iOS).
+    // FIX real (evidencia — RUN-1014: ScheduleSelection tardaba ~101s en este método
+    // antes del primer intento de click. Mismo patrón que el mapa de asientos: el
+    // predicado NSPredicate es amplio (StaticText/Button con value/label presente, sin
+    // límite de longitud — matchea precios, nombre de película, etc.) y por cada
+    // candidato se paga isDisplayed() + obtenerTextoSeguro() (hasta 4 viajes). Se
+    // intenta primero UNA sola llamada a getPageSource() con la misma verificación de
+    // conteo/muestra ya usada para asientos; si algo no cuadra, cae al camino original
+    // (elemento por elemento) sin ningún cambio de comportamiento.
     private List<WebElement> obtenerHorariosDisponibles() {
+        if (isIOS()) {
+            List<WebElement> rapido = intentarHorariosRapidoConPageSource();
+            if (rapido != null) return rapido;
+        }
+
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
@@ -1250,6 +1263,93 @@ public class SelectorPage extends BasePage {
         }
 
         return resultado;
+    }
+
+    // Vía rápida (con verificación) de obtenerHorariosDisponibles() — misma idea que
+    // intentarEscaneoRapidoConPageSource() para asientos: UNA sola llamada a
+    // getPageSource() en vez de isDisplayed()+obtenerTextoSeguro() por cada candidato.
+    // Nunca confía ciegamente en el orden: exige conteo idéntico y verifica una
+    // muestra real (primeros/últimos 3) contra obtenerTextoSeguro(). Si algo no
+    // cuadra, devuelve null y el llamador usa el camino original completo.
+    private List<WebElement> intentarHorariosRapidoConPageSource() {
+        try {
+            List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(driver.getPageSource()).nodos;
+
+            List<WebElement> r1 = intentarPredicadoHorario(nodos,
+                    AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"),
+                    n -> "XCUIElementTypeStaticText".equals(n.tag) && n.attrs.get("value") != null);
+            if (r1 == null) return null;
+            if (!r1.isEmpty()) return r1;
+
+            return intentarPredicadoHorario(nodos,
+                    AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)"),
+                    n -> "XCUIElementTypeButton".equals(n.tag)
+                            && (n.attrs.get("value") != null || n.attrs.get("label") != null));
+        } catch (Exception e) {
+            utils.PerfMetrics.note("SeatSelection", "horariosRapido descartado por excepción: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private List<WebElement> intentarPredicadoHorario(List<SeatUiSnapshot.Nodo> nodos, By locator,
+                                                        java.util.function.Predicate<SeatUiSnapshot.Nodo> filtroTipo) {
+        List<WebElement> crudos;
+        try {
+            crudos = driver.findElements(locator);
+        } catch (Exception e) {
+            return null;
+        }
+        if (crudos.isEmpty()) return new ArrayList<>();
+
+        List<SeatUiSnapshot.Nodo> nodosFiltrados = new ArrayList<>();
+        for (SeatUiSnapshot.Nodo n : nodos) {
+            if (filtroTipo.test(n)) nodosFiltrados.add(n);
+        }
+
+        int n = crudos.size();
+        if (nodosFiltrados.size() != n) {
+            utils.PerfMetrics.note("SeatSelection", String.format(
+                    "horariosRapido descartado: conteo no coincide (findElements=%d, pageSource=%d)",
+                    n, nodosFiltrados.size()));
+            return null;
+        }
+
+        Set<Integer> muestra = new HashSet<>();
+        for (int i = 0; i < Math.min(3, n); i++) muestra.add(i);
+        for (int i = Math.max(0, n - 3); i < n; i++) muestra.add(i);
+        for (int i : muestra) {
+            String textoReal = obtenerTextoSeguro(crudos.get(i));
+            String textoXml = textoHorarioDeNodo(nodosFiltrados.get(i));
+            if (!textoReal.equals(textoXml)) {
+                utils.PerfMetrics.note("SeatSelection", String.format(
+                        "horariosRapido descartado: desajuste de orden en idx=%d real='%s' xml='%s'",
+                        i, textoReal, textoXml));
+                return null;
+            }
+        }
+
+        Map<String, WebElement> unicos = new LinkedHashMap<>();
+        for (int i = 0; i < n; i++) {
+            SeatUiSnapshot.Nodo nodo = nodosFiltrados.get(i);
+            if (!"true".equals(nodo.attrs.get("visible"))) continue;
+            String texto = textoHorarioDeNodo(nodo);
+            if (!texto.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) continue;
+            unicos.putIfAbsent(texto.trim(), crudos.get(i));
+        }
+
+        utils.PerfMetrics.note("SeatSelection", String.format(
+                "horariosRapido OK: %d candidatos -> %d horarios (sin isDisplayed/obtenerTextoSeguro individuales)",
+                n, unicos.size()));
+        return new ArrayList<>(unicos.values());
+    }
+
+    private String textoHorarioDeNodo(SeatUiSnapshot.Nodo n) {
+        String value = n.attrs.get("value");
+        if (value != null && !value.isBlank()) return value.trim();
+        String label = n.attrs.get("label");
+        if (label != null && !label.isBlank()) return label.trim();
+        String name = n.attrs.get("name");
+        return name == null ? "" : name.trim();
     }
 
     // PERF/FIX (Problema 5): esta locator NUNCA tuvo rama iOS (@text es exclusivo de
