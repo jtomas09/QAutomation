@@ -6152,11 +6152,23 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const attemptAutoRecovery = useCallback(() => {
     if (!selectedDevice?.udid) return
     if (document.visibilityState === 'hidden') return
+    // No interrumpir una compilación/verificación de WDA legítimamente en
+    // curso: el Runner tolera hasta 12 capturas fallidas por conexión antes de
+    // resolver por sí solo (éxito o error) — reconectar antes de eso reinicia
+    // esa cuenta en un bucle infinito que nunca deja a WDA llegar a
+    // MIRROR_ACTIVE, sobre todo la primera vez con un dispositivo (puede
+    // tardar varios minutos). Solo reconectamos si mirrorPhase ya es
+    // MIRROR_ACTIVE (debería haber frames y no los hay) o no aplica (Android).
+    const wdaBuilding = mirrorPhase != null
+      && mirrorPhase !== 'MIRROR_ACTIVE'
+      && mirrorPhase !== 'DEVICE_DISCONNECTED'
+      && mirrorPhase !== 'ERROR'
+    if (wdaBuilding) return
     const stale = Date.now() - lastFrameAtRef.current > STALL_THRESHOLD_MS
     if (!stale) return
     console.log('[Mirror] Stream sin frames nuevos — reconectando', { udid: selectedDevice.udid })
     performMirrorReconnect()
-  }, [selectedDevice, performMirrorReconnect])
+  }, [selectedDevice, mirrorPhase, performMirrorReconnect])
 
   const attemptAutoRecoveryRef = useRef(attemptAutoRecovery)
   useEffect(() => { attemptAutoRecoveryRef.current = attemptAutoRecovery }, [attemptAutoRecovery])

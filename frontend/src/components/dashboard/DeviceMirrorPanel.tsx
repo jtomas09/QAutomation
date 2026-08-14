@@ -242,10 +242,19 @@ export default function DeviceMirrorPanel({ device }: Props) {
   const attemptAutoRecovery = useCallback(() => {
     if (!udid || paused) return
     if (document.visibilityState === 'hidden') return
+    // No interrumpir una compilación/verificación de WDA legítimamente en
+    // curso (puede tardar varios minutos la primera vez con un dispositivo) —
+    // reconectar antes de que el Runner resuelva por sí solo (éxito o error)
+    // reinicia su propia tolerancia a fallos en un bucle infinito.
+    const wdaBuilding = mirrorPhase != null
+      && mirrorPhase !== 'MIRROR_ACTIVE'
+      && mirrorPhase !== 'DEVICE_DISCONNECTED'
+      && mirrorPhase !== 'ERROR'
+    if (wdaBuilding) return
     const stale = Date.now() - lastFrameAtRef.current > STALL_THRESHOLD_MS
     if (!stale) return
     performReconnect()
-  }, [udid, paused, performReconnect])
+  }, [udid, paused, mirrorPhase, performReconnect])
 
   const attemptAutoRecoveryRef = useRef(attemptAutoRecovery)
   useEffect(() => { attemptAutoRecoveryRef.current = attemptAutoRecovery }, [attemptAutoRecovery])
