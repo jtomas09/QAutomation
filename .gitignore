@@ -46,6 +46,8 @@ reports/
 *.png
 *.jpg
 *.jpeg
+# Excepción: assets reales del frontend (no evidencia de pruebas)
+!frontend/src/assets/**/*.png
 
 # Logs de Appium
 appium.log

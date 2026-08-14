@@ -21,6 +21,7 @@ import { useRunnerLifecycle } from '../hooks/useRunnerLifecycle'
 import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
 import { suiteService } from '../services/SuiteService'
 import type { SuiteStep } from '../services/SuiteService'
+import showtimesPlaceholder from '../assets/record-studio/showtimes-placeholder.png'
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
@@ -3145,42 +3146,55 @@ const PhoneFrame = React.memo(function PhoneFrame({
                 </span>
               </div>
             )}
-            <AnimatePresence mode="wait">
-              {screen === 'home' ? (
-                <motion.div
-                  key="home"
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  transition={{ duration: 0.15 }}
-                  style={{ width: '100%', height: '100%' }}
-                >
-                  <CinepolisHomeScreen
-                    recording={recording}
-                    onRecord={onRecord}
-                    pkg={ANDROID_PKG}
-                    onScreenChange={onScreenChange}
-                    inspectedElId={inspectedElId}
-                  />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="login"
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  transition={{ duration: 0.15 }}
-                  style={{ width: '100%', height: '100%' }}
-                >
-                  <CinepolisLoginScreen
-                    recording={recording}
-                    onRecord={onRecord}
-                    onScreenChange={onScreenChange}
-                    inspectedElId={inspectedElId}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {recording ? (
+              /* Grabando: mockup interactivo Home/Login — permite grabar pasos
+                 tocando elementos aun sin dispositivo real conectado. */
+              <AnimatePresence mode="wait">
+                {screen === 'home' ? (
+                  <motion.div
+                    key="home"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 10 }}
+                    transition={{ duration: 0.15 }}
+                    style={{ width: '100%', height: '100%' }}
+                  >
+                    <CinepolisHomeScreen
+                      recording={recording}
+                      onRecord={onRecord}
+                      pkg={ANDROID_PKG}
+                      onScreenChange={onScreenChange}
+                      inspectedElId={inspectedElId}
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="login"
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    transition={{ duration: 0.15 }}
+                    style={{ width: '100%', height: '100%' }}
+                  >
+                    <CinepolisLoginScreen
+                      recording={recording}
+                      onRecord={onRecord}
+                      onScreenChange={onScreenChange}
+                      inspectedElId={inspectedElId}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            ) : (
+              /* Sin grabación activa: placeholder estático — más realista que
+                 el mockup interactivo mientras no hay stream real que mostrar. */
+              <img
+                src={showtimesPlaceholder}
+                draggable={false}
+                alt="Vista previa de la app"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+            )}
           </>
         )}
     </div>
