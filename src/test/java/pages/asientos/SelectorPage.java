@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -1265,82 +1266,55 @@ public class SelectorPage extends BasePage {
         return resultado;
     }
 
-    // Vía rápida (con verificación) de obtenerHorariosDisponibles() — misma idea que
-    // intentarEscaneoRapidoConPageSource() para asientos: UNA sola llamada a
-    // getPageSource() en vez de isDisplayed()+obtenerTextoSeguro() por cada candidato.
-    // Nunca confía ciegamente en el orden: exige conteo idéntico y verifica una
-    // muestra real (primeros/últimos 3) contra obtenerTextoSeguro(). Si algo no
-    // cuadra, devuelve null y el llamador usa el camino original completo.
+    // Vía rápida (con verificación) de obtenerHorariosDisponibles().
+    //
+    // FIX real (evidencia — RUN-1015: la primera versión de este método correlacionaba
+    // por ORDEN de documento contra driver.findElements(), igual que el mapa de
+    // asientos — pero aquí la verificación de muestra detectó un desajuste real
+    // ("real='Hoy 13 Ago' xml='Cines'"), demostrando que el orden de findElements()
+    // NO es confiable en esta pantalla (a diferencia del mapa de asientos). Se
+    // descartó esa vía por completo — no se puede confiar en el orden aquí).
+    //
+    // Este diseño no depende del orden en absoluto: UNA sola llamada a
+    // getPageSource() para encontrar los TEXTOS que parecen horarios reales (regex
+    // "7:30 PM"), y luego una búsqueda DIRIGIDA por texto exacto
+    // (reubicarElementoPorTextoExacto(), ya usado en este archivo) por cada horario
+    // encontrado — típicamente 3-8 horarios reales, nunca los cientos de candidatos
+    // crudos del predicado original. Si el XML no tiene ningún horario detectable
+    // devuelve null y el llamador usa el método original completo.
     private List<WebElement> intentarHorariosRapidoConPageSource() {
         try {
             List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(driver.getPageSource()).nodos;
 
-            List<WebElement> r1 = intentarPredicadoHorario(nodos,
-                    AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeStaticText' AND value != nil"),
-                    n -> "XCUIElementTypeStaticText".equals(n.tag) && n.attrs.get("value") != null);
-            if (r1 == null) return null;
-            if (!r1.isEmpty()) return r1;
+            Set<String> horariosEncontrados = new LinkedHashSet<>();
+            for (SeatUiSnapshot.Nodo n : nodos) {
+                if (!"XCUIElementTypeStaticText".equals(n.tag) && !"XCUIElementTypeButton".equals(n.tag)) continue;
+                if (!"true".equals(n.attrs.get("visible"))) continue;
+                String texto = textoHorarioDeNodo(n);
+                if (texto.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) {
+                    horariosEncontrados.add(texto.trim());
+                }
+            }
 
-            return intentarPredicadoHorario(nodos,
-                    AppiumBy.iOSNsPredicateString("type == 'XCUIElementTypeButton' AND (value != nil OR label != nil)"),
-                    n -> "XCUIElementTypeButton".equals(n.tag)
-                            && (n.attrs.get("value") != null || n.attrs.get("label") != null));
+            if (horariosEncontrados.isEmpty()) {
+                utils.PerfMetrics.note("SeatSelection", "horariosRapido: 0 horarios detectados en el XML — camino original decide.");
+                return null;
+            }
+
+            List<WebElement> resultado = new ArrayList<>();
+            for (String texto : horariosEncontrados) {
+                WebElement el = reubicarElementoPorTextoExacto(texto);
+                if (el != null) resultado.add(el);
+            }
+
+            utils.PerfMetrics.note("SeatSelection", String.format(
+                    "horariosRapido OK: %d horario(s) detectados en el XML -> %d resueltos por texto exacto (sin isDisplayed/obtenerTextoSeguro sobre candidatos crudos)",
+                    horariosEncontrados.size(), resultado.size()));
+            return resultado;
         } catch (Exception e) {
             utils.PerfMetrics.note("SeatSelection", "horariosRapido descartado por excepción: " + e.getMessage());
             return null;
         }
-    }
-
-    private List<WebElement> intentarPredicadoHorario(List<SeatUiSnapshot.Nodo> nodos, By locator,
-                                                        java.util.function.Predicate<SeatUiSnapshot.Nodo> filtroTipo) {
-        List<WebElement> crudos;
-        try {
-            crudos = driver.findElements(locator);
-        } catch (Exception e) {
-            return null;
-        }
-        if (crudos.isEmpty()) return new ArrayList<>();
-
-        List<SeatUiSnapshot.Nodo> nodosFiltrados = new ArrayList<>();
-        for (SeatUiSnapshot.Nodo n : nodos) {
-            if (filtroTipo.test(n)) nodosFiltrados.add(n);
-        }
-
-        int n = crudos.size();
-        if (nodosFiltrados.size() != n) {
-            utils.PerfMetrics.note("SeatSelection", String.format(
-                    "horariosRapido descartado: conteo no coincide (findElements=%d, pageSource=%d)",
-                    n, nodosFiltrados.size()));
-            return null;
-        }
-
-        Set<Integer> muestra = new HashSet<>();
-        for (int i = 0; i < Math.min(3, n); i++) muestra.add(i);
-        for (int i = Math.max(0, n - 3); i < n; i++) muestra.add(i);
-        for (int i : muestra) {
-            String textoReal = obtenerTextoSeguro(crudos.get(i));
-            String textoXml = textoHorarioDeNodo(nodosFiltrados.get(i));
-            if (!textoReal.equals(textoXml)) {
-                utils.PerfMetrics.note("SeatSelection", String.format(
-                        "horariosRapido descartado: desajuste de orden en idx=%d real='%s' xml='%s'",
-                        i, textoReal, textoXml));
-                return null;
-            }
-        }
-
-        Map<String, WebElement> unicos = new LinkedHashMap<>();
-        for (int i = 0; i < n; i++) {
-            SeatUiSnapshot.Nodo nodo = nodosFiltrados.get(i);
-            if (!"true".equals(nodo.attrs.get("visible"))) continue;
-            String texto = textoHorarioDeNodo(nodo);
-            if (!texto.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) continue;
-            unicos.putIfAbsent(texto.trim(), crudos.get(i));
-        }
-
-        utils.PerfMetrics.note("SeatSelection", String.format(
-                "horariosRapido OK: %d candidatos -> %d horarios (sin isDisplayed/obtenerTextoSeguro individuales)",
-                n, unicos.size()));
-        return new ArrayList<>(unicos.values());
     }
 
     private String textoHorarioDeNodo(SeatUiSnapshot.Nodo n) {
