@@ -22,6 +22,10 @@ import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
 import { suiteService } from '../services/SuiteService'
 import type { SuiteStep } from '../services/SuiteService'
 import showtimesPlaceholder from '../assets/record-studio/showtimes-placeholder.png'
+import {
+  MIRROR_STATUS_CFG, NO_STREAM_STATUSES, NO_OVERLAY_STATUSES,
+  computeMirrorStatus, computeErrorBodyMessage,
+} from '../utils/mirrorStatus'
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
@@ -2943,8 +2947,13 @@ interface PhoneFrameProps {
   onScreenChange: (s: AppScreen) => void
   isLandscape?: boolean
   inspectedElId?: string
+  /** El <img> del stream real se monta cuando esto es no-nulo — decisión ya tomada
+   *  por el llamador vía streamMounted (ver utils/mirrorStatus.ts). PhoneFrame no
+   *  vuelve a decidir "¿existe el stream?", solo lo renderiza. */
   previewUrl?: string | null
-  previewState?: StreamState
+  /** Overlay de estado (spinner/mensaje) a dibujar ENCIMA del stream o del
+   *  placeholder — independiente de si el stream está montado (ver mirrorStatus.ts). */
+  mirrorOverlay?: { message: string; pulse: boolean } | null
   /** When set and recording with a live preview, renders an interactive overlay. */
   onScreenInteract?: (
     nx: number, ny: number,
@@ -2953,8 +2962,10 @@ interface PhoneFrameProps {
   ) => void
   /** Notifica cuándo llega un frame real del mirror — solo para medir latencia en el contenedor; no cambia qué se renderiza. */
   onFrameLoad?: () => void
-  /** Mensaje específico de la fase de arranque de WDA (ver mirrorPhase) — reemplaza el texto genérico del overlay de carga cuando está presente. */
-  wdaPhaseLabel?: string | null
+  /** Notifica cuándo el <img> del stream dispara onError (conexión cortada/frame roto). */
+  onFrameError?: () => void
+  /** Cambia para forzar un remount del <img> del stream (reintento tras error). */
+  reloadKey?: number
 }
 
 // ── Design system unificado con el Dashboard (Fase de rediseño visual) ────────
@@ -2996,26 +3007,6 @@ function ToolbarIconButton({
   )
 }
 
-/** Mismo vocabulario visual que MIRROR_STATUS_CFG en DeviceMirrorPanel.tsx del Dashboard,
- * derivado de las mismas señales que PhoneFrame ya usa para sus propios estados internos
- * (previewState) — no introduce ningún estado nuevo. */
-function computeDeviceStatusVisual(
-  device: PhysicalDevice | null,
-  state: StreamState | undefined,
-): { label: string; color: string; pulse: boolean } {
-  if (!device) return { label: 'Sin dispositivo', color: '#64748b', pulse: false }
-  switch (state) {
-    case 'connecting':          return { label: 'Conectando',           color: '#60a5fa', pulse: true }
-    case 'loading':             return { label: 'Cargando',             color: '#60a5fa', pulse: true }
-    case 'available':
-    case 'updating':            return { label: 'Conectado',            color: '#34d399', pulse: false }
-    case 'error':                return { label: 'Error',                color: '#f87171', pulse: false }
-    case 'runner_offline':      return { label: 'Runner sin conexión',  color: '#f87171', pulse: false }
-    case 'device_disconnected': return { label: 'Desconectado',         color: '#f87171', pulse: false }
-    default:                     return { label: 'Sin conexión',         color: '#64748b', pulse: false }
-  }
-}
-
 // Mismo bisel que el Mirror del Dashboard (DeviceMirrorPanel.tsx) — borde 6px
 // #1e293b, radius 30, aspect-ratio 9/19.5, sin notch ni barra de estado falsa
 // (el stream real ya trae su propia barra de estado, y el mock de práctica
@@ -3031,10 +3022,11 @@ const PhoneFrame = React.memo(function PhoneFrame({
   onScreenChange,
   inspectedElId,
   previewUrl,
-  previewState,
+  mirrorOverlay,
   onScreenInteract,
   onFrameLoad,
-  wdaPhaseLabel,
+  onFrameError,
+  reloadKey,
 }: PhoneFrameProps) {
   return (
     <div
@@ -3049,157 +3041,108 @@ const PhoneFrame = React.memo(function PhoneFrame({
         boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
       }}
     >
-      {/* ── Live Preview layer (DeviceStreamProvider) ── */}
-      {previewUrl ? (
-          <>
-            {/* Real device screenshot */}
-            <img
-              src={previewUrl}
-              draggable={false}
-              onLoad={onFrameLoad}
-              style={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                display: 'block',
-              }}
-              alt="Device screen"
-            />
-            {/* Subtle "Updating" indicator — top-right dot */}
-            {previewState === 'updating' && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 6,
-                  right: 6,
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  backgroundColor: '#6366f1',
-                  opacity: 0.85,
-                  animation: 'pulse 1s ease-in-out infinite',
-                  zIndex: 10,
-                }}
-              />
-            )}
-            {/* Interactive recording overlay — captures taps/swipes on the live mirror */}
-            {recording && onScreenInteract && (
-              <RecordingOverlay onInteract={onScreenInteract} />
-            )}
-          </>
-        ) : (
-          /* ── Static mockup fallback (no device / no preview) ── */
-          <>
-            {(previewState === 'loading' || previewState === 'connecting') && (
-              /* Loading state overlay */
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  backgroundColor: '#0d1117',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 10,
-                  zIndex: 20,
-                }}
+      {/* ── Live stream — se monta con la única condición real ya decidida por el
+          llamador (streamMounted, ver utils/mirrorStatus.ts); nunca depende de
+          si mirrorOverlay está presente — evita el ciclo circular documentado
+          en mirrorStatus.ts. ── */}
+      {previewUrl && (
+        <>
+          <img
+            key={reloadKey}
+            src={previewUrl}
+            draggable={false}
+            onLoad={onFrameLoad}
+            onError={onFrameError}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block',
+            }}
+            alt="Device screen"
+          />
+          {/* Interactive recording overlay — captures taps/swipes on the live mirror */}
+          {recording && onScreenInteract && (
+            <RecordingOverlay onInteract={onScreenInteract} />
+          )}
+        </>
+      )}
+
+      {/* ── Sin stream montado: mockup interactivo (grabando) o placeholder
+          estático (mismo criterio que antes, sin cambios) ── */}
+      {!previewUrl && (
+        recording ? (
+          /* Grabando: mockup interactivo Home/Login — permite grabar pasos
+             tocando elementos aun sin dispositivo real conectado. */
+          <AnimatePresence mode="wait">
+            {screen === 'home' ? (
+              <motion.div
+                key="home"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                transition={{ duration: 0.15 }}
+                style={{ width: '100%', height: '100%' }}
               >
-                <div
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: '50%',
-                    border: '2px solid rgba(99,102,241,0.2)',
-                    borderTopColor: '#6366f1',
-                    animation: 'spin 0.8s linear infinite',
-                  }}
+                <CinepolisHomeScreen
+                  recording={recording}
+                  onRecord={onRecord}
+                  pkg={ANDROID_PKG}
+                  onScreenChange={onScreenChange}
+                  inspectedElId={inspectedElId}
                 />
-                <span style={{ color: '#475569', fontSize: 10, fontWeight: 600, textAlign: 'center', whiteSpace: 'pre-line', padding: '0 16px' }}>
-                  {wdaPhaseLabel ?? (previewState === 'connecting' ? 'Conectando...' : 'Cargando pantalla...')}
-                </span>
-              </div>
-            )}
-            {(previewState === 'device_disconnected' || previewState === 'runner_offline' || previewState === 'error') && (
-              /* Error state */
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  backgroundColor: '#0d1117',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  zIndex: 20,
-                }}
-              >
-                <div style={{ fontSize: 22, opacity: 0.4 }}>
-                  {previewState === 'device_disconnected' ? '📵' : previewState === 'error' ? '⚠️' : '⚡'}
-                </div>
-                <span style={{ color: '#475569', fontSize: 10, fontWeight: 600, textAlign: 'center', padding: '0 16px' }}>
-                  {previewState === 'device_disconnected'
-                    ? 'Dispositivo desconectado'
-                    : previewState === 'error'
-                    ? 'Error al iniciar WebDriverAgent'
-                    : 'Runner no disponible'}
-                </span>
-              </div>
-            )}
-            {recording ? (
-              /* Grabando: mockup interactivo Home/Login — permite grabar pasos
-                 tocando elementos aun sin dispositivo real conectado. */
-              <AnimatePresence mode="wait">
-                {screen === 'home' ? (
-                  <motion.div
-                    key="home"
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 10 }}
-                    transition={{ duration: 0.15 }}
-                    style={{ width: '100%', height: '100%' }}
-                  >
-                    <CinepolisHomeScreen
-                      recording={recording}
-                      onRecord={onRecord}
-                      pkg={ANDROID_PKG}
-                      onScreenChange={onScreenChange}
-                      inspectedElId={inspectedElId}
-                    />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="login"
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    transition={{ duration: 0.15 }}
-                    style={{ width: '100%', height: '100%' }}
-                  >
-                    <CinepolisLoginScreen
-                      recording={recording}
-                      onRecord={onRecord}
-                      onScreenChange={onScreenChange}
-                      inspectedElId={inspectedElId}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              </motion.div>
             ) : (
-              /* Sin grabación activa: placeholder estático — más realista que
-                 el mockup interactivo mientras no hay stream real que mostrar. */
-              <img
-                src={showtimesPlaceholder}
-                draggable={false}
-                alt="Vista previa de la app"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-              />
+              <motion.div
+                key="login"
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.15 }}
+                style={{ width: '100%', height: '100%' }}
+              >
+                <CinepolisLoginScreen
+                  recording={recording}
+                  onRecord={onRecord}
+                  onScreenChange={onScreenChange}
+                  inspectedElId={inspectedElId}
+                />
+              </motion.div>
             )}
-          </>
-        )}
+          </AnimatePresence>
+        ) : (
+          /* Sin grabación activa: placeholder estático — más realista que
+             el mockup interactivo mientras no hay stream real que mostrar. */
+          <img
+            src={showtimesPlaceholder}
+            draggable={false}
+            alt="Vista previa de la app"
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        )
+      )}
+
+      {/* ── Overlay de estado — mismo patrón que DeviceMirrorPanel.tsx del
+          Dashboard (icono + mensaje, sin spinner): se dibuja ENCIMA de lo que
+          sea que haya debajo (stream real o placeholder), independientemente
+          de si el stream está montado. Nunca se muestra mientras se graba —
+          el modo práctica es una vía de escape deliberada que no debe taparse. ── */}
+      {mirrorOverlay && !recording && (
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 px-4 text-center"
+          style={{ background: '#05070d', zIndex: 20 }}
+        >
+          <Smartphone size={26} className="opacity-25 text-slate-500" />
+          <span
+            className="text-[10px] text-slate-600 leading-relaxed"
+            style={{ whiteSpace: 'pre-line' }}
+          >
+            {mirrorOverlay.message}
+          </span>
+        </div>
+      )}
     </div>
   )
 })
@@ -6096,34 +6039,69 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [inspectedElId, setInspectedElId] = useState<string | null>(null)
   // ── Live device mirror — direct MJPEG from Runner (port 8082) ────────────
-  // mirrorPhase distingue "el Runner responde" de "WDA ya produce frames reales"
-  // (ver IOSMirrorStateTracker en el Runner) — sin esto, el <img> intenta cargar
-  // el stream MJPEG mientras WDA sigue inicializando/compilando/arrancando y
-  // muestra un frame negro/roto. Mismo criterio que ya usa DeviceMirrorPanel.tsx
-  // del Dashboard (MIRROR_STATUS_CFG), aplicado aquí sin tocar Runner/backend.
-  const { url: previewUrl, state: previewState, mirrorPhase } = useMirrorStream(selectedDevice?.udid ?? null)
-  const wdaWarmingUp = mirrorPhase != null
-    && mirrorPhase !== 'MIRROR_ACTIVE'
-    && mirrorPhase !== 'DEVICE_DISCONNECTED'
-    && mirrorPhase !== 'ERROR'
-  const streamReady        = !!previewUrl && !wdaWarmingUp && mirrorPhase !== 'ERROR'
-  const effectivePreviewUrl   = streamReady ? previewUrl : null
-  const effectivePreviewState = !streamReady && mirrorPhase === 'ERROR'
-    ? 'error'
-    : !streamReady && wdaWarmingUp
-    ? 'loading'
-    : previewState
-  // Mismos textos que MIRROR_STATUS_CFG en DeviceMirrorPanel.tsx del Dashboard —
-  // sin esto, la espera de WDA (que puede tardar varios minutos la primera vez)
-  // se ve como una pantalla negra con un spinner genérico y poco visible.
-  const wdaPhaseLabel: string | null = !streamReady
-    ? mirrorPhase === 'DEVICE_DETECTED'   ? 'Esperando inicio de sesión Appium…'
-    : mirrorPhase === 'INITIALIZING_WDA'  ? 'Iniciando WebDriverAgent…'
-    : mirrorPhase === 'BUILDING_WDA'      ? 'Compilando WebDriverAgent…\n\nPuede tardar varios minutos la primera vez en este dispositivo.'
-    : mirrorPhase === 'STARTING_WDA'      ? 'WebDriverAgent compilado — arrancando en el dispositivo…'
-    : mirrorPhase === 'VERIFYING_WDA'     ? 'Verificando que WebDriverAgent responda…'
-    : null
-    : null
+  // Mismo flujo/hook que DeviceMirrorPanel.tsx del Dashboard (useMirrorStream)
+  // y misma lógica de estado (utils/mirrorStatus.ts) — "¿existe el stream?" y
+  // "¿qué overlay se dibuja encima?" son preguntas independientes (ver comentario
+  // en mirrorStatus.ts). El <img> se monta con la única condición real (UDID +
+  // Runner alcanzable); mirrorPhase decide SOLO qué overlay mostrar encima,
+  // nunca si el stream existe — gatearlo causaría un ciclo circular (Runner
+  // solo reporta MIRROR_ACTIVE una vez que el stream ya se está consumiendo).
+  const { url: previewUrl, state: previewState, mirrorPhase, mirrorReason } = useMirrorStream(selectedDevice?.udid ?? null)
+
+  const [imgError, setImgError] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const prevUdidRef = useRef<string | null>(null)
+  useEffect(() => {
+    const udid = selectedDevice?.udid ?? null
+    if (udid !== prevUdidRef.current) {
+      prevUdidRef.current = udid
+      setImgError(false)
+      if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
+      if (udid) console.log('[Mirror] Dispositivo seleccionado', { udid, platform: selectedDevice?.platform })
+    }
+  }, [selectedDevice])
+  useEffect(() => {
+    if (previewState === 'connecting') console.log('[Mirror] Solicitando stream...', { udid: selectedDevice?.udid })
+  }, [previewState, selectedDevice])
+  const prevStreamMountedRef = useRef(false)
+
+  const mirrorStatus = useMemo(() => computeMirrorStatus({
+    hasDevice:    !!selectedDevice,
+    streamState:  previewState ?? 'idle',
+    imgError,
+    mirrorPhase,
+  }), [selectedDevice, previewState, imgError, mirrorPhase])
+
+  // El stream se monta con la única condición real (URL + no en NO_STREAM_STATUSES)
+  // — nunca depende de mirrorPhase (ver comentario en utils/mirrorStatus.ts).
+  const streamMounted = !!previewUrl && !NO_STREAM_STATUSES.has(mirrorStatus)
+  const hasMirrorOverlay = !NO_OVERLAY_STATUSES.has(mirrorStatus)
+  const mirrorOverlayCfg = MIRROR_STATUS_CFG[mirrorStatus]
+  const mirrorOverlayMessage = mirrorStatus === 'ios-error-wda'
+    ? computeErrorBodyMessage(mirrorReason)
+    : mirrorOverlayCfg.bodyMessage
+
+  useEffect(() => {
+    if (streamMounted && !prevStreamMountedRef.current) {
+      console.log('[Mirror] Stream conectado', { udid: selectedDevice?.udid, mirrorStatus })
+    }
+    prevStreamMountedRef.current = streamMounted
+  }, [streamMounted, mirrorStatus, selectedDevice])
+
+  const handleFrameError = useCallback(() => {
+    console.log('[Mirror] Error en <img> del stream — sin frame o conexión cortada', { udid: selectedDevice?.udid })
+    setImgError(true)
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+    retryTimerRef.current = setTimeout(() => {
+      setReloadKey(k => k + 1)
+      setImgError(false)
+    }, 2_000)
+  }, [selectedDevice])
+  useEffect(() => () => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+  }, [])
   // ── Recording session (Runner recording engine on port 8082) ──────────────
   const { sessionId, deviceWidth, deviceHeight, start: startSession, stop: stopSession, send: sendStep, onPhysicalStep } = useRecordingSession()
   // ── Device viewer state ────────────────────────────────────────────────────
@@ -6147,15 +6125,19 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     }
   }, [previewState])
   const handleFrameLoad = useCallback(() => {
+    console.log('[Mirror] Primer frame recibido', { udid: selectedDevice?.udid })
+    setImgError(false)
     if (mirrorConnectStartRef.current !== null) {
       setMirrorConnMs(Math.round(performance.now() - mirrorConnectStartRef.current))
       mirrorConnectStartRef.current = null
     }
-  }, [])
-  const deviceStatusVisual = useMemo(
-    () => computeDeviceStatusVisual(selectedDevice, previewState),
-    [selectedDevice, previewState],
-  )
+    console.log('[Mirror] Frame actualizado')
+    console.log('[Mirror] Renderizando imagen', { udid: selectedDevice?.udid })
+  }, [selectedDevice])
+  const deviceStatusVisual = useMemo(() => {
+    const cfg = MIRROR_STATUS_CFG[mirrorStatus]
+    return { label: cfg.label, color: cfg.color, pulse: cfg.pulse }
+  }, [mirrorStatus])
 
   // ── Fetch devices + configs ────────────────────────────────────────────────
   useEffect(() => {
@@ -7091,11 +7073,15 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                   onScreenChange={setScreen}
                   isLandscape={isLandscape}
                   inspectedElId={inspectedElId ?? undefined}
-                  previewUrl={effectivePreviewUrl}
-                  previewState={effectivePreviewState}
+                  previewUrl={streamMounted ? previewUrl : null}
+                  // 'sin-dispositivo' se excluye: el placeholder + badge + meta-row ya
+                  // comunican "sin dispositivo" — el overlay solo aporta valor una vez
+                  // que SÍ hay un dispositivo seleccionado y algo real está en progreso.
+                  mirrorOverlay={hasMirrorOverlay && mirrorStatus !== 'sin-dispositivo' ? { message: mirrorOverlayMessage, pulse: mirrorOverlayCfg.pulse } : null}
                   onScreenInteract={sessionId ? handleScreenInteract : undefined}
                   onFrameLoad={handleFrameLoad}
-                  wdaPhaseLabel={wdaPhaseLabel}
+                  onFrameError={handleFrameError}
+                  reloadKey={reloadKey}
                 />
               </motion.div>
             </motion.div>

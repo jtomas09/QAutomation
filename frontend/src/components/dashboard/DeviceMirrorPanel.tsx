@@ -4,136 +4,17 @@ import {
   Smartphone, Camera, RefreshCw, Maximize2, Power, WifiOff, RotateCw, Wifi, Loader2,
 } from 'lucide-react'
 import { useMirrorStream } from '../../hooks/useMirrorStream'
-import type { MirrorPhase } from '../../hooks/useMirrorStream'
 import { retryMirrorLaunch } from '../../services/mirrorService'
-import type { StreamState } from '../../services/deviceStream'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
 import { executionTrackingService } from '../../services/ExecutionTrackingService'
 import type { ExecutionRecord, ExecStatus } from '../../services/ExecutionTrackingService'
+import {
+  MIRROR_STATUS_CFG, NO_STREAM_STATUSES, NO_OVERLAY_STATUSES,
+  computeMirrorStatus, computeErrorBodyMessage,
+} from '../../utils/mirrorStatus'
 
 interface Props {
   device: ConfiguredDevice | null
-}
-
-// ── Estados visuales del Mirror (Fase 5) ─────────────────────────────────────
-// Formaliza en un único lugar las 7 combinaciones visuales requeridas, derivadas
-// de señales que YA existen (useMirrorStream.state, el toggle local "paused" de
-// Fase 1, y el ExecutionRecord por-dispositivo de Fase 2/3) — no se agrega
-// ningún mecanismo de conexión nuevo, solo se prioriza y etiqueta lo que ya hay.
-type MirrorStatus =
-  | 'sin-dispositivo'
-  | 'conectando'
-  | 'reconectando'
-  | 'disponible'
-  | 'ejecutando'
-  | 'pausado'
-  | 'desconectado'
-  | 'error'
-  // ── Fases WDA (iOS) — desacopladas de "el Runner responde" ────────────────
-  // Antes, cualquiera de estas situaciones se mostraba como 'disponible'
-  // (verde, "Conectado") con el video en negro, sin explicación. Ahora cada
-  // una tiene su propio estado visual — ver IOSMirrorStateTracker (Runner).
-  | 'ios-esperando-appium'
-  | 'ios-iniciando-wda'
-  | 'ios-construyendo-wda'
-  | 'ios-arrancando-wda'
-  | 'ios-verificando-wda'
-  | 'ios-error-wda'
-
-const MIRROR_STATUS_CFG: Record<MirrorStatus, {
-  label: string; color: string; pulse: boolean; bodyMessage: string
-}> = {
-  'sin-dispositivo': { label: 'Sin dispositivo',      color: '#64748b', pulse: false, bodyMessage: 'Selecciona un dispositivo para visualizar su pantalla.' },
-  'conectando':       { label: 'Conectando',          color: '#60a5fa', pulse: true,  bodyMessage: 'Conectando al stream…' },
-  'reconectando':     { label: 'Reconectando Mirror…', color: '#60a5fa', pulse: true,  bodyMessage: '' },
-  'disponible':       { label: 'Conectado',           color: '#34d399', pulse: false, bodyMessage: '' },
-  'ejecutando':       { label: 'Ejecución en curso',  color: '#34d399', pulse: true,  bodyMessage: '' },
-  'pausado':          { label: 'Pausado',             color: '#f59e0b', pulse: false, bodyMessage: 'Mirror en pausa.' },
-  'desconectado':     { label: 'Desconectado',        color: '#f87171', pulse: false, bodyMessage: 'El dispositivo o el Runner no están disponibles.' },
-  'error':            { label: 'Error',               color: '#f87171', pulse: false, bodyMessage: 'No fue posible establecer el stream.' },
-  'ios-esperando-appium': {
-    label: 'Dispositivo conectado', color: '#60a5fa', pulse: false,
-    bodyMessage: 'Esperando inicio de sesión Appium…',
-  },
-  'ios-iniciando-wda': {
-    label: 'Iniciando WDA', color: '#f59e0b', pulse: true,
-    bodyMessage: 'Iniciando WebDriverAgent…',
-  },
-  'ios-construyendo-wda': {
-    label: 'Compilando WDA', color: '#f59e0b', pulse: true,
-    bodyMessage: 'Compilando WebDriverAgent…\n\nPuede tardar varios minutos la primera vez en este dispositivo.',
-  },
-  'ios-arrancando-wda': {
-    label: 'Arrancando WDA', color: '#f59e0b', pulse: true,
-    bodyMessage: 'WebDriverAgent compilado — arrancando en el dispositivo…',
-  },
-  'ios-verificando-wda': {
-    label: 'Verificando WDA', color: '#f59e0b', pulse: true,
-    bodyMessage: 'Verificando que WebDriverAgent responda…',
-  },
-  'ios-error-wda': {
-    label: 'Error de WDA', color: '#f87171', pulse: false,
-    // Mensaje genérico — computeErrorBodyMessage() lo sobreescribe con el motivo real
-    // reportado por IOSMirrorStateTracker cuando está disponible.
-    bodyMessage: 'No fue posible iniciar el Mirror.\n\nMotivo:\nWebDriverAgent no pudo iniciarse.',
-  },
-}
-
-// ── Stream vs. overlay — desacoplados (arquitectura permanente) ─────────────
-// Antes, "¿existe el <img>?" y "¿qué fase reporta el Runner?" eran la MISMA
-// señal (showsVideo por-status) — eso creaba un ciclo: MIRROR_ACTIVE exigía un
-// frame real, pero un frame real exigía que el <img> ya estuviera montado, que
-// a su vez exigía... MIRROR_ACTIVE. El stream ahora existe con la única
-// condición real (UDID + Runner + dispositivo presente, ver streamMounted más
-// abajo); la fase deja de decidir si se intenta capturar y pasa a decidir
-// solo qué overlay se dibuja ENCIMA del stream — nunca si el stream existe.
-//
-// 'pausado' es la única fase que sigue desmontando el stream: es una acción
-// deliberada del usuario para dejar de consumir la conexión, no una espera de
-// capability — no forma parte del problema de la dependencia circular.
-const NO_STREAM_STATUSES: ReadonlySet<MirrorStatus> = new Set(['sin-dispositivo', 'desconectado', 'pausado'])
-// 'reconectando' se mantiene sin overlay (igual que antes) para no tapar el
-// último frame válido mientras se reabre la conexión.
-const NO_OVERLAY_STATUSES: ReadonlySet<MirrorStatus> = new Set(['disponible', 'ejecutando', 'reconectando'])
-
-/** Construye el mensaje de error con el motivo REAL (p.ej. "xcodebuild failed with code 65"). */
-function computeErrorBodyMessage(reason: string | null): string {
-  const base = 'No fue posible iniciar el Mirror.\n\nMotivo:\nWebDriverAgent no pudo iniciarse.'
-  return reason ? `${base}\n\nError:\n${reason}` : base
-}
-
-function computeMirrorStatus(params: {
-  device:             ConfiguredDevice | null
-  streamState:        StreamState
-  imgError:           boolean
-  paused:             boolean
-  hasActiveExecution: boolean
-  reconnecting:       boolean
-  mirrorPhase:        MirrorPhase | null
-}): MirrorStatus {
-  const { device, streamState, imgError, paused, hasActiveExecution, reconnecting, mirrorPhase } = params
-  if (!device) return 'sin-dispositivo'
-  if (paused) return 'pausado'
-  if (reconnecting) return 'reconectando'
-  if (streamState === 'connecting') return 'conectando'
-  if (streamState === 'error' || imgError) return 'error'
-  if (streamState === 'device_disconnected' || streamState === 'runner_offline') return 'desconectado'
-
-  // A partir de aquí el Runner responde (streamState === 'available'), pero eso
-  // por sí solo no significa que WDA esté realmente produciendo frames — de ahí
-  // la fase reportada por el Runner (IOSMirrorStateTracker). Para Android,
-  // mirrorPhase siempre es MIRROR_ACTIVE (conectado) o DEVICE_DISCONNECTED, así
-  // que este bloque no cambia su comportamiento existente.
-  if (mirrorPhase === 'DEVICE_DISCONNECTED') return 'desconectado'
-  if (mirrorPhase === 'ERROR') return 'ios-error-wda'
-  if (mirrorPhase === 'INITIALIZING_WDA') return 'ios-iniciando-wda'
-  if (mirrorPhase === 'BUILDING_WDA') return 'ios-construyendo-wda'
-  if (mirrorPhase === 'STARTING_WDA') return 'ios-arrancando-wda'
-  if (mirrorPhase === 'VERIFYING_WDA') return 'ios-verificando-wda'
-  if (mirrorPhase === 'DEVICE_DETECTED') return 'ios-esperando-appium'
-
-  if (streamState === 'available') return hasActiveExecution ? 'ejecutando' : 'disponible'
-  return 'desconectado'
 }
 
 // Sin recibir un frame nuevo durante esta ventana, se asume que el stream MJPEG
@@ -437,7 +318,7 @@ export default function DeviceMirrorPanel({ device }: Props) {
   }, [])
 
   const mirrorStatus = useMemo(() => computeMirrorStatus({
-    device,
+    hasDevice:          !!device,
     streamState:        state,
     imgError,
     paused,
