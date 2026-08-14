@@ -2953,6 +2953,8 @@ interface PhoneFrameProps {
   ) => void
   /** Notifica cuándo llega un frame real del mirror — solo para medir latencia en el contenedor; no cambia qué se renderiza. */
   onFrameLoad?: () => void
+  /** Mensaje específico de la fase de arranque de WDA (ver mirrorPhase) — reemplaza el texto genérico del overlay de carga cuando está presente. */
+  wdaPhaseLabel?: string | null
 }
 
 // ── Design system unificado con el Dashboard (Fase de rediseño visual) ────────
@@ -3032,6 +3034,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
   previewState,
   onScreenInteract,
   onFrameLoad,
+  wdaPhaseLabel,
 }: PhoneFrameProps) {
   return (
     <div
@@ -3114,8 +3117,8 @@ const PhoneFrame = React.memo(function PhoneFrame({
                     animation: 'spin 0.8s linear infinite',
                   }}
                 />
-                <span style={{ color: '#475569', fontSize: 10, fontWeight: 600 }}>
-                  {previewState === 'connecting' ? 'Conectando...' : 'Cargando pantalla...'}
+                <span style={{ color: '#475569', fontSize: 10, fontWeight: 600, textAlign: 'center', whiteSpace: 'pre-line', padding: '0 16px' }}>
+                  {wdaPhaseLabel ?? (previewState === 'connecting' ? 'Conectando...' : 'Cargando pantalla...')}
                 </span>
               </div>
             )}
@@ -6110,6 +6113,17 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     : !streamReady && wdaWarmingUp
     ? 'loading'
     : previewState
+  // Mismos textos que MIRROR_STATUS_CFG en DeviceMirrorPanel.tsx del Dashboard —
+  // sin esto, la espera de WDA (que puede tardar varios minutos la primera vez)
+  // se ve como una pantalla negra con un spinner genérico y poco visible.
+  const wdaPhaseLabel: string | null = !streamReady
+    ? mirrorPhase === 'DEVICE_DETECTED'   ? 'Esperando inicio de sesión Appium…'
+    : mirrorPhase === 'INITIALIZING_WDA'  ? 'Iniciando WebDriverAgent…'
+    : mirrorPhase === 'BUILDING_WDA'      ? 'Compilando WebDriverAgent…\n\nPuede tardar varios minutos la primera vez en este dispositivo.'
+    : mirrorPhase === 'STARTING_WDA'      ? 'WebDriverAgent compilado — arrancando en el dispositivo…'
+    : mirrorPhase === 'VERIFYING_WDA'     ? 'Verificando que WebDriverAgent responda…'
+    : null
+    : null
   // ── Recording session (Runner recording engine on port 8082) ──────────────
   const { sessionId, deviceWidth, deviceHeight, start: startSession, stop: stopSession, send: sendStep, onPhysicalStep } = useRecordingSession()
   // ── Device viewer state ────────────────────────────────────────────────────
@@ -7081,6 +7095,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                   previewState={effectivePreviewState}
                   onScreenInteract={sessionId ? handleScreenInteract : undefined}
                   onFrameLoad={handleFrameLoad}
+                  wdaPhaseLabel={wdaPhaseLabel}
                 />
               </motion.div>
             </motion.div>
