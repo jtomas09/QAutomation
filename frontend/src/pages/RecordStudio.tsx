@@ -3013,11 +3013,13 @@ function computeDeviceStatusVisual(
   }
 }
 
-// Mismas dimensiones/bisel que el Mirror del Dashboard (DeviceMirrorPanel.tsx) —
-// PORTRAIT_W=240, aspect-ratio 9/19.5, borde 6px #1e293b, radius 30, sin notch
-// ni barra de estado falsa: el stream real ya trae su propia barra de estado,
-// y el mock de práctica muestra su propio header de app (no un chrome de OS).
-const PORTRAIT_W = 240
+// Mismo bisel que el Mirror del Dashboard (DeviceMirrorPanel.tsx) — borde 6px
+// #1e293b, radius 30, aspect-ratio 9/19.5, sin notch ni barra de estado falsa
+// (el stream real ya trae su propia barra de estado, y el mock de práctica
+// tiene su propio header de app). El tamaño es mayor que en el Dashboard: en
+// Record Studio el dispositivo es el contenido principal de una columna
+// dedicada, no una tarjeta secundaria entre varias.
+const PORTRAIT_W = 300
 
 const PhoneFrame = React.memo(function PhoneFrame({
   recording,
@@ -3034,7 +3036,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
     <div
       className="relative overflow-hidden flex items-center justify-center"
       style={{
-        width: '82%',
+        width: '92%',
         maxWidth: PORTRAIT_W,
         aspectRatio: '9 / 19.5',
         borderRadius: 30,
@@ -3116,7 +3118,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
                 </span>
               </div>
             )}
-            {(previewState === 'device_disconnected' || previewState === 'runner_offline') && (
+            {(previewState === 'device_disconnected' || previewState === 'runner_offline' || previewState === 'error') && (
               /* Error state */
               <div
                 style={{
@@ -3132,11 +3134,13 @@ const PhoneFrame = React.memo(function PhoneFrame({
                 }}
               >
                 <div style={{ fontSize: 22, opacity: 0.4 }}>
-                  {previewState === 'device_disconnected' ? '📵' : '⚡'}
+                  {previewState === 'device_disconnected' ? '📵' : previewState === 'error' ? '⚠️' : '⚡'}
                 </div>
                 <span style={{ color: '#475569', fontSize: 10, fontWeight: 600, textAlign: 'center', padding: '0 16px' }}>
                   {previewState === 'device_disconnected'
                     ? 'Dispositivo desconectado'
+                    : previewState === 'error'
+                    ? 'Error al iniciar WebDriverAgent'
                     : 'Runner no disponible'}
                 </span>
               </div>
@@ -6075,7 +6079,23 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [inspectedElId, setInspectedElId] = useState<string | null>(null)
   // ── Live device mirror — direct MJPEG from Runner (port 8082) ────────────
-  const { url: previewUrl, state: previewState } = useMirrorStream(selectedDevice?.udid ?? null)
+  // mirrorPhase distingue "el Runner responde" de "WDA ya produce frames reales"
+  // (ver IOSMirrorStateTracker en el Runner) — sin esto, el <img> intenta cargar
+  // el stream MJPEG mientras WDA sigue inicializando/compilando/arrancando y
+  // muestra un frame negro/roto. Mismo criterio que ya usa DeviceMirrorPanel.tsx
+  // del Dashboard (MIRROR_STATUS_CFG), aplicado aquí sin tocar Runner/backend.
+  const { url: previewUrl, state: previewState, mirrorPhase } = useMirrorStream(selectedDevice?.udid ?? null)
+  const wdaWarmingUp = mirrorPhase != null
+    && mirrorPhase !== 'MIRROR_ACTIVE'
+    && mirrorPhase !== 'DEVICE_DISCONNECTED'
+    && mirrorPhase !== 'ERROR'
+  const streamReady        = !!previewUrl && !wdaWarmingUp && mirrorPhase !== 'ERROR'
+  const effectivePreviewUrl   = streamReady ? previewUrl : null
+  const effectivePreviewState = !streamReady && mirrorPhase === 'ERROR'
+    ? 'error'
+    : !streamReady && wdaWarmingUp
+    ? 'loading'
+    : previewState
   // ── Recording session (Runner recording engine on port 8082) ──────────────
   const { sessionId, deviceWidth, deviceHeight, start: startSession, stop: stopSession, send: sendStep, onPhysicalStep } = useRecordingSession()
   // ── Device viewer state ────────────────────────────────────────────────────
@@ -6991,8 +7011,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               aria-hidden
               className="absolute rounded-full pointer-events-none"
               style={{
-                width: isLandscape ? 460 : 280,
-                height: isLandscape ? 460 : 480,
+                width: isLandscape ? 520 : 340,
+                height: isLandscape ? 520 : 560,
                 background: 'radial-gradient(closest-side, rgba(99,102,241,0.38), rgba(129,140,248,0.12) 55%, rgba(99,102,241,0) 75%)',
                 filter: 'blur(38px)',
                 zIndex: 0,
@@ -7043,8 +7063,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                   onScreenChange={setScreen}
                   isLandscape={isLandscape}
                   inspectedElId={inspectedElId ?? undefined}
-                  previewUrl={previewUrl}
-                  previewState={previewState}
+                  previewUrl={effectivePreviewUrl}
+                  previewState={effectivePreviewState}
                   onScreenInteract={sessionId ? handleScreenInteract : undefined}
                   onFrameLoad={handleFrameLoad}
                 />
