@@ -3010,9 +3010,22 @@ public class SelectorPage extends BasePage {
         return "new UiSelector().text(\"" + numero + "\")";
     }
 
+    // FIX real (evidencia — RUN-1013: ~120s ocultos entre que el escaneo termina y
+    // SeatSelectionEngine reporta el mapa listo, una vez eliminados los demás escaneos
+    // redundantes): SeatMap.buildRows() volvía a llamar getRect()/getText() por cada
+    // uno de los ~173 elementos, aunque intentarEscaneoRapidoConPageSource() YA había
+    // resuelto exactamente esos mismos datos desde una única llamada a getPageSource().
+    // Este cache guarda esos datos ya resueltos; buildSeatMap() los reutiliza SOLO si
+    // TODOS los elementos del escaneo final están presentes en el cache — si falta
+    // uno solo (camino lento, fallback, u otra discrepancia), se usa el constructor
+    // original de SeatMap sin ningún cambio, exactamente como antes. Se reinicia al
+    // inicio de cada escaneo — nunca sobrevive entre llamadas distintas.
+    private Map<WebElement, SeatMap.RawSeat> cacheEscaneoRapido;
+
     // Sin modificador (package-private): SeatSelectionEngine, en el mismo paquete,
     // necesita reconstruir el mapa entre cada tap sin duplicar este método.
     SeatMap buildSeatMap() {
+        cacheEscaneoRapido = null;
         long t0 = System.currentTimeMillis();
         List<WebElement> raw = esperarYObtenerAsientosDelMapa();
         utils.PerfMetrics.stage("SeatSelection", "busqueda", System.currentTimeMillis() - t0);
@@ -3026,6 +3039,20 @@ public class SelectorPage extends BasePage {
             long tFallback2 = System.currentTimeMillis();
             raw = obtenerAsientosDelMapaAmplio();
             utils.PerfMetrics.stage("SeatSelection", "fallback-amplio", System.currentTimeMillis() - tFallback2);
+        }
+
+        if (cacheEscaneoRapido != null) {
+            List<SeatMap.RawSeat> rawResueltos = new ArrayList<>();
+            boolean completo = true;
+            for (WebElement el : raw) {
+                SeatMap.RawSeat rs = cacheEscaneoRapido.get(el);
+                if (rs == null) { completo = false; break; }
+                rawResueltos.add(rs);
+            }
+            if (completo) {
+                utils.PerfMetrics.note("SeatSelection", "SeatMap construido desde cache del escaneo rápido (sin getRect/getText adicionales)");
+                return SeatMap.fromRawSeats(rawResueltos);
+            }
         }
         return new SeatMap(raw);
     }
@@ -3183,6 +3210,11 @@ public class SelectorPage extends BasePage {
             }
 
             Map<String, WebElement> unicos = new LinkedHashMap<>();
+            // FIX real (evidencia — RUN-1013: ~120s ocultos dentro de new SeatMap(raw),
+            // que volvía a pedir getRect()/getText() por elemento aunque ya se conocían
+            // aquí): se guarda posición+texto ya resueltos por elemento — buildSeatMap()
+            // los reutiliza si el resultado final coincide 1:1 con este cache.
+            Map<WebElement, SeatMap.RawSeat> cache = new LinkedHashMap<>();
             for (int i = 0; i < n; i++) {
                 SeatUiSnapshot.Nodo nodo = nodosFiltrados.get(i);
                 double x = nodo.num("x"), y = nodo.num("y"), w = nodo.num("width"), h = nodo.num("height");
@@ -3190,12 +3222,15 @@ public class SelectorPage extends BasePage {
                 int cy = (int) (y + h / 2);
                 int cx = (int) (x + w / 2);
                 if (cy < mapTop || cy > mapBottom || cx < 20) continue;
-                unicos.putIfAbsent((int) x + "|" + (int) y, crudos.get(i));
+                WebElement el = crudos.get(i);
+                unicos.putIfAbsent((int) x + "|" + (int) y, el);
+                cache.putIfAbsent(el, new SeatMap.RawSeat(el, (int) x, (int) y, (int) w, (int) h, textoDeNodo(nodo)));
             }
 
             utils.PerfMetrics.note("SeatSelection", String.format(
                     "escaneoRapido OK: %d candidatos -> %d filtrados (sin getRect/getAttribute individuales)",
                     n, unicos.size()));
+            cacheEscaneoRapido = cache;
             return new ArrayList<>(unicos.values());
         } catch (Exception e) {
             utils.PerfMetrics.note("SeatSelection", "escaneoRapido descartado por excepción: " + e.getMessage());

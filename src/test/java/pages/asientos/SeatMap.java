@@ -117,6 +117,27 @@ public final class SeatMap {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // RawSeat — posición + texto ya resueltos por el llamador (p. ej. desde un
+    // getPageSource() ya parseado) — evita que buildRows() tenga que volver a
+    // llamar getRect()/getText() por elemento cuando esos datos ya se conocen.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static final class RawSeat {
+        public final WebElement element;
+        public final int        x, y, width, height;
+        public final String     texto;
+
+        public RawSeat(WebElement element, int x, int y, int width, int height, String texto) {
+            this.element = element;
+            this.x       = x;
+            this.y       = y;
+            this.width   = width;
+            this.height  = height;
+            this.texto   = texto == null ? "" : texto;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Estado del mapa
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -132,9 +153,45 @@ public final class SeatMap {
         this.totalSeats = rows.stream().mapToInt(r -> r.seats.size()).sum();
     }
 
-    private static List<Row> buildRows(List<WebElement> elements) {
-        Map<Integer, List<Seat>> grouped = new LinkedHashMap<>();
+    /**
+     * FIX real (evidencia — RUN-1013: ~120s "ocultos" entre que el escaneo termina y
+     * SeatSelectionEngine reporta el mapa listo, una vez que se eliminaron los demás
+     * escaneos redundantes de SelectorPage): esta vía evita que buildRows() vuelva a
+     * llamar getRect()/getText() elemento por elemento cuando el llamador
+     * (SelectorPage.intentarEscaneoRapidoConPageSource()) ya resolvió esos datos desde
+     * una única llamada a getPageSource(). Misma lógica de agrupación por fila que el
+     * constructor original — solo cambia de dónde vienen posición/texto. Método
+     * factory (no constructor) porque List<WebElement> y List<RawSeat> comparten el
+     * mismo tipo borrado y no pueden sobrecargarse entre sí.
+     */
+    public static SeatMap fromRawSeats(List<RawSeat> rawResueltos) {
+        return new SeatMap(agruparEnFilas(seatsDesdeRawSeat(rawResueltos)), true);
+    }
 
+    // Segundo parámetro sin uso real — solo para desambiguar el tipo borrado frente a
+    // SeatMap(List<WebElement>) (List<Row> y List<WebElement> erasionan igual).
+    private SeatMap(List<Row> rowsYaConstruidas, boolean marcadorDesambiguacion) {
+        this.rows       = rowsYaConstruidas;
+        this.totalSeats = rows.stream().mapToInt(r -> r.seats.size()).sum();
+    }
+
+    private static List<Seat> seatsDesdeRawSeat(List<RawSeat> elements) {
+        List<Seat> seats = new ArrayList<>();
+        for (RawSeat rs : elements) {
+            try {
+                int cx = rs.x + rs.width  / 2;
+                int cy = rs.y + rs.height / 2;
+                int number = -1;
+                String txt = rs.texto.trim();
+                if (txt.matches("^\\d{1,2}$")) number = Integer.parseInt(txt);
+                seats.add(new Seat(number, cx, cy, rs.width, rs.height, rs.element));
+            } catch (Exception ignored) {}
+        }
+        return seats;
+    }
+
+    private static List<Row> buildRows(List<WebElement> elements) {
+        List<Seat> seats = new ArrayList<>();
         for (WebElement el : elements) {
             try {
                 org.openqa.selenium.Rectangle r = el.getRect();
@@ -147,16 +204,27 @@ public final class SeatMap {
                     if (txt.matches("^\\d{1,2}$")) number = Integer.parseInt(txt);
                 } catch (Exception ignored) {}
 
-                Seat seat = new Seat(number, cx, cy, r.getWidth(), r.getHeight(), el);
-
-                Integer rowKey = null;
-                for (Integer k : grouped.keySet()) {
-                    if (Math.abs(k - cy) <= ROW_TOLERANCE_PX) { rowKey = k; break; }
-                }
-                if (rowKey == null) { rowKey = cy; grouped.put(rowKey, new ArrayList<>()); }
-                grouped.get(rowKey).add(seat);
-
+                seats.add(new Seat(number, cx, cy, r.getWidth(), r.getHeight(), el));
             } catch (Exception ignored) {}
+        }
+        return agruparEnFilas(seats);
+    }
+
+    // Agrupamiento por fila — EXACTAMENTE la misma lógica que usaba buildRows() antes
+    // de este cambio (mismo ROW_TOLERANCE_PX, mismo orden, mismo criterio de
+    // ordenamiento); se extrajo para que ambos constructores la compartan sin
+    // duplicarla, no para cambiar su comportamiento.
+    private static List<Row> agruparEnFilas(List<Seat> seats) {
+        Map<Integer, List<Seat>> grouped = new LinkedHashMap<>();
+
+        for (Seat seat : seats) {
+            int cy = seat.y;
+            Integer rowKey = null;
+            for (Integer k : grouped.keySet()) {
+                if (Math.abs(k - cy) <= ROW_TOLERANCE_PX) { rowKey = k; break; }
+            }
+            if (rowKey == null) { rowKey = cy; grouped.put(rowKey, new ArrayList<>()); }
+            grouped.get(rowKey).add(seat);
         }
 
         List<Row> result = new ArrayList<>();
