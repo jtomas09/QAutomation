@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
-import { resolveDeviceDisplayName } from '../utils/displayNames'
+import { resolveDeviceDisplayName, cleanBonjourHostname } from '../utils/displayNames'
 import { RecordStudioHeader } from '../components/record-studio/RecordStudioHeader'
 import { useRunnerLifecycle } from '../hooks/useRunnerLifecycle'
 import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
@@ -6969,7 +6969,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5 truncate">
                   {selectedDevice
-                    ? `${selectedDevice.model ?? (selectedDevice.platform === 'IOS' ? 'iPhone' : 'Android')} · ${selectedDevice.platform === 'IOS' ? 'iOS' : 'Android'}${selectedDevice.platformVersion ? ' ' + selectedDevice.platformVersion : ''}`
+                    ? `${cleanBonjourHostname(selectedDevice.model) || (selectedDevice.platform === 'IOS' ? 'iPhone' : 'Android')} · ${selectedDevice.platform === 'IOS' ? 'iOS' : 'Android'}${selectedDevice.platformVersion ? ' ' + selectedDevice.platformVersion : ''}`
                     : 'Sin dispositivo seleccionado'}
                 </div>
               </div>
@@ -7185,7 +7185,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               {/* Model (real cuando el backend lo reporta; '—' si no hay dispositivo) */}
               <DeviceInfoRow
                 label="Modelo"
-                value={selectedDevice?.model ?? '—'}
+                value={selectedDevice ? (cleanBonjourHostname(selectedDevice.model) || '—') : '—'}
                 valueColor="#94a3b8"
               />
               {/* Version (real cuando el backend lo reporta; '—' si no hay dispositivo) */}
