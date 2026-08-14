@@ -3,6 +3,7 @@ import { Play, Download, Trash2 } from 'lucide-react'
 import type { VideoRecord } from '../../types'
 import { getVideoFileUrl } from '../../api'
 import { statusColor, fmtSize, fmtDate, fmtDuration } from './videoVisuals'
+import { cleanBonjourHostname } from '../../utils/displayNames'
 import styles from './VideoCard.module.css'
 
 interface Props {
@@ -85,7 +86,7 @@ export default function VideoCard({ video, playing, deleting, onPlay, onEnded, o
         <div className={styles.meta}>
           <span className={styles.metaChip}>{fmtSize(video.sizeBytes)}</span>
           <span className={styles.metaChip}>{fmtDate(video.createdAt)}</span>
-          {video.device && <span className={styles.metaChip}>{video.device}</span>}
+          {video.device && <span className={styles.metaChip}>{cleanBonjourHostname(video.device)}</span>}
           {video.env && <span className={styles.metaChip}>{video.env}</span>}
         </div>
         <div className={styles.actions}>

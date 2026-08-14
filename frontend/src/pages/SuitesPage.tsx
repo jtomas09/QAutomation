@@ -7,6 +7,7 @@ import { appIconResolver } from '../services/ApplicationIconResolver'
 import { executionTrackingService } from '../services/ExecutionTrackingService'
 import { getDevices } from '../api'
 import type { PhysicalDevice } from '../types'
+import { resolveDeviceDisplayName } from '../utils/displayNames'
 import {
   Layers3, Trash2, Play, PencilLine, MoreHorizontal,
   Search, X, ChevronDown, ChevronRight,
@@ -205,7 +206,7 @@ function ExecuteSuiteModal({ suite, onClose, onExecute }: ExecuteSuiteModalProps
             >
               <option value="">— Sin dispositivo —</option>
               {devices.map(d => (
-                <option key={d.udid} value={d.udid}>{d.deviceName} ({d.platform})</option>
+                <option key={d.udid} value={d.udid}>{resolveDeviceDisplayName(d).title} ({d.platform})</option>
               ))}
             </select>
           )}

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Package, Store, Apple, CheckCircle2, Loader2, Settings2, Smartphone } from 'lucide-react'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
 import { getDeviceAppConfig, saveDeviceAppConfig } from '../api'
+import { resolveDeviceDisplayName } from '../utils/displayNames'
 
 type AppMode = 'INSTALLED' | 'APK' | 'IPA'
 
@@ -135,7 +136,7 @@ export default function DeviceAppConfigDrawer({ device, isOpen, onClose, onSaved
                 <div>
                   <div className="text-[13px] font-bold text-slate-100">Configurar App</div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
-                    {device.deviceName || 'Dispositivo'} · {device.platform}
+                    {resolveDeviceDisplayName(device).title} · {device.platform}
                   </div>
                 </div>
               </div>

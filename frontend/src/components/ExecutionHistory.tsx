@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { ExecutionSummary, ExecutionStatus } from '../types'
 import { getExecutions } from '../api'
+import { cleanBonjourHostname } from '../utils/displayNames'
 import s from './ExecutionHistory.module.css'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
@@ -95,7 +96,7 @@ export default function ExecutionHistory() {
               <span className={s.execId}>{ex.executionId}</span>
               <span>{ex.suite}</span>
               <span className={s.dim}>{ex.env}</span>
-              <span className={s.dim}>{ex.device}</span>
+              <span className={s.dim}>{cleanBonjourHostname(ex.device)}</span>
               <span>
                 <span className={`${s.badge} ${STATUS_CLASS[ex.status]}`}>
                   {ex.status === 'RUNNING' && <span className={s.pulse} />}

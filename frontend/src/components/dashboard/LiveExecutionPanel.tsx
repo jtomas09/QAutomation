@@ -13,6 +13,7 @@ import {
   XCircle, Clock, Loader2, Smartphone, AlertCircle,
 } from 'lucide-react'
 import { executionTrackingService, ACTIVE_STATUSES, DONE_STATUSES } from '../../services/ExecutionTrackingService'
+import { cleanBonjourHostname } from '../../utils/displayNames'
 import type { ExecutionRecord, ExecStatus, CaseRun } from '../../services/ExecutionTrackingService'
 import { appIconResolver } from '../../services/ApplicationIconResolver'
 
@@ -139,7 +140,7 @@ function ExecCard({ exec }: { exec: ExecutionRecord }) {
               <>
                 <span style={{ fontSize: 10, color: '#334155' }}>·</span>
                 <span style={{ fontSize: 10, color: '#64748b' }}>
-                  <Smartphone size={9} style={{ verticalAlign: 'middle', marginRight: 2 }} />{exec.device}
+                  <Smartphone size={9} style={{ verticalAlign: 'middle', marginRight: 2 }} />{cleanBonjourHostname(exec.device)}
                 </span>
               </>
             )}

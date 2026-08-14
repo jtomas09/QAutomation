@@ -77,6 +77,7 @@ public class RunnerController {
         // Universal Runner capability fields
         update.setOs((String) payload.get("os"));
         update.setHostname((String) payload.get("hostname"));
+        if (payload.containsKey("computerName")) update.setComputerName((String) payload.get("computerName"));
         if (payload.containsKey("androidSupported")) {
             update.setAndroidSupported(Boolean.TRUE.equals(payload.get("androidSupported")));
         }

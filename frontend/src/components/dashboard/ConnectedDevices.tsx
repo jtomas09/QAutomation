@@ -5,6 +5,7 @@ import { getDevices, getAllDeviceAppConfigs } from '../../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../../types'
 import type { ConfiguredDevice } from '../../hooks/useExecutionDevices'
 import { PlatformIcon } from '../PlatformIcon'
+import { resolveDeviceDisplayName } from '../../utils/displayNames'
 
 import ip15  from '../../assets/devices/iphone-15.svg'
 import p8pro from '../../assets/devices/pixel-8-pro.svg'
@@ -316,7 +317,7 @@ function DeviceCard({
   const isSelectable  = statusKey !== 'discovered' && !isOffline
   const { color, glow } = accentFor(device)
   const img       = pickImage(device)
-  const name      = device.deviceName || device.model || 'Dispositivo'
+  const { title: name } = resolveDeviceDisplayName(device)
 
   // When selected, override with purple selection glow
   const selBorder  = 'rgba(99,102,241,0.55)'

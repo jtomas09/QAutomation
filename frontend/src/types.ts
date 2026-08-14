@@ -172,6 +172,9 @@ export interface Runner {
   // Universal Runner fields (auto-detected at startup)
   os?:               'WINDOWS' | 'MACOS' | 'LINUX' | string
   hostname?:         string
+  /** Nombre real del equipo (scutil/COMPUTERNAME/hostnamectl) — distinto de `hostname`,
+   *  que puede resolver a una IP cruda. Ver utils/displayNames.ts. */
+  computerName?:     string
   androidSupported?: boolean
   iosSupported?:     boolean
   // Embedded ADB diagnostics (from PlatformToolsManager)

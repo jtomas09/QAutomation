@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { getDevices, getAllDeviceAppConfigs } from '../api'
 import type { PhysicalDevice, DeviceAppConfig } from '../types'
+import { resolveDeviceDisplayName } from '../utils/displayNames'
 import { RecordStudioHeader } from '../components/record-studio/RecordStudioHeader'
 import { useRunnerLifecycle } from '../hooks/useRunnerLifecycle'
 import type { UIElement as AccessibilityUIElement } from '../accessibilityTypes'
@@ -2949,6 +2950,67 @@ interface PhoneFrameProps {
     gesture: 'tap' | 'swipe' | 'long_press',
     nx2?: number, ny2?: number,
   ) => void
+  /** Notifica cuándo llega un frame real del mirror — solo para medir latencia en el contenedor; no cambia qué se renderiza. */
+  onFrameLoad?: () => void
+}
+
+// ── Design system unificado con el Dashboard (Fase de rediseño visual) ────────
+// Mismo patrón exacto que IconButton en components/dashboard/DeviceMirrorPanel.tsx
+// — reutilizado aquí en vez de duplicar estilos ad-hoc para cada botón de la
+// toolbar del panel de dispositivo.
+function ToolbarIconButton({
+  icon: Icon, label, onClick, title, active = false, disabled = false,
+}: {
+  icon:      React.ElementType
+  label?:    string
+  onClick:   () => void
+  title:     string
+  active?:   boolean
+  disabled?: boolean
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="flex items-center justify-center gap-1.5 rounded-lg transition-colors flex-1"
+      style={{
+        height: 32,
+        background: active ? 'rgba(99,102,241,0.18)' : hover && !disabled ? 'rgba(255,255,255,0.07)' : 'var(--btn-bg)',
+        border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'var(--btn-border)'}`,
+        color: disabled ? '#334155' : active ? '#818cf8' : hover ? '#cbd5e1' : '#94a3b8',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+      }}
+    >
+      <Icon size={13} />
+      {label && <span className="text-[10px] font-semibold">{label}</span>}
+    </button>
+  )
+}
+
+/** Mismo vocabulario visual que MIRROR_STATUS_CFG en DeviceMirrorPanel.tsx del Dashboard,
+ * derivado de las mismas señales que PhoneFrame ya usa para sus propios estados internos
+ * (previewState) — no introduce ningún estado nuevo. */
+function computeDeviceStatusVisual(
+  device: PhysicalDevice | null,
+  state: StreamState | undefined,
+): { label: string; color: string; pulse: boolean } {
+  if (!device) return { label: 'Sin dispositivo', color: '#64748b', pulse: false }
+  switch (state) {
+    case 'connecting':          return { label: 'Conectando',           color: '#60a5fa', pulse: true }
+    case 'loading':             return { label: 'Cargando',             color: '#60a5fa', pulse: true }
+    case 'available':
+    case 'updating':            return { label: 'Conectado',            color: '#34d399', pulse: false }
+    case 'error':                return { label: 'Error',                color: '#f87171', pulse: false }
+    case 'runner_offline':      return { label: 'Runner sin conexión',  color: '#f87171', pulse: false }
+    case 'device_disconnected': return { label: 'Desconectado',         color: '#f87171', pulse: false }
+    default:                     return { label: 'Sin conexión',         color: '#64748b', pulse: false }
+  }
 }
 
 const PhoneFrame = React.memo(function PhoneFrame({
@@ -2961,6 +3023,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
   previewUrl,
   previewState,
   onScreenInteract,
+  onFrameLoad,
 }: PhoneFrameProps) {
   const PHONE_W = 340
   const SCREEN_W = 304
@@ -3055,6 +3118,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
             <img
               src={previewUrl}
               draggable={false}
+              onLoad={onFrameLoad}
               style={{
                 position: 'absolute',
                 inset: 0,
@@ -5383,7 +5447,7 @@ const SessionInfoBar = React.memo(function SessionInfoBar({
     },
     {
       label: 'Dispositivo',
-      value: device ? `${device.deviceName} (${device.udid.slice(0, 8)}...)` : '—',
+      value: device ? `${resolveDeviceDisplayName(device).title} (${device.udid.slice(0, 8)}...)` : '—',
     },
     {
       label: 'Aplicación',
@@ -6100,6 +6164,30 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [captureFlash, setCaptureFlash] = useState(false)
   const [deviceFps] = useState(60)
   const [deviceBattery] = useState(87)
+  // ── Latencia del mirror (mismo patrón que DeviceMirrorPanel del Dashboard):
+  // mide el tiempo entre "conectando/cargando" y el primer frame real recibido.
+  // No agrega ninguna llamada nueva al Runner — solo instrumenta el <img> que
+  // PhoneFrame ya renderiza (ver onFrameLoad más abajo).
+  const [mirrorConnMs, setMirrorConnMs] = useState<number | null>(null)
+  const mirrorConnectStartRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (previewState === 'connecting' || previewState === 'loading') {
+      mirrorConnectStartRef.current = performance.now()
+      setMirrorConnMs(null)
+    } else if (previewState !== 'available' && previewState !== 'updating') {
+      mirrorConnectStartRef.current = null
+    }
+  }, [previewState])
+  const handleFrameLoad = useCallback(() => {
+    if (mirrorConnectStartRef.current !== null) {
+      setMirrorConnMs(Math.round(performance.now() - mirrorConnectStartRef.current))
+      mirrorConnectStartRef.current = null
+    }
+  }, [])
+  const deviceStatusVisual = useMemo(
+    () => computeDeviceStatusVisual(selectedDevice, previewState),
+    [selectedDevice, previewState],
+  )
 
   // ── Fetch devices + configs ────────────────────────────────────────────────
   useEffect(() => {
@@ -6846,269 +6934,136 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           overflow: 'hidden',
         }}
       >
-        {/* ── Left column: Professional Device Viewer ── */}
-        <div
+        {/* ── Left column: Device Panel — mismo lenguaje visual que el Dashboard ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          className="flex flex-col overflow-hidden rounded-2xl m-3"
           style={{
-            borderRight: '1px solid rgba(255,255,255,0.07)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
+            background: 'var(--panel-bg)',
+            border: '1px solid var(--panel-border)',
+            boxShadow: 'var(--panel-shadow)',
             minHeight: 0,
-            background: 'linear-gradient(180deg, rgba(7,12,28,0) 0%, rgba(4,8,22,0.4) 100%)',
           }}
         >
-          {/* ── Header: title + status ── */}
+          {/* ── Header: icono + nombre + modelo/OS + estado ── */}
           <div
-            style={{
-              padding: '12px 16px 10px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexShrink: 0,
-            }}
+            className="flex items-center justify-between px-5 py-4 flex-shrink-0 gap-2"
+            style={{ borderBottom: '1px solid var(--panel-divide)' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="flex items-center gap-2.5 min-w-0">
               <div
+                className="flex items-center justify-center rounded-xl flex-shrink-0"
                 style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 8,
+                  width: 32, height: 32,
                   background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(129,140,248,0.1))',
                   border: '1px solid rgba(99,102,241,0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
                 }}
               >
-                <Smartphone size={15} color="#818cf8" />
+                <Smartphone size={15} className="text-indigo-400" />
               </div>
-              <div>
-                <p style={{ margin: 0, color: '#e2e8f0', fontSize: 12, fontWeight: 700, lineHeight: 1.2 }}>
-                  Dispositivo en Vivo
-                </p>
-                <p style={{ margin: 0, color: '#475569', fontSize: 10, lineHeight: 1.4 }}>
-                  {selectedDevice ? selectedDevice.deviceName : 'Sin dispositivo seleccionado'}
-                </p>
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-slate-100 truncate">
+                  {selectedDevice ? resolveDeviceDisplayName(selectedDevice).title : 'Dispositivo en Vivo'}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5 truncate">
+                  {selectedDevice
+                    ? `${selectedDevice.model ?? (selectedDevice.platform === 'IOS' ? 'iPhone' : 'Android')} · ${selectedDevice.platform === 'IOS' ? 'iOS' : 'Android'}${selectedDevice.platformVersion ? ' ' + selectedDevice.platformVersion : ''}`
+                    : 'Sin dispositivo seleccionado'}
+                </div>
               </div>
             </div>
-            {/* Connection status indicator */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <motion.div
-                animate={{ opacity: [1, 0.3, 1] }}
-                transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  backgroundColor: selectedDevice ? '#4ade80' : '#475569',
-                }}
-              />
-              <span style={{ fontSize: 10, color: selectedDevice ? '#4ade80' : '#475569', fontWeight: 500 }}>
-                {selectedDevice ? 'Conectado' : 'Sin conexión'}
-              </span>
-            </div>
+            <span
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold flex-shrink-0"
+              style={{
+                color:      deviceStatusVisual.color,
+                background: `${deviceStatusVisual.color}1f`,
+                border:     `1px solid ${deviceStatusVisual.color}4d`,
+              }}
+            >
+              {deviceStatusVisual.pulse ? (
+                <motion.span
+                  className="w-1.5 h-1.5 rounded-full inline-block"
+                  style={{ background: deviceStatusVisual.color }}
+                  animate={{ opacity: [1, 0.3, 1] }}
+                  transition={{ duration: 1.2, repeat: Infinity }}
+                />
+              ) : (
+                <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: deviceStatusVisual.color }} />
+              )}
+              {deviceStatusVisual.label}
+            </span>
           </div>
 
-          {/* ── Professional toolbar: 5 action buttons ── */}
+          {/* ── Meta row: Resolución · Latencia · FPS (mismo tratamiento tipográfico que el Dashboard) ── */}
           <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '8px 14px',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
-              flexShrink: 0,
-              background: 'rgba(0,0,0,0.15)',
-            }}
+            className="flex items-center gap-5 px-5 py-2.5 flex-shrink-0"
+            style={{ borderBottom: '1px solid var(--panel-divide)' }}
           >
-            {/* Capture */}
-            <button
+            {[
+              { label: 'Resolución', value: '1080 × 2400' },
+              { label: 'Latencia',   value: mirrorConnMs != null ? `${mirrorConnMs} ms` : '—' },
+              { label: 'FPS',        value: String(deviceFps) },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-slate-600 font-bold">{label}</span>
+                <span className="text-[11px] font-semibold text-slate-300 tabular-nums">{value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Toolbar: mismo componente ToolbarIconButton para los 6 controles ── */}
+          <div
+            className="flex items-center gap-1.5 px-4 py-2.5 flex-shrink-0"
+            style={{ borderBottom: '1px solid var(--panel-divide)' }}
+          >
+            <ToolbarIconButton
+              icon={Camera}
               title="Capturar pantalla"
+              active={captureFlash}
               onClick={() => {
                 setCaptureFlash(true)
                 setTimeout(() => setCaptureFlash(false), 300)
               }}
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                padding: '6px 4px',
-                background: captureFlash
-                  ? 'rgba(99,102,241,0.2)'
-                  : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${captureFlash ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.07)'}`,
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: captureFlash ? '#818cf8' : '#64748b',
-                transition: 'all 0.15s',
-              }}
-            >
-              <Camera size={13} />
-              <span style={{ fontSize: 9, fontWeight: 500 }}>Captura</span>
-            </button>
-
-            {/* Video */}
-            <button
+            />
+            <ToolbarIconButton
+              icon={isVideoRecording ? Square : Video}
               title={isVideoRecording ? 'Detener video' : 'Grabar video'}
+              active={isVideoRecording}
               onClick={() => setIsVideoRecording(v => !v)}
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                padding: '6px 4px',
-                background: isVideoRecording
-                  ? 'rgba(239,68,68,0.15)'
-                  : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${isVideoRecording ? 'rgba(239,68,68,0.5)' : 'rgba(255,255,255,0.07)'}`,
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: isVideoRecording ? '#ef4444' : '#64748b',
-                transition: 'all 0.2s',
-              }}
-            >
-              {isVideoRecording ? (
-                <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 1 }}>
-                  <Square size={13} />
-                </motion.div>
-              ) : (
-                <Video size={13} />
-              )}
-              <span style={{ fontSize: 9, fontWeight: 500 }}>
-                {isVideoRecording ? 'Detener' : 'Video'}
-              </span>
-            </button>
-
-            {/* Rotate */}
-            <button
+            />
+            <ToolbarIconButton
+              icon={RotateCw}
               title="Rotar dispositivo"
+              active={isLandscape}
               onClick={() => setIsLandscape(l => !l)}
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                padding: '6px 4px',
-                background: isLandscape
-                  ? 'rgba(99,102,241,0.15)'
-                  : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${isLandscape ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'}`,
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: isLandscape ? '#818cf8' : '#64748b',
-                transition: 'all 0.2s',
-              }}
-            >
-              <RotateCw size={13} />
-              <span style={{ fontSize: 9, fontWeight: 500 }}>Rotar</span>
-            </button>
-
-            {/* Refresh */}
-            <button
+            />
+            <ToolbarIconButton
+              icon={RotateCcw}
               title="Actualizar pantalla"
               onClick={() => setScreen('home')}
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                padding: '6px 4px',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: '#64748b',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => {
-                const b = e.currentTarget as HTMLButtonElement
-                b.style.background = 'rgba(255,255,255,0.08)'
-                b.style.color = '#94a3b8'
-              }}
-              onMouseLeave={e => {
-                const b = e.currentTarget as HTMLButtonElement
-                b.style.background = 'rgba(255,255,255,0.04)'
-                b.style.color = '#64748b'
-              }}
-            >
-              <RotateCcw size={13} />
-              <span style={{ fontSize: 9, fontWeight: 500 }}>Actualizar</span>
-            </button>
-
-            {/* Fullscreen */}
-            <button
+            />
+            <ToolbarIconButton
+              icon={Maximize2}
               title="Pantalla completa"
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                padding: '6px 4px',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: '#64748b',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => {
-                const b = e.currentTarget as HTMLButtonElement
-                b.style.background = 'rgba(255,255,255,0.08)'
-                b.style.color = '#94a3b8'
-              }}
-              onMouseLeave={e => {
-                const b = e.currentTarget as HTMLButtonElement
-                b.style.background = 'rgba(255,255,255,0.04)'
-                b.style.color = '#64748b'
-              }}
-            >
-              <Maximize2 size={13} />
-              <span style={{ fontSize: 9, fontWeight: 500 }}>Pantalla completa</span>
-            </button>
-
-            {/* Debug toggle */}
-            <button
+              onClick={() => {}}
+            />
+            <ToolbarIconButton
+              icon={Eye}
               title={debugMode ? 'Desactivar modo debug' : 'Activar modo debug'}
+              active={debugMode}
               onClick={() => setDebugMode(v => !v)}
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                padding: '6px 4px',
-                background: debugMode ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${debugMode ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.07)'}`,
-                borderRadius: 7,
-                cursor: 'pointer',
-                color: debugMode ? '#34d399' : '#64748b',
-                transition: 'all 0.15s',
-              }}
-            >
-              <Eye size={13} />
-              <span style={{ fontSize: 9, fontWeight: 500 }}>Debug</span>
-            </button>
+            />
           </div>
 
-          {/* ── Phone frame area ── */}
+          {/* ── Phone frame area — el dispositivo como protagonista visual ── */}
           <div
+            className="flex-1 min-h-0 flex items-center justify-center relative"
             style={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: isLandscape ? '10px 16px' : '16px',
+              padding: isLandscape ? '10px 16px' : '20px 16px',
               overflow: 'hidden',
-              position: 'relative',
+              background: 'var(--terminal-bg)',
             }}
           >
             {/* Capture flash overlay */}
@@ -7131,56 +7086,54 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               )}
             </AnimatePresence>
 
-            {/* Phone with rotation animation */}
+            {/* Transición suave cuando cambia la pantalla — solo el contenedor, PhoneFrame no cambia */}
             <motion.div
-              animate={{
-                rotate: isLandscape ? -90 : 0,
-                scale: isLandscape ? 0.58 : 1,
-              }}
-              transition={{ type: 'spring', stiffness: 200, damping: 24 }}
-              style={{ transformOrigin: 'center center' }}
+              key={screen}
+              initial={{ opacity: 0.4 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
             >
-              <PhoneFrame
-                recording={recState === 'recording'}
-                screen={screen}
-                onRecord={handleRecordEl}
-                onScreenChange={setScreen}
-                isLandscape={isLandscape}
-                inspectedElId={inspectedElId ?? undefined}
-                previewUrl={previewUrl}
-                previewState={previewState}
-                onScreenInteract={sessionId ? handleScreenInteract : undefined}
-              />
+              {/* Phone with rotation animation */}
+              <motion.div
+                animate={{
+                  rotate: isLandscape ? -90 : 0,
+                  scale: isLandscape ? 0.58 : 1,
+                }}
+                transition={{ type: 'spring', stiffness: 200, damping: 24 }}
+                style={{ transformOrigin: 'center center' }}
+              >
+                <PhoneFrame
+                  recording={recState === 'recording'}
+                  screen={screen}
+                  onRecord={handleRecordEl}
+                  onScreenChange={setScreen}
+                  isLandscape={isLandscape}
+                  inspectedElId={inspectedElId ?? undefined}
+                  previewUrl={previewUrl}
+                  previewState={previewState}
+                  onScreenInteract={sessionId ? handleScreenInteract : undefined}
+                  onFrameLoad={handleFrameLoad}
+                />
+              </motion.div>
             </motion.div>
           </div>
 
-          {/* ── Device info panel ── */}
+          {/* ── Device info panel — mismo sistema de cards anidadas que el Dashboard ── */}
           <div
-            style={{
-              margin: '0 14px 14px',
-              borderRadius: 10,
-              background: 'rgba(255,255,255,0.025)',
-              border: '1px solid rgba(255,255,255,0.07)',
-              overflow: 'hidden',
-              flexShrink: 0,
-            }}
+            className="mx-3.5 mb-3.5 rounded-xl overflow-hidden flex-shrink-0"
+            style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid var(--panel-divide)' }}
           >
             <div
-              style={{
-                padding: '7px 12px',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
+              className="px-3 py-2 flex items-center justify-between"
+              style={{ borderBottom: '1px solid var(--panel-divide)' }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Wifi size={10} color="#6366f1" />
-                <span style={{ fontSize: 10, color: '#475569', fontWeight: 600, letterSpacing: 0.5 }}>
+              <div className="flex items-center gap-1.5">
+                <Wifi size={10} className="text-indigo-400" />
+                <span className="text-[10px] font-bold tracking-wide text-slate-500">
                   INFO DEL DISPOSITIVO
                 </span>
               </div>
-              <span style={{ fontSize: 9, color: '#334155' }}>
+              <span className="text-[9px] text-slate-700">
                 {selectedDevice?.platform ?? 'ANDROID'}
               </span>
             </div>
@@ -7189,7 +7142,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               {/* Name */}
               <DeviceInfoRow
                 label="Nombre"
-                value={selectedDevice?.deviceName ?? 'Samsung Galaxy A52'}
+                value={selectedDevice ? resolveDeviceDisplayName(selectedDevice).title : 'Samsung Galaxy A52'}
                 valueColor="#e2e8f0"
               />
               {/* Platform chip */}
@@ -7211,13 +7164,18 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                   {selectedDevice?.platform ?? 'ANDROID'}
                 </span>
               </div>
-              {/* Version */}
+              {/* Model (real cuando el backend lo reporta; mismo fallback de antes si no) */}
+              <DeviceInfoRow
+                label="Modelo"
+                value={selectedDevice?.model ?? (selectedDevice?.platform === 'IOS' ? 'iPhone' : 'Galaxy A52')}
+                valueColor="#94a3b8"
+              />
+              {/* Version (real cuando el backend lo reporta; mismo fallback de antes si no) */}
               <DeviceInfoRow
                 label="Versión"
                 value={
-                  (selectedDevice?.platform ?? 'ANDROID') === 'IOS'
-                    ? 'iOS 17.4'
-                    : 'Android 13'
+                  selectedDevice?.platformVersion
+                    ?? ((selectedDevice?.platform ?? 'ANDROID') === 'IOS' ? 'iOS 17.4' : 'Android 13')
                 }
                 valueColor="#94a3b8"
               />
@@ -7307,30 +7265,16 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
           {/* ── Manual action bar when recording ── */}
           {recState === 'recording' && (
             <div
-              style={{
-                margin: '0 14px 14px',
-                borderRadius: 10,
-                background: 'rgba(255,255,255,0.025)',
-                border: '1px solid rgba(255,255,255,0.07)',
-                padding: '10px 10px 8px',
-                flexShrink: 0,
-              }}
+              className="mx-3.5 mb-3.5 rounded-xl flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid var(--panel-divide)', padding: '10px 10px 8px' }}
             >
-              <p
-                style={{
-                  color: '#334155',
-                  fontSize: 9,
-                  fontWeight: 700,
-                  margin: '0 0 7px 2px',
-                  letterSpacing: 0.6,
-                }}
-              >
+              <p className="text-[9px] font-bold tracking-wide text-slate-600" style={{ margin: '0 0 7px 2px' }}>
                 AGREGAR ACCIÓN MANUAL
               </p>
               <ManualActionBar onManualAdd={handleManualAdd} />
             </div>
           )}
-        </div>
+        </motion.div>
 
         {/* ── Middle column: Steps ── */}
         <div

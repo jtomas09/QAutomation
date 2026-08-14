@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { getExecutions } from '../api'
 import type { ExecutionSummary } from '../types'
+import { cleanBonjourHostname } from '../utils/displayNames'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -577,7 +578,7 @@ export default function MetricsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-[12px] truncate" style={{ color: 'var(--text-sec)' }}>{d.device}</span>
+                    <span className="text-[12px] truncate" style={{ color: 'var(--text-sec)' }}>{cleanBonjourHostname(d.device)}</span>
                     <span className="text-[12px] font-semibold ml-2 flex-shrink-0" style={{ color: 'var(--text-pri)' }}>{d.pct}%</span>
                   </div>
                   <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>

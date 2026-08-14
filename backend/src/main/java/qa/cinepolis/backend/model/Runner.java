@@ -16,6 +16,10 @@ public class Runner {
     // Universal Runner capability fields
     private String  os;               // WINDOWS | MACOS | LINUX
     private String  hostname;
+    // Nombre real del equipo reportado por el SO (scutil/COMPUTERNAME/hostnamectl) —
+    // distinto de `hostname`, que puede resolver a una IP cruda en redes sin PTR/mDNS
+    // confiable. Campo adicional, nunca reemplaza a `hostname`.
+    private String  computerName;
     private Boolean androidSupported;
     private Boolean iosSupported;
 
@@ -64,6 +68,8 @@ public class Runner {
     public void    setOs(String v)            { this.os = v; }
     public String  getHostname()              { return hostname; }
     public void    setHostname(String v)      { this.hostname = v; }
+    public String  getComputerName()          { return computerName; }
+    public void    setComputerName(String v)  { this.computerName = v; }
     public Boolean getAndroidSupported()      { return androidSupported; }
     public void    setAndroidSupported(Boolean v) { this.androidSupported = v; }
     public Boolean getIosSupported()          { return iosSupported; }

@@ -25,6 +25,12 @@ public class RunnerConfig {
     // ── Universal Runner capabilities (auto-detected at startup) ──────────
     public String  os;             // WINDOWS | MACOS | LINUX
     public String  hostname;
+    // Nombre amigable real del equipo (el configurado por el usuario en el SO) —
+    // distinto de `hostname`, que en redes sin PTR/mDNS confiable puede resolver
+    // a una IP cruda (evidencia real: hostname="192.168.1.11" en producción).
+    // Se envía como campo ADICIONAL al backend (ver BackendClient.sendHeartbeat) —
+    // nunca reemplaza a `hostname`, que sigue disponible tal cual para diagnóstico.
+    public String  computerName;
     public boolean androidSupported;
     public boolean iosSupported;
 
@@ -65,8 +71,13 @@ public class RunnerConfig {
         // repoUrl / repoBranch / projectName are populated at runtime from GET /api/runner/config
 
         // Auto-detect OS and hostname
-        c.os       = detectOs();
-        c.hostname = detectHostname();
+        c.os           = detectOs();
+        c.hostname     = detectHostname();
+        c.computerName = detectComputerName(c.os);
+        // Consumido por BackendClient.sendHeartbeat() — mismo patrón ya usado por
+        // ADB_PATH/ADB_OK (ver DependencySelfHealingManager) para campos opcionales
+        // del heartbeat sin cambiar la firma de sendHeartbeat() en sus 5 llamadores.
+        System.setProperty("COMPUTER_NAME", c.computerName);
 
         // Auto-detect capabilities (probed at startup)
         c.androidSupported = probeAndroid();
@@ -104,6 +115,43 @@ public class RunnerConfig {
     private static String detectHostname() {
         try { return java.net.InetAddress.getLocalHost().getHostName(); }
         catch (Exception e) { return "unknown-host"; }
+    }
+
+    /**
+     * Nombre real del equipo tal como lo ve el sistema operativo (Ajustes del
+     * sistema en macOS, "Nombre de PC" en Windows) — nunca una IP. Si el comando
+     * nativo falla por cualquier motivo, cae a detectHostname() (mismo
+     * comportamiento que existía antes de este campo, nunca empeora nada).
+     */
+    private static String detectComputerName(String os) {
+        try {
+            if ("MACOS".equals(os)) {
+                String name = runShort("scutil", "--get", "ComputerName");
+                if (name != null && !name.isBlank()) return name;
+            } else if ("WINDOWS".equals(os)) {
+                String env = System.getenv("COMPUTERNAME");
+                if (env != null && !env.isBlank()) return env;
+            } else {
+                String name = runShort("hostnamectl", "--static");
+                if (name != null && !name.isBlank()) return name;
+            }
+        } catch (Exception ignored) {}
+        return detectHostname();
+    }
+
+    /** Ejecuta un comando corto y de solo lectura, devolviendo su primera línea de salida (o null). */
+    private static String runShort(String... cmd) {
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            String out;
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream()))) {
+                out = reader.readLine();
+            }
+            p.waitFor(3, TimeUnit.SECONDS);
+            return out == null ? null : out.trim();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static String generateDefaultId(String os, String hostname) {

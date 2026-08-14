@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import type { PhysicalDevice, ReconciledDevice } from '../types'
 import { getExecutionDeviceConfig, saveExecutionDeviceConfig } from '../api'
+import { resolveDeviceDisplayName } from '../utils/displayNames'
 
 export interface ConfiguredDevice {
   udid:            string
@@ -12,7 +13,7 @@ export interface ConfiguredDevice {
 function toConfigured(device: PhysicalDevice): ConfiguredDevice {
   return {
     udid:            device.udid,
-    name:            device.deviceName || device.model || device.udid,
+    name:            resolveDeviceDisplayName(device).title,
     platform:        device.platform   || 'ANDROID',
     platformVersion: device.platformVersion ?? null,
   }

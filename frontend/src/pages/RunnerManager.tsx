@@ -13,6 +13,7 @@ import {
 } from '../api'
 import type { RunnerDiagnostics, HostDiagnostics } from '../api'
 import type { Runner, RunnerDevice, RunnerStatus } from '../types'
+import { resolveDeviceDisplayName, resolveHostDisplayName } from '../utils/displayNames'
 import { OsAvatar, PlatformIcon } from '../components/PlatformIcon'
 
 // ─── Status helpers ─────────────────────────────────────────────────────────
@@ -350,9 +351,9 @@ function RunnerCard({ runner, onStart, onStop, onRestart }: RunnerCardProps) {
             </span>
           </div>
 
-          {/* OS + hostname */}
+          {/* OS + nombre real del equipo (nunca la IP cruda) */}
           <div className="text-[11px] text-slate-500 mt-0.5 font-medium">
-            {osLabel(os, runner.hostname)}
+            {osLabel(os, resolveHostDisplayName(runner).title)}
           </div>
 
           {/* Last seen + version */}
@@ -478,7 +479,7 @@ function DeviceRow({ device }: { device: RunnerDevice }) {
       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
       <PlatformIcon platform={isIos ? 'IOS' : 'ANDROID'} size={13} />
       <span className="text-[11px] font-medium flex-1 truncate" style={{ color: 'var(--text-sec)' }}>
-        {device.deviceName}
+        {resolveDeviceDisplayName(device).title}
       </span>
       <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
         style={{ background: `${color}18`, color }}>

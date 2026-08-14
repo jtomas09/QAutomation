@@ -165,6 +165,15 @@ public class BackendClient {
             payload.put("devices",          devices);
             payload.put("timestamp",        java.time.Instant.now().toString());
 
+            // Nombre real del equipo (ver RunnerConfig.detectComputerName()) — campo
+            // ADICIONAL a `hostname`, nunca lo reemplaza. Mismo patrón que ADB_PATH/
+            // ADB_OK más abajo: se lee de una system property en vez de agregar un
+            // parámetro nuevo a sendHeartbeat() (evita tocar sus 5 llamadores).
+            String computerName = System.getProperty("COMPUTER_NAME");
+            if (computerName != null && !computerName.isBlank()) {
+                payload.put("computerName", computerName);
+            }
+
             // Device metrics
             long iosCount     = devices.stream().filter(d -> "IOS".equals(d.get("platform"))).count();
             long androidCount = devices.stream().filter(d -> "ANDROID".equals(d.get("platform"))).count();

@@ -8,6 +8,7 @@ import { getDevices } from '../api'
 import type { PhysicalDevice } from '../types'
 import { OsAvatar, PlatformBadge } from '../components/PlatformIcon'
 import { useRunnerLifecycle } from '../hooks/useRunnerLifecycle'
+import { resolveDeviceDisplayName } from '../utils/displayNames'
 
 import ip15  from '../assets/devices/iphone-15.svg'
 import p8pro from '../assets/devices/pixel-8-pro.svg'
@@ -374,7 +375,7 @@ function DeviceCard({
   const accent    = accentFor(device, isActive)
   const isIos     = device.platform?.toUpperCase() === 'IOS'
 
-  const displayName = device.deviceName || device.model || 'Dispositivo'
+  const displayName = resolveDeviceDisplayName(device).title
   const platformLabel = isIos ? 'iOS' : 'Android'
   const version = device.platformVersion ?? '—'
 

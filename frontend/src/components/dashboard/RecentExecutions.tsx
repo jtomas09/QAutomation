@@ -4,6 +4,7 @@ import { ExternalLink, Play } from 'lucide-react'
 import type { ExecutionSummary, ExecutionStatus } from '../../types'
 import { getExecutions } from '../../api'
 import { PlatformBadge } from '../PlatformIcon'
+import { cleanBonjourHostname } from '../../utils/displayNames'
 
 const STATUS_LABEL: Record<ExecutionStatus, string> = {
   PENDING:             'Pendiente',
@@ -159,7 +160,7 @@ export default function RecentExecutions({ onViewAll }: Props) {
                 >
                   <td className="px-4 py-3 font-mono font-bold text-indigo-400">{row.executionId}</td>
                   <td className="px-4 py-3 text-slate-200 font-medium">{row.suite}</td>
-                  <td className="px-4 py-3 text-slate-500">{row.device}</td>
+                  <td className="px-4 py-3 text-slate-500">{cleanBonjourHostname(row.device)}</td>
                   <td className="px-4 py-3">
                     <PlatformBadge platform={inferPlatform(row.device ?? '')} size="xs" />
                   </td>

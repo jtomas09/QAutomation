@@ -12,6 +12,7 @@ import {
 } from 'recharts'
 import { getExecutions } from '../api'
 import type { ExecutionSummary, TestCaseResult } from '../types'
+import { cleanBonjourHostname } from '../utils/displayNames'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TABS = [
@@ -594,7 +595,7 @@ export default function ReportsPage() {
                             <span className="text-xs font-semibold text-slate-300 truncate">— {e.suite}</span>
                           </div>
                           <div className="text-[10px] text-slate-600 mt-0.5">
-                            {e.device}{e.env ? ` • ${e.env}` : ''}
+                            {cleanBonjourHostname(e.device)}{e.env ? ` • ${e.env}` : ''}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -825,7 +826,7 @@ export default function ReportsPage() {
                       style={{ borderBottom: '1px solid var(--panel-divide)', background: i % 2 ? 'rgba(255,255,255,0.012)' : 'transparent' }}>
                       <td className="px-4 py-2.5 font-bold text-indigo-400">{e.executionId}</td>
                       <td className="px-4 py-2.5 text-slate-300 max-w-[130px] truncate">{e.suite}</td>
-                      <td className="px-4 py-2.5 text-slate-400 max-w-[110px] truncate">{e.device}</td>
+                      <td className="px-4 py-2.5 text-slate-400 max-w-[110px] truncate">{cleanBonjourHostname(e.device)}</td>
                       <td className="px-4 py-2.5 text-slate-500">{e.env}</td>
                       <td className="px-4 py-2.5 text-slate-500 capitalize">{e.country}</td>
                       <td className="px-4 py-2.5"><StatusBadge status={e.status} /></td>

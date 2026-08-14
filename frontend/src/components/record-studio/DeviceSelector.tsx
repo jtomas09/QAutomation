@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Smartphone } from 'lucide-react'
 import type { PhysicalDevice } from '../../types'
+import { resolveDeviceDisplayName } from '../../utils/displayNames'
 
 interface DeviceSelectorProps {
   devices: PhysicalDevice[]
@@ -104,7 +105,7 @@ export function DeviceSelector({ devices, selected, onSelect }: DeviceSelectorPr
               lineHeight: 1.3,
             }}
           >
-            {selected?.deviceName ?? 'Seleccionar dispositivo'}
+            {selected ? resolveDeviceDisplayName(selected).title : 'Seleccionar dispositivo'}
           </div>
           {selected && (
             <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1 }}>
@@ -199,7 +200,7 @@ export function DeviceSelector({ devices, selected, onSelect }: DeviceSelectorPr
                     <PlatformIcon platform={d.platform} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>
-                        {d.deviceName}
+                        {resolveDeviceDisplayName(d).title}
                       </div>
                       <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
                         {d.platform} {d.platformVersion ?? ''} · {d.udid.slice(0, 12)}…

@@ -24,6 +24,7 @@ public class RunnerStore {
             if (update.getPlatform() != null) r.setPlatform(update.getPlatform());
             if (update.getVersion()  != null) r.setVersion(update.getVersion());
             if (update.getStatus()   != null) r.setStatus(update.getStatus());
+            if (update.getComputerName() != null) r.setComputerName(update.getComputerName());
             if (update.getDevices()  != null && !update.getDevices().isEmpty()) r.setDevices(update.getDevices());
             // Universal Runner
             if (update.getOs()               != null) r.setOs(update.getOs());

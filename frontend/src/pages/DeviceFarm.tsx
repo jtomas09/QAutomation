@@ -14,6 +14,7 @@ import type { PhysicalDevice, DeviceStatus, Runner, ExecutionSummary, DeviceAppC
 import DeviceAppConfigDrawer from '../components/DeviceAppConfigDrawer'
 import { detectOs, type OsType } from '../hooks/useOs'
 import { OsAvatar, PlatformBadge, PlatformIcon } from '../components/PlatformIcon'
+import { resolveDeviceDisplayName, resolveHostDisplayName, cleanBonjourHostname } from '../utils/displayNames'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -118,13 +119,13 @@ function generateActivityEvents(
       events.push({
         id: `hc-${i}`, time: r.lastSeen, type: 'host_connected',
         title: 'Host conectado',
-        subtitle: `${r.hostname ?? r.runnerId} · ${osDisplayLabel(resolveOs(r))}`,
+        subtitle: `${resolveHostDisplayName(r).title} · ${osDisplayLabel(resolveOs(r))}`,
       })
     } else {
       events.push({
         id: `hd-${i}`, time: r.lastSeen, type: 'host_disconnected',
         title: 'Host desconectado',
-        subtitle: `${r.hostname ?? r.runnerId} perdió conexión`,
+        subtitle: `${resolveHostDisplayName(r).title} perdió conexión`,
       })
     }
   })
@@ -134,7 +135,7 @@ function generateActivityEvents(
     events.push({
       id: `dc-${i}`, time: d.lastSeen, type: 'device_connected',
       title: 'Dispositivo conectado',
-      subtitle: `${d.deviceName ?? d.udid} · ${d.runnerId ?? '—'}`,
+      subtitle: `${resolveDeviceDisplayName(d).title} · ${d.runnerId ?? '—'}`,
     })
   })
 
@@ -143,7 +144,7 @@ function generateActivityEvents(
       events.push({
         id: `es-${i}`, time: ex.startTime, type: 'execution_started',
         title: 'Ejecución iniciada',
-        subtitle: `${ex.suite} · ${ex.device}`,
+        subtitle: `${ex.suite} · ${cleanBonjourHostname(ex.device)}`,
       })
     } else if ((ex.status === 'PASSED' || ex.status === 'FAILED') && ex.endTime) {
       events.push({
@@ -577,7 +578,7 @@ function DownloadModal({ infraState, runners, onClose }: DownloadModalProps) {
                       style={{ background: r.status === 'OFFLINE' ? '#6b7280' : r.status === 'DEGRADED' ? '#f59e0b' : '#10b981' }} />
                     <div className="flex-1 min-w-0">
                       <div className="text-[11px] font-semibold truncate" style={{ color: 'var(--text-sec)' }}>
-                        {r.hostname ?? r.runnerId}
+                        {resolveHostDisplayName(r).title}
                       </div>
                       <div className="text-[10px] text-slate-600">{osDisplayLabel(resolveOs(r))}</div>
                     </div>
@@ -729,7 +730,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
   const hostFilterOptions = useMemo(() => {
     const opts = [{ id: 'ALL', label: 'Todos los hosts' }]
     runners.forEach(r => {
-      opts.push({ id: r.runnerId, label: r.hostname ?? r.runnerId })
+      opts.push({ id: r.runnerId, label: resolveHostDisplayName(r).title })
     })
     return opts
   }, [runners])
@@ -965,7 +966,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                     const os         = resolveOs(runner)
                     const isMac     = os === 'MACOS'
                     const stats     = fakeRunnerStats(runner.runnerId)
-                    const hostName  = runner.hostname ?? runner.runnerId
+                    const hostName  = resolveHostDisplayName(runner).title
 
                     return (
                       <tr key={runner.runnerId}
@@ -1180,7 +1181,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                             <OsAvatar os={device.platform ?? (isIos ? 'IOS' : 'ANDROID')} size={36} status={device.status} />
                             <div>
                               <div className="text-[12px] font-semibold" style={{ color: 'var(--text-pri)' }}>
-                                {device.deviceName ?? device.model ?? 'Desconocido'}
+                                {resolveDeviceDisplayName(device).title}
                               </div>
                               <div className="text-[10px] font-mono text-slate-600 mt-0.5 max-w-[110px] truncate">{device.udid}</div>
                               {device.presence && (
@@ -1224,7 +1225,7 @@ export default function DeviceFarm({ onNavigate, initialOpenDownload = false }: 
                         {/* HOST */}
                         <td className="px-4 py-3">
                           <div className="text-[11px] font-semibold" style={{ color: 'var(--text-sec)' }}>
-                            {runner?.hostname ?? device.runnerId ?? '—'}
+                            {runner ? resolveHostDisplayName(runner).title : (device.runnerId ?? '—')}
                           </div>
                           <div className="text-[10px] text-slate-600">{rOs}</div>
                         </td>
