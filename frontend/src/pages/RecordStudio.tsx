@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useMirrorStream } from '../hooks/useMirrorStream'
+import { retryMirrorLaunch } from '../services/mirrorService'
 import { useRecordingSession } from '../hooks/useRecordingSession'
 import type { RecordingAction } from '../services/recordingService'
 import type { StreamState } from '../services/deviceStream'
@@ -6046,11 +6047,23 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // Runner alcanzable); mirrorPhase decide SOLO qué overlay mostrar encima,
   // nunca si el stream existe — gatearlo causaría un ciclo circular (Runner
   // solo reporta MIRROR_ACTIVE una vez que el stream ya se está consumiendo).
-  const { url: previewUrl, state: previewState, mirrorPhase, mirrorReason } = useMirrorStream(selectedDevice?.udid ?? null)
+  const {
+    url: previewUrl, state: previewState, mirrorPhase, mirrorReason,
+    reconnect: reconnectStream,
+  } = useMirrorStream(selectedDevice?.udid ?? null)
 
   const [imgError, setImgError] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // ── Vigía de "stream colgado" — mismo mecanismo que DeviceMirrorPanel.tsx del
+  // Dashboard: un <img> de un stream MJPEG puede quedar conectado (Runner
+  // alcanzable, mirrorPhase MIRROR_ACTIVE) sin recibir NINGÚN frame nuevo — el
+  // navegador no siempre dispara onError cuando la conexión se cuelga en
+  // silencio (p.ej. contención con la sesión real de WDA/Appium). Sin este
+  // vigía, el <img> queda negro indefinidamente sin ningún indicio visual.
+  const STALL_THRESHOLD_MS = 6_000
+  const lastFrameAtRef = useRef<number>(Date.now())
+  const reconnectingRef = useRef(false)
 
   const prevUdidRef = useRef<string | null>(null)
   useEffect(() => {
@@ -6099,6 +6112,63 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       setImgError(false)
     }, 2_000)
   }, [selectedDevice])
+
+  /** Reconexión completa — mismo flujo que el botón "Reconectar" del Dashboard:
+   *  si mirrorPhase quedó en ERROR (estado terminal en WdaLaunchService, ver
+   *  Runner), retryMirrorLaunch() es la ÚNICA forma de sacarlo de ahí antes de
+   *  reabrir el stream. */
+  const performMirrorReconnect = useCallback(() => {
+    const udid = selectedDevice?.udid
+    if (!udid || reconnectingRef.current) return
+    reconnectingRef.current = true
+    console.log('[Mirror] Reconectando...', { udid, mirrorPhase })
+    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
+    setImgError(false)
+    const proceed = () => {
+      reconnectStream()
+      setReloadKey(k => k + 1)
+      setTimeout(() => { reconnectingRef.current = false }, 3_000)
+    }
+    if (mirrorPhase === 'ERROR') {
+      void retryMirrorLaunch(udid).then(proceed)
+    } else {
+      proceed()
+    }
+  }, [selectedDevice, mirrorPhase, reconnectStream])
+
+  /** Se ejecuta al volver a estar activa la pestaña (visibilitychange/focus/
+   *  pageshow) y también cada STALL_THRESHOLD_MS de forma periódica — cubre
+   *  tanto "la pestaña estuvo oculta" como "el stream se colgó por contención
+   *  con WDA mientras la pestaña seguía visible" (mismo caso documentado en
+   *  DeviceMirrorPanel.tsx del Dashboard). */
+  const attemptAutoRecovery = useCallback(() => {
+    if (!selectedDevice?.udid) return
+    if (document.visibilityState === 'hidden') return
+    const stale = Date.now() - lastFrameAtRef.current > STALL_THRESHOLD_MS
+    if (!stale) return
+    console.log('[Mirror] Stream sin frames nuevos — reconectando', { udid: selectedDevice.udid })
+    performMirrorReconnect()
+  }, [selectedDevice, performMirrorReconnect])
+
+  const attemptAutoRecoveryRef = useRef(attemptAutoRecovery)
+  useEffect(() => { attemptAutoRecoveryRef.current = attemptAutoRecovery }, [attemptAutoRecovery])
+
+  useEffect(() => {
+    const onActivity = () => attemptAutoRecoveryRef.current()
+    document.addEventListener('visibilitychange', onActivity)
+    window.addEventListener('focus',    onActivity)
+    window.addEventListener('pageshow', onActivity)
+    return () => {
+      document.removeEventListener('visibilitychange', onActivity)
+      window.removeEventListener('focus',    onActivity)
+      window.removeEventListener('pageshow', onActivity)
+    }
+  }, [])
+
+  useEffect(() => {
+    const id = setInterval(() => attemptAutoRecoveryRef.current(), STALL_THRESHOLD_MS)
+    return () => clearInterval(id)
+  }, [])
   useEffect(() => () => {
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
   }, [])
@@ -6126,7 +6196,9 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   }, [previewState])
   const handleFrameLoad = useCallback(() => {
     console.log('[Mirror] Primer frame recibido', { udid: selectedDevice?.udid })
+    lastFrameAtRef.current = Date.now()
     setImgError(false)
+    reconnectingRef.current = false
     if (mirrorConnectStartRef.current !== null) {
       setMirrorConnMs(Math.round(performance.now() - mirrorConnectStartRef.current))
       mirrorConnectStartRef.current = null
@@ -6991,8 +7063,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
             />
             <ToolbarIconButton
               icon={RotateCcw}
-              title="Actualizar pantalla"
-              onClick={() => setScreen('home')}
+              title="Actualizar pantalla / Reconectar mirror"
+              onClick={() => { setScreen('home'); performMirrorReconnect() }}
             />
             <ToolbarIconButton
               icon={Maximize2}
