@@ -3013,106 +3013,38 @@ function computeDeviceStatusVisual(
   }
 }
 
+// Mismas dimensiones/bisel que el Mirror del Dashboard (DeviceMirrorPanel.tsx) —
+// PORTRAIT_W=240, aspect-ratio 9/19.5, borde 6px #1e293b, radius 30, sin notch
+// ni barra de estado falsa: el stream real ya trae su propia barra de estado,
+// y el mock de práctica muestra su propio header de app (no un chrome de OS).
+const PORTRAIT_W = 240
+
 const PhoneFrame = React.memo(function PhoneFrame({
   recording,
   screen,
   onRecord,
   onScreenChange,
-  isLandscape = false,
   inspectedElId,
   previewUrl,
   previewState,
   onScreenInteract,
   onFrameLoad,
 }: PhoneFrameProps) {
-  const PHONE_W = 340
-  const SCREEN_W = 304
-  const SCREEN_H = 524
-  const SCALE = 1.0
-
   return (
     <div
+      className="relative overflow-hidden flex items-center justify-center"
       style={{
-        width: PHONE_W,
-        background: '#1a1a1a',
-        borderRadius: 32,
-        padding: '12px 15px',
-        boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 8px 40px rgba(0,0,0,0.6)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 0,
-        position: 'relative',
+        width: '82%',
+        maxWidth: PORTRAIT_W,
+        aspectRatio: '9 / 19.5',
+        borderRadius: 30,
+        border: '6px solid #1e293b',
+        background: '#05070d',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
       }}
     >
-      {/* Notch */}
-      <div
-        style={{
-          width: 70,
-          height: 8,
-          backgroundColor: '#000',
-          borderRadius: 10,
-          marginBottom: 8,
-        }}
-      />
-
-      {/* Status bar */}
-      <div
-        style={{
-          width: SCREEN_W,
-          backgroundColor: '#003087',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '3px 8px',
-          fontSize: 8,
-          color: '#ffffff',
-          borderTopLeftRadius: 4,
-          borderTopRightRadius: 4,
-        }}
-      >
-        <span style={{ fontWeight: 600 }}>12:30</span>
-        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-          <Wifi size={7} color="#fff" />
-          <div
-            style={{
-              width: 14,
-              height: 7,
-              border: '1px solid #fff',
-              borderRadius: 2,
-              position: 'relative',
-            }}
-          >
-            <div
-              style={{
-                position: 'absolute',
-                left: 1,
-                top: 1,
-                width: '75%',
-                height: 'calc(100% - 2px)',
-                backgroundColor: '#fff',
-                borderRadius: 1,
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Screen */}
-      <div
-        style={{
-          width: SCREEN_W,
-          height: SCREEN_H,
-          overflow: 'hidden',
-          backgroundColor: '#000',
-          transform: `scale(${SCALE})`,
-          transformOrigin: 'top center',
-          marginBottom: -(SCREEN_H * (1 - SCALE)),
-          position: 'relative',
-        }}
-      >
-        {/* ── Live Preview layer (DeviceStreamProvider) ── */}
-        {previewUrl ? (
+      {/* ── Live Preview layer (DeviceStreamProvider) ── */}
+      {previewUrl ? (
           <>
             {/* Real device screenshot */}
             <img
@@ -3247,18 +3179,6 @@ const PhoneFrame = React.memo(function PhoneFrame({
             </AnimatePresence>
           </>
         )}
-      </div>
-
-      {/* Home indicator */}
-      <div
-        style={{
-          width: 60,
-          height: 4,
-          backgroundColor: 'rgba(255,255,255,0.3)',
-          borderRadius: 3,
-          marginTop: 8,
-        }}
-      />
     </div>
   )
 })
