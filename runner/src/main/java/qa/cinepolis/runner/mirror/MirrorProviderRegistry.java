@@ -34,13 +34,24 @@ public final class MirrorProviderRegistry {
     private final DeviceMirrorProvider androidChain;
     private final DeviceMirrorProvider iosChain;
 
+    /** Sin auto-descarga de ffmpeg/scrcpy (compatibilidad/pruebas) — solo Homebrew/PATH. */
     public MirrorProviderRegistry(String adbPath) {
+        this(adbPath, null);
+    }
+
+    /**
+     * @param agentDataDir si no es null, AVFoundationMirrorProvider y
+     *                     ScrcpyMirrorProvider intentan descargar ffmpeg/scrcpy
+     *                     automáticamente (ver MirrorDependencyManager) — el
+     *                     usuario nunca instala nada manualmente.
+     */
+    public MirrorProviderRegistry(String adbPath, String agentDataDir) {
         this.androidChain = new FallbackChainProvider("Android", List.of(
-                new ScrcpyMirrorProvider(adbPath),
+                new ScrcpyMirrorProvider(adbPath, agentDataDir),
                 new AndroidMirrorProvider(adbPath)
         ));
         this.iosChain = new FallbackChainProvider("iOS", List.of(
-                new AVFoundationMirrorProvider(),
+                new AVFoundationMirrorProvider(agentDataDir),
                 new LibimobiledeviceMirrorProvider()
         ));
     }

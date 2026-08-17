@@ -47,8 +47,23 @@ public final class AVFoundationMirrorProvider implements DeviceMirrorProvider {
 
     private final ConcurrentHashMap<String, FfmpegPngFrameSource> sessions = new ConcurrentHashMap<>();
 
+    /** Sin auto-descarga (compatibilidad/pruebas) — solo busca en Homebrew/PATH. */
     public AVFoundationMirrorProvider() {
-        this.ffmpegPath      = BinaryLocator.resolve("ffmpeg");
+        this((String) null);
+    }
+
+    /**
+     * @param agentDataDir si no es null, intenta descargar ffmpeg automáticamente
+     *                     (sin acción del usuario) antes de caer a Homebrew/PATH —
+     *                     ver MirrorDependencyManager.
+     */
+    public AVFoundationMirrorProvider(String agentDataDir) {
+        String embeddedFfmpeg = null;
+        if (agentDataDir != null) {
+            MirrorDependencyManager deps = new MirrorDependencyManager(java.nio.file.Path.of(agentDataDir));
+            if (deps.ensureFfmpeg()) embeddedFfmpeg = deps.embeddedFfmpegPath();
+        }
+        this.ffmpegPath      = BinaryLocator.resolve("ffmpeg", embeddedFfmpeg);
         this.idevicenamePath = BinaryLocator.resolve("idevicename");
     }
 

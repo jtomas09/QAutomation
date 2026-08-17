@@ -32,6 +32,20 @@ final class BinaryLocator {
      *         si no se encontró en ningún lado.
      */
     static String resolve(String binaryName) {
+        return resolve(binaryName, null);
+    }
+
+    /**
+     * Igual que {@link #resolve(String)}, pero revisa PRIMERO una ruta
+     * preferida (el binario embebido que MirrorDependencyManager descarga
+     * automáticamente) antes de caer a Homebrew/PATH — así el usuario nunca
+     * necesita instalar nada manualmente cuando la descarga automática
+     * funcionó.
+     */
+    static String resolve(String binaryName, String preferredPath) {
+        if (preferredPath != null && new File(preferredPath).exists() && respondsToVersion(preferredPath)) {
+            return preferredPath;
+        }
         for (String dir : COMMON_DIRS) {
             String candidate = dir.isEmpty() ? binaryName : dir + binaryName;
             if (dir.isEmpty()) {

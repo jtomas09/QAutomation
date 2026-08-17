@@ -82,7 +82,7 @@ public class DeviceStreamServer {
         this.httpsPort       = port + 1;
         this.agentDataDir    = agentDataDir;
         this.recordingEngine = new RecordingEngine(adbPath);
-        this.providers       = new MirrorProviderRegistry(adbPath);
+        this.providers       = new MirrorProviderRegistry(adbPath, agentDataDir);
     }
 
     /** Resuelve el provider de captura para este UDID, o null si su plataforma no está soportada en este host. */

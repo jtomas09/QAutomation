@@ -49,9 +49,26 @@ public final class ScrcpyMirrorProvider implements DeviceMirrorProvider {
 
     private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
 
+    /** Sin auto-descarga (compatibilidad/pruebas) — solo busca en Homebrew/PATH. */
     public ScrcpyMirrorProvider(String adbPath) {
-        this.scrcpyPath = BinaryLocator.resolve("scrcpy");
-        this.ffmpegPath = BinaryLocator.resolve("ffmpeg");
+        this(adbPath, null);
+    }
+
+    /**
+     * @param agentDataDir si no es null, intenta descargar scrcpy y ffmpeg
+     *                     automáticamente (sin acción del usuario) antes de
+     *                     caer a Homebrew/PATH — ver MirrorDependencyManager.
+     */
+    public ScrcpyMirrorProvider(String adbPath, String agentDataDir) {
+        String embeddedScrcpy = null;
+        String embeddedFfmpeg = null;
+        if (agentDataDir != null) {
+            MirrorDependencyManager deps = new MirrorDependencyManager(java.nio.file.Path.of(agentDataDir));
+            if (deps.ensureScrcpy()) embeddedScrcpy = deps.embeddedScrcpyPath();
+            if (deps.ensureFfmpeg()) embeddedFfmpeg = deps.embeddedFfmpegPath();
+        }
+        this.scrcpyPath = BinaryLocator.resolve("scrcpy", embeddedScrcpy);
+        this.ffmpegPath = BinaryLocator.resolve("ffmpeg", embeddedFfmpeg);
         this.adbPath    = adbPath;
     }
 

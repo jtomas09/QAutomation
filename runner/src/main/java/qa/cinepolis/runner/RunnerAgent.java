@@ -215,6 +215,17 @@ public class RunnerAgent {
         updateMgr     = new UpdateManager(
                 config.backendUrl, config.runnerToken, config.version, agentDataDir);
 
+        // Mirror sin WDA (ver mirror.MirrorStartupCheck) — descarga ffmpeg/scrcpy
+        // en segundo plano si faltan, SIN acción del usuario y SIN bloquear el
+        // arranque del Runner (misma filosofía que platformTools.resolveAdb(),
+        // que también se resuelve de forma perezosa/asíncrona respecto a este
+        // punto). Para cuando el usuario abra Record Studio, ya debería estar listo.
+        Thread mirrorStartupThread = new Thread(
+                () -> qa.cinepolis.runner.mirror.MirrorStartupCheck.runAndLog(agentDataDir.toString()),
+                "mirror-startup-check");
+        mirrorStartupThread.setDaemon(true);
+        mirrorStartupThread.start();
+
         // JVM shutdown hook — hard cleanup
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             jvmShutting = true;
