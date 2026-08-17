@@ -38,6 +38,36 @@ type Lang = 'java-testng' | 'java-junit' | 'python' | 'javascript' | 'csharp' | 
 type ViewTab = 'code' | 'xml' | 'inspector' | 'locators'
 
 /**
+ * Estado explícito de la conexión del mirror — reemplaza el vigía basado en
+ * un temporizador fijo (que competía en una carrera con el timeout propio del
+ * Runner para el primer frame, causando reconexiones prematuras). El vigía de
+ * inactividad SOLO se evalúa en 'streaming' — mientras se espera el primer
+ * frame no existe ningún límite de tiempo del lado del cliente; el primer
+ * frame puede tardar lo que tarde sin disparar una reconexión.
+ */
+type MirrorConnState =
+  | 'idle'                 // sin dispositivo seleccionado
+  | 'connecting'           // dispositivo seleccionado, esperando que el Runner sea alcanzable
+  | 'waiting_first_frame'  // stream montado, esperando el primer frame (sin límite de tiempo)
+  | 'streaming'            // ya llegó al menos un frame — aquí SÍ aplica el vigía de inactividad
+  | 'stall_detected'       // en streaming, sin frames nuevos por más del umbral configurado
+  | 'reconnecting'         // reconexión en curso (manual o disparada por stall_detected)
+  | 'error'                // el <img> reportó onError
+
+/** Texto mostrado en el overlay del mirror para cada mirrorConnState — null
+ *  donde no aporta nada sobre lo que ya muestra mirrorStatus (utils/mirrorStatus.ts)
+ *  o donde no debe haber overlay ('streaming': se ve el contenido real). */
+const MIRROR_CONN_STATE_LABEL: Record<MirrorConnState, string | null> = {
+  idle:                null,
+  connecting:          'Conectando al stream…',
+  waiting_first_frame: 'Esperando primer frame…',
+  streaming:           null,
+  stall_detected:      'Sin frames nuevos — reconectando…',
+  reconnecting:        'Reconectando…',
+  error:               'Error de conexión — reintentando…',
+}
+
+/**
  * AppEl is the element type used throughout the code generators.
  * It extends the AccessibilityUIElement shape so that elements from both
  * Android and iOS come in without any transformation.
@@ -6055,15 +6085,23 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const [imgError, setImgError] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // ── Vigía de "stream colgado" — mismo mecanismo que DeviceMirrorPanel.tsx del
-  // Dashboard: un <img> de un stream MJPEG puede quedar conectado (Runner
-  // alcanzable, mirrorPhase MIRROR_ACTIVE) sin recibir NINGÚN frame nuevo — el
-  // navegador no siempre dispara onError cuando la conexión se cuelga en
-  // silencio (p.ej. contención con la sesión real de WDA/Appium). Sin este
-  // vigía, el <img> queda negro indefinidamente sin ningún indicio visual.
+  // ── Vigía de "stream colgado" — basado en ESTADOS, no en un timeout fijo
+  // desde el montaje. El vigía de inactividad (STALL_THRESHOLD_MS) SOLO se
+  // evalúa mientras mirrorConnState === 'streaming' — es decir, después de
+  // que ya llegó al menos un frame real. Mientras se espera el primer frame
+  // (mirrorConnState === 'waiting_first_frame') no existe ningún límite de
+  // tiempo del lado del cliente, sin importar cuánto tarde AVFoundation/
+  // scrcpy en el Runner (puede variar). Esto elimina la carrera que existía
+  // antes: el vigía (6s, fijo) competía contra el propio timeout del Runner
+  // para el primer frame (8s) — si el frame tardaba entre 6-8s, el cliente
+  // reconectaba y mataba el proceso ffmpeg justo antes de que produjera su
+  // primer frame, causando un ciclo Conectado↔Error indefinido.
   const STALL_THRESHOLD_MS = 6_000
-  const lastFrameAtRef = useRef<number>(Date.now())
+  // null = "sin frame real registrado todavía — el vigía no debe evaluar nada"
+  // (evita también reutilizar el timestamp de una sesión/dispositivo anterior).
+  const lastFrameAtRef = useRef<number | null>(null)
   const reconnectingRef = useRef(false)
+  const [mirrorConnState, setMirrorConnState] = useState<MirrorConnState>('idle')
 
   const prevUdidRef = useRef<string | null>(null)
   useEffect(() => {
@@ -6071,6 +6109,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     if (udid !== prevUdidRef.current) {
       prevUdidRef.current = udid
       setImgError(false)
+      lastFrameAtRef.current = null // nuevo dispositivo — nueva sesión, sin frame previo válido
+      setMirrorConnState(udid ? 'connecting' : 'idle')
       if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
       if (udid) console.log('[Mirror] Dispositivo seleccionado', { udid, platform: selectedDevice?.platform })
     }
@@ -6098,15 +6138,27 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // seleccionar el dispositivo — este es exactamente ese comportamiento,
   // restaurado. mirrorPhase sigue decidiendo el overlay, nunca el montaje.
   const streamMounted = !!previewUrl
-  const hasMirrorOverlay = !NO_OVERLAY_STATUSES.has(mirrorStatus)
+  // mirrorStatus (derivado del Runner) reporta 'disponible' en cuanto el
+  // Runner responde — ANTES de que nuestro propio stream haya producido un
+  // solo frame real. mirrorConnState es la fuente de verdad para "¿ya hay
+  // contenido real en pantalla?"; se combinan ambas señales para el overlay.
+  const hasMirrorOverlay =
+    (mirrorConnState !== 'streaming' && mirrorConnState !== 'idle')
+    || !NO_OVERLAY_STATUSES.has(mirrorStatus)
   const mirrorOverlayCfg = MIRROR_STATUS_CFG[mirrorStatus]
+  const connStateLabel = MIRROR_CONN_STATE_LABEL[mirrorConnState]
   const mirrorOverlayMessage = mirrorStatus === 'ios-error-wda'
     ? computeErrorBodyMessage(mirrorReason)
-    : mirrorOverlayCfg.bodyMessage
+    : (connStateLabel ?? mirrorOverlayCfg.bodyMessage)
 
   useEffect(() => {
     if (streamMounted && !prevStreamMountedRef.current) {
       console.log('[Mirror] Stream conectado', { udid: selectedDevice?.udid, mirrorStatus })
+      // Nueva sesión de stream (nueva conexión MJPEG) — el vigía de
+      // inactividad no debe evaluar nada hasta que llegue el primer frame de
+      // ESTA sesión, nunca el de una sesión/dispositivo anterior.
+      lastFrameAtRef.current = null
+      setMirrorConnState('waiting_first_frame')
     }
     prevStreamMountedRef.current = streamMounted
   }, [streamMounted, mirrorStatus, selectedDevice])
@@ -6114,6 +6166,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   const handleFrameError = useCallback(() => {
     console.log('[Mirror] Error en <img> del stream — sin frame o conexión cortada', { udid: selectedDevice?.udid })
     setImgError(true)
+    setMirrorConnState('error')
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
     retryTimerRef.current = setTimeout(() => {
       setReloadKey(k => k + 1)
@@ -6129,9 +6182,13 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     const udid = selectedDevice?.udid
     if (!udid || reconnectingRef.current) return
     reconnectingRef.current = true
+    setMirrorConnState('reconnecting')
     console.log('[Mirror] Reconectando...', { udid, mirrorPhase })
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
     setImgError(false)
+    // Nueva sesión tras reconectar — el vigía no debe evaluar nada hasta el
+    // primer frame de la sesión que está por abrirse.
+    lastFrameAtRef.current = null
     const proceed = () => {
       reconnectStream()
       setReloadKey(k => k + 1)
@@ -6145,30 +6202,23 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   }, [selectedDevice, mirrorPhase, reconnectStream])
 
   /** Se ejecuta al volver a estar activa la pestaña (visibilitychange/focus/
-   *  pageshow) y también cada STALL_THRESHOLD_MS de forma periódica — cubre
-   *  tanto "la pestaña estuvo oculta" como "el stream se colgó por contención
-   *  con WDA mientras la pestaña seguía visible" (mismo caso documentado en
-   *  DeviceMirrorPanel.tsx del Dashboard). */
+   *  pageshow) y también cada STALL_THRESHOLD_MS de forma periódica — pero
+   *  SOLO tiene efecto mientras mirrorConnState === 'streaming'. Antes de
+   *  llegar a 'streaming' (esperando el primer frame, o ya reconectando) este
+   *  vigía es un no-op total, sin importar cuánto tiempo pase — elimina la
+   *  carrera con el timeout propio del Runner para el primer frame en vez de
+   *  intentar afinar dos números independientes para que no choquen. */
   const attemptAutoRecovery = useCallback(() => {
     if (!selectedDevice?.udid) return
     if (document.visibilityState === 'hidden') return
-    // No interrumpir una compilación/verificación de WDA legítimamente en
-    // curso: el Runner tolera hasta 12 capturas fallidas por conexión antes de
-    // resolver por sí solo (éxito o error) — reconectar antes de eso reinicia
-    // esa cuenta en un bucle infinito que nunca deja a WDA llegar a
-    // MIRROR_ACTIVE, sobre todo la primera vez con un dispositivo (puede
-    // tardar varios minutos). Solo reconectamos si mirrorPhase ya es
-    // MIRROR_ACTIVE (debería haber frames y no los hay) o no aplica (Android).
-    const wdaBuilding = mirrorPhase != null
-      && mirrorPhase !== 'MIRROR_ACTIVE'
-      && mirrorPhase !== 'DEVICE_DISCONNECTED'
-      && mirrorPhase !== 'ERROR'
-    if (wdaBuilding) return
+    if (mirrorConnState !== 'streaming') return
+    if (lastFrameAtRef.current === null) return // seguridad: sin frame real, nada que evaluar
     const stale = Date.now() - lastFrameAtRef.current > STALL_THRESHOLD_MS
     if (!stale) return
     console.log('[Mirror] Stream sin frames nuevos — reconectando', { udid: selectedDevice.udid })
+    setMirrorConnState('stall_detected')
     performMirrorReconnect()
-  }, [selectedDevice, mirrorPhase, performMirrorReconnect])
+  }, [selectedDevice, mirrorConnState, performMirrorReconnect])
 
   const attemptAutoRecoveryRef = useRef(attemptAutoRecovery)
   useEffect(() => { attemptAutoRecoveryRef.current = attemptAutoRecovery }, [attemptAutoRecovery])
@@ -6215,7 +6265,16 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
     }
   }, [previewState])
   const handleFrameLoad = useCallback(() => {
-    console.log('[Mirror] Primer frame recibido', { udid: selectedDevice?.udid })
+    // Se dispara en CADA frame del stream multipart/x-mixed-replace, no solo
+    // el primero — por eso setMirrorConnState('streaming') es idempotente
+    // (no-op en frames subsiguientes) y es precisamente lo que le da al vigía
+    // de inactividad un timestamp real y continuo para comparar.
+    setMirrorConnState(prev => {
+      if (prev !== 'streaming') {
+        console.log('[Mirror] Primer frame recibido', { udid: selectedDevice?.udid })
+      }
+      return 'streaming'
+    })
     lastFrameAtRef.current = Date.now()
     setImgError(false)
     reconnectingRef.current = false
