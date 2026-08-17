@@ -436,8 +436,13 @@ public class DeviceStreamServer {
                 System.out.println("[MirrorStream][TEMP] Mirror connection accepted — udid=" + udid
                         + " | client: " + ex.getRemoteAddress());
 
+                System.out.println("[MirrorProvider] Creando sesión — udid=" + udid);
                 DeviceMirrorProvider provider = resolveProvider(udid);
-                if (provider != null) provider.start(udid);
+                System.out.println("[MirrorProvider] Provider seleccionado — udid=" + udid
+                        + " provider=" + (provider != null ? provider.name() : "ninguno (plataforma no soportada)"));
+                boolean started = provider != null && provider.start(udid);
+                System.out.println("[MirrorProvider] " + (started ? "Provider iniciado" : "Provider NO pudo iniciar")
+                        + " — udid=" + udid);
 
                 System.out.println("[DeviceMirror] Stream opened: " + udid
                         + " | provider: " + (provider != null ? provider.name() : "none")
@@ -449,6 +454,7 @@ public class DeviceStreamServer {
                 ex.getResponseHeaders().set("Connection",         "keep-alive");
                 ex.getResponseHeaders().set("X-Accel-Buffering", "no"); // disable nginx buffering
                 ex.sendResponseHeaders(200, 0);                         // 0 = streaming / unknown length
+                System.out.println("[MirrorProvider] Cliente MJPEG conectado — udid=" + udid);
 
                 // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
                 System.out.println("[MirrorStream][TEMP] MJPEG endpoint initialized — udid=" + udid);
@@ -472,6 +478,8 @@ public class DeviceStreamServer {
                     // en cuál etapa (captura/codificación/envío) se rompe el flujo, sin
                     // inundar el log durante el resto de la sesión de streaming.
                     int tempFrameCount = 0;
+                    boolean loggedFirstFrame = false;
+                    System.out.println("[MirrorProvider] Esperando primer frame — udid=" + udid);
 
                     while (!Thread.currentThread().isInterrupted()) {
                         long t0 = System.currentTimeMillis();
@@ -502,33 +510,35 @@ public class DeviceStreamServer {
                             if (++missCount > 12) {
                                 if (deviceGone) break; // dispositivo realmente desconectado (~6s)
 
-                                // Condición objetiva de "WDA no se recuperará dentro de esta
-                                // sesión de stream": se consulta a WdaLifecycleOwner —única
-                                // autoridad del ciclo de vida— si hay un intento de construir/
-                                // verificar WDA en curso para este UDID AHORA MISMO, sin
-                                // importar quién lo haya solicitado (una ejecución real o una
-                                // solicitud del propio Mirror vía requestForMirror(), que corre
-                                // en su propio hilo de fondo, ver IOSMirrorProvider.start()).
-                                // WdaLaunchCoordinator.isExecutionActive() se conserva además
-                                // porque cubre la ventana entre "ejecución real terminó de
-                                // construir" y "IOSExecutionCleanupManager todavía no llamó
-                                // release()" — un instante en el que INFLIGHT ya está vacío pero
-                                // la ejecución real sigue usando la sesión. provider.start(udid)
-                                // solo se invoca UNA VEZ, al abrir esta conexión (arriba, antes
-                                // del while) — nunca de nuevo dentro de este loop. Si ninguna de
-                                // las dos condiciones se cumple, ningún mecanismo de este sistema
-                                // va a revivir WDA para ESTE stream — seguir reintentando sería
-                                // indefinido por definición. Se termina el stream limpiamente (el
-                                // finally de abajo ya libera jpegWriter/provider/MirrorService);
-                                // una nueva petición del cliente abre un Mirror nuevo que vuelve a
-                                // llamar provider.start(udid) y reevalúa desde cero.
-                                if (WdaLaunchCoordinator.currentOwner() == null
-                                        && !WdaLifecycleOwner.isBuildInFlight(udid)) break;
+                                System.out.println("[MirrorProvider] Timeout esperando frame — udid=" + udid
+                                        + " provider=" + (provider != null ? provider.name() : "none")
+                                        + " missCount=" + missCount);
 
-                                // Alguien tiene el control (ejecución real usando WDA, o una
-                                // construcción en curso de cualquier consumidor, incluido el
-                                // propio Mirror) — WDA puede seguir llegando; se mantiene la
-                                // misma espera ya validada, sin agregar ningún mecanismo nuevo.
+                                // La condición "¿hay una compilación de WDA en curso?" SOLO tiene
+                                // sentido para el provider WDA — para AVFoundation/scrcpy/ADB/
+                                // libimobiledevice (el caso normal desde que el Mirror dejó de
+                                // depender de WDA, ver MirrorProviderRegistry) esta consulta
+                                // siempre da "nadie construyendo WDA", así que el stream se
+                                // cortaba tras solo ~960ms de hueco entre frames — aunque
+                                // ffmpeg/scrcpy siguieran vivos y el dispositivo conectado. Eso
+                                // producía el ciclo Conectado→Error→Conectado reportado: cada
+                                // hueco breve de encoding cerraba la conexión completa, el
+                                // frontend reconectaba, y como el proceso real nunca murió,
+                                // reconectaba casi de inmediato — solo para volver a cortarse en
+                                // el siguiente hueco.
+                                boolean isWdaProvider = provider != null && "WDA".equals(provider.name());
+                                if (isWdaProvider) {
+                                    // Condición objetiva de "WDA no se recuperará dentro de esta
+                                    // sesión de stream" — sin cambios respecto al comportamiento
+                                    // original para este provider.
+                                    if (WdaLaunchCoordinator.currentOwner() == null
+                                            && !WdaLifecycleOwner.isBuildInFlight(udid)) break;
+                                }
+                                // Para el resto de providers, la única condición real para seguir
+                                // esperando es "¿el dispositivo sigue conectado?" (ya evaluado en
+                                // deviceGone arriba) — un hueco de encoding no es un motivo válido
+                                // para cortar la conexión mientras el dispositivo siga presente.
+
                                 Thread.sleep(2_000);
                                 continue;
                             }
@@ -537,6 +547,10 @@ public class DeviceStreamServer {
                         }
                         missCount = 0;
                         tempFrameCount++;
+                        if (!loggedFirstFrame) {
+                            System.out.println("[MirrorProvider] Primer frame recibido — udid=" + udid
+                                    + " (" + png.length + " bytes PNG)");
+                        }
                         if (tempFrameCount <= 3) {
                             System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
                                     + " captured — udid=" + udid + " (" + png.length + " bytes PNG)");
@@ -558,6 +572,10 @@ public class DeviceStreamServer {
                         out.write(jpeg);
                         out.write(crLf);
                         out.flush();
+                        if (!loggedFirstFrame) {
+                            loggedFirstFrame = true;
+                            System.out.println("[MirrorProvider] Primer JPEG enviado — udid=" + udid);
+                        }
                         if (tempFrameCount <= 3) {
                             System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
                                     + " sent — udid=" + udid);
@@ -567,12 +585,18 @@ public class DeviceStreamServer {
                         long sleep   = FRAME_MS - elapsed;
                         if (sleep > 0) Thread.sleep(sleep);
                     }
-                } catch (Exception ignored) {
-                    // Normal: client closed connection or device disconnected
+                } catch (Exception e) {
+                    // Normal en el caso más común (el cliente cerró la conexión) — pero se
+                    // imprime la excepción REAL en vez de tragarla en silencio, porque
+                    // "IOException: Broken pipe" (cliente cerró) y cualquier otra causa
+                    // genuina se ven exactamente igual desde afuera sin esto.
+                    System.out.println("[MirrorProvider] Conexión de stream terminada — udid=" + udid
+                            + " causa=" + e.getClass().getSimpleName() + ": " + e.getMessage());
                 } finally {
                     if (jpegWriter != null) jpegWriter.dispose();
                     if (provider != null) provider.stop(udid);
                     MirrorService.deregisterStream(udid);
+                    System.out.println("[MirrorProvider] Provider detenido — udid=" + udid);
                     System.out.println("[DeviceMirror] Stream closed: " + udid);
                 }
             } catch (Exception e) {

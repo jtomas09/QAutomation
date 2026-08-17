@@ -101,6 +101,22 @@ final class FfmpegPngFrameSource {
                 System.err.println("[FfmpegPngFrameSource][" + label + "] reader error: " + e.getMessage());
             }
         }
+
+        // El bucle de lectura terminó (EOF en stdout) — si no fue por un stop()
+        // deliberado, el proceso murió por su cuenta; se reporta el código de
+        // salida real en vez de dejar que el llamador solo vea "sin frames".
+        if (!stopped) {
+            try {
+                boolean exited = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+                if (exited) {
+                    System.err.println("[MirrorProvider] FFmpeg terminó inesperadamente — " + label);
+                    System.err.println("[MirrorProvider] Código de salida: " + p.exitValue() + " — " + label);
+                } else {
+                    System.err.println("[FfmpegPngFrameSource][" + label
+                            + "] stdout cerró pero el proceso sigue reportándose vivo (inusual)");
+                }
+            } catch (Exception ignored) { }
+        }
     }
 
     /** Último frame PNG decodificado, o null si nunca llegó uno o si está obsoleto (proceso colgado). */
