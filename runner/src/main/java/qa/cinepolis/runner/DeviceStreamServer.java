@@ -448,12 +448,15 @@ public class DeviceStreamServer {
                         + " | provider: " + (provider != null ? provider.name() : "none")
                         + " | client: " + ex.getRemoteAddress());
 
+                System.out.println("[Mirror HTTP] Client connected — udid=" + udid + " client=" + ex.getRemoteAddress());
                 ex.getResponseHeaders().set("Content-Type",       "multipart/x-mixed-replace; boundary=" + BOUNDARY);
                 ex.getResponseHeaders().set("Cache-Control",      "no-cache, no-store, must-revalidate");
                 ex.getResponseHeaders().set("Pragma",             "no-cache");
                 ex.getResponseHeaders().set("Connection",         "keep-alive");
                 ex.getResponseHeaders().set("X-Accel-Buffering", "no"); // disable nginx buffering
                 ex.sendResponseHeaders(200, 0);                         // 0 = streaming / unknown length
+                System.out.println("[Mirror HTTP] Content-Type=multipart/x-mixed-replace; boundary=" + BOUNDARY
+                        + " status=200 — udid=" + udid);
                 System.out.println("[MirrorProvider] Cliente MJPEG conectado — udid=" + udid);
 
                 // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
@@ -466,6 +469,7 @@ public class DeviceStreamServer {
                 // registrados cada vez que se llama). No cambia el formato de salida,
                 // solo evita repetir esa búsqueda ~20 veces por segundo.
                 ImageWriter jpegWriter = createJpegWriter();
+                long[] framesSentHolder = {0}; // visible también en el finally, tras cerrar la conexión
                 try (OutputStream out = ex.getResponseBody()) {
                     if (jpegWriter == null) {
                         System.err.println("[DeviceMirror] No hay ImageWriter JPEG disponible en este JVM.");
@@ -550,6 +554,7 @@ public class DeviceStreamServer {
                         if (!loggedFirstFrame) {
                             System.out.println("[MirrorProvider] Primer frame recibido — udid=" + udid
                                     + " (" + png.length + " bytes PNG)");
+                            System.out.println("[Mirror] PNG frame received size=" + png.length + " — udid=" + udid);
                         }
                         if (tempFrameCount <= 3) {
                             System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
@@ -557,7 +562,16 @@ public class DeviceStreamServer {
                         }
 
                         byte[] jpeg = pngToJpeg(png, 0.78f, jpegWriter);
-                        if (jpeg == null) continue;
+                        if (jpeg == null) {
+                            if (tempFrameCount <= 3) {
+                                System.err.println("[Mirror] PNG existe pero la conversión a JPEG devolvió null "
+                                        + "(pngToJpeg falló) — udid=" + udid + " pngSize=" + png.length);
+                            }
+                            continue;
+                        }
+                        if (!loggedFirstFrame) {
+                            System.out.println("[Mirror] JPEG generated size=" + jpeg.length + " — udid=" + udid);
+                        }
                         if (tempFrameCount <= 3) {
                             System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
                                     + " encoded — udid=" + udid + " (" + jpeg.length + " bytes JPEG)");
@@ -572,9 +586,14 @@ public class DeviceStreamServer {
                         out.write(jpeg);
                         out.write(crLf);
                         out.flush();
+                        framesSentHolder[0]++;
                         if (!loggedFirstFrame) {
                             loggedFirstFrame = true;
                             System.out.println("[MirrorProvider] Primer JPEG enviado — udid=" + udid);
+                            System.out.println("[Mirror HTTP] First JPEG sent size=" + jpeg.length + " — udid=" + udid);
+                        }
+                        if (framesSentHolder[0] % 100 == 0) {
+                            System.out.println("[Mirror HTTP] Frames sent=" + framesSentHolder[0] + " — udid=" + udid);
                         }
                         if (tempFrameCount <= 3) {
                             System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
@@ -596,6 +615,7 @@ public class DeviceStreamServer {
                     if (jpegWriter != null) jpegWriter.dispose();
                     if (provider != null) provider.stop(udid);
                     MirrorService.deregisterStream(udid);
+                    System.out.println("[Mirror HTTP] Frames sent (total)=" + framesSentHolder[0] + " — udid=" + udid);
                     System.out.println("[MirrorProvider] Provider detenido — udid=" + udid);
                     System.out.println("[DeviceMirror] Stream closed: " + udid);
                 }

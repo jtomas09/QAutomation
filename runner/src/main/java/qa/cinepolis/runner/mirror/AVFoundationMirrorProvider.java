@@ -90,13 +90,21 @@ public final class AVFoundationMirrorProvider implements DeviceMirrorProvider {
         if (existing != null && existing.isAlive()) return true;
 
         System.out.println("[MirrorProvider][AVFoundation] Creando sesión — udid=" + udid);
+        System.out.println("[AVFoundation] Session created — udid=" + udid);
 
-        Integer index = resolveAvfoundationIndex(udid);
+        java.util.Map<Integer, String> devices = listAvfoundationVideoDevices();
+        System.out.println("[AVFoundation] Capture source detected — " + devices.size()
+                + " dispositivo(s) de video en la lista de AVFoundation — udid=" + udid);
+
+        String friendlyName = resolveFriendlyName(udid);
+        Integer index = matchDeviceIndex(udid, friendlyName, devices);
         if (index == null) {
             System.out.println("[AVFoundation] No se pudo resolver el índice de captura para udid="
                     + udid + " — cae a libimobiledevice.");
             return false;
         }
+        System.out.println("[AVFoundation] Capture device identified — índice=" + index
+                + " nombre='" + devices.get(index) + "' udid=" + udid);
 
         ProcessBuilder pb = new ProcessBuilder(
                 ffmpegPath,
@@ -112,6 +120,7 @@ public final class AVFoundationMirrorProvider implements DeviceMirrorProvider {
 
         FfmpegPngFrameSource source = new FfmpegPngFrameSource(pb, "AVFoundation-" + udid);
         if (!source.start()) return false;
+        System.out.println("[AVFoundation] Capture started — udid=" + udid);
         System.out.println("[AVFoundation] FFmpeg iniciado — udid=" + udid + " índice=" + index);
 
         // DeviceStreamServer da por perdido el stream tras ~12 capturas fallidas
@@ -154,12 +163,6 @@ public final class AVFoundationMirrorProvider implements DeviceMirrorProvider {
     public byte[] captureFrame(String udid) {
         FfmpegPngFrameSource source = sessions.get(udid);
         return source != null ? source.latestFrame() : null;
-    }
-
-    private Integer resolveAvfoundationIndex(String udid) {
-        String friendlyName = resolveFriendlyName(udid);
-        java.util.Map<Integer, String> devices = listAvfoundationVideoDevices();
-        return matchDeviceIndex(udid, friendlyName, devices);
     }
 
     /**

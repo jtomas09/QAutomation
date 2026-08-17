@@ -1,8 +1,18 @@
 package qa.cinepolis.runner.mirror;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -20,21 +30,30 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * Un hilo daemon lee continuamente stdout del proceso ffmpeg y publica cada
  * frame completo en un AtomicReference — captureFrame() nunca bloquea en I/O,
- * solo lee la última referencia publicada.
+ * solo lee la última referencia publicada. Un SEGUNDO hilo daemon lee stderr
+ * por separado — ffmpeg reporta prácticamente todo su diagnóstico real ahí
+ * (códecs, permisos de macOS para Screen Recording/Cámara, errores de
+ * dispositivo) — sin esto, un fallo silencioso (p.ej. permiso no concedido,
+ * que en macOS produce frames NEGROS en vez de un error) es invisible.
  */
 final class FfmpegPngFrameSource {
 
     private static final long STALE_MS = 3_000; // sin frame nuevo en este tiempo => se considera muerto
+    private static final int  STDERR_BUFFER_LINES = 200; // últimas N líneas conservadas para volcar en caso de fallo
 
     private final ProcessBuilder processBuilder;
     private final String         label; // para logs, p.ej. "AVFoundation[udid]"
 
     private volatile Process process;
     private volatile Thread  readerThread;
+    private volatile Thread  stderrThread;
     private volatile boolean stopped;
 
-    private final AtomicReference<byte[]> latestFrame = new AtomicReference<>();
-    private final AtomicLong              lastFrameAt = new AtomicLong(0L);
+    private final AtomicReference<byte[]> latestFrame  = new AtomicReference<>();
+    private final AtomicLong              lastFrameAt  = new AtomicLong(0L);
+    private final AtomicLong              bytesReceived = new AtomicLong(0L);
+    private final AtomicBoolean           loggedFirstFrame = new AtomicBoolean(false);
+    private final Deque<String> stderrTail = new ArrayDeque<>(); // sincronizado manualmente (synchronized en cada acceso)
 
     FfmpegPngFrameSource(ProcessBuilder processBuilder, String label) {
         this.processBuilder = processBuilder;
@@ -45,14 +64,47 @@ final class FfmpegPngFrameSource {
         if (process != null && process.isAlive()) return true;
         try {
             stopped = false;
+            bytesReceived.set(0L);
+            loggedFirstFrame.set(false);
+            synchronized (stderrTail) { stderrTail.clear(); }
+
+            String command = String.join(" ", processBuilder.command());
             process = processBuilder.start();
+            System.out.println("[FFmpeg] Started PID=" + process.pid() + " — " + label);
+            System.out.println("[FFmpeg] Command=" + command + " — " + label);
+
             readerThread = new Thread(this::readLoop, "ffmpeg-png-reader-" + label);
             readerThread.setDaemon(true);
             readerThread.start();
+
+            stderrThread = new Thread(this::stderrLoop, "ffmpeg-stderr-reader-" + label);
+            stderrThread.setDaemon(true);
+            stderrThread.start();
+
+            System.out.println("[FFmpeg] Waiting for frames — " + label);
             return true;
         } catch (Exception e) {
             System.err.println("[FfmpegPngFrameSource][" + label + "] start error: " + e.getMessage());
             return false;
+        }
+    }
+
+    /** Lee stderr línea por línea — se imprime en vivo Y se conserva un buffer acotado para volcar completo si el proceso muere. */
+    private void stderrLoop() {
+        Process p = this.process;
+        if (p == null) return;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println("[FFmpeg][stderr][" + label + "] " + line);
+                synchronized (stderrTail) {
+                    if (stderrTail.size() >= STDERR_BUFFER_LINES) stderrTail.removeFirst();
+                    stderrTail.addLast(line);
+                }
+            }
+        } catch (Exception ignored) {
+            // Normal cuando el proceso se destruye (destroyForcibly cierra el stream).
         }
     }
 
@@ -66,10 +118,10 @@ final class FfmpegPngFrameSource {
             int w0 = 0, w1 = 0, w2 = 0, w3 = 0;
             int windowLen = 0;
             int b;
-            boolean loggedFirstFrame = false;
 
             while (!stopped && (b = in.read()) != -1) {
                 buf.write(b);
+                bytesReceived.incrementAndGet();
                 w0 = w1; w1 = w2; w2 = w3; w3 = b;
                 if (windowLen < 4) windowLen++;
 
@@ -82,15 +134,13 @@ final class FfmpegPngFrameSource {
                         if (n == -1) break;
                         read += n;
                     }
-                    if (read == 4) buf.write(crc, 0, 4);
+                    if (read == 4) { buf.write(crc, 0, 4); bytesReceived.addAndGet(4); }
 
                     byte[] frame = buf.toByteArray();
                     latestFrame.set(frame);
                     lastFrameAt.set(System.currentTimeMillis());
-                    if (!loggedFirstFrame) {
-                        loggedFirstFrame = true;
-                        System.out.println("[FfmpegPngFrameSource][" + label + "] primer frame decodificado ("
-                                + frame.length + " bytes)");
+                    if (loggedFirstFrame.compareAndSet(false, true)) {
+                        logFirstFrameDiagnostics(frame);
                     }
                     buf.reset();
                     windowLen = 0;
@@ -104,13 +154,14 @@ final class FfmpegPngFrameSource {
 
         // El bucle de lectura terminó (EOF en stdout) — si no fue por un stop()
         // deliberado, el proceso murió por su cuenta; se reporta el código de
-        // salida real en vez de dejar que el llamador solo vea "sin frames".
+        // salida real Y el stderr completo acumulado, en vez de dejar que el
+        // llamador solo vea "sin frames".
         if (!stopped) {
             try {
-                boolean exited = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+                boolean exited = p.waitFor(2, TimeUnit.SECONDS);
                 if (exited) {
-                    System.err.println("[MirrorProvider] FFmpeg terminó inesperadamente — " + label);
-                    System.err.println("[MirrorProvider] Código de salida: " + p.exitValue() + " — " + label);
+                    System.err.println("[FFmpeg] Process exited code=" + p.exitValue() + " — " + label);
+                    dumpStderrTail();
                 } else {
                     System.err.println("[FfmpegPngFrameSource][" + label
                             + "] stdout cerró pero el proceso sigue reportándose vivo (inusual)");
@@ -119,11 +170,69 @@ final class FfmpegPngFrameSource {
         }
     }
 
+    /**
+     * Prueba 3 del diagnóstico — evidencia inequívoca del primer frame: tamaño
+     * real, dimensiones decodificadas, y una muestra de píxeles para detectar
+     * el caso MÁS COMÚN de fallo silencioso en macOS (permiso de Screen
+     * Recording/Cámara no concedido al proceso ffmpeg — AVFoundation no lanza
+     * ningún error, simplemente entrega frames completamente negros).
+     */
+    private void logFirstFrameDiagnostics(byte[] frame) {
+        System.out.println("[FFmpeg] First frame received — " + label + " (" + frame.length + " bytes)");
+        System.out.println("[AVFoundation] Frame received — " + label);
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(frame));
+            if (img == null) {
+                System.err.println("[Mirror] Primer frame recibido pero ImageIO no pudo decodificarlo — " + label);
+                return;
+            }
+            int w = img.getWidth(), h = img.getHeight();
+            long sumBrightness = 0;
+            int samples = 0;
+            int[] xs = {w / 2, 4, w - 5, 4,     w - 5};
+            int[] ys = {h / 2, 4, 4,     h - 5, h - 5};
+            for (int i = 0; i < xs.length; i++) {
+                if (xs[i] < 0 || ys[i] < 0 || xs[i] >= w || ys[i] >= h) continue;
+                int rgb = img.getRGB(xs[i], ys[i]);
+                int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF;
+                sumBrightness += (r + g + bl) / 3;
+                samples++;
+            }
+            double avgBrightness = samples > 0 ? (double) sumBrightness / samples : -1;
+            boolean looksBlack = avgBrightness >= 0 && avgBrightness < 8; // umbral conservador — negro real, no solo oscuro
+            System.out.println("[Mirror] Primer frame — dimensiones=" + w + "x" + h
+                    + " tamaño=" + frame.length + " bytes brilloPromedioMuestra=" + String.format("%.1f", avgBrightness)
+                    + " ¿parece negro?=" + looksBlack + " — " + label);
+            if (looksBlack) {
+                System.err.println("[Mirror] ADVERTENCIA: el primer frame parece completamente negro. "
+                        + "Causa más común en macOS: permiso de Screen Recording (o Cámara, según el dispositivo "
+                        + "AVFoundation resuelto) no concedido al proceso del Runner/ffmpeg — revisar Ajustes del "
+                        + "Sistema > Privacidad y Seguridad > Grabación de Pantalla. AVFoundation NO reporta un "
+                        + "error en este caso, solo entrega frames negros. — " + label);
+            }
+        } catch (Exception e) {
+            System.err.println("[Mirror] Error al analizar el primer frame para diagnóstico: " + e.getMessage() + " — " + label);
+        }
+    }
+
+    private void dumpStderrTail() {
+        java.util.List<String> lines;
+        synchronized (stderrTail) { lines = new java.util.ArrayList<>(stderrTail); }
+        System.err.println("[FFmpeg][stderr-completo] ── inicio (" + lines.size() + " líneas) — " + label + " ──");
+        for (String line : lines) System.err.println("[FFmpeg][stderr-completo] " + line);
+        System.err.println("[FFmpeg][stderr-completo] ── fin — " + label + " ──");
+    }
+
     /** Último frame PNG decodificado, o null si nunca llegó uno o si está obsoleto (proceso colgado). */
     byte[] latestFrame() {
         long ts = lastFrameAt.get();
         if (ts == 0L || System.currentTimeMillis() - ts > STALE_MS) return null;
         return latestFrame.get();
+    }
+
+    /** Bytes crudos recibidos por stdout hasta ahora — diagnóstico ("Prueba 1/2": ¿realmente llegan datos?). */
+    long bytesReceived() {
+        return bytesReceived.get();
     }
 
     boolean isAlive() {
@@ -138,6 +247,9 @@ final class FfmpegPngFrameSource {
         }
         if (readerThread != null) {
             readerThread.interrupt();
+        }
+        if (stderrThread != null) {
+            stderrThread.interrupt();
         }
         latestFrame.set(null);
         lastFrameAt.set(0L);
