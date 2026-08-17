@@ -710,6 +710,16 @@ public class DeviceStreamServer {
         ex.getResponseHeaders().set("Access-Control-Allow-Origin",  "*");
         ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        // Requerido por Chrome (Private Network Access) para permitir que un origen
+        // público (p.ej. https://automationqa.netlify.app) llame a un servidor en
+        // localhost/loopback (este Runner). Sin este header, Chrome bloquea la
+        // petición ANTES de enviarla — tanto el polling de estado como el propio
+        // <img> del mirror — con "blocked by CORS policy: Permission was denied
+        // for this request to access the `loopback` address space", sin que el
+        // Runner llegue siquiera a recibir la conexión. Confirmado reproduciendo
+        // el sitio real con Chromium: el único <img> montado era el placeholder,
+        // el stream nunca llegaba a intentarse.
+        ex.getResponseHeaders().set("Access-Control-Allow-Private-Network", "true");
     }
 
     private static void sendText(HttpExchange ex, int status, String body) throws IOException {
