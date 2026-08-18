@@ -2982,6 +2982,11 @@ interface PhoneFrameProps {
    *  por el llamador vía streamMounted (ver utils/mirrorStatus.ts). PhoneFrame no
    *  vuelve a decidir "¿existe el stream?", solo lo renderiza. */
   previewUrl?: string | null
+  /** true solo cuando el <img> del stream ya disparó onLoad con un frame real
+   *  (mirrorConnState === 'streaming'). Mientras sea false, el preview/placeholder
+   *  se mantiene VISIBLE por encima del <img> real (que puede seguir montado pero
+   *  sin contenido) — seleccionar un dispositivo nunca debe vaciar la pantalla. */
+  mirrorStreaming?: boolean
   /** Overlay de estado (spinner/mensaje) a dibujar ENCIMA del stream o del
    *  placeholder — independiente de si el stream está montado (ver mirrorStatus.ts). */
   mirrorOverlay?: { message: string; pulse: boolean } | null
@@ -2992,7 +2997,7 @@ interface PhoneFrameProps {
     nx2?: number, ny2?: number,
   ) => void
   /** Notifica cuándo llega un frame real del mirror — solo para medir latencia en el contenedor; no cambia qué se renderiza. */
-  onFrameLoad?: () => void
+  onFrameLoad?: (e: React.SyntheticEvent<HTMLImageElement>) => void
   /** Notifica cuándo el <img> del stream dispara onError (conexión cortada/frame roto). */
   onFrameError?: () => void
   /** Cambia para forzar un remount del <img> del stream (reintento tras error). */
@@ -3045,6 +3050,7 @@ function ToolbarIconButton({
 // Record Studio el dispositivo es el contenido principal de una columna
 // dedicada, no una tarjeta secundaria entre varias.
 const PORTRAIT_W = 300
+const PORTRAIT_H = Math.round(PORTRAIT_W * 19.5 / 9) // 650 — tope superior de alto, misma proporción 9:19.5
 
 const PhoneFrame = React.memo(function PhoneFrame({
   recording,
@@ -3053,6 +3059,7 @@ const PhoneFrame = React.memo(function PhoneFrame({
   onScreenChange,
   inspectedElId,
   previewUrl,
+  mirrorStreaming,
   mirrorOverlay,
   onScreenInteract,
   onFrameLoad,
@@ -3063,7 +3070,17 @@ const PhoneFrame = React.memo(function PhoneFrame({
     <div
       className="relative overflow-hidden flex items-center justify-center"
       style={{
-        width: '92%',
+        // height:'100%' resuelve contra el motion.div envolvente (ver el
+        // llamador), que ahora sí propaga una altura real — el ancho se deriva
+        // de esa altura vía aspect-ratio (dirección que SÍ funciona en CSS
+        // para elementos no-reemplazados: alto definido + aspect-ratio + ancho
+        // "auto"). maxHeight/maxWidth topan ambos lados para no crecer más
+        // allá del tamaño de diseño (300×650) en paneles muy altos, y para
+        // achicarse correctamente (sin recortarse) en paneles más bajos que
+        // anchos — el caso común en pantallas de laptop.
+        height: '100%',
+        maxHeight: PORTRAIT_H,
+        width: 'auto',
         maxWidth: PORTRAIT_W,
         aspectRatio: '9 / 19.5',
         borderRadius: 30,
@@ -3101,10 +3118,18 @@ const PhoneFrame = React.memo(function PhoneFrame({
         </>
       )}
 
-      {/* ── Sin stream montado: mockup interactivo (grabando) o placeholder
-          estático (mismo criterio que antes, sin cambios) ── */}
-      {!previewUrl && (
-        recording ? (
+      {/* ── Preview (mockup o placeholder) — visible mientras NO tengamos
+          confirmado un primer frame real (mirrorStreaming), sin importar si
+          previewUrl ya está montado debajo. Antes esta condición era
+          `!previewUrl`: en cuanto el Runner respondía (previewUrl truthy) el
+          preview se desmontaba de inmediato aunque el <img> real todavía no
+          tuviera ningún frame — eso es lo que dejaba el contenedor vacío
+          (fondo #05070d del PhoneFrame) al seleccionar un dispositivo. Ahora
+          se superpone (z-index) sobre el <img> real hasta que este confirma
+          contenido, y desaparece recién entonces — nunca antes. ── */}
+      {!mirrorStreaming && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+        {recording ? (
           /* Grabando: mockup interactivo Home/Login — permite grabar pasos
              tocando elementos aun sin dispositivo real conectado. */
           <AnimatePresence mode="wait">
@@ -3152,7 +3177,8 @@ const PhoneFrame = React.memo(function PhoneFrame({
             alt="Vista previa de la app"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
-        )
+        )}
+        </div>
       )}
 
       {/* ── Overlay de estado — mismo patrón que DeviceMirrorPanel.tsx del
@@ -6113,6 +6139,8 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       setMirrorConnState(udid ? 'connecting' : 'idle')
       if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null }
       if (udid) console.log('[Mirror] Dispositivo seleccionado', { udid, platform: selectedDevice?.platform })
+      // TEMP (diagnóstico Preview→Mirror — remover tras validar)
+      console.log('[RecordStudio] Device selected:', udid)
     }
   }, [selectedDevice])
   useEffect(() => {
@@ -6142,9 +6170,24 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
   // Runner responde — ANTES de que nuestro propio stream haya producido un
   // solo frame real. mirrorConnState es la fuente de verdad para "¿ya hay
   // contenido real en pantalla?"; se combinan ambas señales para el overlay.
+  //
+  // Regla de UX: seleccionar un dispositivo NUNCA debe hacer desaparecer la
+  // representación visual (placeholder o último frame real) — el overlay
+  // opaco solo debe cubrirla ante un PROBLEMA real, no durante la espera
+  // normal del primer frame. Antes, cualquier mirrorConnState distinto de
+  // 'streaming'/'idle' (incluyendo 'connecting' y 'waiting_first_frame', las
+  // dos fases NORMALES inmediatamente posteriores a seleccionar un
+  // dispositivo) forzaba el overlay negro — eso es exactamente lo que
+  // producía "selecciono el device y la pantalla se pone negra", sin importar
+  // el navegador: el <img> real (o el placeholder) seguía debajo sin cambios,
+  // pero el overlay opaco lo tapaba por completo. 'conectando' se excluye del
+  // lado de mirrorStatus por el mismo motivo (el Runner aún no respondió, no
+  // significa que algo falló). El resto de estados "malos" reportados por el
+  // Runner (desconectado, error, fases de build de WDA, etc.) sí deben seguir
+  // cubriendo — ahí sí hay información real que comunicar.
   const hasMirrorOverlay =
-    (mirrorConnState !== 'streaming' && mirrorConnState !== 'idle')
-    || !NO_OVERLAY_STATUSES.has(mirrorStatus)
+    mirrorConnState === 'error'
+    || (!NO_OVERLAY_STATUSES.has(mirrorStatus) && mirrorStatus !== 'conectando')
   const mirrorOverlayCfg = MIRROR_STATUS_CFG[mirrorStatus]
   const connStateLabel = MIRROR_CONN_STATE_LABEL[mirrorConnState]
   const mirrorOverlayMessage = mirrorStatus === 'ios-error-wda'
@@ -6159,12 +6202,21 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       // ESTA sesión, nunca el de una sesión/dispositivo anterior.
       lastFrameAtRef.current = null
       setMirrorConnState('waiting_first_frame')
+      // TEMP (diagnóstico Preview→Mirror — remover tras validar)
+      console.log('[RecordStudio] Preview unmounted')
+      console.log('[RecordStudio] Mirror component mounted')
+      console.log('[RecordStudio] Mirror src assigned:', previewUrl)
+    } else if (!streamMounted && prevStreamMountedRef.current) {
+      // TEMP (diagnóstico Preview→Mirror — remover tras validar)
+      console.log('[RecordStudio] Preview mounted')
     }
     prevStreamMountedRef.current = streamMounted
-  }, [streamMounted, mirrorStatus, selectedDevice])
+  }, [streamMounted, mirrorStatus, selectedDevice, previewUrl])
 
   const handleFrameError = useCallback(() => {
     console.log('[Mirror] Error en <img> del stream — sin frame o conexión cortada', { udid: selectedDevice?.udid })
+    // TEMP (diagnóstico Preview→Mirror — remover tras validar)
+    console.log('[RecordStudio] Mirror onError')
     setImgError(true)
     setMirrorConnState('error')
     if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
@@ -6264,14 +6316,20 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
       mirrorConnectStartRef.current = null
     }
   }, [previewState])
-  const handleFrameLoad = useCallback(() => {
+  const handleFrameLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     // Se dispara en CADA frame del stream multipart/x-mixed-replace, no solo
     // el primero — por eso setMirrorConnState('streaming') es idempotente
     // (no-op en frames subsiguientes) y es precisamente lo que le da al vigía
     // de inactividad un timestamp real y continuo para comparar.
+    // TEMP (diagnóstico Preview→Mirror — remover tras validar)
+    const img = e.currentTarget
+    console.log('[RecordStudio] Mirror onLoad')
+    console.log('[RecordStudio] naturalWidth=' + img.naturalWidth)
+    console.log('[RecordStudio] naturalHeight=' + img.naturalHeight)
     setMirrorConnState(prev => {
       if (prev !== 'streaming') {
         console.log('[Mirror] Primer frame recibido', { udid: selectedDevice?.udid })
+        console.log('[RecordStudio] First frame received')
       }
       return 'streaming'
     })
@@ -7200,13 +7258,23 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
               )}
             </AnimatePresence>
 
-            {/* Transición suave cuando cambia la pantalla — solo el contenedor, PhoneFrame no cambia */}
+            {/* Transición suave cuando cambia la pantalla — solo el contenedor, PhoneFrame no cambia.
+                height:'100%' viaja por esta cadena de motion.div (ninguno la definía antes)
+                para que PhoneFrame pueda resolver SU altura contra un valor real — de ahí deriva
+                su propio ancho vía aspect-ratio (ver PhoneFrame). Antes PhoneFrame fijaba
+                `width:92%` pero NINGÚN ancestro definía un ancho propio, así que ese 92% no
+                tenía contra qué resolverse y colapsaba a ~0 (bug de CSS: % width con contenedor
+                de ancho indeterminado) — pasaba SIEMPRE, con o sin dispositivo seleccionado y en
+                cualquier navegador; no era un problema del stream ni del overlay. Conducir desde
+                la altura (en vez del ancho) además deja que el teléfono se achique correctamente
+                cuando el panel disponible es más bajo que ancho (el caso común en pantallas de
+                laptop), en vez de recortarse. */}
             <motion.div
               key={screen}
               initial={{ opacity: 0.4 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
-              style={{ position: 'relative', zIndex: 1 }}
+              style={{ position: 'relative', zIndex: 1, height: '100%' }}
             >
               {/* Phone with rotation animation */}
               <motion.div
@@ -7215,7 +7283,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                   scale: isLandscape ? 0.58 : 1,
                 }}
                 transition={{ type: 'spring', stiffness: 200, damping: 24 }}
-                style={{ transformOrigin: 'center center' }}
+                style={{ transformOrigin: 'center center', height: '100%' }}
               >
                 <PhoneFrame
                   recording={recState === 'recording'}
@@ -7225,6 +7293,7 @@ export default function RecordStudio({ onNavigateToExecute }: RecordStudioProps 
                   isLandscape={isLandscape}
                   inspectedElId={inspectedElId ?? undefined}
                   previewUrl={streamMounted ? previewUrl : null}
+                  mirrorStreaming={mirrorConnState === 'streaming'}
                   // 'sin-dispositivo' se excluye: el placeholder + badge + meta-row ya
                   // comunican "sin dispositivo" — el overlay solo aporta valor una vez
                   // que SÍ hay un dispositivo seleccionado y algo real está en progreso.

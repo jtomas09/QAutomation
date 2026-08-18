@@ -7,6 +7,16 @@
   NODE_VERSION = "20"
   VITE_API_URL = "https://qautomation-production.up.railway.app"
 
+# Chrome 142+ (Local Network Access): un sitio público solo puede pedir permiso
+# para llamar a localhost/loopback (el Runner, en el Mirror de Dispositivo) si el
+# documento de nivel superior declara esta Permissions-Policy — sin esto, Chrome
+# nunca muestra el prompt de permiso y la petición falla en silencio con
+# "Permission was denied for this request to access the `loopback` address space".
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Permissions-Policy = "local-network-access=(self)"
+
 # Proxy /api/* → Railway (fallback si VITE_API_URL no está en el build)
 [[redirects]]
   from   = "/api/*"
