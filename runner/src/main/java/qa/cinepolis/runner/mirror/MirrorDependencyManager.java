@@ -73,6 +73,7 @@ final class MirrorDependencyManager {
 
     Path ffmpegDir() { return toolsDir.resolve("ffmpeg"); }
     Path scrcpyDir() { return toolsDir.resolve("scrcpy"); }
+    Path iosScreenCaptureDir() { return toolsDir.resolve("ios-screen-capture"); }
 
     /** La ruta de ffmpeg que efectivamente funcionó (instalador o descarga propia) — llamar tras ensureFfmpeg(). */
     String embeddedFfmpegPath() {
@@ -83,6 +84,10 @@ final class MirrorDependencyManager {
 
     String embeddedScrcpyPath() {
         return scrcpyDir().resolve(isWindows() ? "scrcpy.exe" : "scrcpy").toString();
+    }
+
+    String embeddedIosScreenCapturePath() {
+        return iosScreenCaptureDir().resolve("ios-screen-capture").toString();
     }
 
     /** Descarga ffmpeg si no está ya presente y funcional. Nunca lanza — devuelve el resultado. */
@@ -140,6 +145,37 @@ final class MirrorDependencyManager {
         System.err.println("[MirrorDependencyManager] No se pudo obtener scrcpy automáticamente — "
                 + "Android caerá a ADB screencap (ya soportado, sin acción del usuario).");
         return false;
+    }
+
+    /**
+     * Extrae (si falta) el binario ios-screen-capture embebido en el propio JAR
+     * — a diferencia de ffmpeg/scrcpy, este no se descarga de internet: es
+     * código propio (ver runner/native/macos/), compilado una vez y empaquetado
+     * como recurso, así que "asegurarlo" es solo copiarlo a disco y marcarlo
+     * ejecutable. Solo aplica a macOS (isSupported() en el provider ya filtra
+     * por SO antes de llegar aquí). Nunca lanza.
+     */
+    boolean ensureIosScreenCapture() {
+        if (!isMac()) return false;
+        String embedded = embeddedIosScreenCapturePath();
+        if (probe(embedded, "--help")) return true; // ya extraído en una corrida anterior
+
+        try (InputStream in = MirrorDependencyManager.class.getResourceAsStream("/native/macos/ios-screen-capture")) {
+            if (in == null) {
+                System.err.println("[MirrorDependencyManager] ios-screen-capture no está embebido en este JAR "
+                        + "(build incompleto) — AVFoundation caerá a libimobiledevice.");
+                return false;
+            }
+            Files.createDirectories(iosScreenCaptureDir());
+            Path dest = Path.of(embedded);
+            Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
+            makeExecutableAndUnquarantine(dest);
+            System.out.println("[MirrorDependencyManager] ios-screen-capture listo: " + embedded);
+            return true;
+        } catch (Exception e) {
+            System.err.println("[MirrorDependencyManager] No se pudo extraer ios-screen-capture: " + e.getMessage());
+            return false;
+        }
     }
 
     // ── ffmpeg ────────────────────────────────────────────────────────────

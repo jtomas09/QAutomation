@@ -59,23 +59,24 @@ class AVFoundationMirrorProviderTest {
     }
 
     @Test
-    @DisplayName("sin nombre amigable y con un único candidato no-built-in, se usa como último recurso")
-    void noNameButSingleNonBuiltInCandidateIsUsedAsLastResort() {
+    @DisplayName("sin nombre amigable y con un único dispositivo en la lista, se usa como último recurso")
+    void noNameButSingleCandidateIsUsedAsLastResort() {
+        // A diferencia de la lista de ffmpeg (que incluía cámaras/pantallas del
+        // Mac y requería filtrarlas), ios-screen-capture list-devices SOLO
+        // reporta dispositivos .external/.muxed — en la práctica, siempre iOS.
+        // No hace falta (ni existe ya) un filtro de "cámara integrada".
         Map<Integer, String> devices = new LinkedHashMap<>();
-        devices.put(0, "FaceTime HD Camera");
-        devices.put(1, "Capture screen 0");
-        devices.put(2, "Unknown Device");
+        devices.put(0, "Unknown Device");
 
-        assertEquals(2, AVFoundationMirrorProvider.matchDeviceIndex("udid-1", null, devices));
+        assertEquals(0, AVFoundationMirrorProvider.matchDeviceIndex("udid-1", null, devices));
     }
 
     @Test
-    @DisplayName("sin nombre amigable y con VARIOS candidatos no-built-in, no se adivina (null)")
+    @DisplayName("sin nombre amigable y con VARIOS candidatos, no se adivina (null)")
     void noNameAndMultipleCandidatesNeverGuesses() {
         Map<Integer, String> devices = new LinkedHashMap<>();
-        devices.put(0, "FaceTime HD Camera");
-        devices.put(1, "iPhone A");
-        devices.put(2, "iPhone B");
+        devices.put(0, "iPhone A");
+        devices.put(1, "iPhone B");
 
         assertNull(AVFoundationMirrorProvider.matchDeviceIndex("udid-1", null, devices));
         assertNull(AVFoundationMirrorProvider.matchDeviceIndex("udid-1", "", devices));
