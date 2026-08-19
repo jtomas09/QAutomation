@@ -26,7 +26,7 @@ public final class IOSDeviceRegistry {
     /** Tiempo máximo que un snapshot "presente" se considera vigente sin un nuevo scan. */
     private static final long TTL_MS = 45_000L;
 
-    public record Snapshot(boolean present, long updatedAtMs) {}
+    public record Snapshot(boolean present, long updatedAtMs, String platformVersion) {}
 
     private static final ConcurrentHashMap<String, Snapshot> LAST_SEEN = new ConcurrentHashMap<>();
 
@@ -36,7 +36,10 @@ public final class IOSDeviceRegistry {
      * Actualiza el registro con el resultado de un escaneo de IOSDeviceScanner.scan().
      * Marca como ausentes los UDIDs previamente vistos que ya no aparecen en este scan,
      * y registra como presentes los que sí aparecen — logueando únicamente en las
-     * transiciones reales de estado, nunca en cada scan.
+     * transiciones reales de estado, nunca en cada scan. También cachea platformVersion
+     * (ya viene en el mismo Map de cada escaneo — IOSDeviceScanner.scanInternal — así que
+     * esto no dispara ningún proceso xcrun adicional) para que IOSMirrorProviderResolver
+     * pueda decidir WDA vs CoreDevice por versión sin una consulta O(n) aparte.
      */
     static void update(List<Map<String, String>> scannedDevices) {
         long now = System.currentTimeMillis();
@@ -46,7 +49,7 @@ public final class IOSDeviceRegistry {
             String udid = device.get("udid");
             if (udid == null || udid.isBlank()) continue;
             seenNow.add(udid);
-            markPresentInternal(udid, now);
+            markPresentInternal(udid, now, device.get("platformVersion"));
         }
 
         // UDIDs que estaban presentes/registrados pero no aparecieron en este scan.
@@ -54,14 +57,18 @@ public final class IOSDeviceRegistry {
             if (seenNow.contains(udid)) continue;
             Snapshot prev = LAST_SEEN.get(udid);
             if (prev != null && prev.present()) {
-                LAST_SEEN.put(udid, new Snapshot(false, now));
+                LAST_SEEN.put(udid, new Snapshot(false, now, prev.platformVersion()));
                 System.out.println("📱 iOS Device desconectado — UDID: " + udid);
             }
         }
     }
 
-    private static void markPresentInternal(String udid, long now) {
-        Snapshot prev = LAST_SEEN.put(udid, new Snapshot(true, now));
+    private static void markPresentInternal(String udid, long now, String platformVersion) {
+        Snapshot prev = LAST_SEEN.get(udid);
+        String resolvedVersion = (platformVersion != null && !platformVersion.isBlank())
+                ? platformVersion
+                : (prev != null ? prev.platformVersion() : null); // conserva la última versión conocida si este scan no la trae
+        LAST_SEEN.put(udid, new Snapshot(true, now, resolvedVersion));
         if (prev == null || !prev.present()) {
             System.out.println("📱 iOS Device conectado — UDID: " + udid);
         }
@@ -80,9 +87,20 @@ public final class IOSDeviceRegistry {
         long age = System.currentTimeMillis() - snap.updatedAtMs();
         if (age > TTL_MS) {
             System.out.println("📱 iOS Device expiró por TTL (" + age + "ms sin scan) — UDID: " + udid);
-            LAST_SEEN.put(udid, new Snapshot(false, snap.updatedAtMs()));
+            LAST_SEEN.put(udid, new Snapshot(false, snap.updatedAtMs(), snap.platformVersion()));
             return false;
         }
         return true;
+    }
+
+    /**
+     * Versión de iOS (p.ej. "26.6") del último escaneo que vio este UDID, o null si
+     * nunca se vio o el escaneo no la reportó. Lectura en memoria O(1) — usada por
+     * IOSMirrorProviderResolver para decidir WDA vs CoreDevice sin ejecutar devicectl.
+     */
+    public static String getPlatformVersion(String udid) {
+        if (udid == null || udid.isBlank()) return null;
+        Snapshot snap = LAST_SEEN.get(udid);
+        return snap != null ? snap.platformVersion() : null;
     }
 }

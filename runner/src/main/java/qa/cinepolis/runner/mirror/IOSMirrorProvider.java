@@ -7,12 +7,16 @@ import qa.cinepolis.runner.RunnerAgent;
 import qa.cinepolis.runner.WdaLifecycleOwner;
 import qa.cinepolis.runner.WdaManager;
 
+import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Captura de pantalla para dispositivos iOS físicos, reutilizando el
@@ -47,6 +51,11 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             .connectTimeout(Duration.ofSeconds(2))
             .build();
 
+    // Evidencia real de "el mirror funciona" pedida explícitamente (no basta con
+    // "provider=WDA" o "WDA iniciado") — por udid, se resetea en start().
+    private final ConcurrentHashMap<String, AtomicBoolean> loggedFirstFrame = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicLong>    framesReceived   = new ConcurrentHashMap<>();
+
     @Override
     public String name() { return "WDA"; }
 
@@ -68,6 +77,10 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
 
     @Override
     public boolean start(String udid) {
+        System.out.println("[WdaMirrorProvider] Starting mirror... — udid=" + udid);
+        loggedFirstFrame.put(udid, new AtomicBoolean(false));
+        framesReceived.put(udid, new AtomicLong(0));
+
         // Registra al Mirror como consumidor activo y, solo si hace falta, solicita
         // formalmente al único propietario del ciclo de vida que consiga WDA — esta
         // llamada nunca compila, instala ni lanza xcodebuild aquí mismo (ver
@@ -129,10 +142,35 @@ public final class IOSMirrorProvider implements DeviceMirrorProvider {
             // Agnóstico al origen: no importa si WDA lo levantó el propio Mirror
             // o una ejecución real vía Appium — este probe HTTP directo es el mismo.
             WdaEventBus.publish(udid, WdaEventBus.WdaEvent.ACTIVE);
+
+            long count = framesReceived.computeIfAbsent(udid, k -> new AtomicLong(0)).incrementAndGet();
+            AtomicBoolean firstFrameFlag = loggedFirstFrame.computeIfAbsent(udid, k -> new AtomicBoolean(false));
+            if (firstFrameFlag.compareAndSet(false, true)) {
+                logFirstFrame(udid, frame);
+                System.out.println("[IOSMirror] STREAMING — udid=" + udid);
+            }
+            if (count % 100 == 0) {
+                System.out.println("[WdaMirrorProvider] Frames received: " + count + " — udid=" + udid);
+            }
             return frame;
         } catch (Exception e) {
             System.err.println("[IOSMirrorProvider] WDA screenshot error [" + udid + "]: " + e.getMessage());
             return null;
+        }
+    }
+
+    /** Evidencia real del primer frame — dimensiones decodificadas, no solo "llegó algo". */
+    private static void logFirstFrame(String udid, byte[] frame) {
+        System.out.println("[WdaMirrorProvider] First frame received — udid=" + udid + " (" + frame.length + " bytes)");
+        try {
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(new ByteArrayInputStream(frame));
+            if (img != null) {
+                System.out.println("[WdaMirrorProvider] Frame: " + img.getWidth() + "x" + img.getHeight() + " — udid=" + udid);
+            } else {
+                System.err.println("[WdaMirrorProvider] Frame recibido pero ImageIO no pudo decodificarlo — udid=" + udid);
+            }
+        } catch (Exception e) {
+            System.err.println("[WdaMirrorProvider] Error decodificando dimensiones del primer frame: " + e.getMessage());
         }
     }
 }

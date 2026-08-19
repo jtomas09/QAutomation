@@ -10,19 +10,29 @@ import java.util.regex.Pattern;
  * UDIDs físicos de iOS del resto. Es una clasificación en memoria (sin
  * subprocesos), apta para el hot path del Mirror.
  *
- * ── El Mirror nunca depende de WDA ────────────────────────────────────────
- * Cada plataforma resuelve a una FallbackChainProvider con varios candidatos
- * ordenados por calidad — el primero soportado en este host que logre
- * arrancar para un UDID dado "gana" esa sesión de mirror:
+ * ── Android — sin cambios, ver historial ──────────────────────────────────
+ * ScrcpyMirrorProvider (video real vía scrcpy) → AndroidMirrorProvider
+ * (adb screencap — fallback universal, incluye Windows).
  *
- *   Android: ScrcpyMirrorProvider (video real vía scrcpy) → AndroidMirrorProvider
- *            (adb screencap — fallback universal, incluye Windows).
- *   iOS:     AVFoundationMirrorProvider (video real vía USB, solo macOS+ffmpeg)
- *            → LibimobiledeviceMirrorProvider (idevicescreenshot, USB directo).
+ * ── iOS — selección automática por capacidad real del dispositivo ─────────
+ * Investigación real (no teórica) contra un iPhone físico descartó
+ * AVFoundation/CoreMediaIO y libimobiledevice para este dispositivo: ni
+ * AVFoundation expone el iPhone como fuente de video (macOS nunca lista el
+ * dispositivo salvo el enlace de confianza vía QuickTime, que NO es
+ * automatizable — se investigó a fondo el mecanismo CoreMediaIO subyacente,
+ * ver historial de AVFoundationMirrorProvider), ni libimobiledevice funciona
+ * contra iOS 17+ (protocolo lockdownd clásico reemplazado por RemoteXPC,
+ * confirmado en el issue tracker del proyecto). Investigación adicional (real,
+ * con pymobiledevice3 contra el mismo iPhone) confirmó que el sucesor moderno
+ * — CoreDevice/RSD — tampoco expone su servicio de video en este dispositivo
+ * porque requiere iOS 27+ (este iPhone corre iOS 26.6).
  *
- * IOSMirrorProvider (WDA) NO participa de esta cadena — WebDriverAgent sigue
- * existiendo únicamente para automatización/inspección real (ver
- * WdaLifecycleOwner), nunca como fuente del Mirror.
+ * IOSMirrorProviderResolver decide automáticamente, por versión real del
+ * dispositivo Y disponibilidad real del servicio (nunca "version >= 27" a
+ * ciegas): CoreDeviceMirrorProvider si el dispositivo lo soporta, si no
+ * IOSMirrorProvider (WDA) — reutilizando el MISMO WebDriverAgent que ya usa
+ * la automatización XCUITest/Appium (ver WdaLifecycleOwner.Consumer.MIRROR),
+ * nunca una segunda instancia, nunca interfiriendo con una ejecución real.
  */
 public final class MirrorProviderRegistry {
 
@@ -50,10 +60,10 @@ public final class MirrorProviderRegistry {
                 new ScrcpyMirrorProvider(adbPath, agentDataDir),
                 new AndroidMirrorProvider(adbPath)
         ));
-        this.iosChain = new FallbackChainProvider("iOS", List.of(
-                new AVFoundationMirrorProvider(agentDataDir),
-                new LibimobiledeviceMirrorProvider()
-        ));
+        this.iosChain = new IOSMirrorProviderResolver(
+                new CoreDeviceMirrorProvider(),
+                new IOSMirrorProvider()
+        );
     }
 
     /**
