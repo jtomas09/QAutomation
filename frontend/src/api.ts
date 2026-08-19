@@ -98,12 +98,27 @@ export async function getConfig(): Promise<BackendConfig> {
 
 // ─── Run execution ────────────────────────────────────────────────────────────
 
+/**
+ * Payload de un caso grabado en Record Studio que aún no existe como test
+ * precompilado en el repo del Runner — ver JobExecutor (Runner): cuando este
+ * campo viene presente, escribe `source` como `{className}.java` dentro de
+ * tests/QARecordStudio/ del workspace YA clonado, corre Gradle apuntando
+ * directo a esa clase (sin pasar por SUITE_MAP), y borra el archivo al
+ * terminar el job — nunca modifica el repo base de forma permanente.
+ */
+export interface RecordedCasePayload {
+  className: string
+  source:    string
+  caseName:  string
+}
+
 export interface RunRequest {
   suite:        string
   env:          string
   device:       string
   country:      string
   videoEnabled?: boolean
+  recordedCase?: RecordedCasePayload
 }
 
 export interface ExecutionStarted {

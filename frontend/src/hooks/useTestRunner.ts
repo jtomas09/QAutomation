@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import type { RunState, LogLevel, LogEntry, ExecutionEvent } from '../types'
 import { postRun, streamExecution, stopExecution, ApiError } from '../api'
+import type { RecordedCasePayload } from '../api'
 import { executionTrackingService } from '../services/ExecutionTrackingService'
 
 /** Mirrors JobExecutor.extractTestName — parses "Class > method() PASSED" → "method" */
@@ -120,6 +121,7 @@ export function useTestRunner() {
     country:      string  = 'mexico',
     videoEnabled: boolean = false,
     deviceLabels: string[] = [],     // display names for log prefixes
+    recordedCase?: RecordedCasePayload, // presente solo para un caso grabado en Record Studio (ver postRun)
   ) => {
     if (devices.length === 0) {
       addLog('WARN', '⚠️ Sin dispositivos seleccionados')
@@ -158,7 +160,7 @@ export function useTestRunner() {
     try {
       // Fire all POSTs simultaneously
       const runs = await Promise.all(
-        devices.map(udid => postRun({ suite: suiteId, env, device: udid, country, videoEnabled }))
+        devices.map(udid => postRun({ suite: suiteId, env, device: udid, country, videoEnabled, recordedCase }))
       )
 
       const allIds = runs.map(r => r.executionId)

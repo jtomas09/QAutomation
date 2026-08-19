@@ -100,6 +100,16 @@ public class JobController {
         job.put("deviceName",      exec.getDevice());
         job.put("platform",        assignedPlatform);
 
+        // Caso grabado en Record Studio (ver RunController/RunRequest.RecordedCase)
+        // — presente solo cuando esta ejecución viene de Suites→Ejecutar sobre un
+        // caso grabado. El Runner (JobExecutor) usa estos campos para escribir y
+        // compilar el test dinámico en vez de resolver la suite vía SUITE_MAP.
+        if (exec.getRecordedCaseClassName() != null) {
+            job.put("recordedCaseClassName", exec.getRecordedCaseClassName());
+            job.put("recordedCaseSource",    exec.getRecordedCaseSource());
+            job.put("recordedCaseName",      exec.getRecordedCaseName());
+        }
+
         // Inject per-device app config if present
         String lookupUdid = exec.getDeviceUdid() != null ? exec.getDeviceUdid() : requestedDevice;
         appConfigStore.get(lookupUdid).ifPresent(cfg -> {

@@ -71,6 +71,17 @@ public class RunController {
                 request.isVideoEnabled()
         );
 
+        // Caso grabado en Record Studio (ver RunRequest.RecordedCase) — se adjunta
+        // tal cual a la Execution ya creada; JobController lo incluye en el JSON
+        // del job cuando el Runner lo reclama. Ausente en cualquier ejecución normal.
+        if (request.getRecordedCase() != null) {
+            exec.setRecordedCaseClassName(request.getRecordedCase().getClassName());
+            exec.setRecordedCaseSource(request.getRecordedCase().getSource());
+            exec.setRecordedCaseName(request.getRecordedCase().getCaseName());
+            log.info("[RunController] Caso grabado — className={} udid={}",
+                    request.getRecordedCase().getClassName(), request.getDevice());
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("success",     true);
         body.put("executionId", exec.getExecutionId());

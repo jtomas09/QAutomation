@@ -31,4 +31,14 @@ public class JobDto {
     public String  bundleId;        // iOS bundle identifier
     public String  appMode;         // INSTALLED | APK | IPA
 
+    // ── Caso grabado en Record Studio (Suites → Ejecutar) ────────────────────
+    // Presente SOLO cuando esta ejecución viene de un caso grabado que todavía
+    // no existe como test precompilado en el repo — ver JobExecutor: cuando
+    // recordedCaseClassName != null, escribe recordedCaseSource como archivo
+    // .java en tests/QARecordStudio/ del workspace ya clonado, apunta el
+    // filtro --tests directo a esa clase (sin pasar por SUITE_MAP), y borra
+    // el archivo al terminar — nunca modifica el repo base de forma permanente.
+    public String  recordedCaseClassName;
+    public String  recordedCaseSource;
+    public String  recordedCaseName;
 }

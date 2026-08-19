@@ -7,6 +7,8 @@ import { appIconResolver } from '../services/ApplicationIconResolver'
 import { executionTrackingService } from '../services/ExecutionTrackingService'
 import { getDevices } from '../api'
 import type { PhysicalDevice } from '../types'
+import type { RecordedCasePayload } from '../api'
+import { generateExecutableJava } from '../services/executableTestGenerator'
 import { resolveDeviceDisplayName } from '../utils/displayNames'
 import {
   Layers3, Trash2, Play, PencilLine, MoreHorizontal,
@@ -228,6 +230,163 @@ function ExecuteSuiteModal({ suite, onClose, onExecute }: ExecuteSuiteModalProps
         >
           <Zap size={14} />
           {loading ? 'Iniciando…' : caseCount === 0 ? 'Sin casos de prueba' : `Ejecutar ${caseCount} caso${caseCount !== 1 ? 's' : ''}`}
+        </button>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// ── ExecuteCaseModal ──────────────────────────────────────────────────────────
+//
+// Ejecuta un ÚNICO caso grabado — mismo pipeline que ExecuteSuiteModal
+// (arriba), pero valida explícitamente readyForExecution antes de permitir
+// "Ejecutar": el Runner/backend ya rechaza un device no disponible (409),
+// pero esto evita el viaje redondo cuando ya sabemos que no está listo.
+interface ExecuteCaseModalProps {
+  testCase: TestCase
+  suiteName: string
+  onClose(): void
+  onExecute(device: PhysicalDevice, environment: string): void
+}
+
+function ExecuteCaseModal({ testCase, suiteName, onClose, onExecute }: ExecuteCaseModalProps) {
+  const [env, setEnv] = useState('qa')
+  const [devices, setDevices] = useState<PhysicalDevice[]>([])
+  const [deviceId, setDeviceId] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getDevices()
+      .then(d => {
+        setDevices(d)
+        const firstReady = d.find(x => x.readyForExecution)
+        if (firstReady) setDeviceId(firstReady.udid)
+      })
+      .catch(() => setLoadError('No se pudo consultar los dispositivos conectados.'))
+  }, [])
+
+  const readyDevices = devices.filter(d => d.readyForExecution)
+  const selectedDevice = readyDevices.find(d => d.udid === deviceId) ?? null
+  const canRun = !!selectedDevice && !loading
+
+  const handleRun = async () => {
+    if (!selectedDevice) return
+    setLoading(true)
+    try {
+      await onExecute(selectedDevice, env)
+      onClose()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.94, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.94, y: 10 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#111827', border: '1px solid rgba(52,211,153,0.25)',
+          borderRadius: 14, padding: 28, width: '100%', maxWidth: 420,
+          display: 'flex', flexDirection: 'column', gap: 18,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+            background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.25)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Zap size={17} color="#34d399" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {testCase.name}
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{suiteName} · {testCase.stepCount} paso{testCase.stepCount !== 1 ? 's' : ''}</div>
+          </div>
+          <button onClick={onClose} style={{ color: '#475569', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 7 }}>Ambiente</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {ENVIRONMENTS.map(e => (
+              <button
+                key={e.id}
+                onClick={() => setEnv(e.id)}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 7, cursor: 'pointer', fontSize: 11,
+                  fontWeight: env === e.id ? 700 : 500,
+                  border: `1px solid ${env === e.id ? 'rgba(52,211,153,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                  background: env === e.id ? 'rgba(52,211,153,0.1)' : 'rgba(255,255,255,0.03)',
+                  color: env === e.id ? '#34d399' : '#64748b',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                }}
+              >
+                {e.flag} {e.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 5 }}>
+            Dispositivo
+          </label>
+          {loadError ? (
+            <div style={{ padding: '10px 12px', borderRadius: 7, fontSize: 11, color: '#f87171', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
+              {loadError}
+            </div>
+          ) : readyDevices.length === 0 ? (
+            <div style={{ padding: '10px 12px', borderRadius: 7, fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
+              El dispositivo seleccionado no está disponible. Conecta un dispositivo listo para ejecutar.
+            </div>
+          ) : (
+            <select
+              value={deviceId}
+              onChange={e => setDeviceId(e.target.value)}
+              style={{
+                width: '100%', background: '#0d1117', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 7, color: '#e2e8f0', padding: '8px 11px', fontSize: 12,
+                boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit',
+              }}
+            >
+              {readyDevices.map(d => (
+                <option key={d.udid} value={d.udid}>{resolveDeviceDisplayName(d).title} ({d.platform})</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <button
+          onClick={handleRun}
+          disabled={!canRun}
+          style={{
+            width: '100%', padding: '11px 0', borderRadius: 8, border: 'none',
+            background: canRun ? 'linear-gradient(90deg, #059669, #34d399)' : 'rgba(255,255,255,0.05)',
+            color: canRun ? '#fff' : '#475569',
+            fontSize: 13, fontWeight: 700, cursor: canRun ? 'pointer' : 'not-allowed',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          }}
+        >
+          <Zap size={14} />
+          {loading ? 'Iniciando…' : 'Ejecutar caso'}
         </button>
       </motion.div>
     </motion.div>
@@ -897,15 +1056,24 @@ function SuiteAccordion({
 
 interface SuitesPageProps {
   onNavigate?: (page: string) => void
+  /**
+   * Ejecuta un caso grabado — mismo pipeline que Dashboard (runReady/runTest/
+   * postRun), ver App.tsx:runReadyRecordedCase. Ausente solo en contextos que
+   * no tienen acceso a ese pipeline (ninguno en producción — App.tsx siempre
+   * lo pasa); si falta, el botón de ejecución de un caso individual no hace
+   * nada (mejor que ejecutar por un camino paralelo/duplicado).
+   */
+  onExecuteRecordedCase?: (recordedCase: RecordedCasePayload, device: PhysicalDevice, environment: string) => void
 }
 
-export default function SuitesPage({ onNavigate }: SuitesPageProps = {}) {
+export default function SuitesPage({ onNavigate, onExecuteRecordedCase }: SuitesPageProps = {}) {
   const [suites,      setSuites]      = useState<TestSuite[]>([])
   const [search,      setSearch]      = useState('')
   const [pfFilter,    setPfFilter]    = useState<'all' | 'android' | 'ios'>('all')
   const [showCreate,  setShowCreate]  = useState(false)
   const [detailCase,  setDetailCase]  = useState<{ tc: TestCase; suiteName: string } | null>(null)
   const [execTarget,  setExecTarget]  = useState<TestSuite | null>(null)
+  const [execCaseTarget, setExecCaseTarget] = useState<{ tc: TestCase; suiteName: string } | null>(null)
   const [toast,       setToast]       = useState<string | null>(null)
 
   const confirm = useConfirmation()
@@ -979,22 +1147,30 @@ export default function SuitesPage({ onNavigate }: SuitesPageProps = {}) {
   }, [])
 
   const handleExecuteCase = useCallback((tc: TestCase) => {
-    // Execute a single case by wrapping it in a one-case suite run
+    // Ejecución REAL de un caso grabado — abre el selector de dispositivo
+    // (valida readyForExecution) en vez de disparar directo; ver
+    // handleExecuteCaseConfirm para el pipeline real (runReadyRecordedCase).
     const parentSuite = suites.find(s => s.id === tc.suiteId)
     if (!parentSuite) return
-    executionTrackingService.runSuite({
-      suiteId:     parentSuite.id,
-      suiteName:   `${parentSuite.name} › ${tc.name}`,
-      appName:     parentSuite.appName,
-      appPackage:  parentSuite.appPackage,
-      platform:    parentSuite.platform,
-      environment: 'qa',
-      country:     parentSuite.country,
-      cases:       [{ caseId: tc.id, caseName: tc.name, stepsTotal: tc.stepCount }],
-      onNavigateToDashboard: () => onNavigate?.('dashboard'),
-    }).catch(console.warn)
-    showToast(`Ejecutando caso "${tc.name}"`)
-  }, [suites, onNavigate, showToast])
+    setExecCaseTarget({ tc, suiteName: parentSuite.name })
+  }, [suites])
+
+  const handleExecuteCaseConfirm = useCallback(async (device: PhysicalDevice, environment: string) => {
+    if (!execCaseTarget) return
+    const { tc } = execCaseTarget
+    if (!onExecuteRecordedCase) {
+      showToast('No se pudo ejecutar: el pipeline de ejecución no está disponible.')
+      return
+    }
+    const { className, source } = generateExecutableJava(tc.steps, tc.name)
+    onExecuteRecordedCase(
+      { className, source, caseName: tc.name },
+      device,
+      environment,
+    )
+    showToast(`Ejecutando "${tc.name}" — ver en Dashboard`)
+    onNavigate?.('dashboard')
+  }, [execCaseTarget, onExecuteRecordedCase, onNavigate, showToast])
 
   const handleExecuteConfirm = useCallback(async (device: PhysicalDevice | null, environment: string) => {
     if (!execTarget) return
@@ -1207,6 +1383,15 @@ export default function SuitesPage({ onNavigate }: SuitesPageProps = {}) {
             suite={execTarget}
             onClose={() => setExecTarget(null)}
             onExecute={handleExecuteConfirm}
+          />
+        )}
+        {execCaseTarget && (
+          <ExecuteCaseModal
+            key="exec-case-modal"
+            testCase={execCaseTarget.tc}
+            suiteName={execCaseTarget.suiteName}
+            onClose={() => setExecCaseTarget(null)}
+            onExecute={handleExecuteCaseConfirm}
           />
         )}
       </AnimatePresence>

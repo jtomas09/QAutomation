@@ -24,6 +24,9 @@ import RunnerManager          from './pages/RunnerManager'
 import DeviceFarm             from './pages/DeviceFarm'
 import RecordStudio           from './pages/RecordStudio'
 import SuitesPage            from './pages/SuitesPage'
+import type { RecordedCasePayload } from './api'
+import type { PhysicalDevice } from './types'
+import { resolveDeviceDisplayName } from './utils/displayNames'
 
 export default function App() {
   const [page,       setPage]       = useState<Page>('dashboard')
@@ -36,7 +39,7 @@ export default function App() {
   const {
     configured, reconciled, readyUdids, toggleDevice: toggleConfigDevice,
     saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
-    activeDevice, videoEnabled, setVideoEnabled,
+    activeDevice, videoEnabled, setVideoEnabled, followExecutionDevice,
   } = useExecutionDevices()
 
   const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
@@ -79,6 +82,35 @@ export default function App() {
 
   function handleRun() {
     runReady(suite)
+  }
+
+  /**
+   * Ejecuta un caso grabado en Record Studio (Suites) — MISMO pipeline que
+   * runReady()/runTest() (un solo POST /api/run, mismo RUN-XXXX, mismo SSE,
+   * mismo Mirror/Actividad en Tiempo Real). La única diferencia es el campo
+   * `recordedCase`, que el Runner usa para escribir y compilar el test
+   * generado en vez de resolver un nombre de suite ya existente (ver
+   * JobExecutor). No crea un segundo mecanismo de ejecución.
+   *
+   * `device` viene del selector de dispositivo propio de SuitesPage (no pasa
+   * por la reconciliación configured/readyUdids de Dashboard, pensada para
+   * ejecuciones multi-dispositivo curadas) — la validación real de "¿está
+   * disponible AHORA?" la hace el backend (RunController → 409 si no está
+   * listo, ver ExecuteCaseModal que ya solo ofrece dispositivos con
+   * readyForExecution=true).
+   *
+   * Fase 6 (Mirror sigue a la ejecución activa): este dispositivo puede no
+   * estar en `configured` (el multi-selector persistido del Dashboard) —
+   * followExecutionDevice() lo agrega/activa para que el panel Mirror lo
+   * muestre de inmediato, sin tocar la config guardada.
+   */
+  function runReadyRecordedCase(recordedCase: RecordedCasePayload, device: PhysicalDevice, executionEnv: string) {
+    const deviceLabel = resolveDeviceDisplayName(device).title
+    followExecutionDevice({
+      udid: device.udid, name: deviceLabel,
+      platform: device.platform || 'ANDROID', platformVersion: device.platformVersion ?? null,
+    })
+    runTest(`QARecordStudio:${recordedCase.className}`, executionEnv, [device.udid], country, videoEnabled, [deviceLabel], recordedCase)
   }
 
   function handleCountryChange(c: string) {
@@ -163,7 +195,12 @@ export default function App() {
             <RecordStudio onNavigateToExecute={() => setPage('execute')} />
           )}
 
-          {page === 'suites' && <SuitesPage onNavigate={p => setPage(p as import('./components/Sidebar').Page)} />}
+          {page === 'suites' && (
+            <SuitesPage
+              onNavigate={p => setPage(p as import('./components/Sidebar').Page)}
+              onExecuteRecordedCase={runReadyRecordedCase}
+            />
+          )}
 
           {page === 'execute' && (() => {
             const countrySuites = COUNTRY_SUITES[country] ?? []

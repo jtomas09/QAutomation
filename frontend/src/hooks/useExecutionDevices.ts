@@ -118,6 +118,22 @@ export function useExecutionDevices() {
     }
   }, [])
 
+  /**
+   * Hace que el Mirror siga al dispositivo de una ejecución recién lanzada
+   * desde fuera del toggle de "Dispositivos Conectados" (p. ej. el picker
+   * ad-hoc de Suites → Ejecutar caso). Si el dispositivo no está en
+   * `configured` se agrega (igual que el camino "activar" de toggleDevice,
+   * sin persistir — la config guardada del Dashboard no cambia); si ya está,
+   * simplemente pasa a ser el activo.
+   */
+  const followExecutionDevice = useCallback((device: ConfiguredDevice) => {
+    const current = configuredRef.current
+    if (!current.some(d => d.udid === device.udid)) {
+      setConfigured([...current, device])
+    }
+    setActiveDeviceUdid(device.udid)
+  }, [])
+
   /** Persist the current selection to the backend. */
   const saveConfig = useCallback(async () => {
     const toSave = configuredRef.current
@@ -177,7 +193,7 @@ export function useExecutionDevices() {
 
   return {
     configured, configuredUdids, toggleDevice, saveConfig, saving, isDirty, syncWithLive,
-    activeDevice, videoEnabled, setVideoEnabled,
+    activeDevice, videoEnabled, setVideoEnabled, followExecutionDevice,
     reconciled, readyUdids,
   }
 }

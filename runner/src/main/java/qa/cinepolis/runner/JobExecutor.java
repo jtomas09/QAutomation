@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -567,6 +568,12 @@ public class JobExecutor {
         // se envía desde el catch/finally (fuera del bloque try donde se calcula su valor
         // real); -1 hasta que resolveExpectedCountFromCommand() lo determine más abajo.
         final AtomicInteger expectedCountHolder = new AtomicInteger(-1);
+        // Caso grabado en Record Studio: ruta absoluta del .java escrito en el
+        // workspace clonado (null si esta ejecución no viene de un caso grabado).
+        // Hoisted fuera del try para que el finally lo borre sin importar el camino
+        // de salida (éxito, abort o excepción) — nunca debe modificar el repo base
+        // de forma permanente.
+        final AtomicReference<String> recordedCaseFilePath = new AtomicReference<>();
 
         // ── Ciclo de vida unificado de procesos largos (Fase 20) ────────────────
         // Causa raíz real: el abort solo vigilaba a Gradle — un abort durante
@@ -664,6 +671,15 @@ public class JobExecutor {
                 return;
             }
             String workDir = projectDir.getAbsolutePath();
+
+            // ── Caso grabado en Record Studio: escribir el .java dinámico ────────
+            // Se escribe DESPUÉS de ensureWorkspace() (que ya hizo git reset --hard +
+            // git clean -fd) para que sobreviva hasta el gradlew de este job; se borra
+            // explícitamente en el finally de este método — nunca se persiste en el
+            // repo base ni depende del clean del próximo job.
+            if (job.recordedCaseClassName != null && !job.recordedCaseClassName.isBlank()) {
+                recordedCaseFilePath.set(writeRecordedCaseFile(job, workDir));
+            }
 
             // ── Pre-flight ────────────────────────────────────────────────────
             boolean isAndroid = !"ios".equalsIgnoreCase(receivedPlatform);
@@ -1243,6 +1259,14 @@ public class JobExecutor {
                 } catch (Exception ignored) {}
             }
         } finally {
+            // Caso grabado en Record Studio: borrar el .java dinámico del workspace
+            // clonado — nunca debe persistir en el repo base, sin importar el camino
+            // de salida (éxito, abort o excepción).
+            String recordedPath = recordedCaseFilePath.get();
+            if (recordedPath != null) {
+                try { java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(recordedPath)); }
+                catch (Exception ignored) {}
+            }
             // Safety net: guarantees cleanup and execution finalization regardless of what failed above.
             // IOSVideoRecordingManager.stop() is idempotent — no-op if already called.
             try { if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId); } catch (Exception ignored) {}
@@ -1606,6 +1630,31 @@ public class JobExecutor {
         try { client.sendLog(job.executionId, "INFO", msg); } catch (Exception ignored) {}
     }
 
+    // ── Caso grabado en Record Studio: escritura del test dinámico ──────────────
+    //
+    // Escribe job.recordedCaseSource en {workDir}/src/test/java/tests/QARecordStudio/
+    // {job.recordedCaseClassName}.java — el paquete "tests.QARecordStudio" ya está
+    // cubierto por @SelectPackages("tests") en RunAllTests.java y por el patrón
+    // estándar de Gradle (src/test/java), así que no requiere cambios de build.gradle.
+    // Devuelve la ruta absoluta escrita, para que execute() la borre en su finally.
+    private String writeRecordedCaseFile(JobDto job, String workDir) {
+        try {
+            java.nio.file.Path pkgDir = java.nio.file.Paths.get(
+                    workDir, "src", "test", "java", "tests", "QARecordStudio");
+            java.nio.file.Files.createDirectories(pkgDir);
+            java.nio.file.Path filePath = pkgDir.resolve(job.recordedCaseClassName + ".java");
+            java.nio.file.Files.writeString(filePath, job.recordedCaseSource,
+                    java.nio.charset.StandardCharsets.UTF_8);
+            client.sendLog(job.executionId, "INFO",
+                    "📝 Caso grabado escrito: tests.QARecordStudio." + job.recordedCaseClassName);
+            return filePath.toAbsolutePath().toString();
+        } catch (Exception e) {
+            client.sendLog(job.executionId, "ERROR",
+                    "❌ No fue posible escribir el caso grabado en el workspace: " + describeException(e));
+            return null;
+        }
+    }
+
     // ── Gradle command builder ─────────────────────────────────────────────────
 
     private List<String> buildCommand(JobDto job) {
@@ -1617,7 +1666,14 @@ public class JobExecutor {
         }
 
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
-        String  testFilter = resolveTestFilter(job.suite, job.testClass);
+
+        // Caso grabado en Record Studio — el filtro apunta DIRECTO a la clase que
+        // writeRecordedCaseFile() acaba de escribir en tests/QARecordStudio/, sin
+        // pasar por SUITE_MAP/resolveTestFilter (esa tabla es para suites reales
+        // preexistentes, no aplica aquí).
+        String testFilter = (job.recordedCaseClassName != null && !job.recordedCaseClassName.isBlank())
+                ? "tests.QARecordStudio." + job.recordedCaseClassName
+                : resolveTestFilter(job.suite, job.testClass);
 
         List<String> cmd = new ArrayList<>();
         if (isWindows) {

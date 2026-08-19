@@ -18,6 +18,33 @@ public class RunRequest {
 
     private String  testClass;
 
+    /**
+     * Presente únicamente cuando la ejecución viene de un caso grabado en
+     * Record Studio (Suites → Ejecutar) que todavía no existe como test
+     * precompilado en el repo del Runner — ver JobExecutor (Runner): escribe
+     * `source` como archivo .java en tests/QARecordStudio/ del workspace ya
+     * clonado, corre Gradle apuntando directo a esa clase (sin pasar por
+     * SUITE_MAP), y lo borra al terminar el job. Ausente (null) en cualquier
+     * ejecución normal — mismo POST /api/run, mismo RUN-XXXX, mismo pipeline.
+     */
+    private RecordedCase recordedCase;
+
+    public static class RecordedCase {
+        private String className;
+        private String source;
+        private String caseName;
+
+        public String getClassName()            { return className; }
+        public void   setClassName(String c)     { this.className = c; }
+        public String getSource()                { return source; }
+        public void   setSource(String s)        { this.source = s; }
+        public String getCaseName()              { return caseName; }
+        public void   setCaseName(String c)      { this.caseName = c; }
+    }
+
+    public RecordedCase getRecordedCase()               { return recordedCase; }
+    public void         setRecordedCase(RecordedCase r) { this.recordedCase = r; }
+
     public String  getSuite()       { return suite; }
     public void    setSuite(String suite) { this.suite = suite; }
 

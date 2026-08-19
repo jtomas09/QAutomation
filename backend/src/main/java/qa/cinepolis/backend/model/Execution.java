@@ -32,6 +32,13 @@ public class Execution {
      *  dispositivo desconectado entre encolar y despachar) — ver ExecutionService.failWithReason(). */
     private String          failureReason;
 
+    // ── Caso grabado en Record Studio (ver RunRequest.RecordedCase) ─────────
+    // Ausentes (null) en cualquier ejecución normal — solo el Runner los lee,
+    // vía JobController, para escribir/compilar el test dinámico.
+    private String          recordedCaseClassName;
+    private String          recordedCaseSource;
+    private String          recordedCaseName;
+
     public String          getExecutionId()              { return executionId; }
     public void            setExecutionId(String v)      { this.executionId = v; }
     public String          getSuite()                    { return suite; }
@@ -78,4 +85,10 @@ public class Execution {
     public void            setAssignedRunnerId(String v)        { this.assignedRunnerId = v; }
     public String          getFailureReason()                   { return failureReason; }
     public void            setFailureReason(String v)           { this.failureReason = v; }
+    public String          getRecordedCaseClassName()           { return recordedCaseClassName; }
+    public void            setRecordedCaseClassName(String v)   { this.recordedCaseClassName = v; }
+    public String          getRecordedCaseSource()               { return recordedCaseSource; }
+    public void            setRecordedCaseSource(String v)       { this.recordedCaseSource = v; }
+    public String          getRecordedCaseName()                 { return recordedCaseName; }
+    public void            setRecordedCaseName(String v)         { this.recordedCaseName = v; }
 }
