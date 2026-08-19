@@ -234,7 +234,14 @@ class SuiteServiceImpl {
   }
 
   private persist(suites: TestSuite[]): void {
-    localStorage.setItem(V2_KEY, JSON.stringify(suites))
+    try {
+      localStorage.setItem(V2_KEY, JSON.stringify(suites))
+    } catch (e) {
+      if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+        throw new Error('Se alcanzó el límite de almacenamiento del navegador. Elimina casos antiguos o exporta esta suite antes de guardar uno nuevo.')
+      }
+      throw e
+    }
   }
 
   private dispatch(event: string, detail: unknown): void {

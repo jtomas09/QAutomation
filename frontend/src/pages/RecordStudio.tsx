@@ -5486,6 +5486,7 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
   const [targetSuiteId, setTargetSuiteId] = useState('')
   const [newSuiteName,  setNewSuiteName]  = useState('')
   const [saved,         setSaved]         = useState(false)
+  const [saveError,     setSaveError]     = useState<string | null>(null)
 
   const isSuite = mode === 'suite'
   const title   = isSuite ? 'Guardar como Suite' : 'Guardar como Caso de Prueba'
@@ -5505,16 +5506,27 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
 
   const handleSave = () => {
     if (!canSave) return
-    onConfirm({
-      name:         name.trim(),
-      description:  description.trim(),
-      country,
-      mode,
-      targetSuiteId: (!isCreatingNew && targetSuiteId) ? targetSuiteId : undefined,
-      newSuiteName:  isCreatingNew ? newSuiteName.trim() : undefined,
-    })
-    setSaved(true)
-    setTimeout(onClose, 1400)
+    setSaveError(null)
+    try {
+      onConfirm({
+        name:         name.trim(),
+        description:  description.trim(),
+        country,
+        mode,
+        targetSuiteId: (!isCreatingNew && targetSuiteId) ? targetSuiteId : undefined,
+        newSuiteName:  isCreatingNew ? newSuiteName.trim() : undefined,
+      })
+      setSaved(true)
+      setTimeout(onClose, 1400)
+    } catch (err) {
+      // onConfirm() persiste sincrónicamente (SuiteService, localStorage) — si
+      // falla (p.ej. cuota de almacenamiento excedida al agregar un caso a una
+      // suite existente con mucho historial acumulado), antes esta excepción
+      // se tragaba en silencio: el modal se quedaba abierto sin ningún feedback,
+      // exactamente el síntoma de "el botón no funciona". Ahora se muestra el
+      // motivo real en vez de fallar callado.
+      setSaveError(err instanceof Error ? err.message : 'No se pudo guardar. Intenta de nuevo.')
+    }
   }
 
   return (
@@ -5738,6 +5750,19 @@ function SaveSuiteModal({ mode, onClose, onConfirm }: SaveSuiteModalProps) {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {saveError && (
+              <div
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 7,
+                  padding: '9px 11px', borderRadius: 8,
+                  background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+                }}
+              >
+                <AlertCircle size={13} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ color: '#fca5a5', fontSize: 11.5, lineHeight: 1.5 }}>{saveError}</span>
               </div>
             )}
 
