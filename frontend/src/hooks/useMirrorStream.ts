@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getMirrorStreamUrl, checkRunnerStreamReachable, getDeviceMirrorStatus } from '../services/mirrorService'
+import { getMirrorStreamUrl, checkRunnerStreamReachable, getDeviceMirrorStatus, runnerBaseUrl } from '../services/mirrorService'
 import type { MirrorPhase } from '../services/mirrorService'
 import type { StreamState } from '../services/deviceStream'
 import type { DeviceStreamData } from './useDeviceStream'
@@ -64,7 +64,13 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
     if (ok !== prevReachRef.current) {
       prevReachRef.current = ok
       setLastUpdated(Date.now())
-      if (ok) console.log('[Mirror] Stream connected', { udid: currentUdid })
+      if (ok) {
+        console.log('[Mirror] Stream connected', { udid: currentUdid })
+        console.log('[Mirror] Stream state: streaming', { udid: currentUdid })
+      } else {
+        console.log('[Mirror] ERROR:', { stage: 'connectivity-check', udid: currentUdid,
+          error: 'Runner no alcanzable en ' + runnerBaseUrl() })
+      }
     }
     reachableRef.current = ok
     setReachable(ok)
@@ -86,7 +92,9 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
       return
     }
 
+    console.log('[Mirror] useMirrorStream called:', { udid })
     console.log('[Mirror] Starting stream for RUN device:', udid)
+    console.log('[Mirror] Stream state: connecting', { udid })
     setState('connecting')
     void check()
 
