@@ -1175,6 +1175,12 @@ export default function SuitesPage({ onNavigate, onExecuteRecordedCase }: Suites
   const handleExecuteConfirm = useCallback(async (device: PhysicalDevice | null, environment: string) => {
     if (!execTarget) return
 
+    // Único punto de verdad para "qué device eligió el usuario en ESTE modal"
+    // — logueado tal cual llega, antes de que nada más lo toque.
+    console.log('[SuiteExecution] Selected device:', device
+      ? { name: device.deviceName, platform: device.platform, udid: device.udid }
+      : null)
+
     // Regla de seguridad: una Suite sin TestCases ejecutables NUNCA debe llegar
     // al Runner — eso es exactamente lo que antes caía silenciosamente en
     // tests.RunAllTests. Se falla explícito ANTES de llamar a runSuite/postRun,

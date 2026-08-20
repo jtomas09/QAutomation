@@ -59,9 +59,19 @@ export function useExecutionDevices() {
   // ConnectedDevices) — no agrega ningún control nuevo en la UI.
   const [activeDeviceUdid, setActiveDeviceUdidState] = useState<string | null>(null)
 
+  // Device Target de la ejecución (Suite/caso) más reciente — EXCLUSIVO y
+  // completamente separado de `configured` (esa lista es del toggle manual
+  // del usuario en "Dispositivos Conectados", persistida al backend). Nunca
+  // se "agrega" — cada nueva ejecución REEMPLAZA por completo al anterior, así
+  // que jamás pueden coexistir dos devices de ejecución al mismo tiempo (ver
+  // followExecutionDevice más abajo — causa raíz del Device A que "seguía
+  // configurado" tras seleccionar Device B).
+  const [executionDevice, setExecutionDeviceState] = useState<ConfiguredDevice | null>(null)
+
   // Ref keeps state readable synchronously (avoids stale closure in syncWithLive/saveConfig)
   const configuredRef       = useRef<ConfiguredDevice[]>([])
   const activeDeviceUdidRef = useRef<string | null>(null)
+  const executionDeviceRef  = useRef<ConfiguredDevice | null>(null)
   const videoEnabledRef     = useRef(false)
 
   function setConfigured(next: ConfiguredDevice[]) {
@@ -72,6 +82,11 @@ export function useExecutionDevices() {
   function setActiveDeviceUdid(next: string | null) {
     activeDeviceUdidRef.current = next
     setActiveDeviceUdidState(next)
+  }
+
+  function setExecutionDevice(next: ConfiguredDevice | null) {
+    executionDeviceRef.current = next
+    setExecutionDeviceState(next)
   }
 
   // Load saved config from backend on mount
@@ -116,21 +131,31 @@ export function useExecutionDevices() {
       setConfigured([...current, toConfigured(device)])
       setActiveDeviceUdid(device.udid)
     }
+    // La selección manual siempre puede tomar el control del Mirror — ver
+    // followExecutionDevice: mientras exista un executionDevice, gana sobre
+    // activeDeviceUdid en el cómputo de `activeDevice` más abajo, así que hay
+    // que soltarlo aquí para que el toggle manual tenga efecto inmediato.
+    setExecutionDevice(null)
   }, [])
 
   /**
-   * Hace que el Mirror siga al dispositivo de una ejecución recién lanzada
-   * desde fuera del toggle de "Dispositivos Conectados" (p. ej. el picker
-   * ad-hoc de Suites → Ejecutar caso). Si el dispositivo no está en
-   * `configured` se agrega (igual que el camino "activar" de toggleDevice,
-   * sin persistir — la config guardada del Dashboard no cambia); si ya está,
-   * simplemente pasa a ser el activo.
+   * Fija el Device Target de una ejecución (Suite/caso) recién lanzada desde
+   * fuera del toggle de "Dispositivos Conectados" (p. ej. el picker ad-hoc de
+   * Suites → Ejecutar). SIEMPRE reemplaza — nunca agrega — al anterior, y
+   * NUNCA toca `configured` (esa lista es exclusiva del toggle manual del
+   * usuario, persistida al backend): antes, esta función agregaba el device a
+   * `configured` sin quitar el de una ejecución previa, así que un Device A
+   * de una ejecución anterior podía quedar "configurado" para siempre — este
+   * es exactamente el bug que corrige este cambio.
    */
   const followExecutionDevice = useCallback((device: ConfiguredDevice) => {
-    const current = configuredRef.current
-    if (!current.some(d => d.udid === device.udid)) {
-      setConfigured([...current, device])
+    const previous = executionDeviceRef.current
+    if (previous && previous.udid !== device.udid) {
+      console.log('[SuiteExecution] Previous device cleared:', { name: previous.name, udid: previous.udid })
     }
+    console.log('[SuiteExecution] Final target device:',
+      { name: device.name, platform: device.platform, udid: device.udid })
+    setExecutionDevice(device)
     setActiveDeviceUdid(device.udid)
   }, [])
 
@@ -176,7 +201,11 @@ export function useExecutionDevices() {
 
   const configuredUdids = configured.map(d => d.udid)
   const isDirty = [...configuredUdids].sort().join(',') !== [...savedUdids].sort().join(',')
-  const activeDevice = configured.find(d => d.udid === activeDeviceUdid) ?? null
+  // executionDevice (Suite/caso en ejecución) tiene prioridad — es exclusivo
+  // por construcción (followExecutionDevice siempre reemplaza), así que nunca
+  // hay ambigüedad entre "el device de la ejecución" y "el device tocado a
+  // mano en Dashboard". Sin ejecución activa, cae al toggle manual de siempre.
+  const activeDevice = executionDevice ?? configured.find(d => d.udid === activeDeviceUdid) ?? null
 
   // Capa 3 (Plan de Ejecución): reconciled se recalcula automáticamente en cada
   // poll — un dispositivo que vuelve a AVAILABLE pasa a isReady=true sin que el

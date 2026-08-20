@@ -453,6 +453,8 @@ class ExecutionTrackingServiceImpl {
     this.addActivity(rec.id, 'Conectando con Runner…', 'info')
 
     try {
+      console.log('[SuiteExecution] RUN payload device:',
+        { name: opts.device?.deviceName ?? '', platform: opts.device?.platform ?? '', udid: opts.device?.udid ?? '' })
       const started = await postRun({
         suite:   opts.suiteName,
         env:     opts.environment,
