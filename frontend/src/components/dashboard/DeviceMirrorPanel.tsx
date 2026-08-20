@@ -153,6 +153,7 @@ export default function DeviceMirrorPanel({ device }: Props) {
     // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
     console.log('[Mirror][TEMP] Frame received by frontend', { udid })
     console.log('[Mirror][TEMP] Image rendered', { udid })
+    console.log('[Mirror] First frame received', { udid })
     lastFrameAtRef.current = Date.now()
     setImgError(false)
     if (reconnectingRef.current) {

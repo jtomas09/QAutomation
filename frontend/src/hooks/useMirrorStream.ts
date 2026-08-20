@@ -64,6 +64,7 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
     if (ok !== prevReachRef.current) {
       prevReachRef.current = ok
       setLastUpdated(Date.now())
+      if (ok) console.log('[Mirror] Stream connected', { udid: currentUdid })
     }
     reachableRef.current = ok
     setReachable(ok)
@@ -85,6 +86,7 @@ export function useMirrorStream(udid: string | null | undefined): MirrorStreamDa
       return
     }
 
+    console.log('[Mirror] Starting stream for RUN device:', udid)
     setState('connecting')
     void check()
 

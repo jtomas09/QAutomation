@@ -470,6 +470,9 @@ class ExecutionTrackingServiceImpl {
       })
 
       // Runner accepted — start streaming
+      console.log(`[SuiteExecution] RUN created: ${started.executionId}`)
+      console.log(`[SuiteExecution] Target device: name=${opts.device?.deviceName ?? ''} `
+        + `platform=${opts.device?.platform ?? ''} udid=${opts.device?.udid ?? ''}`)
       this.patch(rec.id, r => ({ ...r, status: 'running', startedAt: now(), runnerId: started.executionId }))
       this.addActivity(rec.id, `Runner iniciando — ID: ${started.executionId}`, 'ok')
       this.startNextCase(rec.id)

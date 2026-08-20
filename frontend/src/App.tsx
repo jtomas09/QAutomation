@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle } from 'lucide-react'
 import { ConfirmationProvider } from './hooks/useConfirmation'
@@ -41,6 +41,34 @@ export default function App() {
     saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
     activeDevice, videoEnabled, setVideoEnabled, followExecutionDevice,
   } = useExecutionDevices()
+
+  /**
+   * Mirror sigue automáticamente al Device Target de CUALQUIER ejecución
+   * lanzada vía ExecutionTrackingService (Suites → Ejecutar suite/caso real
+   * preexistente) — no solo la de Record Studio (esa ya se cubre en
+   * runReadyRecordedCase() más abajo, porque pasa por useTestRunner, NO por
+   * ExecutionTrackingService; son dos mecanismos de tracking distintos que ya
+   * existían, no se unifican aquí). 'qa:exec:created' ya lo dispara
+   * createExecution() de forma síncrona con el udid ya resuelto (el modal de
+   * Suites lo conoce ANTES de llamar a postRun) — sin espera de red, sin
+   * carrera: para cuando este handler corre, RUN + DEVICE + UDID ya existen.
+   * No se toca useMirrorStream/DeviceMirrorPanel/ningún provider del Mirror.
+   */
+  useEffect(() => {
+    function onExecCreated(e: Event) {
+      const rec = (e as CustomEvent).detail as { id?: string; udid?: string; device?: string; platform?: string } | null
+      if (!rec?.udid) return
+      console.log(`[Dashboard] Active execution detected: ${rec.id}`)
+      console.log('[Dashboard] Resolving mirror device from active RUN')
+      console.log(`[Dashboard] Mirror target: ${rec.device} / ${rec.udid}`)
+      followExecutionDevice({
+        udid: rec.udid, name: rec.device || rec.udid,
+        platform: rec.platform || 'ANDROID', platformVersion: null,
+      })
+    }
+    window.addEventListener('qa:exec:created', onExecCreated)
+    return () => window.removeEventListener('qa:exec:created', onExecCreated)
+  }, [followExecutionDevice])
 
   const { state, runTest, stopTest, clearLog, attachToExecution } = useTestRunner()
   const backendHealth = useBackendHealth()
