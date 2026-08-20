@@ -460,6 +460,10 @@ class ExecutionTrackingServiceImpl {
         // (App.tsx) y que DeviceReadinessService (backend): más específico y
         // sin ambigüedad si dos dispositivos comparten nombre visible.
         device:  opts.device?.udid ?? '',
+        // Solo informativos — para que [RunDevice] y los mensajes de rechazo
+        // muestren el nombre, no participan en la resolución real del device.
+        deviceName:     opts.device?.deviceName,
+        devicePlatform: opts.device?.platform,
         country: opts.country ?? 'mexico',
         suiteId:       opts.recordedCases?.length ? opts.suiteId : undefined,
         recordedCases: opts.recordedCases?.length ? opts.recordedCases : undefined,

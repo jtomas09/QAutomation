@@ -642,6 +642,17 @@ public class JobExecutor {
                     "📱 DISPOSITIVO RECIBIDO DEL BACKEND: " + receivedDevice
                     + (receivedPlatform.isBlank() ? "" : " / " + receivedPlatform)
                     + (receivedUdid.isBlank()     ? "" : " / " + receivedUdid));
+
+            // Device Target explícito de ESTE RUN — nunca "el device configurado en
+            // Dashboard" ni el primero disponible; viene fijo en el job desde que se
+            // creó la Execution (ver RunController/JobController). Log pedido para
+            // poder comprobar exactamente qué device usa cada RUN de forma aislada.
+            System.out.println("[RunDevice] RUN=" + job.executionId);
+            System.out.println("[RunDevice] Target device: name=" + receivedDevice
+                    + " platform=" + receivedPlatform + " udid=" + receivedUdid);
+            client.sendLog(job.executionId, "INFO", "[RunDevice] Target device: name=" + receivedDevice
+                    + " platform=" + receivedPlatform + " udid=" + receivedUdid);
+
             if (receivedUdid.isBlank()) {
                 client.sendLog(job.executionId, "ERROR",
                         "❌ La configuración almacenada no coincide con el dispositivo enviado. " +
@@ -697,12 +708,18 @@ public class JobExecutor {
                     + " | UDID: " + receivedUdid);
             events.business(job.executionId, qa.cinepolis.runner.events.EventType.DEVICE_PREPARE_START,
                     "Preparando dispositivo…");
+            client.sendLog(job.executionId, "INFO", "[RunDevice] Resolving device...");
             IosPreflightManager.IosPreflightResult iosResult = null;
             if (isAndroid) {
                 checkAdbDevices(job.executionId);
                 if (!receivedUdid.isBlank()) {
                     clearUiAutomator2SystemPort(receivedUdid, job.executionId);
                 }
+                // 8200 es el systemPort fijo que Runner libera arriba (ADB forward) para
+                // UiAutomator2 — el valor real de la capability lo fija config.DriverFactory
+                // (repo de tests) al crear el driver; este log documenta lo que el Runner
+                // ya garantiza antes de delegar esa creación.
+                client.sendLog(job.executionId, "INFO", "[RunDevice] systemPort=8200");
             } else {
                 if (!checkIosXcuitestDriver(job.executionId)) {
                     if (shouldSendResult(wasAborted, resultSent)) {
@@ -733,11 +750,21 @@ public class JobExecutor {
             }
             events.business(job.executionId, qa.cinepolis.runner.events.EventType.DEVICE_PREPARE_DONE,
                     "Dispositivo listo");
+            client.sendLog(job.executionId, "INFO", "[RunDevice] Device available=true");
             events.business(job.executionId, qa.cinepolis.runner.events.EventType.APPIUM_START,
                     "Iniciando Appium…");
+            client.sendLog(job.executionId, "INFO", "[RunDevice] Configuring Appium...");
             checkAppiumServer(job.executionId);
             events.business(job.executionId, qa.cinepolis.runner.events.EventType.APPIUM_READY,
                     "Appium listo");
+            // El Driver (AndroidDriver/iOSDriver) se crea DENTRO del proceso Gradle que
+            // se lanza más abajo — en config.DriverFactory del repo de tests, leyendo los
+            // -D system properties que addCommonDFlags() ya inyecta (udid/platformName/
+            // platformVersion/deviceName/appium.hub). El Runner no lo crea directamente,
+            // así que no puede confirmar "Driver created successfully" — solo que todo lo
+            // que el Driver necesita ya está listo antes de delegarle la creación.
+            client.sendLog(job.executionId, "INFO",
+                    "[RunDevice] Delegando creación de driver a DriverFactory (Gradle)...");
 
             // ── Pre-clean locked test-results to avoid file-lock failures ────
             preCleanTestResults(job.executionId, workDir);
@@ -1747,8 +1774,10 @@ public class JobExecutor {
         }
 
         System.out.println("[Runner] Gradle target: " + testFilters);
-        try { client.sendLog(job.executionId, "INFO", "[Runner] Gradle target: " + testFilters); }
-        catch (Exception ignored) {}
+        try {
+            client.sendLog(job.executionId, "INFO", "[Runner] Gradle target: " + testFilters);
+            client.sendLog(job.executionId, "INFO", "[RunDevice] Executing suite=" + job.suite);
+        } catch (Exception ignored) {}
 
         List<String> cmd = new ArrayList<>();
         if (isWindows) {

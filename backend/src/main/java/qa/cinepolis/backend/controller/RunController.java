@@ -42,8 +42,20 @@ public class RunController {
                 request.getCountry(), request.isVideoEnabled());
 
         if (!configured.isEmpty() && !configured.contains(request.getDevice())) {
-            log.warn("[RunController] ⚠ La configuración almacenada no coincide con el dispositivo enviado. " +
-                    "Configurado={} | Recibido={}", configured, request.getDevice());
+            log.info("[RunController] La config guardada del Dashboard ({}) no incluye el Device Target " +
+                    "de este RUN ({}) — esto es esperado: el Device Target de un RUN lo decide el modal de " +
+                    "ejecución, no la configuración global del Dashboard.", configured, request.getDevice());
+        }
+
+        // REGLA DE SEGURIDAD (Device Target): un RUN nunca se crea sin un device
+        // explícito — nunca se usa "el dispositivo configurado en Dashboard" ni
+        // "el primer disponible" como fallback. Rechazo explícito, sin excepción.
+        if (request.getDevice() == null || request.getDevice().isBlank()) {
+            log.warn("[RunController] ❌ Ejecución rechazada — sin Device Target: suite={}", request.getSuite());
+            Map<String, Object> rejected = new LinkedHashMap<>();
+            rejected.put("success", false);
+            rejected.put("message", "La ejecución no tiene un Device Target configurado.");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(rejected);
         }
 
         // Problema 5 — nunca crear una Execution destinada a fallar: se valida
@@ -53,9 +65,12 @@ public class RunController {
         // JobController) — solo evita el caso común (dispositivo ya offline
         // desde antes de intentar ejecutar).
         if (!readiness.isReady(request.getDevice())) {
-            String reason = readiness.notReadyReason(request.getDevice());
+            String label = request.getDeviceName() != null && !request.getDeviceName().isBlank()
+                    ? request.getDeviceName() + " / " + request.getDevice()
+                    : request.getDevice();
+            String reason = "Device Target " + label + " no está disponible.";
             log.warn("[RunController] ❌ Ejecución rechazada — dispositivo no listo: {} ({})",
-                    request.getDevice(), reason);
+                    request.getDevice(), readiness.notReadyReason(request.getDevice()));
             Map<String, Object> rejected = new LinkedHashMap<>();
             rejected.put("success", false);
             rejected.put("message", reason);
@@ -70,6 +85,14 @@ public class RunController {
                 request.getCountry(),
                 request.isVideoEnabled()
         );
+
+        // Device Target — logging explícito pedido: este RUN queda pinneado a
+        // ESTE device de forma permanente en la Execution (campo por-instancia,
+        // ver Execution.device/deviceUdid) — cambiar la selección en Dashboard
+        // después de este punto no afecta a este RUN en absoluto.
+        log.info("[RunDevice] RUN={}", exec.getExecutionId());
+        log.info("[RunDevice] Target device: name={} platform={} udid={}",
+                request.getDeviceName(), request.getDevicePlatform(), request.getDevice());
 
         // Caso grabado en Record Studio (ver RunRequest.RecordedCase) — se adjunta
         // tal cual a la Execution ya creada; JobController lo incluye en el JSON

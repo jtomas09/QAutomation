@@ -9,6 +9,18 @@ public class RunRequest {
     private String suite;
     private String device;
 
+    /**
+     * Nombre/plataforma visibles del Device Target, tal como los conocía el
+     * modal en el momento de la selección (ver ExecuteSuiteModal/ExecuteCaseModal
+     * en SuitesPage.tsx) — PURAMENTE informativos, para que los logs [RunDevice]
+     * y los mensajes de rechazo puedan mostrar "SM-A566E" en vez de solo el
+     * UDID. La resolución real de qué hardware existe sigue siendo autoridad
+     * exclusiva de DeviceStore (nunca se confía en el cliente para eso) —
+     * `device` (el UDID) sigue siendo el único campo que participa en el match.
+     */
+    private String deviceName;
+    private String devicePlatform;
+
     /** Presente solo cuando `suite` es una TestSuite de Record Studio — puramente
      *  informativo/trazabilidad (ver logs [SuiteExecution] en RunController). La
      *  identidad real de qué se ejecuta viaja en recordedCases, no aquí. */
@@ -76,6 +88,11 @@ public class RunRequest {
 
     public String  getDevice()      { return device; }
     public void    setDevice(String device) { this.device = device; }
+
+    public String  getDeviceName()               { return deviceName; }
+    public void    setDeviceName(String v)       { this.deviceName = v; }
+    public String  getDevicePlatform()           { return devicePlatform; }
+    public void    setDevicePlatform(String v)   { this.devicePlatform = v; }
 
     public String  getEnvironment() { return environment; }
     public void    setEnvironment(String environment) { this.environment = environment; }

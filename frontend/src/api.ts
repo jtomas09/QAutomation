@@ -116,7 +116,12 @@ export interface RecordedCasePayload {
 export interface RunRequest {
   suite:         string
   env:           string
+  /** UDID — único campo que participa en la resolución real del Device Target. */
   device:        string
+  /** Nombre/plataforma visibles del device, tal como los conocía el modal al
+   *  seleccionarlo — solo informativos (logs [RunDevice], mensajes de rechazo). */
+  deviceName?:     string
+  devicePlatform?: string
   country:       string
   videoEnabled?:  boolean
   recordedCase?:  RecordedCasePayload
