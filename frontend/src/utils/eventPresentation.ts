@@ -32,6 +32,7 @@ export const EVENT_ICON: Record<string, string> = {
   MAIL_SENDING:         'Mail',
   MAIL_SENT:            'Mail',
   EXECUTION_FINISHED:   'FlagTriangleRight',
+  EXECUTION_REJECTED:   'XOctagon',
 }
 
 export const DEFAULT_EVENT_ICON = 'Circle'

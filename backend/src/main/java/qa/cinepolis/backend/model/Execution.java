@@ -39,6 +39,13 @@ public class Execution {
     private String          recordedCaseSource;
     private String          recordedCaseName;
 
+    // ── Suite grabada en Record Studio (ver RunRequest.recordedCases) ──────
+    // Ausente (null/vacío) en cualquier ejecución de una suite real
+    // preexistente — solo el Runner los lee, vía JobController, para escribir
+    // y ejecutar los N tests dinámicos de esta Suite.
+    private String                     suiteId;
+    private List<RunRequest.RecordedCase> recordedCases;
+
     public String          getExecutionId()              { return executionId; }
     public void            setExecutionId(String v)      { this.executionId = v; }
     public String          getSuite()                    { return suite; }
@@ -91,4 +98,8 @@ public class Execution {
     public void            setRecordedCaseSource(String v)       { this.recordedCaseSource = v; }
     public String          getRecordedCaseName()                 { return recordedCaseName; }
     public void            setRecordedCaseName(String v)         { this.recordedCaseName = v; }
+    public String          getSuiteId()                          { return suiteId; }
+    public void            setSuiteId(String v)                  { this.suiteId = v; }
+    public List<RunRequest.RecordedCase> getRecordedCases()             { return recordedCases; }
+    public void                          setRecordedCases(List<RunRequest.RecordedCase> v) { this.recordedCases = v; }
 }

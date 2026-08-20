@@ -20,5 +20,8 @@ public enum EventType {
     CASE_START, CASE_PASSED, CASE_FAILED, CASE_SKIPPED, CASE_RETRY,
     REPORT_GENERATING, REPORT_READY,
     MAIL_SENDING, MAIL_SENT,
-    EXECUTION_FINISHED
+    EXECUTION_FINISHED,
+    /** La ejecución se rechazó antes de tocar Gradle/el dispositivo — suite o
+     *  caso grabado sin un target resoluble (ver JobExecutor.buildCommand). */
+    EXECUTION_REJECTED
 }

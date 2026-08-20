@@ -107,18 +107,23 @@ export async function getConfig(): Promise<BackendConfig> {
  * terminar el job — nunca modifica el repo base de forma permanente.
  */
 export interface RecordedCasePayload {
-  className: string
-  source:    string
-  caseName:  string
+  testCaseId?: string
+  className:   string
+  source:      string
+  caseName:    string
 }
 
 export interface RunRequest {
-  suite:        string
-  env:          string
-  device:       string
-  country:      string
-  videoEnabled?: boolean
-  recordedCase?: RecordedCasePayload
+  suite:         string
+  env:           string
+  device:        string
+  country:       string
+  videoEnabled?:  boolean
+  recordedCase?:  RecordedCasePayload
+  /** Suite grabada en Record Studio (Suites → Ejecutar suite) — N TestCases,
+   *  con prioridad absoluta sobre cualquier suite predefinida en el Runner. */
+  suiteId?:       string
+  recordedCases?: RecordedCasePayload[]
 }
 
 export interface ExecutionStarted {

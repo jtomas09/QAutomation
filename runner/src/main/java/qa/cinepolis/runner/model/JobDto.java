@@ -31,8 +31,8 @@ public class JobDto {
     public String  bundleId;        // iOS bundle identifier
     public String  appMode;         // INSTALLED | APK | IPA
 
-    // ── Caso grabado en Record Studio (Suites → Ejecutar) ────────────────────
-    // Presente SOLO cuando esta ejecución viene de un caso grabado que todavía
+    // ── Caso grabado en Record Studio (Suites → Ejecutar caso individual) ────
+    // Presente SOLO cuando esta ejecución viene de UN caso grabado que todavía
     // no existe como test precompilado en el repo — ver JobExecutor: cuando
     // recordedCaseClassName != null, escribe recordedCaseSource como archivo
     // .java en tests/QARecordStudio/ del workspace ya clonado, apunta el
@@ -41,4 +41,22 @@ public class JobDto {
     public String  recordedCaseClassName;
     public String  recordedCaseSource;
     public String  recordedCaseName;
+
+    // ── Suite grabada en Record Studio (Suites → Ejecutar suite) ────────────
+    // Presente SOLO cuando la Execution viene de una Suite de Record Studio con
+    // N TestCases — ver JobExecutor.resolveEffectiveRecordedCases(): cuando
+    // recordedCases no es null/vacío, tiene PRIORIDAD absoluta sobre SUITE_MAP
+    // (incluso si job.suite coincidiera por accidente con una clave real) —
+    // se escribe un .java por entrada y el comando Gradle recibe un --tests
+    // por cada una. suiteId es solo para logging/trazabilidad.
+    public String suiteId;
+    public java.util.List<RecordedCaseEntry> recordedCases;
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RecordedCaseEntry {
+        public String testCaseId;
+        public String className;
+        public String source;
+        public String caseName;
+    }
 }

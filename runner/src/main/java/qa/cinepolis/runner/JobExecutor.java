@@ -27,7 +27,6 @@ import java.util.Comparator;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -568,12 +567,12 @@ public class JobExecutor {
         // se envía desde el catch/finally (fuera del bloque try donde se calcula su valor
         // real); -1 hasta que resolveExpectedCountFromCommand() lo determine más abajo.
         final AtomicInteger expectedCountHolder = new AtomicInteger(-1);
-        // Caso grabado en Record Studio: ruta absoluta del .java escrito en el
-        // workspace clonado (null si esta ejecución no viene de un caso grabado).
-        // Hoisted fuera del try para que el finally lo borre sin importar el camino
-        // de salida (éxito, abort o excepción) — nunca debe modificar el repo base
-        // de forma permanente.
-        final AtomicReference<String> recordedCaseFilePath = new AtomicReference<>();
+        // Caso(s) grabado(s) en Record Studio: rutas absolutas de los .java
+        // escritos en el workspace clonado (vacío si esta ejecución no viene de
+        // Record Studio). Hoisted fuera del try para que el finally los borre sin
+        // importar el camino de salida (éxito, abort, rechazo o excepción) —
+        // nunca debe modificar el repo base de forma permanente.
+        final List<String> recordedCaseFilePaths = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         // ── Ciclo de vida unificado de procesos largos (Fase 20) ────────────────
         // Causa raíz real: el abort solo vigilaba a Gradle — un abort durante
@@ -672,13 +671,23 @@ public class JobExecutor {
             }
             String workDir = projectDir.getAbsolutePath();
 
-            // ── Caso grabado en Record Studio: escribir el .java dinámico ────────
+            // ── Caso(s) grabado(s) en Record Studio: escribir el/los .java ───────
             // Se escribe DESPUÉS de ensureWorkspace() (que ya hizo git reset --hard +
             // git clean -fd) para que sobreviva hasta el gradlew de este job; se borra
             // explícitamente en el finally de este método — nunca se persiste en el
             // repo base ni depende del clean del próximo job.
-            if (job.recordedCaseClassName != null && !job.recordedCaseClassName.isBlank()) {
-                recordedCaseFilePath.set(writeRecordedCaseFile(job, workDir));
+            List<JobDto.RecordedCaseEntry> effectiveRecordedCases = resolveEffectiveRecordedCases(job);
+            if (!effectiveRecordedCases.isEmpty()) {
+                System.out.println("[Runner] " + job.executionId + " | Suite=" + job.suite
+                        + " | Tests=" + effectiveRecordedCases.size());
+                client.sendLog(job.executionId, "INFO",
+                        "[Runner] " + job.executionId + " | Suite=" + job.suite
+                        + " | Tests=" + effectiveRecordedCases.size());
+                for (JobDto.RecordedCaseEntry entry : effectiveRecordedCases) {
+                    System.out.println("[Runner] Executing TestCase: id="
+                            + nvl(entry.testCaseId, "-") + " name=" + entry.caseName);
+                    recordedCaseFilePaths.add(writeRecordedCaseFile(job.executionId, entry, workDir));
+                }
             }
 
             // ── Pre-flight ────────────────────────────────────────────────────
@@ -734,7 +743,21 @@ public class JobExecutor {
             preCleanTestResults(job.executionId, workDir);
 
             // ── Build Gradle command ──────────────────────────────────────────
-            List<String> cmd = buildCommand(job);
+            List<String> cmd;
+            try {
+                cmd = buildCommand(job);
+            } catch (UnresolvableTestTargetException ute) {
+                String rejectMsg = ute.getMessage();
+                System.err.println("[Runner] ⛔ Ejecución rechazada — " + rejectMsg);
+                client.sendLog(job.executionId, "ERROR", "⛔ " + rejectMsg);
+                events.business(job.executionId, qa.cinepolis.runner.events.EventType.EXECUTION_REJECTED,
+                        qa.cinepolis.runner.events.EventSeverity.ERROR, rejectMsg);
+                if (shouldSendResult(wasAborted, resultSent)) {
+                    client.sendResult(job.executionId, 0, 1, 0, null, List.of());
+                    resultSent.set(true);
+                }
+                return;
+            }
 
             // Per-device config takes precedence over global runner config
             String effectivePackage  = (job.appPackage != null && !job.appPackage.isBlank())
@@ -1259,11 +1282,11 @@ public class JobExecutor {
                 } catch (Exception ignored) {}
             }
         } finally {
-            // Caso grabado en Record Studio: borrar el .java dinámico del workspace
-            // clonado — nunca debe persistir en el repo base, sin importar el camino
-            // de salida (éxito, abort o excepción).
-            String recordedPath = recordedCaseFilePath.get();
-            if (recordedPath != null) {
+            // Caso(s) grabado(s) en Record Studio: borrar el/los .java dinámicos del
+            // workspace clonado — nunca deben persistir en el repo base, sin importar
+            // el camino de salida (éxito, abort, rechazo o excepción).
+            for (String recordedPath : recordedCaseFilePaths) {
+                if (recordedPath == null) continue;
                 try { java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(recordedPath)); }
                 catch (Exception ignored) {}
             }
@@ -1630,26 +1653,56 @@ public class JobExecutor {
         try { client.sendLog(job.executionId, "INFO", msg); } catch (Exception ignored) {}
     }
 
-    // ── Caso grabado en Record Studio: escritura del test dinámico ──────────────
+    // ── Caso(s) grabado(s) en Record Studio: normalización ──────────────────────
     //
-    // Escribe job.recordedCaseSource en {workDir}/src/test/java/tests/QARecordStudio/
-    // {job.recordedCaseClassName}.java — el paquete "tests.QARecordStudio" ya está
+    // Unifica el caso individual (Fase 1: recordedCaseClassName/Source/Name,
+    // campos singulares) y la suite grabada (Fase 8: recordedCases, lista) en
+    // UNA sola lista — todo el código de escritura/ejecución/limpieza de aquí en
+    // adelante opera sobre esta lista sin distinguir de dónde vino, evitando dos
+    // caminos que puedan divergir. Lista vacía == esta ejecución no viene de
+    // Record Studio (comportamiento de suites reales, sin cambios).
+    private List<JobDto.RecordedCaseEntry> resolveEffectiveRecordedCases(JobDto job) {
+        if (job.recordedCases != null && !job.recordedCases.isEmpty()) {
+            return job.recordedCases;
+        }
+        if (job.recordedCaseClassName != null && !job.recordedCaseClassName.isBlank()) {
+            JobDto.RecordedCaseEntry entry = new JobDto.RecordedCaseEntry();
+            entry.className = job.recordedCaseClassName;
+            entry.source    = job.recordedCaseSource;
+            entry.caseName  = job.recordedCaseName;
+            return List.of(entry);
+        }
+        return List.of();
+    }
+
+    /** Se lanza cuando ni recordedCases/recordedCase ni SUITE_MAP resuelven un target
+     *  ejecutable — el ÚNICO punto permitido para rechazar una ejecución sin tocar
+     *  Gradle; ver REGLA DE SEGURIDAD en execute(): jamás cae a tests.RunAllTests
+     *  como default de "no sé qué es esto". */
+    private static class UnresolvableTestTargetException extends RuntimeException {
+        UnresolvableTestTargetException(String message) { super(message); }
+    }
+
+    // ── Caso(s) grabado(s) en Record Studio: escritura del test dinámico ────────
+    //
+    // Escribe entry.source en {workDir}/src/test/java/tests/QARecordStudio/
+    // {entry.className}.java — el paquete "tests.QARecordStudio" ya está
     // cubierto por @SelectPackages("tests") en RunAllTests.java y por el patrón
     // estándar de Gradle (src/test/java), así que no requiere cambios de build.gradle.
     // Devuelve la ruta absoluta escrita, para que execute() la borre en su finally.
-    private String writeRecordedCaseFile(JobDto job, String workDir) {
+    private String writeRecordedCaseFile(String executionId, JobDto.RecordedCaseEntry entry, String workDir) {
         try {
             java.nio.file.Path pkgDir = java.nio.file.Paths.get(
                     workDir, "src", "test", "java", "tests", "QARecordStudio");
             java.nio.file.Files.createDirectories(pkgDir);
-            java.nio.file.Path filePath = pkgDir.resolve(job.recordedCaseClassName + ".java");
-            java.nio.file.Files.writeString(filePath, job.recordedCaseSource,
+            java.nio.file.Path filePath = pkgDir.resolve(entry.className + ".java");
+            java.nio.file.Files.writeString(filePath, entry.source,
                     java.nio.charset.StandardCharsets.UTF_8);
-            client.sendLog(job.executionId, "INFO",
-                    "📝 Caso grabado escrito: tests.QARecordStudio." + job.recordedCaseClassName);
+            client.sendLog(executionId, "INFO",
+                    "📝 Caso grabado escrito: tests.QARecordStudio." + entry.className);
             return filePath.toAbsolutePath().toString();
         } catch (Exception e) {
-            client.sendLog(job.executionId, "ERROR",
+            client.sendLog(executionId, "ERROR",
                     "❌ No fue posible escribir el caso grabado en el workspace: " + describeException(e));
             return null;
         }
@@ -1657,6 +1710,17 @@ public class JobExecutor {
 
     // ── Gradle command builder ─────────────────────────────────────────────────
 
+    /**
+     * REGLA DE SEGURIDAD: el Runner NUNCA debe ejecutar un test distinto al
+     * seleccionado por el usuario. Prioridad estricta:
+     *   1. recordedCases/recordedCase (Record Studio) — namespace dedicado
+     *      tests.QARecordStudio.*, sin colisión posible con SUITE_MAP.
+     *   2. job.suite coincide con una clave real de SUITE_MAP (suites
+     *      preexistentes del repo — "full suite"/"regresión"/"sanity" SÍ
+     *      mapean a tests.RunAllTests a propósito, eso no cambia).
+     *   3. Ninguna de las anteriores → UnresolvableTestTargetException.
+     *      tests.RunAllTests JAMÁS es un default de "no reconozco esta suite".
+     */
     private List<String> buildCommand(JobDto job) {
         String key = job.suite != null ? job.suite.toLowerCase().trim() : "";
 
@@ -1666,14 +1730,25 @@ public class JobExecutor {
         }
 
         boolean isWindows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        List<JobDto.RecordedCaseEntry> recorded = resolveEffectiveRecordedCases(job);
 
-        // Caso grabado en Record Studio — el filtro apunta DIRECTO a la clase que
-        // writeRecordedCaseFile() acaba de escribir en tests/QARecordStudio/, sin
-        // pasar por SUITE_MAP/resolveTestFilter (esa tabla es para suites reales
-        // preexistentes, no aplica aquí).
-        String testFilter = (job.recordedCaseClassName != null && !job.recordedCaseClassName.isBlank())
-                ? "tests.QARecordStudio." + job.recordedCaseClassName
-                : resolveTestFilter(job.suite, job.testClass);
+        List<String> testFilters;
+        if (!recorded.isEmpty()) {
+            testFilters = new ArrayList<>();
+            for (JobDto.RecordedCaseEntry entry : recorded) {
+                testFilters.add("tests.QARecordStudio." + entry.className);
+            }
+        } else if (SUITE_MAP.containsKey(key)) {
+            testFilters = List.of(resolveTestFilter(job.suite, job.testClass));
+        } else {
+            throw new UnresolvableTestTargetException(
+                    "Suite '" + job.suite + "' no tiene TestCases grabados asociados ni "
+                    + "corresponde a una suite predefinida — ejecución cancelada.");
+        }
+
+        System.out.println("[Runner] Gradle target: " + testFilters);
+        try { client.sendLog(job.executionId, "INFO", "[Runner] Gradle target: " + testFilters); }
+        catch (Exception ignored) {}
 
         List<String> cmd = new ArrayList<>();
         if (isWindows) {
@@ -1683,8 +1758,10 @@ public class JobExecutor {
         }
 
         cmd.add("test");
-        cmd.add("--tests");
-        cmd.add(testFilter);
+        for (String filter : testFilters) {
+            cmd.add("--tests");
+            cmd.add(filter);
+        }
         cmd.add("--rerun-tasks");
         cmd.add("--no-daemon");
 

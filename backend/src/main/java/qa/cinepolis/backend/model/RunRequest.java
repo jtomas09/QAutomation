@@ -2,10 +2,17 @@ package qa.cinepolis.backend.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 public class RunRequest {
 
     private String suite;
     private String device;
+
+    /** Presente solo cuando `suite` es una TestSuite de Record Studio — puramente
+     *  informativo/trazabilidad (ver logs [SuiteExecution] en RunController). La
+     *  identidad real de qué se ejecuta viaja en recordedCases, no aquí. */
+    private String suiteId;
 
     // Frontend sends "env"; @JsonProperty maps it to this field
     @JsonProperty("env")
@@ -29,11 +36,24 @@ public class RunRequest {
      */
     private RecordedCase recordedCase;
 
+    /**
+     * Presente únicamente cuando `suite` es una TestSuite de Record Studio con
+     * N TestCases (Suites → Ejecutar suite) — ver JobExecutor (Runner):
+     * resolveEffectiveRecordedCases() le da prioridad absoluta sobre SUITE_MAP,
+     * escribe un .java por entrada y arma un --tests por cada una. Ausente
+     * (null/vacío) en cualquier ejecución de una suite real preexistente.
+     */
+    private List<RecordedCase> recordedCases;
+
     public static class RecordedCase {
+        /** Solo trazabilidad/logging ([SuiteExecution]/[Runner] Executing TestCase) — no participa en la resolución de qué ejecutar. */
+        private String testCaseId;
         private String className;
         private String source;
         private String caseName;
 
+        public String getTestCaseId()            { return testCaseId; }
+        public void   setTestCaseId(String id)    { this.testCaseId = id; }
         public String getClassName()            { return className; }
         public void   setClassName(String c)     { this.className = c; }
         public String getSource()                { return source; }
@@ -44,6 +64,12 @@ public class RunRequest {
 
     public RecordedCase getRecordedCase()               { return recordedCase; }
     public void         setRecordedCase(RecordedCase r) { this.recordedCase = r; }
+
+    public List<RecordedCase> getRecordedCases()             { return recordedCases; }
+    public void               setRecordedCases(List<RecordedCase> r) { this.recordedCases = r; }
+
+    public String  getSuiteId()               { return suiteId; }
+    public void    setSuiteId(String suiteId) { this.suiteId = suiteId; }
 
     public String  getSuite()       { return suite; }
     public void    setSuite(String suite) { this.suite = suite; }

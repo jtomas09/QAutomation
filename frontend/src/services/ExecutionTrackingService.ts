@@ -10,6 +10,7 @@
  */
 
 import { postRun, streamExecution } from '../api'
+import type { RecordedCasePayload } from '../api'
 import type { PhysicalDevice } from '../types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -421,6 +422,14 @@ class ExecutionTrackingServiceImpl {
     environment: string
     country?:    string
     cases: { caseId: string; caseName: string; stepsTotal: number }[]
+    /**
+     * Suite grabada en Record Studio — un RecordedCasePayload por TestCase de
+     * la suite (mismo generador que el caso individual, ver
+     * SuitesPage.handleExecuteConfirm). Ausente para las suites reales
+     * preexistentes (Smoke/Full Suite/Regresión/etc.) — ese camino sigue
+     * enviando solo `suite: suiteName` como siempre.
+     */
+    recordedCases?: RecordedCasePayload[]
     onNavigateToDashboard?: () => void
   }): Promise<ExecutionRecord> {
     const rec = this.createExecution({
@@ -447,8 +456,13 @@ class ExecutionTrackingServiceImpl {
       const started = await postRun({
         suite:   opts.suiteName,
         env:     opts.environment,
-        device:  opts.device?.deviceName ?? '',
+        // UDID, no nombre visible — mismo criterio que runReadyRecordedCase()
+        // (App.tsx) y que DeviceReadinessService (backend): más específico y
+        // sin ambigüedad si dos dispositivos comparten nombre visible.
+        device:  opts.device?.udid ?? '',
         country: opts.country ?? 'mexico',
+        suiteId:       opts.recordedCases?.length ? opts.suiteId : undefined,
+        recordedCases: opts.recordedCases?.length ? opts.recordedCases : undefined,
       })
 
       // Runner accepted — start streaming

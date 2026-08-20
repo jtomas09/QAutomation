@@ -1174,6 +1174,29 @@ export default function SuitesPage({ onNavigate, onExecuteRecordedCase }: Suites
 
   const handleExecuteConfirm = useCallback(async (device: PhysicalDevice | null, environment: string) => {
     if (!execTarget) return
+
+    // Regla de seguridad: una Suite sin TestCases ejecutables NUNCA debe llegar
+    // al Runner — eso es exactamente lo que antes caía silenciosamente en
+    // tests.RunAllTests. Se falla explícito ANTES de llamar a runSuite/postRun,
+    // no se ejecuta ningún test.
+    if (execTarget.testCases.length === 0) {
+      showToast(`"${execTarget.name}" no tiene casos — nada que ejecutar.`)
+      return
+    }
+    const sinPasos = execTarget.testCases.filter(c => !c.steps || c.steps.length === 0)
+    if (sinPasos.length > 0) {
+      showToast(
+        `TestCase grabado no tiene implementación ejecutable: `
+        + sinPasos.map(c => `"${c.name}"`).join(', '),
+      )
+      return
+    }
+
+    const recordedCases: RecordedCasePayload[] = execTarget.testCases.map(c => {
+      const { className, source } = generateExecutableJava(c.steps, c.name)
+      return { testCaseId: c.id, className, source, caseName: c.name }
+    })
+
     await executionTrackingService.runSuite({
       suiteId:     execTarget.id,
       suiteName:   execTarget.name,
@@ -1184,10 +1207,11 @@ export default function SuitesPage({ onNavigate, onExecuteRecordedCase }: Suites
       environment,
       country:     execTarget.country,
       cases:       execTarget.testCases.map(c => ({ caseId: c.id, caseName: c.name, stepsTotal: c.stepCount })),
+      recordedCases,
       onNavigateToDashboard: () => onNavigate?.('dashboard'),
     })
     setExecTarget(null)
-    showToast(`Suite "${execTarget.name}" enviada al runner`)
+    showToast(`Suite "${execTarget.name}" enviada al runner — ${recordedCases.length} caso(s)`)
   }, [execTarget, onNavigate, showToast])
 
   const handleReorder = useCallback((suiteId: string, newOrder: string[]) => {

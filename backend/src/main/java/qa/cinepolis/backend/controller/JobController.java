@@ -110,6 +110,13 @@ public class JobController {
             job.put("recordedCaseName",      exec.getRecordedCaseName());
         }
 
+        // Suite grabada en Record Studio (ver Execution.recordedCases) — el Runner
+        // (JobDto.recordedCases) le da prioridad absoluta sobre SUITE_MAP.
+        if (exec.getRecordedCases() != null && !exec.getRecordedCases().isEmpty()) {
+            job.put("suiteId",       exec.getSuiteId());
+            job.put("recordedCases", exec.getRecordedCases());
+        }
+
         // Inject per-device app config if present
         String lookupUdid = exec.getDeviceUdid() != null ? exec.getDeviceUdid() : requestedDevice;
         appConfigStore.get(lookupUdid).ifPresent(cfg -> {

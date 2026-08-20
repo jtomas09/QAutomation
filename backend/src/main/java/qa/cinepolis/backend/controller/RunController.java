@@ -82,6 +82,25 @@ public class RunController {
                     request.getRecordedCase().getClassName(), request.getDevice());
         }
 
+        // Suite grabada en Record Studio (ver RunRequest.recordedCases) — misma
+        // idea que arriba pero para N TestCases de una TestSuite. Log explícito
+        // pedido para poder comprobar EXACTAMENTE qué se va a ejecutar antes de
+        // que el Runner toque Gradle (ver JobExecutor.buildCommand — nunca cae a
+        // tests.RunAllTests cuando esto está presente).
+        if (request.getRecordedCases() != null && !request.getRecordedCases().isEmpty()) {
+            exec.setSuiteId(request.getSuiteId());
+            exec.setRecordedCases(request.getRecordedCases());
+            List<String> testCaseIds = request.getRecordedCases().stream()
+                    .map(RunRequest.RecordedCase::getTestCaseId).toList();
+            log.info("[SuiteExecution] suiteId={} suiteName={} testCaseIds={}",
+                    request.getSuiteId(), request.getSuite(), testCaseIds);
+            int n = 1;
+            for (RunRequest.RecordedCase rc : request.getRecordedCases()) {
+                log.info("[SuiteExecution] Resolved testCases: {}. id={} name={}",
+                        n++, rc.getTestCaseId(), rc.getCaseName());
+            }
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("success",     true);
         body.put("executionId", exec.getExecutionId());
