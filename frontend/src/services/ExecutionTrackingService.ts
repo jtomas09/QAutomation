@@ -448,6 +448,13 @@ class ExecutionTrackingServiceImpl {
     // Navigate to Dashboard so user sees the execution immediately
     opts.onNavigateToDashboard?.()
 
+    // Actividad en Tiempo Real — vocabulario explícito pedido, para que quede
+    // claro DESDE EL PRIMER instante qué Suite/Device/UDID se está usando,
+    // sin esperar a la primera línea del Runner.
+    this.addActivity(rec.id, `[Suite] ${opts.suiteName}`, 'info')
+    this.addActivity(rec.id, `[Device] ${opts.device?.deviceName || 'N/A'}`, 'info')
+    this.addActivity(rec.id, `[UDID] ${opts.device?.udid || 'N/A'}`, 'info')
+
     // Mark as initializing while we try the Runner
     this.patch(rec.id, r => ({ ...r, status: 'initializing' }))
     this.addActivity(rec.id, 'Conectando con Runner…', 'info')
@@ -476,7 +483,9 @@ class ExecutionTrackingServiceImpl {
       console.log(`[SuiteExecution] Target device: name=${opts.device?.deviceName ?? ''} `
         + `platform=${opts.device?.platform ?? ''} udid=${opts.device?.udid ?? ''}`)
       this.patch(rec.id, r => ({ ...r, status: 'running', startedAt: now(), runnerId: started.executionId }))
+      this.addActivity(rec.id, '[Runner] Device configured', 'ok')
       this.addActivity(rec.id, `Runner iniciando — ID: ${started.executionId}`, 'ok')
+      this.addActivity(rec.id, '[Runner] Starting execution', 'ok')
       this.startNextCase(rec.id)
 
       const unsub = streamExecution(
@@ -494,22 +503,27 @@ class ExecutionTrackingServiceImpl {
           // porque failed===0, mostrando en Dashboard una falla total de infraestructura
           // como si fuera un COMPLETADO exitoso.
           if (result.total === 0) {
+            this.addActivity(rec.id, '[Runner] Execution was not started', 'error')
             this.addActivity(rec.id,
               'La ejecución terminó sin reportar ningún resultado — el dispositivo/Appium probablemente no llegó a estar listo.',
               'error')
             this.finishExecution(rec.id, 'error')
           } else {
+            this.addActivity(rec.id, `[Result] ${result.failed > 0 ? 'FAILED' : 'PASSED'}`,
+              result.failed > 0 ? 'error' : 'ok')
             this.finishExecution(rec.id, result.failed > 0 ? 'failed' : 'passed')
           }
         },
         (errMsg) => {
           unsub()
+          this.addActivity(rec.id, '[Runner] Execution was not started', 'error')
           this.addActivity(rec.id, errMsg, 'error')
           this.finishExecution(rec.id, 'error')
         },
       )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      this.addActivity(rec.id, '[Runner] Execution was not started', 'error')
       this.addActivity(rec.id, `Runner no disponible: ${msg}`, 'error')
       this.finishExecution(rec.id, 'error')
     }

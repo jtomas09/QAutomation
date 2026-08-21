@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Calendar, Layers3, CheckCircle2, Package } from 'lucide-react'
-import type { RunState, ReconciledDevice } from '../types'
+import type { RunState, ReconciledDevice, LogEntry } from '../types'
 import type { ConfiguredDevice } from '../hooks/useExecutionDevices'
 import { getExecutions } from '../api'
 import { suiteService } from '../services/SuiteService'
+import { executionTrackingService, ACTIVE_STATUSES } from '../services/ExecutionTrackingService'
+import type { ExecutionRecord } from '../services/ExecutionTrackingService'
 import StatsCards          from '../components/dashboard/StatsCards'
 import RunTestsPanel       from '../components/dashboard/RunTestsPanel'
 import RecentExecutions    from '../components/dashboard/RecentExecutions'
@@ -20,6 +22,11 @@ interface Props {
   env:                string
   configured:         ConfiguredDevice[]
   reconciled:         ReconciledDevice[]
+  /** "Dispositivos Configurados" (RunTestsPanel) — reconciled + el device de
+   *  la ejecución activa (Suite/caso), aunque no esté en `configured`. Solo
+   *  para mostrar; el plan real de ejecución del botón "Ejecutar" del
+   *  Dashboard sigue usando `reconciled`/readyUdids sin cambios. */
+  configuredDisplay:  ReconciledDevice[]
   activeDevice:       ConfiguredDevice | null
   country:            string
   videoEnabled:       boolean
@@ -50,7 +57,7 @@ const DAYS_OPTIONS = [
 ]
 
 export default function Dashboard({
-  state, suite, env, configured, reconciled, activeDevice, country, videoEnabled,
+  state, suite, env, configured, reconciled, configuredDisplay, activeDevice, country, videoEnabled,
   saving, isDirty,
   onSuiteChange, onEnvChange, onCountryChange,
   onVideoToggle, onToggleDevice, onSaveConfig, onSyncLive,
@@ -59,6 +66,43 @@ export default function Dashboard({
 }: Props) {
   const [daysBack,   setDaysBack]   = useState<number>(7)
   const [clearedAt,  setClearedAt]  = useState<number>(0)
+
+  // ── Actividad en Tiempo Real para ejecuciones lanzadas desde Suites ──────
+  //
+  // "Actividad en Tiempo Real" (ActivityLog, más abajo) leía EXCLUSIVAMENTE
+  // state.logs/state.events — el estado de useTestRunner, que solo se llena
+  // cuando la ejecución se lanzó desde el propio botón "Ejecutar" del
+  // Dashboard. Una Suite ejecutada desde Suites usa ExecutionTrackingService
+  // (mecanismo de tracking totalmente separado, ver runSuite()) — su
+  // actividad real (ya registrada ahí con addActivity()) nunca llegaba a este
+  // panel, así que se veía "0 eventos funcionales" aunque el Runner sí
+  // estuviera trabajando. Se reutiliza el mismo store — ninguna suscripción
+  // ni estado nuevo, solo se lee lo que ya existe — y solo se muestra cuando
+  // useTestRunner no tiene una ejecución propia activa (nunca se pisan entre sí).
+  const [suiteExecRecord, setSuiteExecRecord] = useState<ExecutionRecord | null>(null)
+  useEffect(() => {
+    const refresh = () => {
+      const active = executionTrackingService.getActiveExecutions()
+      setSuiteExecRecord(active.length > 0 ? active[active.length - 1] : null)
+    }
+    refresh()
+    const events = ['qa:exec:created', 'qa:exec:updated', 'qa:exec:finished']
+    events.forEach(e => window.addEventListener(e, refresh))
+    return () => events.forEach(e => window.removeEventListener(e, refresh))
+  }, [])
+
+  const dashboardOwnRunActive = state.status === 'running'
+  const showingSuiteExec = !dashboardOwnRunActive && !!suiteExecRecord
+    && (ACTIVE_STATUSES as string[]).includes(suiteExecRecord.status)
+  const activityLogs: LogEntry[] = showingSuiteExec
+    ? suiteExecRecord!.activity.map((a, i) => ({
+        id: `suite-${suiteExecRecord!.id}-${i}`,
+        time: a.ts,
+        level: a.level === 'ok' ? 'PASS' : a.level === 'error' ? 'ERROR' : a.level === 'warn' ? 'WARN' : 'INFO',
+        message: a.msg,
+      }))
+    : state.logs
+  const activityStatus = showingSuiteExec ? 'running' : state.status
   const [aggStats,   setAggStats]   = useState<AggStats>({ passed: 0, failed: 0, skipped: 0, total: 0, avgMs: 0 })
   const [suiteMetrics, setSuiteMetrics] = useState({ suites: 0, cases: 0, steps: 0 })
 
@@ -251,7 +295,7 @@ export default function Dashboard({
           <div className="grid gap-4" style={{ gridTemplateColumns: '400px 1fr', height: 420 }}>
             <RunTestsPanel
               suite={suite}                 env={env}
-              configuredDevices={reconciled}
+              configuredDevices={configuredDisplay}
               country={country}
               status={state.status}         executionId={state.executionId ?? null}
               videoEnabled={videoEnabled}   onVideoToggle={onVideoToggle}
@@ -273,7 +317,13 @@ export default function Dashboard({
 
           {/* Activity log + Donut + Daily chart */}
           <div className="grid gap-4" style={{ gridTemplateColumns: '1fr 230px 1fr', height: 380 }}>
-            <ActivityLog logs={state.logs} events={state.events} status={state.status} onClear={onClearLog} onViewAll={onViewAll} />
+            <ActivityLog
+              logs={activityLogs}
+              events={showingSuiteExec ? [] : state.events}
+              status={activityStatus}
+              onClear={onClearLog}
+              onViewAll={onViewAll}
+            />
             <ResultsDonut
               passed={aggStats.passed}
               failed={aggStats.failed}

@@ -40,6 +40,7 @@ export default function App() {
     configured, reconciled, readyUdids, toggleDevice: toggleConfigDevice,
     saveConfig, saving: savingConfig, isDirty: configDirty, syncWithLive,
     activeDevice, videoEnabled, setVideoEnabled, followExecutionDevice,
+    reconciledForDisplay,
   } = useExecutionDevices()
 
   /**
@@ -175,6 +176,7 @@ export default function App() {
               suite={suite}              env={env}
               configured={configured}
               reconciled={reconciled}
+              configuredDisplay={reconciledForDisplay}
               activeDevice={activeDevice}
               country={country}
               videoEnabled={videoEnabled}

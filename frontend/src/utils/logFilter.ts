@@ -77,6 +77,22 @@ const TECH_PATTERNS: RegExp[] = [
   /^\d{2}:\d{2}:\d{2}\.\d{3}/,                  // HH:MM:SS.mmm from SLF4J/Logback
 ]
 
+// Vocabulario explícito de Actividad en Tiempo Real para ejecuciones lanzadas
+// desde Suites (ver ExecutionTrackingService.runSuite) — deliberadamente
+// user-facing, a diferencia del "[Runner] ..."/"[Suite] ..."/"[Test] ..." que
+// TECH_PATTERNS ya oculta (ruido interno real de JobExecutor/Gradle). Sin este
+// allowlist, esas líneas nuevas caerían en el mismo patrón por el prefijo y
+// jamás se verían — se listan explícitamente, no se relaja el patrón general.
+const FUNCTIONAL_ALLOW_PATTERNS: RegExp[] = [
+  /^\[Suite\]/,
+  /^\[Device\]/,
+  /^\[UDID\]/,
+  /^\[Runner\] Device configured/,
+  /^\[Runner\] Starting execution/,
+  /^\[Runner\] Execution was not started/,
+  /^\[Result\]/,
+]
+
 /**
  * Returns true when the log entry belongs in the functional QA view.
  *
@@ -85,5 +101,6 @@ const TECH_PATTERNS: RegExp[] = [
  */
 export function isFunctionalLog(entry: LogEntry): boolean {
   if (entry.level === 'PASS' || entry.level === 'FAIL' || entry.level === 'SKIP') return true
+  if (FUNCTIONAL_ALLOW_PATTERNS.some(p => p.test(entry.message))) return true
   return !TECH_PATTERNS.some(p => p.test(entry.message))
 }

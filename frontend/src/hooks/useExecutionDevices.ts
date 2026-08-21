@@ -210,7 +210,10 @@ export function useExecutionDevices() {
   // Capa 3 (Plan de Ejecución): reconciled se recalcula automáticamente en cada
   // poll — un dispositivo que vuelve a AVAILABLE pasa a isReady=true sin que el
   // usuario reconfigure nada. readyUdids es lo único que debe alimentar el
-  // ExecutionPlan — nunca configuredUdids directamente.
+  // ExecutionPlan — nunca configuredUdids directamente. NUNCA incluye
+  // executionDevice — el plan de ejecución del botón "Ejecutar" del Dashboard
+  // sigue siendo exclusivamente lo que el usuario marcó a mano aquí, jamás lo
+  // que una Suite usó la última vez.
   const reconciled = useMemo(
     () => reconcile(configured, lastLiveDevices),
     [configured, lastLiveDevices],
@@ -220,9 +223,25 @@ export function useExecutionDevices() {
     [reconciled],
   )
 
+  // Vista para "Dispositivos Configurados" (RunTestsPanel) — misma fuente de
+  // verdad (configured + reconcile()), solo que además incluye el
+  // executionDevice de la ejecución activa cuando no está ya en `configured`.
+  // Es puramente una proyección de lectura: no persiste nada nuevo, no crea
+  // un segundo store, y NUNCA se usa para decidir contra qué UDIDs ejecutar
+  // (eso sigue siendo readyUdids, arriba, sin cambios).
+  const configuredForDisplay = useMemo(() => {
+    if (!executionDevice) return configured
+    if (configured.some(d => d.udid === executionDevice.udid)) return configured
+    return [...configured, executionDevice]
+  }, [configured, executionDevice])
+  const reconciledForDisplay = useMemo(
+    () => reconcile(configuredForDisplay, lastLiveDevices),
+    [configuredForDisplay, lastLiveDevices],
+  )
+
   return {
     configured, configuredUdids, toggleDevice, saveConfig, saving, isDirty, syncWithLive,
     activeDevice, videoEnabled, setVideoEnabled, followExecutionDevice,
-    reconciled, readyUdids,
+    reconciled, readyUdids, reconciledForDisplay,
   }
 }
