@@ -488,7 +488,19 @@ class ExecutionTrackingServiceImpl {
         },
         (result) => {
           unsub()
-          this.finishExecution(rec.id, result.failed > 0 ? 'failed' : 'passed')
+          // total===0 (ni un PASS/FAIL/SKIP) nunca es un éxito real — significa que el
+          // Runner no llegó a reportar ningún resultado (device/Appium/WDA falló antes
+          // de que Gradle/JUnit corriera algo). Antes caía en "passed" por default solo
+          // porque failed===0, mostrando en Dashboard una falla total de infraestructura
+          // como si fuera un COMPLETADO exitoso.
+          if (result.total === 0) {
+            this.addActivity(rec.id,
+              'La ejecución terminó sin reportar ningún resultado — el dispositivo/Appium probablemente no llegó a estar listo.',
+              'error')
+            this.finishExecution(rec.id, 'error')
+          } else {
+            this.finishExecution(rec.id, result.failed > 0 ? 'failed' : 'passed')
+          }
         },
         (errMsg) => {
           unsub()

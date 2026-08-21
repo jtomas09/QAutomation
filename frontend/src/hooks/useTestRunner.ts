@@ -208,7 +208,11 @@ export function useTestRunner() {
                 level === 'ERROR' ? 'error' : level === 'WARN' ? 'warn' : 'info')
           },
           (result) => {
-            executionTrackingService.finishExecution(trackingId, result.failed > 0 ? 'failed' : 'passed')
+            // total===0: el Runner nunca reportó un solo PASS/FAIL/SKIP (device/Appium/WDA
+            // falló antes de que Gradle corriera algo) — nunca es un "passed" real solo
+            // porque failed===0 también.
+            executionTrackingService.finishExecution(
+              trackingId, result.total === 0 ? 'error' : (result.failed > 0 ? 'failed' : 'passed'))
             finished++
             if (finished === runs.length) {
               closeStreamRef.current  = null
@@ -310,7 +314,8 @@ export function useTestRunner() {
         closeStreamRef.current  = null
         executionIdRef.current  = null
         executionIdsRef.current = []
-        executionTrackingService.finishExecution(rec.id, result.failed > 0 ? 'failed' : 'passed')
+        executionTrackingService.finishExecution(
+          rec.id, result.total === 0 ? 'error' : (result.failed > 0 ? 'failed' : 'passed'))
         setState(prev => ({
           ...prev,
           status:  'finished',

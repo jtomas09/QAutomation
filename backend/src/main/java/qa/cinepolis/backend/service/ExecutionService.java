@@ -134,10 +134,31 @@ public class ExecutionService {
             // nada falló pero sí hubo al menos un test omitido (p. ej. Assumptions.abort por
             // "menos de 3 asientos disponibles"), el estado real es SKIPPED, no COMPLETED. No
             // afecta el caso con al menos 1 passed (sigue siendo COMPLETED, sin cambios).
-            ExecutionStatus status = (expectedCount > 0 && total < expectedCount)
-                    ? ExecutionStatus.INCOMPLETE
-                    : (failed > 0 ? ExecutionStatus.FAILED
-                        : (passed == 0 && skipped > 0 ? ExecutionStatus.SKIPPED : ExecutionStatus.COMPLETED));
+            //
+            // FIX real #2 — causa raíz confirmada en vivo (WDA con "Developer App Certificate
+            // is not trusted"): cuando el Runner nunca llega a reportar NINGÚN resultado
+            // (passed=failed=skipped=0 — ni un solo PASS/FAIL/SKIP, porque el driver nunca se
+            // creó, Gradle abortó antes de que JUnit arrancara, etc.), total==0 caía por todas
+            // las ramas anteriores hasta el default COMPLETED — un fallo total de
+            // infraestructura se mostraba en el Dashboard indistinguible de un éxito real. Sin
+            // expectedCount (0/desconocido, el caso normal en un caso grabado dinámico) no
+            // hay ninguna otra rama que lo capture, así que total==0 es su propia condición,
+            // sin importar expectedCount.
+            ExecutionStatus status;
+            if (expectedCount > 0 && total < expectedCount) {
+                status = ExecutionStatus.INCOMPLETE;
+            } else if (total == 0) {
+                status = ExecutionStatus.FAILED;
+                e.setFailureReason("La ejecución no reportó ningún resultado (0 casos ejecutados) — "
+                        + "probable falla de infraestructura (dispositivo/Appium/WDA) antes de que "
+                        + "Gradle pudiera correr algún test.");
+            } else if (failed > 0) {
+                status = ExecutionStatus.FAILED;
+            } else if (passed == 0 && skipped > 0) {
+                status = ExecutionStatus.SKIPPED;
+            } else {
+                status = ExecutionStatus.COMPLETED;
+            }
             e.setStatus(status);
             e.setEndTime(Instant.now());
             if (allureUrl  != null && !allureUrl.isBlank())  e.setAllureUrl(allureUrl);
