@@ -105,6 +105,31 @@ function javaByStr(el: ElLike | null | undefined): string {
   }
 }
 
+// ── Pasos grabados sobre pantallas transitorias conocidas (TAREA 3) ─────────
+//
+// "o crea una cuenta para comenzar a disfrutar los beneficios de ser socio" es
+// el CTA secundario de la pantalla "Club Cinépolis" (login/alta de socio) —
+// BaseTest.beforeEach() (ClubGuard/PromosGuard, repo de tests) YA la cierra
+// automáticamente para TODOS los tests antes de que cualquier paso grabado se
+// ejecute, porque es transitoria (solo aparece en ciertos arranques). Si el
+// caso se grabó mientras esa pantalla estaba visible, el tap queda grabado
+// igual — pero para cuando el test corre de verdad, la pantalla casi siempre
+// ya no está. Confirmado con evidencia real (pageSource + screenshot del
+// dispositivo): la app queda en Cartelera, sin ese texto en pantalla.
+//
+// Lista cerrada y explícita — SOLO estos textos exactos activan la tolerancia;
+// cualquier otro tap grabado sigue siendo estrictamente obligatorio (falla si
+// no encuentra el elemento), sin cambios.
+const TRANSIENT_SCREEN_TAP_TEXTS = new Set([
+  'o crea una cuenta para comenzar a disfrutar los beneficios de ser socio',
+])
+
+function isTransientScreenTap(step: SuiteStep): boolean {
+  if (step.type !== 'tap') return false
+  const text = step.el?.text?.trim()
+  return !!text && TRANSIENT_SCREEN_TAP_TEXTS.has(text)
+}
+
 const SPANISH_STOP_WORDS = new Set(['el', 'la', 'los', 'las', 'de', 'del', 'un', 'una', 'y', 'en', 'a'])
 
 function removeAccents(s: string): string {
@@ -171,11 +196,25 @@ export function generateExecutableJava(steps: SuiteStep[], caseName: string): Ge
       case 'double_tap':
       case 'long_press': {
         const by = javaByStr(step.el)
-        body.push(`        TestSteps.run("${label}", () -> {`)
-        body.push(`            WebElement el = new WebDriverWait(driver, Duration.ofSeconds(15))`)
-        body.push(`                    .until(ExpectedConditions.elementToBeClickable(${by}));`)
-        body.push(step.type === 'double_tap' ? `            el.click();\n            el.click();` : `            el.click();`)
-        body.push(`        }, driver);`)
+        if (isTransientScreenTap(step)) {
+          const transientText = escJava(step.el?.text?.trim() ?? '')
+          body.push(`        TestSteps.run("${label}", () -> {`)
+          body.push(`            try {`)
+          body.push(`                WebElement el = new WebDriverWait(driver, Duration.ofSeconds(15))`)
+          body.push(`                        .until(ExpectedConditions.elementToBeClickable(${by}));`)
+          body.push(`                el.click();`)
+          body.push(`                System.out.println("[RecordStudio][TransientStep] texto=${transientText} action=TAPPED");`)
+          body.push(`            } catch (org.openqa.selenium.TimeoutException notPresent) {`)
+          body.push(`                System.out.println("[RecordStudio][TransientStep] texto=${transientText} action=SKIPPED reason=Club Cinépolis transient screen");`)
+          body.push(`            }`)
+          body.push(`        }, driver);`)
+        } else {
+          body.push(`        TestSteps.run("${label}", () -> {`)
+          body.push(`            WebElement el = new WebDriverWait(driver, Duration.ofSeconds(15))`)
+          body.push(`                    .until(ExpectedConditions.elementToBeClickable(${by}));`)
+          body.push(step.type === 'double_tap' ? `            el.click();\n            el.click();` : `            el.click();`)
+          body.push(`        }, driver);`)
+        }
         break
       }
       case 'input': {
