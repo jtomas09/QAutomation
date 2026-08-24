@@ -9,6 +9,7 @@ import {
   getArticleById, type DocumentationArticle,
 } from '../data/documentation'
 import ArticleDetail from '../components/docs/ArticleDetail'
+import DeviceSetupGuidePage from '../components/docs/DeviceSetupGuidePage'
 
 interface Props {
   /** Opcional — permite que "Videos Tutoriales"/"Soporte Técnico" salten a esas
@@ -49,6 +50,15 @@ export default function DocsPage({ onNavigate }: Props) {
   const selectedArticle = selectedArticleId ? getArticleById(selectedArticleId) : null
 
   if (selectedArticle) {
+    if (selectedArticle.id === 'config-dispositivos') {
+      return (
+        <DeviceSetupGuidePage
+          onBack={() => setSelectedArticleId(null)}
+          onSelectArticle={setSelectedArticleId}
+          onGoToSupport={() => onNavigate?.('support')}
+        />
+      )
+    }
     return (
       <ArticleDetail
         article={selectedArticle}
