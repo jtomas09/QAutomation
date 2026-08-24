@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
-import { Clock, Signal, RefreshCw, Smartphone, Apple } from 'lucide-react'
+import { Clock, Signal, RefreshCw } from 'lucide-react'
+import { AppleLogo, AndroidLogo } from '../icons/BrandIcons'
 
 interface MetaItem {
   icon:  LucideIcon
@@ -50,19 +51,19 @@ export default function DocumentationHero({ icon: Icon, color, title, subtitle, 
         </div>
       </div>
 
-      {/* Ilustración discreta Android + iOS — mismos iconos lucide, sin logos de marca */}
+      {/* Ilustración discreta Android + iOS — logotipos oficiales reales (vectoriales), ver BrandIcons.tsx */}
       <div className="relative hidden md:flex items-center justify-center flex-shrink-0" style={{ width: 150, height: 110 }}>
         <div
           className="absolute w-20 h-28 rounded-2xl flex items-center justify-center"
           style={{ left: 8, background: '#0c1226', border: '1px solid var(--panel-border)', boxShadow: 'var(--panel-shadow)' }}
         >
-          <Apple size={26} style={{ color: 'var(--text-lbl)' }} />
+          <AppleLogo size={26} className="text-slate-300" />
         </div>
         <div
           className="absolute w-20 h-28 rounded-2xl flex items-center justify-center"
           style={{ right: 8, background: 'rgba(16,185,129,0.10)', border: '1px solid rgba(16,185,129,0.3)', boxShadow: '0 0 20px rgba(16,185,129,0.18)' }}
         >
-          <Smartphone size={26} style={{ color: '#10b981' }} />
+          <AndroidLogo size={26} className="text-emerald-500" />
         </div>
       </div>
     </div>
