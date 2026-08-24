@@ -24,6 +24,7 @@ import RunnerManager          from './pages/RunnerManager'
 import DeviceFarm             from './pages/DeviceFarm'
 import RecordStudio           from './pages/RecordStudio'
 import SuitesPage            from './pages/SuitesPage'
+import DocsPage               from './pages/DocsPage'
 import type { RecordedCasePayload } from './api'
 import type { PhysicalDevice } from './types'
 import { resolveDeviceDisplayName } from './utils/displayNames'
@@ -212,6 +213,8 @@ export default function App() {
 
           {page === 'metrics'        && <MetricsPage />}
 
+          {page === 'docs' && <DocsPage onNavigate={p => setPage(p as Page)} />}
+
           {page === 'runner-manager' && <RunnerManager />}
 
           {(page === 'device-farm' || page === 'download-agent') && (
@@ -327,7 +330,7 @@ export default function App() {
             </div>
           )}
 
-          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent','record-studio','suites'].includes(page) && (
+          {!['dashboard','execute','executions','history','devices','videos','settings','schedule','reports','metrics','runner-manager','device-farm','download-agent','record-studio','suites','docs'].includes(page) && (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
                 <div className="text-4xl mb-4 opacity-30">🚧</div>
