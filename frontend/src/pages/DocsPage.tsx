@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Search, BookOpen, Rocket, Smartphone, PlayCircle, BarChart3,
-  ArrowRight, Video, Code2, HelpCircle, Headphones, Sparkles, MessageCircle,
+  Search, BookOpen, Rocket, Smartphone, Terminal, BarChart3,
+  ArrowRight, Play, Code2, HelpCircle, Headset, Sparkles, MessageCircle,
 } from 'lucide-react'
 import {
   DOC_CATEGORIES, getArticlesByCategory, searchArticles,
@@ -16,18 +16,27 @@ interface Props {
   onNavigate?: (page: string) => void
 }
 
-const QUICK_GUIDES: { title: string; description: string; icon: typeof Rocket; articleId: string }[] = [
-  { title: 'Guía de Inicio Rápido',      description: 'Comienza a ejecutar tus primeras pruebas en minutos.',            icon: Rocket,      articleId: 'primeros-pasos-guia' },
-  { title: 'Configuración de Dispositivos', description: 'Aprende a conectar y configurar dispositivos Android e iOS.', icon: Smartphone,  articleId: 'config-dispositivos' },
-  { title: 'Ejecutar Pruebas',           description: 'Ejecuta casos, suites y pruebas en múltiples dispositivos.',      icon: PlayCircle,  articleId: 'ejecutar-suites' },
-  { title: 'Reportes y Métricas',        description: 'Entiende los resultados y métricas de tus ejecuciones.',         icon: BarChart3,   articleId: 'entender-reportes' },
+// Mismos 4 colores que DOC_CATEGORIES (morado/verde/ámbar/azul) — Guías Rápidas
+// y Recursos Adicionales no tienen categoría propia, pero cada tarjeta
+// corresponde conceptualmente a una de las 4, así que reutiliza su color en
+// vez de inventar una paleta paralela.
+const COLOR_PRIMEROS  = '#8b5cf6'
+const COLOR_CONFIG    = '#10b981'
+const COLOR_EJECUCION = '#f59e0b'
+const COLOR_REPORTES  = '#38bdf8'
+
+const QUICK_GUIDES: { title: string; description: string; icon: typeof Rocket; color: string; articleId: string }[] = [
+  { title: 'Guía de Inicio Rápido',      description: 'Comienza a ejecutar tus primeras pruebas en minutos.',            icon: Rocket,     color: COLOR_PRIMEROS,  articleId: 'primeros-pasos-guia' },
+  { title: 'Configuración de Dispositivos', description: 'Aprende a conectar y configurar dispositivos Android e iOS.', icon: Smartphone, color: COLOR_CONFIG,    articleId: 'config-dispositivos' },
+  { title: 'Ejecutar Pruebas',           description: 'Ejecuta casos, suites y pruebas en múltiples dispositivos.',      icon: Terminal,   color: COLOR_EJECUCION, articleId: 'ejecutar-suites' },
+  { title: 'Reportes y Métricas',        description: 'Entiende los resultados y métricas de tus ejecuciones.',         icon: BarChart3,  color: COLOR_REPORTES,  articleId: 'entender-reportes' },
 ]
 
-const RESOURCES: { title: string; description: string; icon: typeof Video; kind: 'page' | 'article'; target: string }[] = [
-  { title: 'Videos Tutoriales',     description: 'Tutoriales paso a paso en video',   icon: Video,      kind: 'page',    target: 'videos' },
-  { title: 'API Reference',         description: 'Documentación de API completa',     icon: Code2,      kind: 'article', target: 'api-reference' },
-  { title: 'Preguntas Frecuentes',  description: 'Respuestas a dudas comunes',        icon: HelpCircle, kind: 'article', target: 'faq' },
-  { title: 'Soporte Técnico',       description: 'Obtén ayuda del equipo',            icon: Headphones, kind: 'page',    target: 'support' },
+const RESOURCES: { title: string; description: string; icon: typeof Play; color: string; kind: 'page' | 'article'; target: string }[] = [
+  { title: 'Videos Tutoriales',     description: 'Tutoriales paso a paso en video',   icon: Play,       color: COLOR_PRIMEROS,  kind: 'page',    target: 'videos' },
+  { title: 'API Reference',         description: 'Documentación de API completa',     icon: Code2,      color: COLOR_CONFIG,    kind: 'article', target: 'api-reference' },
+  { title: 'Preguntas Frecuentes',  description: 'Respuestas a dudas comunes',        icon: HelpCircle, color: COLOR_EJECUCION, kind: 'article', target: 'faq' },
+  { title: 'Soporte Técnico',       description: 'Obtén ayuda del equipo',            icon: Headset,    color: COLOR_REPORTES,  kind: 'page',    target: 'support' },
 ]
 
 export default function DocsPage({ onNavigate }: Props) {
@@ -196,7 +205,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function QuickGuideCard({ guide, index, onOpen }: {
-  guide: { title: string; description: string; icon: typeof Rocket }
+  guide: { title: string; description: string; icon: typeof Rocket; color: string }
   index: number
   onOpen: () => void
 }) {
@@ -213,7 +222,7 @@ function QuickGuideCard({ guide, index, onOpen }: {
     >
       <div
         className="w-10 h-10 rounded-xl flex items-center justify-center"
-        style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}
+        style={{ background: `${guide.color}22`, color: guide.color, boxShadow: `0 0 12px ${guide.color}33` }}
       >
         <Icon size={18} />
       </div>
@@ -221,7 +230,7 @@ function QuickGuideCard({ guide, index, onOpen }: {
         <div className="text-sm font-bold" style={{ color: 'var(--text-pri)' }}>{guide.title}</div>
         <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--text-dim)' }}>{guide.description}</p>
       </div>
-      <div className="text-xs font-semibold flex items-center gap-1" style={{ color: '#818cf8' }}>
+      <div className="text-xs font-semibold flex items-center gap-1" style={{ color: guide.color }}>
         Ver guía <ArrowRight size={12} />
       </div>
     </motion.button>
@@ -249,7 +258,7 @@ function CategoryCard({ categoryId, index, onOpenArticle }: {
 
       <div className="p-4 pb-2 flex items-center gap-3">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: `${category.color}22`, color: category.color }}>
+          style={{ background: `${category.color}22`, color: category.color, boxShadow: `0 0 12px ${category.color}33` }}>
           <Icon size={17} />
         </div>
         <span className="text-sm font-bold" style={{ color: 'var(--text-pri)' }}>{category.title}</span>
@@ -282,7 +291,7 @@ function CategoryCard({ categoryId, index, onOpenArticle }: {
 }
 
 function ResourceCard({ resource, index, onOpen }: {
-  resource: { title: string; description: string; icon: typeof Video }
+  resource: { title: string; description: string; icon: typeof Play; color: string }
   index: number
   onOpen: () => void
 }) {
@@ -298,7 +307,7 @@ function ResourceCard({ resource, index, onOpen }: {
       style={{ background: 'var(--panel-bg)', border: '1px solid var(--panel-border)', boxShadow: 'var(--panel-shadow)' }}
     >
       <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-        style={{ background: 'rgba(56,189,248,0.15)', color: '#38bdf8' }}>
+        style={{ background: `${resource.color}22`, color: resource.color, boxShadow: `0 0 12px ${resource.color}33` }}>
         <Icon size={18} />
       </div>
       <div className="flex-1 min-w-0">
@@ -342,7 +351,10 @@ function SearchResults({ query, results, onOpen }: {
               >
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{ background: `${category?.color ?? '#6366f1'}22`, color: category?.color ?? '#6366f1' }}>
+                    style={{
+                      background: `${category?.color ?? '#6366f1'}22`, color: category?.color ?? '#6366f1',
+                      boxShadow: `0 0 10px ${category?.color ?? '#6366f1'}33`,
+                    }}>
                     <Icon size={15} />
                   </div>
                   <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: category?.color ?? 'var(--text-dim)' }}>

@@ -10,12 +10,12 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
-  Rocket, Smartphone, PlayCircle, BarChart3,
+  Rocket, Smartphone, Play, BarChart3,
   BookOpen, Download, ListChecks,
-  Settings2, Globe2, Plug, SlidersHorizontal,
+  Settings, Globe2, Plug, SlidersHorizontal,
   Layers3, CalendarClock, GitBranch,
   LineChart, FileOutput, History,
-  Video, Code2, HelpCircle, Headphones,
+  Code2, HelpCircle, Headset,
 } from 'lucide-react'
 
 export type DocCategoryId = 'primeros-pasos' | 'configuracion' | 'ejecucion' | 'reportes'
@@ -42,9 +42,9 @@ export interface DocumentationCategory {
 }
 
 export const DOC_CATEGORIES: DocumentationCategory[] = [
-  { id: 'primeros-pasos', title: 'Primeros Pasos', icon: Rocket,    color: '#8b5cf6' },
-  { id: 'configuracion',  title: 'Configuración',   icon: Settings2, color: '#10b981' },
-  { id: 'ejecucion',      title: 'Ejecución',       icon: PlayCircle, color: '#f59e0b' },
+  { id: 'primeros-pasos', title: 'Primeros Pasos', icon: BookOpen, color: '#8b5cf6' },
+  { id: 'configuracion',  title: 'Configuración',   icon: Settings, color: '#10b981' },
+  { id: 'ejecucion',      title: 'Ejecución',       icon: Play,     color: '#f59e0b' },
   { id: 'reportes',       title: 'Reportes',        icon: BarChart3, color: '#38bdf8' },
 ]
 
@@ -118,7 +118,7 @@ export const DOC_ARTICLES: DocumentationArticle[] = [
   {
     id: 'ejecutar-casos', title: 'Ejecutar Casos de Prueba',
     description: 'Ejecuta casos individuales grabados desde Record Studio.',
-    category: 'ejecucion', icon: PlayCircle, route: 'ejecutar-casos',
+    category: 'ejecucion', icon: Play, route: 'ejecutar-casos',
     tags: ['casos', 'record studio', 'ejecutar'],
     content: PLACEHOLDER_BODY('Ejecutar Casos de Prueba'),
   },
@@ -178,7 +178,7 @@ export const DOC_ARTICLES: DocumentationArticle[] = [
   {
     id: 'videos-tutoriales', title: 'Videos Tutoriales',
     description: 'Tutoriales paso a paso en video.',
-    category: 'primeros-pasos', icon: Video, route: 'videos-tutoriales',
+    category: 'primeros-pasos', icon: Play, route: 'videos-tutoriales',
     tags: ['videos', 'tutoriales'],
     content: PLACEHOLDER_BODY('Videos Tutoriales'),
   },
@@ -199,7 +199,7 @@ export const DOC_ARTICLES: DocumentationArticle[] = [
   {
     id: 'soporte-tecnico', title: 'Soporte Técnico',
     description: 'Obtén ayuda del equipo.',
-    category: 'primeros-pasos', icon: Headphones, route: 'soporte-tecnico',
+    category: 'primeros-pasos', icon: Headset, route: 'soporte-tecnico',
     tags: ['soporte', 'ayuda', 'contacto'],
     content: PLACEHOLDER_BODY('Soporte Técnico'),
   },

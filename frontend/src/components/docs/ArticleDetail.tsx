@@ -60,7 +60,10 @@ export default function ArticleDetail({ article, onBack, onSelectArticle }: Prop
         <div className="flex items-start gap-4">
           <div
             className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: `${category?.color ?? '#6366f1'}22`, color: category?.color ?? '#6366f1' }}
+            style={{
+              background: `${category?.color ?? '#6366f1'}22`, color: category?.color ?? '#6366f1',
+              boxShadow: `0 0 14px ${category?.color ?? '#6366f1'}33`,
+            }}
           >
             <Icon size={22} />
           </div>
