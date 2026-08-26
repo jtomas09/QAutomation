@@ -4,6 +4,9 @@ import io.appium.java_client.AppiumBy;
 import io.appium.java_client.AppiumDriver;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
+import org.openqa.selenium.WebDriverException;
+import org.openqa.selenium.StaleElementReferenceException;
+import org.openqa.selenium.NoSuchSessionException;
 import org.openqa.selenium.interactions.PointerInput;
 import org.openqa.selenium.interactions.Sequence;
 import org.slf4j.Logger;
@@ -616,14 +619,22 @@ public class SelectorPage extends BasePage {
 
     public void irAEtiquetaHorarios() {
         for (int intento = 1; intento <= 3; intento++) {
+            long t0 = System.currentTimeMillis();
+            String resultado = "?";
+            String excepcion = "";
             try {
-                WebElement boton = reubicarElementoPorTextoExacto("Ver horarios");
+                // FIX real (causa raíz de "No se encontró el botón Ver horarios" con la
+                // película recién abierta): antes, la búsqueda del botón era UN solo
+                // findElements() sin espera — si el detalle de película todavía estaba en
+                // transición/animación de entrada, este método fallaba de inmediato y el for
+                // exterior pasaba al siguiente intento SIN NINGÚN sleep entre ellos, agotando
+                // los 3 intentos en milisegundos sin darle tiempo real a la UI a estabilizarse.
+                // esperarYLocalizarPorTexto() ahora hace un poll acotado (2500ms) que sale en
+                // cuanto el botón aparece, en vez de rendirse en el primer chequeo.
+                WebElement boton = esperarYLocalizarPorTexto("Ver horarios", 2500);
 
                 if (boton == null) {
-                    boton = reubicarElementoPorTexto("Ver horarios");
-                }
-
-                if (boton == null) {
+                    resultado = "NO-ENCONTRADO";
                     throw new RuntimeException("No se encontró el botón Ver horarios.");
                 }
 
@@ -636,6 +647,7 @@ public class SelectorPage extends BasePage {
                 tapW3C(centerX, centerY);
                 if (esperarPantallaHorarios(5000)) {
                     log.info("[SelectorPage] Se abrió la sección de horarios correctamente.");
+                    resultado = "OK-tap-directo";
                     return;
                 }
 
@@ -646,6 +658,7 @@ public class SelectorPage extends BasePage {
                 tapW3C(centerX, yArriba);
                 if (esperarPantallaHorarios(5000)) {
                     log.info("[SelectorPage] Se abrió la sección de horarios correctamente con offset.");
+                    resultado = "OK-tap-offset";
                     return;
                 }
 
@@ -654,13 +667,32 @@ public class SelectorPage extends BasePage {
                     WebElement parent = boton.findElement(By.xpath(".."));
                     if (clicSeguroEnElemento(parent) && esperarPantallaHorarios(5000)) {
                         log.info("[SelectorPage] Se abrió la sección de horarios correctamente desde parent.");
+                        resultado = "OK-parent";
                         return;
                     }
+                } catch (StaleElementReferenceException stale) {
+                    // El botón quedó stale entre localizarlo y pedir su parent — no se
+                    // reutiliza; el siguiente "intento" del for relocaliza desde cero.
+                    log.debug("[SelectorPage] Botón 'Ver horarios' quedó stale al buscar su parent; se reintentará.");
+                    resultado = "STALE";
                 } catch (Exception ignored) {
                 }
 
+                if (resultado.equals("?")) resultado = "SIN-TRANSICION";
+
+            } catch (SesionAppiumMuertaException muerta) {
+                throw muerta; // no seguir intentando contra una sesión muerta
+
             } catch (Exception e) {
+                relanzarSiSesionMuerta(e, "irAEtiquetaHorarios");
+                excepcion = e.getClass().getSimpleName() + ": " + e.getMessage();
                 log.warn("[SelectorPage] Error entrando a horarios: {}", e.getMessage());
+                if (resultado.equals("?")) resultado = "ERROR";
+            } finally {
+                utils.PerfMetrics.note("MovieOpen", String.format(
+                        "[irAEtiquetaHorarios] intento=%d comando=tap+esperarPantallaHorarios "
+                        + "duracionMs=%d resultado=%s excepcion=%s",
+                        intento, System.currentTimeMillis() - t0, resultado, excepcion));
             }
         }
 
@@ -765,22 +797,46 @@ public class SelectorPage extends BasePage {
                 throw new RuntimeException("La pantalla de horarios no cargó correctamente.");
             }
 
+            // FIX real (causa raíz confirmada de StaleElementReferenceException / "Cached
+            // elements ... do not exist in DOM anymore" / timeout de 240000ms reportados en
+            // SeleccionAsientos > Selección de Asientos Consecutivos): la versión anterior
+            // obtenía UNA lista de WebElement por ronda y la recorría completa con
+            // `for (WebElement horario : horarios)`. Si el primer click de la ronda cambiaba
+            // la pantalla de cualquier forma no reconocida como "alerta esperada" (o
+            // directamente lanzaba), el resto de ESA MISMA lista quedaba con referencias
+            // potencialmente inválidas, y cada intento siguiente pagaba un viaje completo a
+            // Appium solo para descubrirlo — exactamente el patrón "Cached elements... do not
+            // exist" del log. Ahora NUNCA se conserva un WebElement entre iteraciones: solo el
+            // texto (obtenerTextosHorariosDisponibles()); cada horario se vuelve a localizar
+            // por texto exacto justo antes de tocarlo, y ante StaleElement o "sin transición
+            // confirmada" se corta la ronda actual en vez de seguir iterando un snapshot ya
+            // desactualizado (en vez de reintentar 10 veces contra el mismo estado inválido).
+            Set<String> descartadosPorAlerta = new LinkedHashSet<>();
             int intentoGlobal = 0;
-            for (int intento = 0; intento < 10; intento++) {
-                List<WebElement> horarios = obtenerHorariosDisponibles();
-                if (horarios.isEmpty()) break;
+
+            for (int ronda = 0; ronda < 10; ronda++) {
+                List<String> horariosTexto = obtenerTextosHorariosDisponibles();
+                horariosTexto.removeAll(descartadosPorAlerta);
+                if (horariosTexto.isEmpty()) break;
 
                 boolean alertaDescartada = false;
-                for (WebElement horario : horarios) {
+
+                for (String hora : horariosTexto) {
                     intentoGlobal++;
                     long t0 = System.currentTimeMillis();
-                    String hora = "?";
+                    String resultado = "?";
+                    String excepcion = "";
                     try {
-                        if (!horario.isDisplayed()) continue;
-                        hora = obtenerTextoSeguro(horario);
-                        if (hora.isBlank()) continue;
+                        log.info("[SelectorPage] Intentando horario (descarte-alerta) intento={}: {}", ronda, hora);
 
-                        log.info("[SelectorPage] Intentando horario (descarte-alerta) intento={}: {}", intento, hora);
+                        // Re-localizar SIEMPRE justo antes de interactuar — nunca reutilizar
+                        // un WebElement obtenido en una vuelta anterior del bucle. Ya viene
+                        // filtrado por isDisplayed() (ver primerVisible()).
+                        WebElement horario = reubicarElementoPorTextoExacto(hora);
+                        if (horario == null) {
+                            resultado = "NO-ENCONTRADO";
+                            continue; // el DOM ya cambió — se prueba el siguiente texto de esta ronda
+                        }
 
                         boolean clicOk = clicSeguroEnHorario(horario);
                         if (!clicOk) {
@@ -792,44 +848,104 @@ public class SelectorPage extends BasePage {
                             }
                         }
                         if (!clicOk) {
-                            utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "FAIL");
+                            resultado = "FAIL";
                             continue;
                         }
 
-                        // PERF (Problema 5): sleep(1000) fijo → espera inteligente. aceptarAlertaAtencionSiPresente()
-                        // ya poll-ea por su cuenta (no se puede acortar sin duplicar su lógica), pero
-                        // hayAlertaHorarioInesperada() (más abajo) SOLO hace un chequeo instantáneo sin
-                        // reintento — por eso no se puede simplemente ELIMINAR este sleep (a diferencia del
-                        // caso análogo en seleccionarPrimerHorarioDisponibleEnGrid): se reemplaza por polling
-                        // corto que sale en cuanto cualquiera de las dos alertas aparece, con el mismo tope
-                        // de 1000ms como peor caso — nunca espera más que antes, casi siempre espera menos.
+                        // PERF (Problema 5, preservado): espera inteligente por cualquiera de
+                        // las dos alertas conocidas, mismo tope de 1000ms como peor caso.
+                        long tAlerta0 = System.currentTimeMillis();
                         smartWait(() -> !driver.findElements(aceptarYContinuarLocator()).isEmpty()
                                 || estaVisibleAlertaRestricciones(), 1000, 100);
+                        utils.PerfMetrics.stage("ScheduleSelection", "smartWait-alertaVisible", System.currentTimeMillis() - tAlerta0);
 
                         // Alerta "Atención" (movimientos/vibraciones): aceptar y continuar al flujo de asientos
-                        if (aceptarAlertaAtencionSiPresente()) {
+                        long tAceptar0 = System.currentTimeMillis();
+                        boolean aceptada = aceptarAlertaAtencionSiPresente();
+                        utils.PerfMetrics.stage("ScheduleSelection", "aceptarAlertaAtencionSiPresente", System.currentTimeMillis() - tAceptar0);
+                        // FIX real (causa raíz CONFIRMADA en vivo del "SIN-TRANSICION" de ~12-20s:
+                        // aceptarAlertaAceptarYContinuarSiPresente() restaura implicitlyWait a 10s en
+                        // su propio finally al retornar — convención correcta para SUS otros
+                        // llamadores, pero aquí pisa silenciosamente el implicitlyWait(0) que este
+                        // método puso al entrar. Con implicitlyWait=10s heredado, CADA
+                        // driver.findElements() posterior que no encuentra nada (el caso normal de
+                        // "no hay alerta") espera hasta 10s completos antes de devolver vacío — medido
+                        // en vivo: hayAlertaHorarioInesperada() pasó de ~0ms a ~12000ms exactos, dos
+                        // veces seguidas, apenas después de esta llamada). Se reafirma el 0 propio de
+                        // este método inmediatamente, sin tocar la convención de
+                        // aceptarAlertaAceptarYContinuarSiPresente() para sus demás llamadores.
+                        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+                        if (aceptada) {
                             log.info("[SelectorPage] Alerta 'Atención' aceptada para horario '{}'.", hora);
-                            utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "OK");
+                            resultado = "OK";
                             return hora;
                         }
 
-                        if (hayAlertaHorarioInesperada()) {
+                        long tHay0 = System.currentTimeMillis();
+                        boolean hayAlerta = hayAlertaHorarioInesperada();
+                        utils.PerfMetrics.stage("ScheduleSelection", "hayAlertaHorarioInesperada", System.currentTimeMillis() - tHay0);
+                        if (hayAlerta) {
                             log.warn("[SelectorPage] Alerta tras '{}': descartando y probando siguiente horario.", hora);
                             descartarAlertaHorario();
-                            // PERF (Problema 5): sleep(600) fijo → espera inteligente por la condición
-                            // real (la alerta desaparece), mismo tope de 600ms como peor caso.
+                            // PERF (Problema 5, preservado): espera inteligente, tope 600ms.
                             smartWait(() -> !hayAlertaHorarioInesperada(), 600, 100);
+                            descartadosPorAlerta.add(hora);
                             alertaDescartada = true;
-                            utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "SKIP-ALERTA");
-                            break;
+                            resultado = "SKIP-ALERTA";
+                            break; // no seguir con el resto de esta ronda: la pantalla acaba de cambiar (alerta cerrada)
                         }
 
-                        utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "OK");
-                        return hora;
+                        // FIX real (causa raíz CONFIRMADA con evidencia de screenshot + pageSource en
+                        // vivo — investigación "SIN-TRANSICION" de la sesión anterior): la validación
+                        // anterior (`!estaEnPantallaDeHorarios()`) es AMBIGUA. La pantalla de Asientos
+                        // muestra su propio selector de horarios (pestañas "11:05 AM", "11:35 AM"...)
+                        // en la parte superior para cambiar de función sin salir del mapa de asientos
+                        // — el mismo texto con forma de horario que detecta estaEnPantallaDeHorarios()
+                        // sigue presente AHÍ TAMBIÉN. Evidencia capturada: a t+500ms tras un click que
+                        // "nunca transicionaba" según ese chequeo, el pageSource ya contenía "Asientos",
+                        // "Paso 2 de 4" y "Pantalla Sala 10" (la app SÍ había transicionado, en menos de
+                        // 500ms) — el click y la transición real nunca fueron el problema; el falso
+                        // negativo era de esta validación. Se reemplaza por una condición NO ambigua:
+                        // estaEnPantallaDeAsientos(), con los mismos indicadores ya usados y validados
+                        // en verificarPantallaAsientosOSkip() de este mismo archivo (nunca aparecen en
+                        // la pantalla de horarios).
+                        long tTrans0 = System.currentTimeMillis();
+                        boolean transicionOk = smartWait(this::estaEnPantallaDeAsientos, 1500, 150);
+                        utils.PerfMetrics.stage("ScheduleSelection", "smartWait-transicion", System.currentTimeMillis() - tTrans0);
+                        if (transicionOk) {
+                            resultado = "OK";
+                            return hora;
+                        }
+
+                        log.warn("[SelectorPage] Click en '{}' no lanzó excepción pero la pantalla de horarios "
+                                + "sigue visible — transición no confirmada, se corta esta ronda.", hora);
+                        resultado = "SIN-TRANSICION";
+                        break; // el snapshot de esta ronda puede ya no reflejar la pantalla real
+
+                    } catch (StaleElementReferenceException stale) {
+                        // Requisito explícito: NO seguir usando el WebElement anterior. Se
+                        // corta esta ronda completa (el resto del snapshot puede estar
+                        // igualmente obsoleto) y se reconstruye desde cero en la siguiente.
+                        resultado = "STALE";
+                        excepcion = stale.getClass().getSimpleName() + ": " + stale.getMessage();
+                        log.warn("[SelectorPage] StaleElementReferenceException con horario='{}' — se descartan "
+                                + "las referencias de esta ronda y se reconstruye la lista.", hora);
+                        break;
+
+                    } catch (SesionAppiumMuertaException muerta) {
+                        throw muerta; // no seguir ejecutando comandos contra una sesión muerta
 
                     } catch (Exception e) {
-                        utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, "ERROR");
-                        log.warn("[SelectorPage] Error intentando horario: {}", e.getMessage());
+                        relanzarSiSesionMuerta(e, "seleccionarPrimerHorarioDescartandoAlertas horario=" + hora);
+                        resultado = "ERROR";
+                        excepcion = e.getClass().getSimpleName() + ": " + e.getMessage();
+                        log.warn("[SelectorPage] Error intentando horario '{}': {}", hora, e.getMessage());
+                    } finally {
+                        utils.PerfMetrics.attempt("ScheduleSelection", intentoGlobal, hora, System.currentTimeMillis() - t0, resultado);
+                        utils.PerfMetrics.note("ScheduleSelection", String.format(
+                                "intento=%d horario='%s' locator=texto-exacto comando=reubicar+click "
+                                + "duracionMs=%d resultado=%s excepcion=%s",
+                                intentoGlobal, hora, System.currentTimeMillis() - t0, resultado, excepcion));
                     }
                 }
 
@@ -879,26 +995,120 @@ public class SelectorPage extends BasePage {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Manejo de sesión Appium muerta (FIX — requisito explícito: NO ocultar
+    // "A session is either terminated or not started" ni seguir enviando comandos
+    // contra una sesión muerta). No se implementa una arquitectura de recuperación
+    // nueva: se detecta la señal que Appium YA emite y se relanza de forma clara e
+    // inconfundible para que el mecanismo de recuperación EXISTENTE de BaseTest
+    // (relaunchAppSafe()/quitDriver() en @BeforeEach/@AfterEach, no tocado) actúe en
+    // el siguiente test — este método solo deja de insistir dentro del actual.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Señal inconfundible de sesión Appium muerta — nunca debe seguir generando comandos. */
+    public static class SesionAppiumMuertaException extends RuntimeException {
+        public SesionAppiumMuertaException(String mensaje, Throwable causa) {
+            super(mensaje, causa);
+        }
+    }
+
+    private static boolean esMensajeDeSesionMuerta(String mensaje) {
+        if (mensaje == null) return false;
+        String m = mensaje.toLowerCase();
+        return m.contains("session is either terminated or not started")
+                || m.contains("invalid session id")
+                || m.contains("session not found");
+    }
+
+    /**
+     * Si {@code e} indica que la sesión Appium ya no existe (NoSuchSessionException, o
+     * WebDriverException con el mensaje característico), la relanza como
+     * SesionAppiumMuertaException para que el llamador deje de ejecutar más comandos
+     * inmediatamente. Si no es ese caso, no hace nada (el llamador sigue con su manejo
+     * normal de la excepción).
+     */
+    private void relanzarSiSesionMuerta(Exception e, String contexto) {
+        boolean sesionMuerta = (e instanceof NoSuchSessionException)
+                || (e instanceof WebDriverException && esMensajeDeSesionMuerta(e.getMessage()));
+        if (sesionMuerta) {
+            log.error("[SelectorPage] Sesión Appium terminada durante '{}' — abortando sin más comandos. {}",
+                    contexto, e.getMessage());
+            throw new SesionAppiumMuertaException(
+                    "Sesión Appium terminada durante '" + contexto + "'.", e);
+        }
+    }
+
+    /**
+     * Poll acotado para localizar un elemento por texto — reemplaza la búsqueda de UN
+     * solo intento que usaba irAEtiquetaHorarios() (ver FIX real ahí: sin esta espera, si
+     * el detalle de película todavía estaba en transición cuando se buscaba "Ver horarios",
+     * los 3 intentos del for exterior se agotaban en milisegundos sin darle tiempo real a
+     * la UI a estabilizarse). Nunca espera más que timeoutMs; sale en cuanto aparece.
+     */
+    private WebElement esperarYLocalizarPorTexto(String texto, long timeoutMs) {
+        long end = System.currentTimeMillis() + timeoutMs;
+        WebElement el;
+        do {
+            el = reubicarElementoPorTextoExacto(texto);
+            if (el == null) el = reubicarElementoPorTexto(texto);
+            if (el != null) return el;
+            sleep(200);
+        } while (System.currentTimeMillis() < end);
+        return null;
+    }
+
+    /**
+     * Snapshot de SOLO TEXTO de los horarios visibles — nunca WebElement. Pieza central del
+     * fix de StaleElementReferenceException / "Cached elements ... do not exist in DOM
+     * anymore": seleccionarPrimerHorarioDescartandoAlertas() ya no conserva una lista de
+     * WebElement durante todo el ciclo de reintentos (ver comentario ahí) — cada horario se
+     * vuelve a localizar por texto exacto justo antes de tocarlo, así que lo único que debe
+     * sobrevivir entre el escaneo y el click es el texto.
+     */
+    private List<String> obtenerTextosHorariosDisponibles() {
+        List<WebElement> horarios = obtenerHorariosDisponibles();
+        List<String> textos = new ArrayList<>();
+        for (WebElement el : horarios) {
+            try {
+                if (!el.isDisplayed()) continue;
+                String texto = obtenerTextoSeguro(el);
+                if (!texto.isBlank()) textos.add(texto);
+            } catch (Exception ignored) {
+                // Elemento ya inválido entre el findElements() y este punto — se omite sin
+                // conservar la referencia (a diferencia del comportamiento anterior).
+            }
+        }
+        return textos;
+    }
+
     // PERF/FIX (Problema 5 — irAEtiquetaHorarios): sin rama iOS, @text es exclusivo de
     // Android — en iOS "Ver horarios" (y cualquier otro texto) NUNCA se encontraba aquí,
     // aunque el elemento estuviera perfectamente visible. NSPredicate en iOS — ver nota
     // de rendimiento en PlatformLocator.byExactText().
+    // FIX real (misma causa raíz que estaEnPantallaDeHorarios() — ver comentario ahí):
+    // el locator Android original era //*[contains(@text,...)], un wildcard que fuerza a
+    // UiAutomator2 a volcar el árbol completo y puede colgarse durante una transición/
+    // animación. Se prueba primero el patrón acotado (android.widget.TextView/android.view.View
+    // — únicos dos tipos de nodo con @text en esta app, mismo criterio ya usado en
+    // hayHorarioVisible()/obtenerHorariosDisponibles()) y, si ese acotado no encuentra nada
+    // (nunca debería excluir un candidato real, pero se conserva como red de seguridad
+    // explícita — "conserva el locator existente como primera opción" no aplica aquí porque
+    // el existente ERA la causa del cuelgue, así que pasa a ser el fallback), se cae al
+    // wildcard original sin ningún cambio de comportamiento final.
     private WebElement reubicarElementoPorTexto(String texto) {
         try {
+            if (!isIOS()) {
+                By acotado = By.xpath("//android.widget.TextView[contains(@text,'" + texto + "')]"
+                        + " | //android.view.View[contains(@text,'" + texto + "')]");
+                WebElement el = primerVisible(driver.findElements(acotado));
+                if (el != null) return el;
+            }
+
             By locator = isIOS()
                     ? AppiumBy.iOSNsPredicateString(
                         "label CONTAINS \"" + texto + "\" OR name CONTAINS \"" + texto + "\" OR value CONTAINS \"" + texto + "\"")
                     : By.xpath("//*[contains(@text,'" + texto + "')]");
-            List<WebElement> elementos = driver.findElements(locator);
-
-            for (WebElement el : elementos) {
-                try {
-                    if (el.isDisplayed()) {
-                        return el;
-                    }
-                } catch (Exception ignored) {
-                }
-            }
+            return primerVisible(driver.findElements(locator));
         } catch (Exception ignored) {
         }
 
@@ -906,21 +1116,32 @@ public class SelectorPage extends BasePage {
     }
     private WebElement reubicarElementoPorTextoExacto(String texto) {
         try {
+            if (!isIOS()) {
+                By acotado = By.xpath("//android.widget.TextView[@text='" + texto + "']"
+                        + " | //android.view.View[@text='" + texto + "']");
+                WebElement el = primerVisible(driver.findElements(acotado));
+                if (el != null) return el;
+            }
+
             By locator = isIOS()
                     ? AppiumBy.iOSNsPredicateString(
                         "label == \"" + texto + "\" OR name == \"" + texto + "\" OR value == \"" + texto + "\"")
                     : By.xpath("//*[@text='" + texto + "']");
-            List<WebElement> elementos = driver.findElements(locator);
-
-            for (WebElement el : elementos) {
-                try {
-                    if (el.isDisplayed()) return el;
-                } catch (Exception ignored) {
-                }
-            }
+            return primerVisible(driver.findElements(locator));
         } catch (Exception ignored) {
         }
 
+        return null;
+    }
+
+    /** Devuelve el primer elemento visible de la lista, tolerando stale/errores por elemento. */
+    private WebElement primerVisible(List<WebElement> elementos) {
+        for (WebElement el : elementos) {
+            try {
+                if (el.isDisplayed()) return el;
+            } catch (Exception ignored) {
+            }
+        }
         return null;
     }
 
@@ -1346,6 +1567,22 @@ public class SelectorPage extends BasePage {
     // (evita depender de que el motor ICU regex de iOS traduzca \d/anchors idéntico a
     // Java sin poder validarlo en el dispositivo) — el regex Java sigue siendo la única
     // autoridad real sobre "¿esto es un horario válido?", sin ningún cambio.
+    // FIX real (causa raíz confirmada del timeout de 240000ms "Could not proxy command to
+    // the remote server" reportado en SeleccionAsientos > Selección de Asientos Consecutivos):
+    // pese al comentario de hayAlertaHorarioInesperada()/hayHorarioVisible() que afirma que
+    // este método ya fue acotado en "Iteración 3", el locator Android seguía siendo el
+    // wildcard //*[@text...] — matchea TODO elemento con @text en el árbol completo, sin
+    // excluir tipo de nodo. Este método se llama cada 300ms dentro de esperarPantallaHorarios(),
+    // incluida la ventana en la que la app está en plena transición/animación (justo tras tocar
+    // "Ver horarios" o tras tocar un horario). UiAutomator2 debe volcar la jerarquía completa de
+    // vistas para resolver un XPath //*, y ese volcado espera a que la UI esté "idle" — con una
+    // animación en curso, esa espera puede colgarse hasta que expira el timeout HTTP del cliente
+    // (los 240000ms observados), y es exactamente ese comando el que deja "cached elements" del
+    // locator ancho huérfanos cuando por fin responde sobre un DOM ya distinto. Se acota al mismo
+    // patrón YA validado en producción por hayHorarioVisible()/obtenerPeliculasVisibles()/
+    // obtenerHorariosDisponibles() en este mismo archivo (los únicos dos tipos de nodo que emiten
+    // @text en esta app) — nunca puede excluir una pantalla de horarios real, solo evita el
+    // volcado completo del árbol.
     private boolean estaEnPantallaDeHorarios() {
         try {
             By locator = isIOS()
@@ -1354,7 +1591,8 @@ public class SelectorPage extends BasePage {
                         + "OR label CONTAINS[c] 'AM' OR label CONTAINS[c] 'PM' "
                         + "OR value ==[c] 'español' OR label ==[c] 'español' "
                         + "OR value ==[c] 'subtitulada' OR label ==[c] 'subtitulada')")
-                    : By.xpath("//*[@text and normalize-space(@text)!='']");
+                    : By.xpath("//android.widget.TextView[@text and normalize-space(@text)!='']"
+                        + " | //android.view.View[@text and normalize-space(@text)!='']");
             List<WebElement> todos = driver.findElements(locator);
 
             for (WebElement el : todos) {
@@ -1376,6 +1614,27 @@ public class SelectorPage extends BasePage {
         } catch (Exception ignored) {
         }
 
+        return false;
+    }
+
+    // FIX real (ver comentario en seleccionarPrimerHorarioDescartandoAlertas() —
+    // investigación "SIN-TRANSICION" con evidencia de screenshot/pageSource): a
+    // diferencia de estaEnPantallaDeHorarios() (ambiguo — la pantalla de Asientos
+    // también muestra texto con forma de horario en su selector de función), estos
+    // indicadores NUNCA aparecen en la pantalla de horarios — son el mismo criterio
+    // ya usado y validado en verificarPantallaAsientosOSkip() de este archivo.
+    private boolean estaEnPantallaDeAsientos() {
+        try {
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'Pantalla Sala' OR value CONTAINS 'Pantalla Sala' "
+                        + "OR label CONTAINS 'Paso 2' OR value CONTAINS 'Paso 2' "
+                        + "OR label CONTAINS 'Paso 3' OR value CONTAINS 'Paso 3'")
+                    : By.xpath("//android.widget.TextView[contains(@text,'Pantalla Sala') or contains(@text,'Paso 2') or contains(@text,'Paso 3')]"
+                        + " | //android.view.View[contains(@text,'Pantalla Sala') or contains(@text,'Paso 2') or contains(@text,'Paso 3')]");
+            return !driver.findElements(locator).isEmpty();
+        } catch (Exception ignored) {
+        }
         return false;
     }
 
@@ -1862,13 +2121,19 @@ public class SelectorPage extends BasePage {
      */
     // PERF/FIX (Problema 5 — hayAlertaHorarioInesperada, llamado en cada horario probado):
     // sin rama iOS, siempre false en iOS. NSPredicate — ver nota en PlatformLocator.byExactText().
+    // FIX real (mismo hallazgo que aceptarYContinuarLocator() — ver comentario ahí): este
+    // método se llama en el hot-path de cada horario probado (hayAlertaHorarioInesperada(),
+    // y directamente dentro del smartWait de seleccionarPrimerHorarioDescartandoAlertas()) —
+    // wildcard //* acotado al mismo patrón ya validado en el resto del archivo, sin cambio de
+    // semántica para ninguno de sus llamadores (incluida la alerta de Sala Junior).
     public boolean estaVisibleAlertaRestricciones() {
         try {
             By locator = isIOS()
                     ? AppiumBy.iOSNsPredicateString(
                         "label CONTAINS 'Restricciones' OR label CONTAINS 'ambiente familiar' " +
                         "OR value CONTAINS 'Restricciones' OR value CONTAINS 'ambiente familiar'")
-                    : By.xpath("//*[contains(@text,'Restricciones') or contains(@text,'ambiente familiar')]");
+                    : By.xpath("//android.widget.TextView[contains(@text,'Restricciones') or contains(@text,'ambiente familiar')]"
+                        + " | //android.view.View[contains(@text,'Restricciones') or contains(@text,'ambiente familiar')]");
             return !driver.findElements(locator).isEmpty();
         } catch (Exception ignored) {}
         return false;
@@ -1953,10 +2218,20 @@ public class SelectorPage extends BasePage {
     // garantizado los 2000ms completos (implicitlyWait=0 ya estaba bien puesto — el
     // problema era el locator en sí, no la espera). NSPredicate — ver nota en
     // PlatformLocator.byExactText().
+    // FIX real (causa raíz confirmada EN VIVO tras instrumentar seleccionarPrimerHorarioDescartandoAlertas()
+    // — ver METRICS[ScheduleSelection]: un click válido quedó "SIN-TRANSICION" 17-20s en dos corridas
+    // reales consecutivas contra el mismo dispositivo, sin ninguna excepción ni log intermedio). Este
+    // locator se consulta en bucle (hasta 2s en aceptarAlertaAceptarYContinuarSiPresente(), y de nuevo
+    // dentro del smartWait de seleccionarPrimerHorarioDescartandoAlertas()) — con el wildcard //* cada
+    // consulta fuerza a UiAutomator2 a volcar el árbol completo, y si hay una animación de entrada del
+    // modal en curso cada volcado puede tardar varios segundos en vez de milisegundos, multiplicado por
+    // cada re-chequeo del bucle. Mismo acotado ya validado en el resto del archivo (android.widget.TextView/
+    // android.view.View — únicos tipos de nodo con @text en esta app).
     private By aceptarYContinuarLocator() {
         return isIOS()
                 ? AppiumBy.iOSNsPredicateString("label CONTAINS 'Aceptar y continuar' OR value CONTAINS 'Aceptar y continuar'")
-                : By.xpath("//*[contains(@text,'Aceptar y continuar')]");
+                : By.xpath("//android.widget.TextView[contains(@text,'Aceptar y continuar')]"
+                    + " | //android.view.View[contains(@text,'Aceptar y continuar')]");
     }
 
     public boolean aceptarAlertaAceptarYContinuarSiPresente() {
@@ -2036,9 +2311,12 @@ public class SelectorPage extends BasePage {
         try {
             // Primeras líneas de texto visibles en el área superior del diálogo.
             // NSPredicate en iOS — ver nota de rendimiento en PlatformLocator.byExactText().
+            // FIX real (mismo hallazgo que aceptarYContinuarLocator() — ver comentario ahí):
+            // wildcard //* acotado al mismo patrón ya validado en el resto del archivo.
             By locator = isIOS()
                     ? AppiumBy.iOSNsPredicateString("value.length > 3 AND value.length < 60")
-                    : By.xpath("//*[@text and string-length(@text) > 3 and string-length(@text) < 60]");
+                    : By.xpath("//android.widget.TextView[@text and string-length(@text) > 3 and string-length(@text) < 60]"
+                        + " | //android.view.View[@text and string-length(@text) > 3 and string-length(@text) < 60]");
             List<WebElement> textos = driver.findElements(locator);
             for (WebElement el : textos) {
                 try {

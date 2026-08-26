@@ -124,5 +124,5 @@ export const RELATED_ARTICLE_IDS = ['introduccion', 'instalacion-agent', 'ambien
 export const GUIDE_META = {
   tiempoEstimado: '15 min',
   nivel: 'Principiantes',
-  ultimaActualizacion: '21 may 2024',
+  ultimaActualizacion: '20 agosto 2026',
 }
