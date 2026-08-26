@@ -63,6 +63,14 @@ test {
     useJUnitPlatform()
     systemProperties System.getProperties()
     systemProperty "SEND_PER_TEST", "false"
+    // FIX real (robustez Unicode extremo a extremo — nombres de prueba con acentos/ñ en el
+    // stdout que lee JobExecutor/TestRunnerService): Gradle ejecuta los tests en una JVM
+    // forkeada aparte ("Gradle Test Executor") — systemProperties de arriba solo copia
+    // valores de propiedades YA existentes, no cambia el charset con el que ESA JVM
+    // arrancó. Se fija explícitamente para no depender del locale/file.encoding por
+    // defecto de la máquina donde corra el Runner/backend (crítico en Windows, donde el
+    // default de JDK 17 no es UTF-8).
+    jvmArgs '-Dfile.encoding=UTF-8', '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
     testLogging {
         events "passed", "skipped", "failed"
         showStandardStreams = true

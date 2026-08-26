@@ -604,8 +604,20 @@ public class BaseTest {
 
             byte[] videoBytes = Base64.getDecoder().decode(base64);
             String className  = getClass().getSimpleName();
-            String testName   = testInfo.getDisplayName()
-                    .replaceAll("[^a-zA-Z0-9_\\-]", "_");
+            // FIX real (causa raíz confirmada de pérdida de acentos/Unicode en Videos de
+            // Ejecución): el regex anterior era una whitelist ASCII (solo a-z A-Z 0-9 _ -),
+            // así que reemplazaba CUALQUIER acento/ñ/¿/¡ por "_" — "Selección de Múltiples
+            // Asientos" se convertía en "Selecci_n_de_M_ltiples_Asientos". Ese nombre de
+            // archivo es exactamente lo que JobExecutor (RunnerAgent) vuelve a leer para
+            // subir el video al backend (testName/originalName), y lo que el frontend
+            // muestra en VideoCard — el texto nunca se corrompía en tránsito, se perdía
+            // aquí, en el primer punto donde se generaba el nombre. Los filesystems de
+            // macOS/Linux/Windows manejan Unicode en nombres de archivo sin problema vía
+            // java.nio.file — no hay ninguna razón técnica para eliminar los acentos. Se
+            // reemplaza por una blacklist que solo sustituye caracteres realmente inválidos
+            // en un nombre de archivo (los reservados por Windows, más caracteres de
+            // control), preservando á é í ó ú Á É Í Ó Ú ñ Ñ ¿ ¡ y cualquier otro Unicode.
+            String testName   = sanitizeFileName(testInfo.getDisplayName());
 
             Path dir  = Paths.get("build", "videos", className);
             Files.createDirectories(dir);
@@ -626,6 +638,18 @@ public class BaseTest {
 
     private static String sanitizeLocal(String s) {
         if (s == null || s.isBlank()) return "reporte";
-        return s.replaceAll("[^a-zA-Z0-9-_]", "_");
+        return sanitizeFileName(s);
+    }
+
+    // Caracteres realmente inválidos/reservados en un nombre de archivo en Windows/macOS/
+    // Linux, más controles (0x00-0x1F) — a diferencia del regex anterior (whitelist ASCII),
+    // esto SOLO reemplaza lo que de verdad rompería el sistema de archivos, preservando
+    // cualquier letra Unicode (acentos, ñ, ¿, ¡, etc.). Ver FIX real en stopVideoRecording().
+    private static final java.util.regex.Pattern FILENAME_UNSAFE_CHARS =
+            java.util.regex.Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1F]");
+
+    static String sanitizeFileName(String s) {
+        if (s == null) return "";
+        return FILENAME_UNSAFE_CHARS.matcher(s).replaceAll("_");
     }
 }

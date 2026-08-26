@@ -1408,7 +1408,14 @@ public class JobExecutor {
             List<TestCaseResult> testCases, int expectedCount, AtomicInteger streamIncidents) {
 
         int consecutiveFailures = 0;
-        BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        // FIX real (robustez Unicode — este stream es la fuente de extractTestName(), que
+        // alimenta los eventos de progreso mostrados en el Dashboard): sin charset explícito,
+        // InputStreamReader usa Charset.defaultCharset() (el default de la JVM del Runner),
+        // que en JDK 17 no está garantizado como UTF-8 en todas las plataformas (Windows en
+        // particular). El proceso Gradle hijo escribe su stdout con SU propio default — se
+        // fuerza UTF-8 en ambos extremos (ver build.gradle test{} y aquí) para no depender
+        // de que ambos JVMs coincidan por casualidad en el mismo charset de plataforma.
+        BufferedReader br = new BufferedReader(new InputStreamReader(process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
 
         // Sin límite de reintentos: mientras Gradle siga vivo, se sigue intentando
         // leer — de lo contrario, cualquier corte temporal dejaría de contar
@@ -1448,7 +1455,7 @@ public class JobExecutor {
                 // drainPendingLines() agota lo que br ya tenía bufferado ANTES de reemplazarlo.
                 drainPendingLines(job, br, process, passed, failed, skipped, testCases,
                         expectedCount, streamIncidents);
-                br = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                br = new BufferedReader(new InputStreamReader(process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
 
             } catch (IOException ioe) {
                 if (!process.isAlive()) {
@@ -1468,7 +1475,7 @@ public class JobExecutor {
                 // Solo se reemplaza la referencia — el InputStream subyacente de
                 // process.getInputStream() nunca se cierra mientras el proceso viva,
                 // así que envolverlo de nuevo aquí SÍ puede seguir leyendo datos reales.
-                br = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                br = new BufferedReader(new InputStreamReader(process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
             }
         }
         System.out.println("[Executor] Proceso ya no está vivo — fin de la lectura de stdout/stderr.");

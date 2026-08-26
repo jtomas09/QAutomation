@@ -75,8 +75,10 @@ public class VideoRecordingExtension implements BeforeEachCallback, AfterEachCal
             String className = context.getTestClass()
                 .map(Class::getSimpleName)
                 .orElse("unknown");
-            String testName = context.getDisplayName()
-                .replaceAll("[^a-zA-Z0-9_\\-]", "_");
+            // FIX real (mismo hallazgo que BaseTest.stopVideoRecording() — ver comentario
+            // ahí): whitelist ASCII → blacklist de caracteres realmente inválidos en un
+            // nombre de archivo, preservando acentos/ñ/¿/¡/Unicode.
+            String testName = sanitizeFileName(context.getDisplayName());
 
             Path dir  = Paths.get("build", "videos", className);
             Files.createDirectories(dir);
@@ -98,5 +100,13 @@ public class VideoRecordingExtension implements BeforeEachCallback, AfterEachCal
 
     private static boolean isEnabled() {
         return "true".equalsIgnoreCase(DriverFactory.prop("video.enabled", "false"));
+    }
+
+    private static final java.util.regex.Pattern FILENAME_UNSAFE_CHARS =
+            java.util.regex.Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1F]");
+
+    private static String sanitizeFileName(String s) {
+        if (s == null) return "";
+        return FILENAME_UNSAFE_CHARS.matcher(s).replaceAll("_");
     }
 }

@@ -63,7 +63,12 @@ public class TestRunnerService {
                 }
                 currentProcess = pb.start();
 
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(currentProcess.getInputStream()))) {
+                // FIX real (robustez Unicode — este stream trae los nombres de prueba que se
+                // reenvían como LogEvent por SSE al Dashboard en vivo): sin charset explícito
+                // se usa Charset.defaultCharset(), no garantizado como UTF-8 en JDK 17. Se
+                // fuerza UTF-8 en ambos extremos: aquí, y en buildCommand() para el JVM hijo.
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(
+                        currentProcess.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
                     String line;
                     while ((line = br.readLine()) != null) {
                         LogLevel lvl = detectLevel(line);
@@ -110,6 +115,13 @@ public class TestRunnerService {
     private List<String> buildCommand(RunRequest req) {
         List<String> cmd = new ArrayList<>(List.of(
             "java",
+            // FIX real (robustez Unicode extremo a extremo): debe ir ANTES de -jar para
+            // que la JVM realmente arranque con este charset (file.encoding se fija en el
+            // bootstrap de la JVM — pasado después de -jar llegaría solo como argumento de
+            // programa, no como opción de JVM, y no tendría ningún efecto). Garantiza que
+            // el proceso hijo escriba su stdout (nombres de prueba incluidos) en UTF-8 sin
+            // depender del locale de la máquina donde corra el backend.
+            "-Dfile.encoding=UTF-8",
             "-jar", testsJar,
             "-Dappium.mode="       + appiumMode,
             "-DsuiteId="           + req.getSuite(),

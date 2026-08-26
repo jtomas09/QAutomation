@@ -900,8 +900,17 @@ public class PdfReportGenerator {
         c.setStrokingColor(rgb[0], rgb[1], rgb[2]);
     }
 
+    // FIX real (causa raíz de pérdida de acentos/Unicode en nombres de archivo de reportes):
+    // usada solo para el nombre del PDF en disco (el contenido dibujado dentro del PDF usa
+    // testName sin sanitizar — no se toca aquí). Blacklist de caracteres realmente inválidos
+    // en un nombre de archivo, en vez de la whitelist ASCII anterior que reemplazaba
+    // cualquier acento/ñ por "_".
+    private static final java.util.regex.Pattern FILENAME_UNSAFE_CHARS =
+            java.util.regex.Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1F]");
+
     private static String sanitize(String t) {
-        return t.replaceAll("[^a-zA-Z0-9-_]", "_");
+        if (t == null) return "";
+        return FILENAME_UNSAFE_CHARS.matcher(t).replaceAll("_");
     }
 
     private static String truncate(String s, int max) {

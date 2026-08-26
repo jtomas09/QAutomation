@@ -1,8 +1,13 @@
 <configuration>
 
+    <!-- FIX real (robustez Unicode): sin <charset>, el encoder usa Charset.defaultCharset()
+         (el default de la JVM), no garantizado como UTF-8 en JDK 17 fuera de macOS/Linux
+         (Windows en particular). Se fija explícitamente para que test-run.log (que contiene
+         cada nombre de test/paso con acentos vía log.info) sea siempre UTF-8. -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
         </encoder>
     </appender>
 
@@ -14,6 +19,7 @@
         </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <charset>UTF-8</charset>
         </encoder>
     </appender>
 

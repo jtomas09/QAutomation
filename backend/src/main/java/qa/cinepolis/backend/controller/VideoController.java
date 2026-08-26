@@ -27,7 +27,11 @@ public class VideoController {
     /**
      * POST /api/executions/{execId}/videos
      * Runner uploads an MP4 as raw bytes (Content-Type: application/octet-stream).
-     * Metadata arrives in custom headers: X-File-Name, X-Suite-Name, X-Test-Name.
+     * Metadata arrives in custom headers: X-File-Name, X-Suite-Name, X-Test-Name — el Runner
+     * (BackendClient.uploadVideo()) las envía percent-encoded (UTF-8) porque la codificación
+     * de bytes de un header HTTP no está garantizada como UTF-8 en el wire; se decodifican
+     * aquí con el mismo charset antes de guardarlas (mismo patrón ya usado en deleteSuite()
+     * más abajo para el path variable).
      */
     @PostMapping(value = "/executions/{execId}/videos", consumes = "application/octet-stream")
     public ResponseEntity<VideoRecord> upload(
@@ -36,8 +40,13 @@ public class VideoController {
             @RequestHeader(value = "X-Suite-Name", defaultValue = "")          String suiteName,
             @RequestHeader(value = "X-Test-Name",  defaultValue = "")          String testName,
             @RequestBody byte[] data) throws Exception {
-        VideoRecord rec = videoStore.save(execId, fileName, suiteName, testName, data);
+        VideoRecord rec = videoStore.save(execId,
+                urlDecodeUtf8(fileName), urlDecodeUtf8(suiteName), urlDecodeUtf8(testName), data);
         return ResponseEntity.ok(rec);
+    }
+
+    private static String urlDecodeUtf8(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     /** GET /api/videos/suites — resumen por suite (pantalla "Nivel 1"), más reciente primero */

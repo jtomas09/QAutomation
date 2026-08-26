@@ -156,7 +156,20 @@ public class TestSteps {
         return file.toString();
     }
 
+    // FIX real (causa raíz confirmada de pérdida de acentos/Unicode): este sanitize()
+    // alimenta currentTestName, que a su vez viaja SIN RESANITIZAR a
+    // TestFlowEventPublisher.stepStarted/Completed/Failed/Skipped() — es decir, el nombre
+    // de prueba mostrado en vivo en el Dashboard durante la ejecución venía de aquí. El
+    // regex anterior era una whitelist ASCII (solo a-z A-Z 0-9 _ -), así que "Selección de
+    // Múltiples Asientos" llegaba al Dashboard como "Selecci_n_de_M_ltiples_Asientos" desde
+    // el primer evento. Se reemplaza por una blacklist que solo sustituye caracteres
+    // realmente inválidos en un nombre de archivo (este mismo valor también se usa para el
+    // nombre del PNG de evidencia en takeScreenshot()), preservando acentos/ñ/¿/¡/Unicode.
+    private static final java.util.regex.Pattern FILENAME_UNSAFE_CHARS =
+            java.util.regex.Pattern.compile("[\\\\/:*?\"<>|\\x00-\\x1F]");
+
     private static String sanitize(String text) {
-        return text.replaceAll("[^a-zA-Z0-9-_]", "_");
+        if (text == null) return "";
+        return FILENAME_UNSAFE_CHARS.matcher(text).replaceAll("_");
     }
 }

@@ -6,6 +6,7 @@ import qa.cinepolis.runner.model.TestCaseResult;
 
 import java.io.File;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -456,6 +457,15 @@ public class BackendClient {
             throw new RuntimeException("POST /api/results → " + res.statusCode() + " " + res.body());
     }
 
+    // FIX real (robustez de extremo a extremo para Unicode): los headers HTTP no tienen una
+    // codificación de bytes garantizada en el wire (ISO-8859-1 históricamente, no UTF-8) —
+    // pasar un String con acentos/Unicode directamente a .header() no está definido de forma
+    // fiable entre cliente/servidor/versión de JDK. Se percent-encodea (RFC 3986, vía
+    // URLEncoder con UTF-8) ANTES de ponerlo en el header — el valor que viaja es puro ASCII
+    // (siempre válido en un header), y VideoController.java lo decodifica con
+    // URLDecoder.decode(..., UTF_8) al recibirlo. Hoy este valor ya llega sin acentos (ver
+    // fix en BaseTest.java/JobExecutor.java), pero este cambio evita que el mismo bug
+    // reaparezca como mojibake en cuanto esa causa raíz se corrija en la fuente.
     public void uploadVideo(String executionId, String suiteName, String testName, Path videoFile) {
         try {
             byte[] bytes    = Files.readAllBytes(videoFile);
@@ -464,9 +474,9 @@ public class BackendClient {
                     .uri(URI.create(baseUrl + "/api/executions/" + executionId + "/videos"))
                     .header("Content-Type",  "application/octet-stream")
                     .header("Authorization", "Bearer " + token)
-                    .header("X-File-Name",   filename)
-                    .header("X-Suite-Name",  suiteName != null ? suiteName : "")
-                    .header("X-Test-Name",   testName  != null ? testName  : "")
+                    .header("X-File-Name",   urlEncodeUtf8(filename))
+                    .header("X-Suite-Name",  urlEncodeUtf8(suiteName != null ? suiteName : ""))
+                    .header("X-Test-Name",   urlEncodeUtf8(testName  != null ? testName  : ""))
                     .timeout(java.time.Duration.ofSeconds(60))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(bytes))
                     .build();
@@ -479,6 +489,10 @@ public class BackendClient {
         } catch (Exception e) {
             System.err.println("[BackendClient] uploadVideo error: " + e.getMessage());
         }
+    }
+
+    private static String urlEncodeUtf8(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     // ─────────────────────────────────────────────────────────────────────

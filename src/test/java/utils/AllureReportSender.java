@@ -902,9 +902,13 @@ public class AllureReportSender {
         return String.format("%02dm %02ds", m, s);
     }
 
+    // FIX real (pérdida de acentos/Unicode en nombres de archivo de reportes): blacklist de
+    // caracteres realmente inválidos en un nombre de archivo, en vez de la whitelist ASCII
+    // anterior. El cuerpo del correo ya fuerza UTF-8 explícitamente (ver setSubject/
+    // setContent con "UTF-8" más abajo) — esto solo corrige el nombre del archivo adjunto.
     private static String sanitizeFileName(String s) {
         if (s == null) return "Reporte";
-        return s.replaceAll("[^a-zA-Z0-9._-]", "_");
+        return s.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1F]", "_");
     }
 
     private static String escapeHtml(String s) {
