@@ -43,7 +43,7 @@ public class SmtpConfig {
         return null;
     }
 
-    private static boolean notBlank(String s) {
+    static boolean notBlank(String s) {
         return s != null && !s.isBlank();
     }
 }

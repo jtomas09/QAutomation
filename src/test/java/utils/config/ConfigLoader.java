@@ -18,7 +18,11 @@ import java.nio.file.StandardOpenOption;
  * mensaje [SMTP] explícito, nunca solo una excepción genérica:
  *
  *   1. Variables de entorno (SMTP_HOST/PORT/USER/PASS/FROM, + SMTP_TLS/SMTP_SSL
- *      opcionales) — solo se usan si las 5 obligatorias están presentes.
+ *      opcionales) — solo se usan si HOST/PORT/USER/FROM están presentes.
+ *      SMTP_PASS admite dos orígenes: la variable de entorno misma, o —si no
+ *      está definida— el Keychain de macOS (cuenta=SMTP_USER, servicio
+ *      "automationqa-smtp"), para que la contraseña nunca necesite existir
+ *      como texto plano en el .plist ni en ningún archivo.
  *   2. config/smtp-config.json (filesystem, relativo a la raíz del proyecto)
  *      — si no existe, se genera una plantilla vacía UNA sola vez y se avisa
  *      qué falta completar; nunca se sobrescribe un archivo ya existente.
@@ -82,10 +86,14 @@ public class ConfigLoader {
         String host = env("SMTP_HOST", null);
         String port = env("SMTP_PORT", null);
         String user = env("SMTP_USER", null);
-        String pass = env("SMTP_PASS", null);
         String from = env("SMTP_FROM", null);
 
-        if (isBlank(host) || isBlank(port) || isBlank(user) || isBlank(pass) || isBlank(from)) {
+        if (isBlank(host) || isBlank(port) || isBlank(user) || isBlank(from)) {
+            return null;
+        }
+
+        String pass = resolveSmtpPass(user);
+        if (isBlank(pass)) {
             return null;
         }
 
@@ -99,6 +107,53 @@ public class ConfigLoader {
         cfg.smtp.tls  = Boolean.parseBoolean(env("SMTP_TLS", "true"));
         cfg.smtp.ssl  = Boolean.parseBoolean(env("SMTP_SSL", "false"));
         return cfg;
+    }
+
+    /**
+     * SMTP_PASS: primero la variable de entorno (compatibilidad con quien la
+     * defina así); si no está, se busca en el Keychain de macOS. Así la
+     * contraseña real puede vivir fuera del .plist por completo.
+     */
+    private static String resolveSmtpPass(String user) {
+        String pass = env("SMTP_PASS", null);
+        return !isBlank(pass) ? pass : readPassFromKeychain(user);
+    }
+
+    // ── Keychain de macOS — fuente opcional y preferida para SMTP_PASS ──────
+
+    private static final String KEYCHAIN_SERVICE = "automationqa-smtp";
+
+    /**
+     * Lee la contraseña SMTP desde el Keychain (cifrado por el sistema
+     * operativo, nunca un archivo de texto plano) — cuenta = SMTP_USER,
+     * servicio = "automationqa-smtp". Si `security` no existe (no-macOS) o
+     * no hay entrada guardada, retorna null silenciosamente: no es un error,
+     * solo significa que esta fuente no aplica y se sigue con las demás.
+     */
+    private static String readPassFromKeychain(String account) {
+        if (isBlank(account)) return null;
+        try {
+            Process p = new ProcessBuilder(
+                    "security", "find-generic-password",
+                    "-a", account, "-s", KEYCHAIN_SERVICE, "-w")
+                    .redirectErrorStream(false)
+                    .start();
+
+            String out;
+            try (var in = p.getInputStream()) {
+                out = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+            }
+            boolean finished = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                log.warn("[SMTP] Lectura de Keychain excedió el tiempo de espera (cuenta={})", account);
+                return null;
+            }
+            return (p.exitValue() == 0 && !out.isBlank()) ? out : null;
+        } catch (Exception e) {
+            log.warn("[SMTP] No se pudo leer SMTP_PASS desde Keychain (cuenta={}): {}", account, e.getMessage());
+            return null;
+        }
     }
 
     // ── 2) config/smtp-config.json ──────────────────────────────────────────
@@ -199,5 +254,44 @@ public class ConfigLoader {
     private static String env(String key, String def) {
         String v = System.getenv(key);
         return (v == null || v.isBlank()) ? def : v.trim();
+    }
+
+    // ── Diagnóstico seguro (nunca expone valores, solo OK/MISSING) ──────────
+
+    /**
+     * Reporte de estado en UNA sola línea, formato {@code CAMPO=OK} /
+     * {@code CAMPO=MISSING} — nunca el valor real de ningún campo (ni siquiera
+     * host/user/from, aunque no sean secretos, para mantener un único formato
+     * consistente en todos los logs de diagnóstico SMTP).
+     *
+     * Comprueba PRIMERO la variable de entorno cruda y, si no está definida, el
+     * valor final ya cargado en {@code cfg} (que puede venir del archivo). Esto
+     * importa porque {@link #tryLoadFromEnv()} es todo-o-nada (ver su comentario:
+     * si falta UNA de las obligatorias, se descarta el env por completo y se
+     * cae a smtp-config.json) — sin esta doble verificación, definir el resto
+     * de las variables de entorno reportaría erróneamente todas como MISSING
+     * en vez de señalar la única que realmente falta.
+     *
+     * Para SMTP_PASS específicamente se comprueba además el Keychain de macOS
+     * (misma cuenta=SMTP_USER que usa {@link #readPassFromKeychain}) — así el
+     * reporte es preciso incluso cuando la contraseña vive solo ahí.
+     */
+    public static String reporteEstado(SmtpConfig cfg, String mailTo) {
+        SmtpConfig.Smtp smtp = cfg != null ? cfg.smtp : null;
+        return String.format(
+                "SMTP_HOST=%s SMTP_PORT=%s SMTP_USER=%s SMTP_PASS=%s SMTP_FROM=%s MAIL_TO=%s",
+                estado(env("SMTP_HOST", null), smtp != null ? smtp.host : null),
+                estado(env("SMTP_PORT", null), smtp != null ? smtp.port : null),
+                estado(env("SMTP_USER", null), smtp != null ? smtp.user : null),
+                estado(env("SMTP_PASS", null), readPassFromKeychain(env("SMTP_USER", null)), smtp != null ? smtp.pass : null),
+                estado(env("SMTP_FROM", null), cfg != null ? cfg.resolvedFrom() : null),
+                estado(mailTo, null));
+    }
+
+    private static String estado(String... candidatos) {
+        for (String c : candidatos) {
+            if (c != null && !c.isBlank()) return "OK";
+        }
+        return "MISSING";
     }
 }

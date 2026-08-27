@@ -343,15 +343,27 @@ public class AllureReportSender {
             }
         }
 
+        // Validación segura ANTES de intentar nada — reporte campo=OK/MISSING, nunca
+        // el valor real (ni siquiera host/user/from, mismo formato en todos los casos
+        // para no tener dos convenciones de log distintas). Sirve tanto para el caso
+        // "todo configurado" (auditoría) como para identificar EXACTAMENTE qué falta.
+        log.info("[SMTP] Estado de configuración: {}", ConfigLoader.reporteEstado(cfg, to));
+
         if (smtpHost.isBlank() || smtpUser.isBlank() || smtpPass.isBlank()) {
-            log.error("[SMTP] No existe configuración SMTP válida (host/user/pass incompletos) — "
-                    + "el envío de correo será omitido. Configure las variables de entorno "
-                    + "SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM o complete config/smtp-config.json.");
+            log.error("ERROR SMTP configuration: {}", ConfigLoader.reporteEstado(cfg, to));
+            log.error("[SMTP] Configuración SMTP incompleta — el envío de correo será omitido. "
+                    + "Configure las variables de entorno SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM "
+                    + "(o, en desarrollo, config/smtp-config.json).");
+            log.error("EMAIL: NOT SENT");
+            log.error("REASON: SMTP configuration incomplete");
             return false;
         }
         if (to.isBlank()) {
+            log.error("ERROR SMTP configuration: {}", ConfigLoader.reporteEstado(cfg, to));
             log.error("[SMTP] No hay destinatarios configurados (ReportEmailStore/MAIL_TO ni mail.recipients) — "
                     + "el envío de correo será omitido.");
+            log.error("EMAIL: NOT SENT");
+            log.error("REASON: No recipients configured");
             return false;
         }
 
@@ -621,10 +633,18 @@ public class AllureReportSender {
             log.info("[TIMING] SMTP send: {} ms", System.currentTimeMillis() - tSmtpStart);
             log.info("[AllureReportSender] Email sent successfully to: {}", to);
             log.info("[EMAIL FLOW] Correo enviado correctamente.");
+            int recipientCount = InternetAddress.parse(to).length;
+            log.info("EMAIL: SENT");
+            log.info("RECIPIENTS: {}", recipientCount);
             return true;
         } catch (Throwable e) {
             log.info("[TIMING] SMTP send (falló): {} ms", System.currentTimeMillis() - tSmtpStart);
+            // e.getMessage() de javax.mail nunca incluye la contraseña enviada (los
+            // servidores SMTP no la reflejan en sus respuestas de error) — seguro de
+            // registrar tal cual, igual que ya hacía este catch antes de este cambio.
             log.error("[AllureReportSender] Email send failed: {} -> {}", e.getClass().getName(), e.getMessage(), e);
+            log.error("EMAIL: NOT SENT");
+            log.error("REASON: SMTP send failed ({})", e.getClass().getSimpleName());
             return false;
         }
     }

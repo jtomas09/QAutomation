@@ -30,12 +30,6 @@ public class EmailTester {
         String smtpPass = safe(cfg.smtp.pass, "");
         String from     = safe(cfg.resolvedFrom(), "automation_android@ia.com.mx");
 
-        if (!cfg.isValid()) {
-            System.out.println("[ERROR] No hay una configuración SMTP válida (host/user/pass/from incompletos).");
-            System.out.println("        Defina las variables de entorno SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM");
-            System.out.println("        o complete config/smtp-config.json.");
-        }
-
         // Destinatario: MAIL_TO env var > primer destinatario en config (legacy mail.to) > from
         String mailToEnv = System.getenv("MAIL_TO");
         String to;
@@ -50,17 +44,18 @@ public class EmailTester {
             System.out.println("[WARN] Sin destinatarios configurados; enviando al remitente: " + to);
         }
 
+        // Mismo reporte seguro campo=OK/MISSING que usa AllureReportSender — nunca
+        // el valor real de ningún campo, ni siquiera host/user/from.
         System.out.println("----------------------------------------------------");
-        System.out.println("  Host SMTP : " + smtpHost);
-        System.out.println("  Puerto    : " + smtpPort);
-        System.out.println("  Usuario   : " + smtpUser);
-        System.out.println("  Password  : " + (smtpPass.isBlank() ? "[VACÍA - ERROR]" : "****** (configurada)"));
-        System.out.println("  From      : " + from);
-        System.out.println("  To        : " + to);
+        System.out.println("  " + ConfigLoader.reporteEstado(cfg, to));
         System.out.println("----------------------------------------------------");
 
-        if (smtpPass.isBlank()) {
-            System.out.println("[ERROR] La contraseña SMTP está vacía. Verifica smtp-config.json.");
+        if (!cfg.isValid()) {
+            System.out.println("ERROR SMTP configuration: " + ConfigLoader.reporteEstado(cfg, to));
+            System.out.println("[ERROR] Defina las variables de entorno SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM");
+            System.out.println("        o complete config/smtp-config.json.");
+            System.out.println("EMAIL: NOT SENT");
+            System.out.println("REASON: SMTP configuration incomplete");
             System.exit(1);
         }
 
@@ -113,6 +108,8 @@ public class EmailTester {
             System.out.println("====================================================");
             System.out.println("  [ÉXITO] Correo enviado correctamente a: " + to);
             System.out.println("====================================================");
+            System.out.println("EMAIL: SENT");
+            System.out.println("RECIPIENTS: " + InternetAddress.parse(to).length);
 
         } catch (AuthenticationFailedException e) {
             System.out.println("====================================================");
@@ -120,8 +117,11 @@ public class EmailTester {
             System.out.println("  Verifica que el usuario y contraseña sean correctos.");
             System.out.println("  Para AWS SES: la contraseña SMTP es diferente a la");
             System.out.println("  clave secreta de IAM. Se genera en la consola de SES.");
+            // e.getMessage() de javax.mail nunca incluye la contraseña enviada.
             System.out.println("  Detalle: " + e.getMessage());
             System.out.println("====================================================");
+            System.out.println("EMAIL: NOT SENT");
+            System.out.println("REASON: SMTP authentication failed");
             System.exit(1);
         } catch (MessagingException e) {
             System.out.println("====================================================");
@@ -130,6 +130,8 @@ public class EmailTester {
                 System.out.println("  Causa: " + e.getCause().getMessage());
             }
             System.out.println("====================================================");
+            System.out.println("EMAIL: NOT SENT");
+            System.out.println("REASON: SMTP connection failed");
             System.exit(1);
         }
     }
