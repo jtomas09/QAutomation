@@ -121,6 +121,23 @@ echo ""
 # ── PASO 4: Generar plist ────────────────────────────────────
 echo -e "${BOLD}[4/5] Generando LaunchAgent plist...${NC}"
 
+# ── Preservar SMTP_* de una instalacion previa ────────────────
+# Mas abajo el plist se sobrescribe por completo (cat > "$PLIST_PATH").
+# Sin este paso, cada reinstalacion/actualizacion del Runner borraria en
+# silencio cualquier EnvironmentVariables SMTP_* agregado manualmente.
+# Los valores solo viven en variables de shell en memoria — nunca se
+# imprimen ni se escriben en ningun log.
+PLISTBUDDY="/usr/libexec/PlistBuddy"
+SMTP_HOST_PREV=""; SMTP_PORT_PREV=""; SMTP_USER_PREV=""; SMTP_PASS_PREV=""; SMTP_FROM_PREV=""
+
+if [ -f "$PLIST_PATH" ] && [ -x "$PLISTBUDDY" ]; then
+    SMTP_HOST_PREV=$("$PLISTBUDDY" -c "Print :EnvironmentVariables:SMTP_HOST" "$PLIST_PATH" 2>/dev/null)
+    SMTP_PORT_PREV=$("$PLISTBUDDY" -c "Print :EnvironmentVariables:SMTP_PORT" "$PLIST_PATH" 2>/dev/null)
+    SMTP_USER_PREV=$("$PLISTBUDDY" -c "Print :EnvironmentVariables:SMTP_USER" "$PLIST_PATH" 2>/dev/null)
+    SMTP_PASS_PREV=$("$PLISTBUDDY" -c "Print :EnvironmentVariables:SMTP_PASS" "$PLIST_PATH" 2>/dev/null)
+    SMTP_FROM_PREV=$("$PLISTBUDDY" -c "Print :EnvironmentVariables:SMTP_FROM" "$PLIST_PATH" 2>/dev/null)
+fi
+
 # Detener agente anterior si existe
 if launchctl list | grep -q "$LABEL" 2>/dev/null; then
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
@@ -203,6 +220,23 @@ echo -e "${BOLD}[5/5] Cargando LaunchAgent...${NC}"
 
 # Fijar permisos
 chmod 644 "$PLIST_PATH"
+
+# ── Reinsertar SMTP_* preservadas (nunca se imprime el valor) ─
+if [ -n "$SMTP_HOST_PREV$SMTP_PORT_PREV$SMTP_USER_PREV$SMTP_PASS_PREV$SMTP_FROM_PREV" ] && [ -x "$PLISTBUDDY" ]; then
+    "$PLISTBUDDY" -c "Add :EnvironmentVariables dict" "$PLIST_PATH" >/dev/null 2>&1 || true
+    [ -n "$SMTP_HOST_PREV" ] && { "$PLISTBUDDY" -c "Add :EnvironmentVariables:SMTP_HOST string $SMTP_HOST_PREV" "$PLIST_PATH" >/dev/null 2>&1 || true; }
+    [ -n "$SMTP_PORT_PREV" ] && { "$PLISTBUDDY" -c "Add :EnvironmentVariables:SMTP_PORT string $SMTP_PORT_PREV" "$PLIST_PATH" >/dev/null 2>&1 || true; }
+    [ -n "$SMTP_USER_PREV" ] && { "$PLISTBUDDY" -c "Add :EnvironmentVariables:SMTP_USER string $SMTP_USER_PREV" "$PLIST_PATH" >/dev/null 2>&1 || true; }
+    [ -n "$SMTP_PASS_PREV" ] && { "$PLISTBUDDY" -c "Add :EnvironmentVariables:SMTP_PASS string $SMTP_PASS_PREV" "$PLIST_PATH" >/dev/null 2>&1 || true; }
+    [ -n "$SMTP_FROM_PREV" ] && { "$PLISTBUDDY" -c "Add :EnvironmentVariables:SMTP_FROM string $SMTP_FROM_PREV" "$PLIST_PATH" >/dev/null 2>&1 || true; }
+
+    echo "  Configuracion SMTP de instalacion previa:"
+    if [ -n "$SMTP_HOST_PREV" ]; then echo "    SMTP_HOST: PRESERVED"; else echo "    SMTP_HOST: MISSING"; fi
+    if [ -n "$SMTP_PORT_PREV" ]; then echo "    SMTP_PORT: PRESERVED"; else echo "    SMTP_PORT: MISSING"; fi
+    if [ -n "$SMTP_USER_PREV" ]; then echo "    SMTP_USER: PRESERVED"; else echo "    SMTP_USER: MISSING"; fi
+    if [ -n "$SMTP_PASS_PREV" ]; then echo "    SMTP_PASS: PRESERVED"; else echo "    SMTP_PASS: MISSING"; fi
+    if [ -n "$SMTP_FROM_PREV" ]; then echo "    SMTP_FROM: PRESERVED"; else echo "    SMTP_FROM: MISSING"; fi
+fi
 
 # Cargar el agente
 launchctl load -w "$PLIST_PATH" 2>/dev/null
