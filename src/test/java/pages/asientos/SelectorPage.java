@@ -3331,10 +3331,12 @@ public class SelectorPage extends BasePage {
     // "Continuar, 2" / "Continuar, 3" (verificado: A5→"Continuar, 1", A1→
     // "Continuar, 2", A2→"Continuar, 3"). Es el único indicador que de verdad
     // refleja el estado de la app, y no depende de qué asiento se tocó — sirve
-    // igual para 1, N o VIP. Solo iOS (única evidencia recolectada); en Android no
-    // se ha investigado este botón, así que no se asume el mismo formato.
+    // igual para 1, N o VIP.
     int contarAsientosSeleccionadosPorBotonContinuar() {
-        if (!isIOS()) return -1; // sin evidencia en Android — el llamador decide el fallback
+        return isIOS() ? contarPorBotonContinuarIOS() : contarPorBotonContinuarAndroid();
+    }
+
+    private int contarPorBotonContinuarIOS() {
         try {
             List<WebElement> candidatos = driver.findElements(AppiumBy.iOSNsPredicateString(
                     "type == 'XCUIElementTypeButton' AND (label BEGINSWITH 'Continuar' OR name BEGINSWITH 'Continuar')"));
@@ -3350,6 +3352,60 @@ public class SelectorPage extends BasePage {
             }
         } catch (Exception ignored) {}
         return 0; // botón "Continuar, N" no encontrado → 0 asientos seleccionados según la app
+    }
+
+    // FIX real (causa raíz de "0 confirmados, 0 taps exitosos" en "Selección de
+    // Múltiples Asientos" — evidencia capturada en vivo contra dispositivo Android real,
+    // build/seat-diagnostics/despues_primer_tap.xml, tras un tap real y exitoso en
+    // "Selección de Asientos Consecutivos"): a diferencia de iOS (un solo string
+    // "Continuar, N"), en Android el contador vive en un TextView HERMANO separado,
+    // dentro del mismo contenedor clickable que el TextView "Continuar" — estructura
+    // real observada:
+    //   <android.view.View clickable="true">
+    //     <android.widget.TextView text="Continuar" .../>
+    //     <android.view.View>
+    //       <android.widget.TextView text="1" .../>      ← el contador
+    //     </android.view.View>
+    //   </android.view.View>
+    // Ausente por completo (ningún nodo con text="Continuar") cuando no hay asientos
+    // seleccionados — mismo comportamiento ya documentado en iOS. Antes de esta
+    // evidencia el código devolvía -1 sin haberlo investigado nunca en Android.
+    // FIX real (evidencia en vivo — el primer intento de esta implementación navegaba
+    // "Continuar" → parent vía By.xpath("..") y lanzó NoSuchElementException de forma
+    // intermitente): CUALQUIER navegación de árbol (parent/child) sobre un WebElement ya
+    // devuelto por findElements() demostró ser poco confiable en este árbol Android — el
+    // mismo patrón de fondo ya identificado para reubicarAsientoPorNumero(). Se evita
+    // por completo: UNA sola consulta trae todos los TextView, y "Continuar" + su
+    // contador se correlacionan en Java por posición (misma fila, contador a la
+    // derecha) usando SOLO getText()/getRect() sobre cada handle de forma independiente
+    // — nunca una segunda consulta dirigida ni navegación de árbol.
+    private int contarPorBotonContinuarAndroid() {
+        try {
+            List<WebElement> textos = driver.findElements(By.xpath("//android.widget.TextView"));
+
+            org.openqa.selenium.Rectangle continuarBounds = null;
+            for (WebElement t : textos) {
+                try {
+                    if ("Continuar".equals(t.getText().trim())) {
+                        continuarBounds = t.getRect();
+                        break;
+                    }
+                } catch (Exception ignored) {}
+            }
+            if (continuarBounds == null) return 0; // sin "Continuar" en pantalla → 0 seleccionados
+
+            for (WebElement t : textos) {
+                try {
+                    String texto = t.getText().trim();
+                    if (!texto.matches("^\\d+$")) continue;
+                    org.openqa.selenium.Rectangle r = t.getRect();
+                    boolean mismaFila  = Math.abs(r.getY() - continuarBounds.getY()) < continuarBounds.getHeight();
+                    boolean aLaDerecha = r.getX() > continuarBounds.getX();
+                    if (mismaFila && aLaDerecha) return Integer.parseInt(texto);
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return 0; // "Continuar" presente pero sin contador legible → 0
     }
 
     private String predicadoAsientoPorNumero(int numero) {
