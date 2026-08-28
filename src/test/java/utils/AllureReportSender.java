@@ -529,6 +529,17 @@ public class AllureReportSender {
 
         String executorName = safe(EXECUTOR, "");
 
+        // Plataforma/dispositivo REAL de esta ejecución — -DplatformName/-DdeviceName ya
+        // los pasa JobExecutor por Job específico (JobExecutor.java addCommonDFlags()),
+        // derivados de job.platform/job.deviceName (Suite/Record Studio), NUNCA de una
+        // config global del Dashboard. Es el mismo valor que ya usa DriverFactory para
+        // crear el driver real y que PdfReportGenerator ya muestra en el footer del PDF
+        // — se reutiliza tal cual, no se inventa un mecanismo paralelo.
+        String[] platformLines = resolvePlatformAndDeviceLines(
+                System.getProperty("platformName", ""), System.getProperty("deviceName", ""));
+        String platformLine = platformLines[0];
+        String deviceLine   = platformLines[1];
+
         // ✅ HTML (solo estética; lógica intacta)
         String html =
                 "<html><body style='margin:0;padding:0;background:#0b0f14;font-family:Arial,Helvetica,sans-serif;color:#e6edf3;'>"
@@ -543,6 +554,8 @@ public class AllureReportSender {
                         + "    </div>"
 
                         + "    <div style='background:#111827;border:1px solid #22304a;border-radius:16px;padding:18px;margin-bottom:16px;'>"
+                        + "      <div style='font-size:15px;font-weight:700;color:#c9d1d9;margin-bottom:" + (deviceLine != null ? "2px" : "10px") + ";'>" + escapeHtml(platformLine) + "</div>"
+                        +      (deviceLine != null ? "      <div style='font-size:12.5px;color:#8b949e;margin-bottom:10px;'>" + escapeHtml(deviceLine) + "</div>" : "")
                         + "      <div style='font-size:14px;color:#c9d1d9;line-height:1.6;'>"
                         + "        <div><b>Proyecto:</b> " + escapeHtml(projectName) + "</div>"
                         + "        <div><b>Ejecutor:</b> " + escapeHtml(executorName) + "</div>"
@@ -944,6 +957,28 @@ public class AllureReportSender {
         if (v == null) return def;
         String t = v.trim();
         return t.isEmpty() ? def : t;
+    }
+
+    /**
+     * Resuelve las líneas "Pruebas ejecutadas en SO ..." / "Dispositivo: ..." a partir
+     * de -DplatformName/-DdeviceName (ya seteados por JobExecutor por Job específico —
+     * ver comentario en sendInternalAllureOnly). Nunca asume Android si platformName no
+     * llegó o no es un valor reconocido; en ese caso registra el WARNING explícito y usa
+     * el texto seguro "no determinado".
+     *
+     * @return arreglo {platformLine, deviceLine} — deviceLine es null si no hay device.
+     */
+    static String[] resolvePlatformAndDeviceLines(String platformNameProp, String deviceNameProp) {
+        String platformLine;
+        if ("iOS".equalsIgnoreCase(platformNameProp) || "Android".equalsIgnoreCase(platformNameProp)) {
+            platformLine = "Pruebas ejecutadas en SO " + ("iOS".equalsIgnoreCase(platformNameProp) ? "iOS" : "Android");
+        } else {
+            log.warn("[EMAIL] WARNING: Unable to determine execution platform from selected device");
+            platformLine = "Pruebas ejecutadas en SO no determinado";
+        }
+        String deviceLine = (deviceNameProp != null && !deviceNameProp.isBlank())
+                ? "Dispositivo: " + deviceNameProp.trim() : null;
+        return new String[]{platformLine, deviceLine};
     }
 
     // ======================================================
