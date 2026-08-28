@@ -92,7 +92,7 @@ public class TestSteps {
                         String.valueOf(aborted.getMessage()));
             } catch (Exception ignored) {}
 
-            steps.get().add(new StepResult(name, "SKIPPED", screenshotPath));
+            steps.get().add(new StepResult(name, "SKIPPED", screenshotPath, extractUsefulMessage(aborted)));
             TestFlowEventPublisher.stepSkipped(suite, test, name, aborted.getMessage());
             throw aborted;
 
@@ -171,5 +171,21 @@ public class TestSteps {
     private static String sanitize(String text) {
         if (text == null) return "";
         return FILENAME_UNSAFE_CHARS.matcher(text).replaceAll("_");
+    }
+
+    /**
+     * Recorre la cadena de causas de una excepción buscando el primer mensaje
+     * no vacío — Assumptions.abort() siempre trae el mensaje útil directamente,
+     * pero si algún día un skip llega envuelto en otra excepción sin mensaje
+     * propio, esto evita perder el motivo real que sí tiene la causa anidada.
+     */
+    private static String extractUsefulMessage(Throwable t) {
+        Throwable current = t;
+        while (current != null) {
+            String msg = current.getMessage();
+            if (msg != null && !msg.isBlank()) return msg;
+            current = current.getCause();
+        }
+        return null;
     }
 }

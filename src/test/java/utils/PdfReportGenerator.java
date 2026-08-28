@@ -76,10 +76,14 @@ public class PdfReportGenerator {
             int failed  = total - passed - skipped;
             boolean hasFailure = failed > 0;
 
-            String overallStatus = hasFailure ? "FALLADO"
-                    : (skipped > 0 && passed == 0) ? "OMITIDO" : "PASADO";
-            float[] stColor = hasFailure ? C_RED : (skipped > 0 && passed == 0) ? C_YELLOW : C_GREEN;
-            float[] stBg    = hasFailure ? C_RED_BG : (skipped > 0 && passed == 0) ? C_YEL_BG : C_GRN_BG;
+            boolean isSkippedOverall = skipped > 0 && passed == 0 && !hasFailure;
+            String overallStatus = hasFailure ? "FALLADO" : isSkippedOverall ? "OMITIDO" : "PASADO";
+            float[] stColor = hasFailure ? C_RED : isSkippedOverall ? C_YELLOW : C_GREEN;
+            float[] stBg    = hasFailure ? C_RED_BG : isSkippedOverall ? C_YEL_BG : C_GRN_BG;
+
+            // Motivo real del skip (si existe) — solo se usa cuando el caso completo
+            // quedó OMITIDO, nunca cuando un paso SKIP convive con otros pasos OK/FAIL.
+            String skipReason = isSkippedOverall ? findSkipReason(steps) : null;
 
             PDPage page1 = new PDPage(PDRectangle.A4);
             doc.addPage(page1);
@@ -138,6 +142,9 @@ public class PdfReportGenerator {
             if (hasFailure && y - 65f >= minBottom) {
                 y -= 10f;
                 drawErrorSection(cs, margin, y, tableW, steps);
+            } else if (skipReason != null && y - 78f >= minBottom) {
+                y -= 10f;
+                drawSkippedSection(cs, margin, y, tableW, skipReason);
             }
 
             // 8. Footer
@@ -661,6 +668,85 @@ public class PdfReportGenerator {
         cs.newLineAtOffset(x + 14f, yTop - 48f);
         cs.showText("Revisar la evidencia adjunta del paso fallido para mayor detalle.");
         cs.endText();
+
+        return yTop - secH;
+    }
+
+    /**
+     * Busca el motivo real del skip entre los pasos — Assumptions.abort() detiene
+     * la ejecucion en el acto, asi que solo puede existir un paso SKIPPED por caso.
+     * Retorna null si no hay un motivo real y limpio que mostrar (nunca se inventa
+     * texto generico: si no hay razon util, la seccion completa se omite en el PDF).
+     */
+    private static String findSkipReason(List<StepResult> steps) {
+        return steps.stream()
+                .filter(s -> "SKIPPED".equalsIgnoreCase(s.getStatus()))
+                .map(s -> cleanSkipReason(s.getReason()))
+                .filter(r -> r != null)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** Prefijos tecnicos ("SKIPPED:") o textos genericos que no aportan valor real. */
+    private static final java.util.Set<String> GENERIC_SKIP_TEXTS = java.util.Set.of(
+            "skipped", "no ejecutado", "sin informacion", "sin información");
+
+    private static String cleanSkipReason(String raw) {
+        if (raw == null) return null;
+        String cleaned = raw.trim();
+        if (cleaned.regionMatches(true, 0, "SKIPPED:", 0, 8)) {
+            cleaned = cleaned.substring(8).trim();
+        } else if (cleaned.regionMatches(true, 0, "SKIPPED", 0, 7)) {
+            cleaned = cleaned.substring(7).trim();
+        }
+        if (cleaned.isBlank() || GENERIC_SKIP_TEXTS.contains(cleaned.toLowerCase())) return null;
+        return cleaned;
+    }
+
+    /** Card amarilla con el motivo real de un caso OMITIDO — mismo estilo visual que drawErrorSection. */
+    private static float drawSkippedSection(PDPageContentStream cs,
+                                             float x, float yTop, float w,
+                                             String skipReason) throws IOException {
+        String full = "Prueba omitida: " + skipReason
+                + (skipReason.matches(".*[.!?]$") ? "" : ".");
+
+        String line1 = full;
+        String line2 = null;
+        final int maxLineLen = 95;
+        if (full.length() > maxLineLen) {
+            int splitAt = full.lastIndexOf(' ', maxLineLen);
+            if (splitAt <= 0) splitAt = maxLineLen;
+            line1 = full.substring(0, splitAt).trim();
+            line2 = truncate(full.substring(splitAt).trim(), maxLineLen);
+        }
+
+        final float secH = (line2 != null) ? 74f : 60f;
+        fillRect(cs, C_YEL_BG, x, yTop - secH, w, secH);
+        fillRect(cs, C_YELLOW, x, yTop - secH, 4f, secH);
+        strokeRect(cs, C_YELLOW, x, yTop - secH, w, secH);
+
+        cs.beginText();
+        setNonStrokingColor(cs, C_YELLOW);
+        cs.setFont(PDType1Font.HELVETICA_BOLD, 9f);
+        cs.newLineAtOffset(x + 14f, yTop - 15f);
+        cs.showText("PRUEBA OMITIDA");
+        cs.endText();
+
+        cs.beginText();
+        setNonStrokingColor(cs, C_TEXT_D);
+        cs.setFont(PDType1Font.HELVETICA, 8.5f);
+        cs.newLineAtOffset(x + 14f, yTop - 32f);
+        cs.showText(line1);
+        cs.endText();
+
+        if (line2 != null) {
+            cs.beginText();
+            setNonStrokingColor(cs, C_TEXT_D);
+            cs.setFont(PDType1Font.HELVETICA, 8.5f);
+            cs.newLineAtOffset(x + 14f, yTop - 46f);
+            cs.showText(line2);
+            cs.endText();
+        }
 
         return yTop - secH;
     }
