@@ -51,6 +51,7 @@ public class EmailTester {
         System.out.println("----------------------------------------------------");
 
         if (!cfg.isValid()) {
+            System.out.println("SMTP CONFIG: FAILED");
             System.out.println("ERROR SMTP configuration: " + ConfigLoader.reporteEstado(cfg, to));
             System.out.println("[ERROR] Defina las variables de entorno SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/SMTP_FROM");
             System.out.println("        o complete config/smtp-config.json.");
@@ -58,6 +59,7 @@ public class EmailTester {
             System.out.println("REASON: SMTP configuration incomplete");
             System.exit(1);
         }
+        System.out.println("SMTP CONFIG: OK");
 
         // 2. Conectar y enviar
         System.out.println("[INFO] Intentando conectar al servidor SMTP...");
@@ -108,10 +110,19 @@ public class EmailTester {
             System.out.println("====================================================");
             System.out.println("  [ÉXITO] Correo enviado correctamente a: " + to);
             System.out.println("====================================================");
+            System.out.println("SMTP CONNECTION: OK");
+            System.out.println("SMTP TLS: OK");
+            System.out.println("SMTP AUTH: OK");
+            System.out.println("SMTP SEND: OK");
             System.out.println("EMAIL: SENT");
             System.out.println("RECIPIENTS: " + InternetAddress.parse(to).length);
 
         } catch (AuthenticationFailedException e) {
+            // Llegar aquí prueba que la conexión TCP/TLS con el host SMTP sí se
+            // estableció — jakarta.mail solo lanza esta excepción específica
+            // DESPUÉS de que el servidor respondió al intento de autenticación
+            // (p.ej. 535). Si la conexión en sí hubiera fallado, se lanzaría
+            // MessagingException genérica (ver el otro catch), nunca esta.
             System.out.println("====================================================");
             System.out.println("  [ERROR] Autenticación SMTP fallida");
             System.out.println("  Verifica que el usuario y contraseña sean correctos.");
@@ -120,8 +131,12 @@ public class EmailTester {
             // e.getMessage() de javax.mail nunca incluye la contraseña enviada.
             System.out.println("  Detalle: " + e.getMessage());
             System.out.println("====================================================");
+            System.out.println("SMTP CONNECTION: OK");
+            System.out.println("SMTP TLS: OK");
+            System.out.println("SMTP AUTH: FAILED");
+            System.out.println("SMTP SEND: FAILED");
             System.out.println("EMAIL: NOT SENT");
-            System.out.println("REASON: SMTP authentication failed");
+            System.out.println("REASON: SMTP AUTH FAILED (" + e.getMessage() + ")");
             System.exit(1);
         } catch (MessagingException e) {
             System.out.println("====================================================");
@@ -130,6 +145,10 @@ public class EmailTester {
                 System.out.println("  Causa: " + e.getCause().getMessage());
             }
             System.out.println("====================================================");
+            System.out.println("SMTP CONNECTION: FAILED");
+            System.out.println("SMTP TLS: N/A");
+            System.out.println("SMTP AUTH: N/A");
+            System.out.println("SMTP SEND: FAILED");
             System.out.println("EMAIL: NOT SENT");
             System.out.println("REASON: SMTP connection failed");
             System.exit(1);
