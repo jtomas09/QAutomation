@@ -434,7 +434,8 @@ public final class WdaLifecycleOwner {
                             : "WDA inició (" + detectedUrl + ") pero /status no respondió en " + timeoutSeconds + "s.";
             client.sendLog(executionId, "ERROR",
                     "❌ [WDA] " + reason
-                    + (outcome.deviceLocked() ? "" : "\n" + WdaManager.diagnoseWdaFailure(udid, teamId)));
+                    + (outcome.deviceLocked() ? "" : "\n" + WdaManager.diagnoseWdaFailure(
+                            udid, teamId, outcome.noAccountsSigningIssue())));
             markTerminalError(udid, reason);
             return new Result(false, reason);
         }

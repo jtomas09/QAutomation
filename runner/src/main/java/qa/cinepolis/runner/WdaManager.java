@@ -473,15 +473,32 @@ public final class WdaManager {
         final java.util.concurrent.atomic.AtomicBoolean deviceLocked =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
 
+        /**
+         * True cuando xcodebuild reportó "No Accounts:" o "No profiles for" —
+         * confirmado con ejecución real: esto NO significa que la cuenta/Team no
+         * exista (nuestro Apple Developer Discovery ya la confirmó USABLE antes de
+         * llegar aquí, leyendo solo archivos locales: com.apple.dt.Xcode.plist +
+         * listado de certificados en Keychain). Significa que xcodebuild, al pedir
+         * un provisioning profile NUEVO para el bundle dinámico de WDA, necesita
+         * acceso a la sesión de autenticación de la cuenta protegida en Keychain —
+         * acceso que macOS niega en silencio a procesos sin aprobación interactiva
+         * previa (imposible en un LaunchAgent desatendido). Detección dedicada
+         * porque estas líneas NUNCA contienen "error:" — no las captura el
+         * mecanismo genérico de más abajo.
+         */
+        final java.util.concurrent.atomic.AtomicBoolean noAccountsSigningIssue =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+
         private BuildOutcome(boolean started) { this.started = started; }
 
         static BuildOutcome started()    { return new BuildOutcome(true); }
         static BuildOutcome notStarted() { return new BuildOutcome(false); }
 
-        String  capturedError()       { return capturedError.get(); }
-        boolean mismatchedIdentifier() { return mismatchedIdentifier.get(); }
-        boolean testFailed()           { return testFailed.get(); }
-        boolean deviceLocked()         { return deviceLocked.get(); }
+        String  capturedError()          { return capturedError.get(); }
+        boolean mismatchedIdentifier()   { return mismatchedIdentifier.get(); }
+        boolean testFailed()             { return testFailed.get(); }
+        boolean deviceLocked()           { return deviceLocked.get(); }
+        boolean noAccountsSigningIssue() { return noAccountsSigningIssue.get(); }
     }
 
     // ── Start attempt A: test-without-building ────────────────────────────────
@@ -538,6 +555,173 @@ public final class WdaManager {
 
     // ── Start attempt B: full xcodebuild test ─────────────────────────────────
 
+    private static final Pattern DEV_TEAM_LINE = Pattern.compile("DEVELOPMENT_TEAM = [^;]*;");
+    private static final Pattern BUNDLE_ID_LINE = Pattern.compile(
+            "PRODUCT_BUNDLE_IDENTIFIER = ([^;]*WebDriverAgentRunner[^;]*|io\\.qautomation\\.wda\\.[^;]*);");
+
+    /**
+     * CAUSA RAÍZ DE LA REGRESIÓN (confirmada leyendo el project.pbxproj real de
+     * este Mac, no supuesta): antes de que este método (WdaManager) se volviera
+     * el único compilador de WDA (ver comentario más abajo sobre el commit
+     * 0bdd825), Appium construía WDA por su cuenta y, como parte de su propio
+     * flujo interno, reescribía DEVELOPMENT_TEAM/PRODUCT_BUNDLE_IDENTIFIER
+     * DIRECTAMENTE dentro de WebDriverAgent.xcodeproj/project.pbxproj (así es
+     * como appium-webdriveragent siempre ha preparado el proyecto). Al
+     * centralizar la compilación aquí, esa reescritura nunca se replicó — el
+     * archivo quedó "congelado" con el ÚLTIMO valor que Appium escribió ahí en
+     * algún momento pasado (Team huérfano C32VD96Q84, de una cuenta ya no
+     * autenticada), confirmado en este Mac con:
+     *   grep DEVELOPMENT_TEAM WebDriverAgent.xcodeproj/project.pbxproj
+     *   → DEVELOPMENT_TEAM = C32VD96Q84;  (en el target REAL WebDriverAgentRunner)
+     * Pasar un Team DISTINTO solo por línea de comandos (DEVELOPMENT_TEAM=...)
+     * NO alcanza: Xcode encuentra un conflicto entre lo que dice el proyecto y
+     * lo que pide la línea de comandos, y con certificados válidos de AMBOS
+     * Teams presentes en Keychain (el huérfano y el actual), su resolución de
+     * firma automática colapsa por completo — reportando "No Accounts"/
+     * "No profiles for X" en vez de un error de conflicto de Team explícito.
+     * PRODUCT_BUNDLE_IDENTIFIER tenía el mismo problema: ya estaba "horneado"
+     * como literal ("io.qautomation.wda.0000811000", nuestro propio patrón —
+     * imposible que viniera de una instalación limpia de appium-webdriveragent)
+     * en vez de la variable $(UPDATEDWDABUNDLEID) que el flag de línea de
+     * comandos necesita para tener efecto — por eso ese flag dejó de servir
+     * para nada, y además quedaría fijo al UDID del último dispositivo usado,
+     * rompiendo el soporte multi-dispositivo.
+     *
+     * Corrección: replicar aquí, de forma idempotente (segura de correr en
+     * cada intento, incluso si npm reinstala una copia limpia del driver), lo
+     * que Appium hacía antes de 0bdd825 — sincronizar ambos valores con el
+     * Team/bundle REALES de este intento, ANTES de invocar xcodebuild. Solo
+     * toca los bloques cuyo PRODUCT_BUNDLE_IDENTIFIER ya referencia
+     * "WebDriverAgentRunner" o nuestro propio patrón "io.qautomation.wda." —
+     * nunca los targets propios de Facebook (IntegrationTests, variantes
+     * tvOS) que este proyecto jamás compila.
+     */
+    private static void syncProjectSigningTeam(BackendClient client, String executionId,
+                                                String projectPath, String teamId, String wdaBundleId) {
+        if (teamId == null || teamId.isBlank()) return;
+        try {
+            File pbxproj = new File(projectPath, "project.pbxproj");
+            if (!pbxproj.isFile()) return;
+
+            String content = new String(java.nio.file.Files.readAllBytes(pbxproj.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            String updated = content;
+            int teamHits = 0, bundleHits = 0;
+
+            Matcher teamMatcher = DEV_TEAM_LINE.matcher(updated);
+            StringBuilder sb1 = new StringBuilder();
+            while (teamMatcher.find()) {
+                teamHits++;
+                teamMatcher.appendReplacement(sb1,
+                        Matcher.quoteReplacement("DEVELOPMENT_TEAM = " + teamId + ";"));
+            }
+            teamMatcher.appendTail(sb1);
+            updated = sb1.toString();
+
+            if (wdaBundleId != null && !wdaBundleId.isBlank()) {
+                Matcher bundleMatcher = BUNDLE_ID_LINE.matcher(updated);
+                StringBuilder sb2 = new StringBuilder();
+                while (bundleMatcher.find()) {
+                    bundleHits++;
+                    bundleMatcher.appendReplacement(sb2,
+                            Matcher.quoteReplacement("PRODUCT_BUNDLE_IDENTIFIER = " + wdaBundleId + ";"));
+                }
+                bundleMatcher.appendTail(sb2);
+                updated = sb2.toString();
+            }
+
+            if (!updated.equals(content)) {
+                java.nio.file.Files.write(pbxproj.toPath(), updated.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String msg = "[iOS Signing] project.pbxproj sincronizado con el Team/bundle de este intento — "
+                        + "DEVELOPMENT_TEAM actualizado (" + teamHits + " bloque(s)), "
+                        + "PRODUCT_BUNDLE_IDENTIFIER actualizado (" + bundleHits + " bloque(s)).";
+                System.out.println(msg);
+                if (client != null && executionId != null) client.sendTechLog(executionId, msg);
+            }
+        } catch (Exception e) {
+            String msg = "[iOS Signing] No se pudo sincronizar project.pbxproj: " + e.getMessage();
+            System.out.println(msg);
+            if (client != null && executionId != null) client.sendLog(executionId, "WARN", msg);
+        }
+    }
+
+    /**
+     * Busca, sin decodificar el CMS completo, si ya existe un provisioning profile
+     * instalado que mencione el bundle .xctrunner — un .mobileprovision es una
+     * plist firmada (no cifrada), así que su texto plano (incluido el bundle ID)
+     * es legible directamente en el archivo. Solo lectura, nunca modifica nada.
+     * Retorna el nombre de archivo (UUID) si lo encuentra, o null si no existe
+     * todavía (caso normal en un dispositivo/bundle nuevo — xcodebuild lo genera).
+     */
+    private static String findMatchingProfileUuid(String wdaBundleId, String home) {
+        if (wdaBundleId == null || wdaBundleId.isBlank()) return null;
+        File profilesDir = new File(home, "Library/MobileDevice/Provisioning Profiles");
+        File[] files = profilesDir.isDirectory()
+                ? profilesDir.listFiles((d, n) -> n.endsWith(".mobileprovision")) : null;
+        if (files == null) return null;
+        String needle = wdaBundleId + ".xctrunner";
+        for (File f : files) {
+            try {
+                String raw = new String(java.nio.file.Files.readAllBytes(f.toPath()),
+                        java.nio.charset.StandardCharsets.ISO_8859_1);
+                if (raw.contains(needle)) {
+                    return f.getName().replace(".mobileprovision", "");
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    /**
+     * Diagnóstico seguro del contexto real bajo el que corre xcodebuild — nunca
+     * imprime secretos (password, tokens, private keys). Existe para poder
+     * comparar, con evidencia de log y sin reproducir el problema manualmente,
+     * el contexto del RunnerAgent (usuario/HOME/DEVELOPER_DIR/Xcode) contra el
+     * que usó Apple Developer Discovery al detectar la cuenta como USABLE.
+     */
+    private static void logWdaSigningContext(BackendClient client, String executionId,
+                                              String teamId, String wdaBundleId) {
+        String user = System.getProperty("user.name", "?");
+        String home = System.getProperty("user.home", "?");
+        String developerDir = System.getenv("DEVELOPER_DIR");
+        String xcodeVersion = XcodeValidator.validate().xcodeVersion;
+
+        File profilesDir = new File(home, "Library/MobileDevice/Provisioning Profiles");
+        String[] profiles = profilesDir.isDirectory() ? profilesDir.list() : null;
+        String provisioning = (profiles == null)
+                ? "directorio no existe (0 perfiles instalados)"
+                : profiles.length + " perfil(es) instalado(s) en " + profilesDir;
+
+        String msg = "[WDA-SIGNING]"
+                + "\n  user=" + user
+                + "\n  home=" + home
+                + "\n  developerDir=" + (developerDir == null || developerDir.isBlank()
+                        ? "(no seteado — usa el resuelto por xcode-select -p)" : developerDir)
+                + "\n  xcode=" + xcodeVersion
+                + "\n  team=" + (teamId == null || teamId.isBlank() ? "(ninguno)" : teamId)
+                + "\n  certificate=Apple Development"
+                + "\n  bundle=" + wdaBundleId
+                + "\n  provisioning=" + provisioning;
+
+        String profileUuid = findMatchingProfileUuid(wdaBundleId, home);
+        String iosSigningMsg = "[iOS Signing]"
+                + "\n  Team ID: " + (teamId == null || teamId.isBlank() ? "(ninguno)" : teamId)
+                + "\n  Certificate: Apple Development"
+                + "\n  Bundle ID: " + wdaBundleId
+                + "\n  Signing Style: Automatic"
+                + "\n  Provisioning Profile: " + (profileUuid != null ? "existente (se reutiliza)" : "se generará automáticamente")
+                + "\n  Profile UUID: " + (profileUuid != null ? profileUuid : "N/A (pendiente hasta que xcodebuild lo genere)");
+        System.out.println(iosSigningMsg);
+        if (client != null && executionId != null) {
+            client.sendTechLog(executionId, iosSigningMsg);
+        }
+
+        System.out.println(msg);
+        if (client != null && executionId != null) {
+            client.sendTechLog(executionId, msg);
+        }
+    }
+
     /**
      * Starts WDA via full xcodebuild test from the WebDriverAgent.xcodeproj.
      * Compila desde cero — funciona incluso sin DerivedData previo (primera vez
@@ -549,6 +733,8 @@ public final class WdaManager {
                                              String wdaBundleId, String projectPath) {
         client.sendLog(executionId, "INFO",
                 "   [WDA] Iniciando desde proyecto: " + projectPath);
+        syncProjectSigningTeam(client, executionId, projectPath, teamId, wdaBundleId);
+        logWdaSigningContext(client, executionId, teamId, wdaBundleId);
         try {
             List<String> cmd = new ArrayList<>();
             cmd.add("xcodebuild");
@@ -560,15 +746,20 @@ public final class WdaManager {
             if (!teamId.isBlank()) {
                 cmd.add("DEVELOPMENT_TEAM=" + teamId);
                 cmd.add("CODE_SIGN_IDENTITY=Apple Development");
-                // Sin estos dos flags, xcodebuild no autogenera un provisioning profile
-                // para un bundle ID nuevo (uno distinto por UDID, ver generateWdaBundleId())
-                // y falla con "Automatic signing is disabled and unable to generate a
-                // profile" / "No profiles for <bundleId>.xctrunner". Este es el ÚNICO
-                // compilador real de WDA desde 0bdd825 (Appium ya nunca construye WDA por
-                // su cuenta) — antes este mismo problema lo resolvía la capability
-                // allowProvisioningDeviceRegistration de Appium (DriverFactory), que quedó
-                // huérfana al retirar esa ruta. Se agrega aquí, en el único compilador que
-                // sobrevivió, con la misma condición (solo cuando hay teamId real).
+                // Estrategia A (Automatic Signing) completa y explícita, sin mezclar con
+                // Manual — sin CODE_SIGN_STYLE=Automatic explícito, Xcode puede seguir
+                // atado a lo que ya haya quedado grabado en el propio project.pbxproj
+                // (ver syncProjectSigningTeam(), que corrige la causa raíz real: el
+                // archivo tenía un Team viejo/huérfano hardcodeado ahí desde antes de
+                // 0bdd825). Sin estos flags, xcodebuild no autogenera un provisioning
+                // profile para un bundle ID nuevo (uno distinto por UDID, ver
+                // generateWdaBundleId()) y falla con "Automatic signing is disabled..."
+                // / "No profiles for <bundleId>.xctrunner". Este es el ÚNICO compilador
+                // real de WDA desde 0bdd825 (Appium ya nunca construye WDA por su
+                // cuenta) — antes este mismo problema lo resolvía la capability
+                // allowProvisioningDeviceRegistration de Appium (DriverFactory), que
+                // quedó huérfana al retirar esa ruta.
+                cmd.add("CODE_SIGN_STYLE=Automatic");
                 cmd.add("-allowProvisioningUpdates");
                 cmd.add("-allowProvisioningDeviceRegistration");
             }
@@ -628,10 +819,43 @@ public final class WdaManager {
      * Returns a multi-line actionable diagnostic when WDA fails to start.
      */
     public static String diagnoseWdaFailure(String udid, String teamId) {
+        return diagnoseWdaFailure(udid, teamId, false);
+    }
+
+    /**
+     * @param noAccountsSigningIssue true cuando xcodebuild reportó "No Accounts:"/
+     *                                "No profiles for" (ver BuildOutcome.noAccountsSigningIssue).
+     *                                NO es un problema de cuenta/Team faltante — nuestro Apple
+     *                                Developer Discovery ya la validó como USABLE antes de llegar
+     *                                aquí, leyendo solo archivos locales (Keychain + Xcode.plist).
+     *                                Es que xcodebuild necesita acceso a la sesión de autenticación
+     *                                de esa cuenta protegida en Keychain — acceso que macOS niega
+     *                                en silencio sin una aprobación interactiva previa, imposible
+     *                                en un LaunchAgent desatendido. El fix real es un permiso de
+     *                                Keychain, de una sola vez, NUNCA otra vez "agrega la cuenta
+     *                                a Xcode" (la cuenta ya está agregada y ya es USABLE).
+     */
+    public static String diagnoseWdaFailure(String udid, String teamId, boolean noAccountsSigningIssue) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n   ──────── Diagnóstico y solución ────────\n");
 
-        if (teamId == null || teamId.isBlank()) {
+        if (noAccountsSigningIssue) {
+            sb.append("   🔐 CAUSA RAÍZ: xcodebuild no puede acceder a la sesión de autenticación\n");
+            sb.append("      de la cuenta Apple Developer en Keychain — NO es que falte la cuenta.\n");
+            sb.append("      Team ").append(teamId != null ? teamId : "?")
+              .append(" ya fue detectado como USABLE por Apple Developer Discovery,\n");
+            sb.append("      pero esa detección solo lee archivos locales (Keychain + Xcode.plist).\n");
+            sb.append("      xcodebuild, al pedir un provisioning profile NUEVO, necesita acceso a un\n");
+            sb.append("      dato protegido de Keychain que macOS niega sin aprobación interactiva —\n");
+            sb.append("      imposible en un LaunchAgent desatendido.\n");
+            sb.append("   ✅ SOLUCIÓN (una sola vez, en tu propia Terminal — pide tu password de Mac,\n");
+            sb.append("      nunca la de tu Apple ID, y nunca se comparte con nadie):\n");
+            sb.append("      security set-key-partition-list -S apple-tool:,apple:,codesign: -s \\\n");
+            sb.append("        ~/Library/Keychains/login.keychain-db\n");
+            sb.append("      (te pedirá el password de tu cuenta de Mac; el permiso queda guardado\n");
+            sb.append("      en el Keychain de forma permanente — sobrevive reinicios y reinstalaciones\n");
+            sb.append("      del Runner porque no depende de ningún archivo de este proyecto)\n");
+        } else if (teamId == null || teamId.isBlank()) {
             sb.append("   ⚠️  Apple Developer Team ID no detectado.\n");
             sb.append("       → Abre Xcode → Settings → Accounts → agrega tu Apple ID.\n");
             sb.append("       → Acepta el certificado de desarrollo que Xcode descargue.\n");
@@ -679,6 +903,14 @@ public final class WdaManager {
     private static final Pattern DEVICE_LOCKED_PAT = Pattern.compile(
             "(?i)com\\.apple\\.dt\\.deviceprep|unlock .* to continue|the device is locked|"
             + "may need to be unlocked|timed out waiting for all destinations");
+
+    // "No Accounts: Add a new account in Accounts settings." / "No profiles for
+    // '<bundle>.xctrunner' were found." — xcodebuild no puede acceder a la sesión
+    // de autenticación protegida de la cuenta en Keychain (ver comentario en
+    // BuildOutcome.noAccountsSigningIssue). Ninguna de las dos líneas contiene
+    // "error:" — confirmado leyendo la salida real capturada de xcodebuild.
+    private static final Pattern NO_ACCOUNTS_PAT = Pattern.compile(
+            "(?i)no accounts:|no profiles for ");
 
     private static final long BUILD_LOG_FLUSH_MS    = 1_000L;
     private static final int  BUILD_LOG_FLUSH_CHARS = 6_000;
@@ -794,6 +1026,11 @@ public final class WdaManager {
                     // actual. WdaLifecycleOwner decide si reintenta tras desinstalarlo.
                     if (line.contains("MismatchedApplicationIdentifierEntitlement")) {
                         outcome.mismatchedIdentifier.set(true);
+                    }
+
+                    if (NO_ACCOUNTS_PAT.matcher(line).find()) {
+                        outcome.noAccountsSigningIssue.set(true);
+                        capturedError.set(line.trim());
                     }
 
                     // Dispositivo bloqueado/passcode requerido — confirmado con ejecución
