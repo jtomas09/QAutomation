@@ -728,11 +728,79 @@ public final class WdaManager {
      * en un dispositivo/Mac limpios). Más lento, pero es el único camino que NO
      * depende de que algo haya compilado WDA antes.
      */
+    // Ventana acotada para detectar la firma "No Accounts"/"No profiles for" antes
+    // de decidir si se reintenta — NUNCA se espera la vida completa del proceso
+    // (un "xcodebuild test" exitoso queda corriendo indefinidamente sirviendo WDA,
+    // nunca termina por sí solo). Esta firma aparece siempre en la fase de
+    // resolución de firma/provisioning, antes de compilar — muy al inicio del
+    // proceso — así que esta ventana no retrasa perceptiblemente un build exitoso:
+    // el build sigue avanzando en su propio hilo mientras este método solo
+    // observa, sin bloquear ni pausar el proceso real de xcodebuild.
+    private static final long RETRY_DETECTION_WINDOW_MS = 20_000L;
+    private static final long RETRY_DETECTION_POLL_MS   = 300L;
+
     static BuildOutcome tryStartFromProject(BackendClient client, String executionId,
                                              String udid, String teamId,
                                              String wdaBundleId, String projectPath) {
         client.sendLog(executionId, "INFO",
                 "   [WDA] Iniciando desde proyecto: " + projectPath);
+
+        client.sendTechLog(executionId, "[iOS Signing] Attempt 1");
+        BuildOutcome outcome = startXcodebuildAttempt(client, executionId, udid, teamId, wdaBundleId, projectPath);
+        if (outcome.started && waitForNoAccountsSignal(outcome)) {
+            client.sendLog(executionId, "WARN",
+                    "[WDA-SIGNING] Attempt 1 FAILED\n"
+                    + "[WDA-SIGNING] Reason: provisioning/account error\n"
+                    + "[WDA-SIGNING] Retrying xcodebuild once...");
+            if (wdaProcess != null && wdaProcess.isAlive()) {
+                wdaProcess.destroyForcibly();
+            }
+
+            client.sendTechLog(executionId, "[iOS Signing] Attempt 2");
+            BuildOutcome outcome2 = startXcodebuildAttempt(client, executionId, udid, teamId, wdaBundleId, projectPath);
+            if (outcome2.started && waitForNoAccountsSignal(outcome2)) {
+                client.sendLog(executionId, "WARN",
+                        "[WDA-SIGNING] Attempt 2 FAILED\n"
+                        + "[WDA-SIGNING] No further retry will be attempted.");
+            } else if (outcome2.started) {
+                client.sendTechLog(executionId, "[WDA-SIGNING] Attempt 2 SUCCEEDED");
+            }
+            return outcome2;
+        }
+        return outcome;
+    }
+
+    /**
+     * Espera acotada (nunca bloqueante indefinidamente) a que el hilo daemon de
+     * {@link #streamBuildOutput} marque {@code noAccountsSigningIssue}, o a que
+     * el proceso termine por cualquier otro motivo dentro de la ventana. Retorna
+     * false en cuanto ya no tiene sentido seguir esperando esa firma específica.
+     */
+    private static boolean waitForNoAccountsSignal(BuildOutcome outcome) {
+        long deadline = System.currentTimeMillis() + RETRY_DETECTION_WINDOW_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (outcome.noAccountsSigningIssue()) return true;
+            Process p = wdaProcess;
+            if (p != null && !p.isAlive()) break;
+            try {
+                Thread.sleep(RETRY_DETECTION_POLL_MS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return outcome.noAccountsSigningIssue();
+    }
+
+    /**
+     * Un único intento de compilar/lanzar WDA — exactamente la misma lógica que
+     * existía antes de agregar el retry (sin cambios de comportamiento), extraída
+     * a un método propio únicamente para poder invocarla dos veces (intento 1 e
+     * intento 2) sin duplicar la construcción del comando.
+     */
+    private static BuildOutcome startXcodebuildAttempt(BackendClient client, String executionId,
+                                                         String udid, String teamId,
+                                                         String wdaBundleId, String projectPath) {
         syncProjectSigningTeam(client, executionId, projectPath, teamId, wdaBundleId);
         logWdaSigningContext(client, executionId, teamId, wdaBundleId);
         try {
