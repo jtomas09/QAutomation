@@ -458,10 +458,21 @@ public class IosPreflightManager {
 
     // ── WDA bundle ID ─────────────────────────────────────────────────────────
 
+    /**
+     * Bundle ID ESTABLE para WDA (ya no por UDID) — causa raíz confirmada con
+     * evidencia real: con Apple Personal Team (Free Provisioning), cada bundle
+     * nuevo exige crear un App ID/profile desde cero vía xcodebuild
+     * -allowProvisioningUpdates, un paso documentado como poco confiable en
+     * cuentas Free (ver investigación real: "No Accounts"/"No profiles for" en
+     * un bundle nunca antes registrado). Un bundle estable solo necesita pasar
+     * por esa creación una vez; los dispositivos nuevos se agregan al MISMO
+     * perfil vía -allowProvisioningDeviceRegistration, y validateCachedWda()
+     * ya valida membresía por UDID contra ProvisionedDevices del perfil — el
+     * aislamiento por dispositivo nunca dependió de que el bundle fuera único.
+     * El parámetro udid se conserva sin usar para no tocar ningún caller.
+     */
     public static String generateWdaBundleId(String udid) {
-        String suffix = udid.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
-        if (suffix.length() > 10) suffix = suffix.substring(0, 10);
-        return "io.qautomation.wda." + suffix;
+        return "io.qautomation.wda";
     }
 
     // ── WDA cache ─────────────────────────────────────────────────────────────
