@@ -489,10 +489,53 @@ public final class WdaManager {
         final java.util.concurrent.atomic.AtomicBoolean noAccountsSigningIssue =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
 
+        /**
+         * TAREA 3.1 — true en cuanto capturedError contiene una causa ESPECÍFICA
+         * (no el resumen genérico "Testing cancelled because the build failed.").
+         * Ver {@link #captureError}: mientras esto sea true, ninguna línea
+         * genérica posterior puede sobrescribir capturedError.
+         */
+        final java.util.concurrent.atomic.AtomicBoolean specificErrorCaptured =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+
         private BuildOutcome(boolean started) { this.started = started; }
 
         static BuildOutcome started()    { return new BuildOutcome(true); }
         static BuildOutcome notStarted() { return new BuildOutcome(false); }
+
+        /**
+         * TAREA 3.1 — único punto de escritura de capturedError. Regla de
+         * preservación (evidencia real: RUN-1005/1006/1007 perdían "Invalid
+         * trust settings"/"No Accounts" porque cada línea del bloque
+         * "Testing failed:" sobrescribía incondicionalmente a la anterior,
+         * dejando como valor final el resumen genérico "Testing cancelled
+         * because the build failed."):
+         *
+         *   - specific=true  → si aún no había ninguna causa específica
+         *                      capturada, esta la reemplaza (incluso si ya
+         *                      había un valor genérico previo — evidencia
+         *                      TAREA 8.4/8.3: un mensaje genérico nunca debe
+         *                      ganarle a uno específico real). Una vez fijada
+         *                      la primera causa específica, ninguna línea
+         *                      posterior (específica o genérica) la reemplaza.
+         *   - specific=false → solo se usa como respaldo cuando todavía no
+         *                      existe ningún valor capturado en absoluto.
+         *
+         * No introduce clasificación de negocio (Trust/Signing/Provisioning) —
+         * eso queda para una tarea posterior; aquí solo se decide QUÉ TEXTO
+         * sobrevive, no QUÉ SIGNIFICA. Esta lógica no cambió en TAREA 8.4 — el
+         * defecto real de TAREA 8.3 estaba en qué valor de {@code specific} le
+         * pasaba el detector de "error:" en {@link #streamBuildOutput}, no aquí.
+         */
+        void captureError(String text, boolean specific) {
+            if (specific) {
+                if (specificErrorCaptured.compareAndSet(false, true)) {
+                    capturedError.set(text);
+                }
+            } else {
+                capturedError.compareAndSet(null, text);
+            }
+        }
 
         String  capturedError()          { return capturedError.get(); }
         boolean mismatchedIdentifier()   { return mismatchedIdentifier.get(); }
@@ -893,36 +936,45 @@ public final class WdaManager {
     /**
      * @param noAccountsSigningIssue true cuando xcodebuild reportó "No Accounts:"/
      *                                "No profiles for" (ver BuildOutcome.noAccountsSigningIssue).
-     *                                NO es un problema de cuenta/Team faltante — nuestro Apple
-     *                                Developer Discovery ya la validó como USABLE antes de llegar
-     *                                aquí, leyendo solo archivos locales (Keychain + Xcode.plist).
-     *                                Es que xcodebuild necesita acceso a la sesión de autenticación
-     *                                de esa cuenta protegida en Keychain — acceso que macOS niega
-     *                                en silencio sin una aprobación interactiva previa, imposible
-     *                                en un LaunchAgent desatendido. El fix real es un permiso de
-     *                                Keychain, de una sola vez, NUNCA otra vez "agrega la cuenta
-     *                                a Xcode" (la cuenta ya está agregada y ya es USABLE).
+     *                                CORRECCIÓN (2026-09-01): la hipótesis anterior de este método
+     *                                — permiso de Keychain / partition-list — quedó DESCARTADA con
+     *                                evidencia directa: `codesign -s "<identidad>"` firma un binario
+     *                                real sin ningún prompt ni error usando exactamente esta misma
+     *                                identidad, en la misma sesión de RunnerAgent, así que el acceso
+     *                                a la llave privada NUNCA estuvo bloqueado por ACL/partition-list.
+     *                                Causa real (evidencia: `~/Library/MobileDevice/Provisioning
+     *                                Profiles/` no existe — nunca se creó un perfil aquí, ni por CLI
+     *                                ni por Xcode): con Personal Team, `-allowProvisioningUpdates`
+     *                                necesita crear el perfil llamando en vivo al portal de Apple, lo
+     *                                cual requiere una sesión de cuenta de Xcode autenticada — sesión
+     *                                que es distinta del certificado/Team cacheados en Xcode.plist y
+     *                                que expira/se invalida con el tiempo. Sin esa sesión viva,
+     *                                xcodebuild responde "No Accounts" en vez de un error de red más
+     *                                claro. Ningún comando de Keychain soluciona esto — requiere volver
+     *                                a autenticar la cuenta desde la propia GUI de Xcode.
      */
     public static String diagnoseWdaFailure(String udid, String teamId, boolean noAccountsSigningIssue) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n   ──────── Diagnóstico y solución ────────\n");
 
         if (noAccountsSigningIssue) {
-            sb.append("   🔐 CAUSA RAÍZ: xcodebuild no puede acceder a la sesión de autenticación\n");
-            sb.append("      de la cuenta Apple Developer en Keychain — NO es que falte la cuenta.\n");
+            sb.append("   🔐 CAUSA RAÍZ: xcodebuild no puede completar la creación automática del\n");
+            sb.append("      provisioning profile porque la sesión de la cuenta Apple ID en Xcode\n");
+            sb.append("      no está activa/vigente — NO es un problema de Keychain ni de la llave\n");
+            sb.append("      privada (confirmado: codesign firma con este certificado sin errores).\n");
             sb.append("      Team ").append(teamId != null ? teamId : "?")
-              .append(" ya fue detectado como USABLE por Apple Developer Discovery,\n");
-            sb.append("      pero esa detección solo lee archivos locales (Keychain + Xcode.plist).\n");
-            sb.append("      xcodebuild, al pedir un provisioning profile NUEVO, necesita acceso a un\n");
-            sb.append("      dato protegido de Keychain que macOS niega sin aprobación interactiva —\n");
-            sb.append("      imposible en un LaunchAgent desatendido.\n");
-            sb.append("   ✅ SOLUCIÓN (una sola vez, en tu propia Terminal — pide tu password de Mac,\n");
-            sb.append("      nunca la de tu Apple ID, y nunca se comparte con nadie):\n");
-            sb.append("      security set-key-partition-list -S apple-tool:,apple:,codesign: -s \\\n");
-            sb.append("        ~/Library/Keychains/login.keychain-db\n");
-            sb.append("      (te pedirá el password de tu cuenta de Mac; el permiso queda guardado\n");
-            sb.append("      en el Keychain de forma permanente — sobrevive reinicios y reinstalaciones\n");
-            sb.append("      del Runner porque no depende de ningún archivo de este proyecto)\n");
+              .append(" está cacheado como USABLE en Xcode.plist,\n");
+            sb.append("      pero ese dato local no basta: crear el perfil de Personal Team exige una\n");
+            sb.append("      llamada en vivo al portal de Apple con la cuenta autenticada.\n");
+            sb.append("   ✅ SOLUCIÓN (manual, en el iPhone/Mac — no hay comando de Keychain que la\n");
+            sb.append("      reemplace):\n");
+            sb.append("      1. Abre Xcode → Settings (⌘,) → Accounts.\n");
+            sb.append("      2. Selecciona el Apple ID y vuelve a autenticarlo (puede pedir password\n");
+            sb.append("         o 2FA) hasta que el team ya no muestre ningún aviso de error.\n");
+            sb.append("      3. Con el iPhone conectado, deja que Xcode termine de sincronizar cuentas\n");
+            sb.append("         (unos segundos) y vuelve a Ejecutar desde el Dashboard.\n");
+            sb.append("      Esto es periódico (cuentas Personal Team expiran su sesión con el tiempo),\n");
+            sb.append("      no es un paso por cada ejecución.\n");
         } else if (teamId == null || teamId.isBlank()) {
             sb.append("   ⚠️  Apple Developer Team ID no detectado.\n");
             sb.append("       → Abre Xcode → Settings → Accounts → agrega tu Apple ID.\n");
@@ -980,6 +1032,31 @@ public final class WdaManager {
     private static final Pattern NO_ACCOUNTS_PAT = Pattern.compile(
             "(?i)no accounts:|no profiles for ");
 
+    // TAREA 3.1 — único cierre genérico del bloque "Testing failed:" confirmado con
+    // evidencia real: se buscó exhaustivamente en todo el log histórico del Runner
+    // (RUN-1001 en adelante) cada línea distinta vista dentro de ese bloque, para
+    // cualquier tipo de fallo (No Accounts, Invalid trust settings, No profiles for,
+    // Developer App Certificate not trusted, Timed out while enabling automation
+    // mode, remote process communication error) — "Testing cancelled because the
+    // build failed." es la ÚNICA línea de cierre genérica que aparece siempre al
+    // final, sin importar la causa real. No se agregan variantes sin evidencia.
+    private static final Pattern GENERIC_BUILD_SUMMARY_PAT = Pattern.compile(
+            "(?i)^testing cancelled because the build failed\\.?$");
+
+    // TAREA 8.4 — evidencia real (TAREA 8.3, ejecución E2E contra hardware físico):
+    // "ERROR: The operation couldn't be completed. (CoreDeviceCLISupport.DiagnoseError
+    // error 0.)" es un mensaje OPERATIVO de xcodebuild/devicectl al fallar la
+    // recolección de diagnósticos post-mortem — no aporta ninguna causa real del
+    // fallo de WDA. Apareció ANTES de la causa real ("Timed out while enabling
+    // automation mode.") y, al tratarse como específica sin serlo (ver detector de
+    // "error:" más abajo, antes de esta tarea), bloqueaba para siempre la causa real.
+    // Se identifica por "CoreDeviceCLISupport.DiagnoseError" — cadena única de esta
+    // línea, sin depender del carácter de apóstrofo (que xcodebuild a veces emite
+    // como comilla tipográfica y llega mal codificado). No se agregan variantes de
+    // CoreDevice sin evidencia real adicional.
+    private static final Pattern GENERIC_COREDEVICE_DIAGNOSTIC_PAT = Pattern.compile(
+            "(?i)coredevicecli.*diagnoseerror");
+
     private static final long BUILD_LOG_FLUSH_MS    = 1_000L;
     private static final int  BUILD_LOG_FLUSH_CHARS = 6_000;
 
@@ -998,7 +1075,6 @@ public final class WdaManager {
      */
     private static void streamBuildOutput(Process p, String prefix, BackendClient client,
                                            String executionId, BuildOutcome outcome) {
-        AtomicReference<String> capturedError = outcome.capturedError;
         Thread t = new Thread(() -> {
             StringBuilder batch = new StringBuilder();
             long lastFlush = System.currentTimeMillis();
@@ -1061,11 +1137,16 @@ public final class WdaManager {
                     // Bloque "Testing failed:" — precede a "** TEST FAILED **" y trae la
                     // razón real, legible, del propio xcodebuild (p.ej. "Failed to install
                     // the app on the device. (Underlying Error: ... rejecting upgrade.)").
-                    // Se captura de forma AUTORITATIVA (set, no compareAndSet): sustituye
-                    // cualquier línea "error:" genérica ya capturada, porque esta cadena
-                    // real de iOS demostró NO contener "error:" y por eso el detector
-                    // genérico podía quedarse con una línea de diagnóstico irrelevante
-                    // vista antes (falso positivo confirmado con ejecución real).
+                    //
+                    // TAREA 3.1 (corrección de preservación — evidencia real: RUN-1005/1006/1007
+                    // perdían "Invalid trust settings"/"No Accounts" porque cada línea de este
+                    // bloque sobrescribía incondicionalmente a la anterior, dejando como valor
+                    // final el resumen genérico "Testing cancelled because the build failed.").
+                    // Ahora cada línea pasa por BuildOutcome.captureError(texto, specific):
+                    // la única línea de cierre genérica confirmada (GENERIC_BUILD_SUMMARY_PAT)
+                    // solo se usa como respaldo si todavía no hay ninguna causa específica;
+                    // cualquier otra línea de este bloque se trata como específica y se
+                    // conserva la PRIMERA vista, sin que nada posterior la reemplace.
                     if (line.trim().equalsIgnoreCase("Testing failed:")) {
                         insideTestFailureBlock = true;
                         outcome.testFailed.set(true);
@@ -1074,18 +1155,26 @@ public final class WdaManager {
                         if (trimmed.isEmpty() || trimmed.startsWith("**")) {
                             insideTestFailureBlock = false;
                         } else {
-                            capturedError.set(trimmed);
+                            boolean generic = GENERIC_BUILD_SUMMARY_PAT.matcher(trimmed).matches();
+                            outcome.captureError(trimmed, !generic);
                         }
                     }
 
-                    // Captura la PRIMERA línea "error:" de ESTE intento — la causa raíz
-                    // real suele aparecer antes que los resúmenes genéricos que xcodebuild
-                    // imprime al final (p.ej. "xcodebuild: error: Failed to build workspace
-                    // ..."). Nunca se sobreescribe con contenido de otro proceso (appium.log).
-                    // El bloque "Testing failed:" de arriba puede sobreescribir esto después
-                    // — deliberado, ver comentario de esa rama.
+                    // Captura la línea "error:" de ESTE intento — la causa raíz real suele
+                    // aparecer antes que los resúmenes genéricos que xcodebuild imprime al
+                    // final (p.ej. "xcodebuild: error: Failed to build workspace ...").
+                    // Nunca se sobreescribe con contenido de otro proceso (appium.log).
+                    // TAREA 8.4: no toda línea con "error:" aporta una causa específica —
+                    // evidencia real (TAREA 8.3) mostró que el diagnóstico operativo genérico
+                    // de devicectl también contiene "ERROR:" y, tratado ciegamente como
+                    // específico, bloqueaba para siempre la causa real posterior. Se marca
+                    // specific=false únicamente para esa línea conocida
+                    // (GENERIC_COREDEVICE_DIAGNOSTIC_PAT); el resto de líneas "error:" se
+                    // sigue tratando como específica, igual que antes.
                     if (line.toLowerCase().contains("error:")) {
-                        capturedError.compareAndSet(null, line.trim());
+                        boolean genericOperationalError =
+                                GENERIC_COREDEVICE_DIAGNOSTIC_PAT.matcher(line).find();
+                        outcome.captureError(line.trim(), !genericOperationalError);
                     }
 
                     // Detección dedicada (no vía capturedError — esta línea real de iOS no
@@ -1098,7 +1187,7 @@ public final class WdaManager {
 
                     if (NO_ACCOUNTS_PAT.matcher(line).find()) {
                         outcome.noAccountsSigningIssue.set(true);
-                        capturedError.set(line.trim());
+                        outcome.captureError(line.trim(), true);
                     }
 
                     // Dispositivo bloqueado/passcode requerido — confirmado con ejecución

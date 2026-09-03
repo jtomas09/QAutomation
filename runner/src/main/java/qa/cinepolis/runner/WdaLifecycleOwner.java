@@ -4,8 +4,10 @@ import qa.cinepolis.runner.mirror.WdaEventBus;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -68,7 +70,21 @@ public final class WdaLifecycleOwner {
      * simplemente, las dos razones posibles por las que alguien pide (acquire) o dejar
      * de necesitar (release) una instancia ya administrada por esta clase.
      */
-    public enum Consumer { JOB_EXECUTION, MIRROR }
+    /**
+     * TAREA 8: se agrega {@code RECOVERY} — único cambio indispensable a esta clase
+     * para el vertical slice de IOSRecoveryManager. Motivo: sin un valor propio,
+     * IOSRecoveryManager habría tenido que registrarse como JOB_EXECUTION o MIRROR
+     * para poder llamar a IosPreflightManager.runPreflight(); al liberar esa
+     * referencia con release(JOB_EXECUTION, ...) inmediatamente después, habría
+     * corrido el riesgo real de liberar/derribar WDA de una ejecución real
+     * CONCURRENTE que también estuviera registrada como JOB_EXECUTION (Consumer es
+     * un enum, ACTIVE_CONSUMERS es un Set por UDID — dos llamadores del mismo valor
+     * no se distinguen entre sí). Un valor propio evita esa colisión sin cambiar
+     * ninguna lógica existente: la rama especial de release() (línea ~192) solo
+     * compara contra JOB_EXECUTION explícitamente, así que RECOVERY cae en el
+     * camino genérico ya existente ("si quedan otros consumidores, no derribar").
+     */
+    public enum Consumer { JOB_EXECUTION, MIRROR, RECOVERY }
 
     // UDID → consumidores que ACTUALMENTE necesitan que WDA siga vivo. Mientras este
     // conjunto no esté vacío, release() nunca destruye la instancia — sin importar
@@ -329,9 +345,70 @@ public final class WdaLifecycleOwner {
 
         try {
             return future.get();
-        } catch (Exception e) {
-            String reason = "Error esperando el intento de WDA en curso: " + e.getMessage();
+        } catch (InterruptedException e) {
+            // TAREA 15 — este hilo (productor o joiner, aquí son indistinguibles: ambos
+            // solo esperan en future.get(), runAttempt() corre siempre en BUILD_EXECUTOR)
+            // fue interrumpido ESPERANDO, no el intento de WDA en sí. runAttempt() puede
+            // seguir corriendo y terminar bien o mal por su cuenta — nada de eso se sabe
+            // aquí. NUNCA registrar esto como fallo terminal: sería un falso terminal
+            // error que ocultaría, ante IOSRunnerReadinessEngine, un intento que ni
+            // siquiera terminó.
+            //
+            // El flag de interrupción se restaura JUSTO ANTES del return, como última
+            // acción — evidencia real (depurado en esta misma tarea): restaurarlo ANTES
+            // de client.sendLog(...) hacía que esa llamada de red, al ejecutarse con el
+            // hilo ya marcado como interrumpido, consumiera el flag como efecto
+            // secundario de su propio manejo interno de E/S bloqueante — dejando
+            // isInterrupted()==false para quien llamó a acquire(), justo el
+            // comportamiento incorrecto que esta tarea busca evitar.
+            String reason = "Este consumidor fue interrumpido esperando el intento de WDA en curso "
+                    + "para " + udid + " — el intento en sí puede seguir en curso o haber terminado "
+                    + "por su cuenta; no se registra como fallo terminal de WDA.";
+            client.sendLog(executionId, "WARN", "⚠️ [WDA] " + reason);
+            Thread.currentThread().interrupt();
+            return new Result(false, reason);
+        } catch (CancellationException e) {
+            // Nada en este archivo llama future.cancel() hoy — se maneja de todas formas
+            // por completitud/defensa. Una cancelación es una acción administrativa
+            // externa, no un fallo real de WDA: mismo criterio que InterruptedException,
+            // nunca se persiste como terminal error.
+            String reason = "El intento de WDA en curso para " + udid + " fue cancelado — "
+                    + "no se registra como fallo terminal de WDA (no hay una causa real de fallo asociada).";
+            client.sendLog(executionId, "WARN", "⚠️ [WDA] " + reason);
+            return new Result(false, reason);
+        } catch (ExecutionException e) {
+            // Este es el caso real que TAREA 13 identificó: runAttempt() (el PRODUCTOR,
+            // corriendo en BUILD_EXECUTOR) lanzó una excepción no controlada ANTES de
+            // alcanzar cualquiera de sus propios puntos de markTerminalError() (líneas
+            // ~392, ~401, ~453 de este archivo — los tres únicos caminos de fallo de
+            // runAttempt(), y los tres SÍ llaman markTerminalError ya hoy). A diferencia
+            // de InterruptedException, esto sí significa que el intento real terminó —
+            // con una falla, no con éxito — así que su motivo merece quedar disponible
+            // para IOSRunnerReadinessEngine. Se persiste el MISMO causa real (e.getCause())
+            // para cualquier consumidor que la observe (productor o joiner, todos ven la
+            // misma excepción real del mismo intento) — nunca un texto sintetizado por
+            // "quién lo esperaba". Regla de no sobrescritura (ya establecida en TAREA 3.1,
+            // "first meaningful specific error wins"): si TERMINAL_ERRORS ya tiene un
+            // motivo (de este intento o de uno previo no reseteado), se conserva tal cual.
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            String reason = "El intento de WDA para " + udid + " terminó con una excepción no controlada: "
+                    + cause.getClass().getSimpleName()
+                    + (cause.getMessage() != null ? ": " + cause.getMessage() : "");
             client.sendLog(executionId, "ERROR", "❌ [WDA] " + reason);
+            if (!isTerminalError(udid)) {
+                markTerminalError(udid, reason);
+            }
+            return new Result(false, reason);
+        } catch (Exception e) {
+            // Red de seguridad para cualquier otra excepción no declarada por Future.get() —
+            // mismo criterio que ExecutionException: representa una falla real e inesperada
+            // de este intento (no una simple interrupción local), así que también se
+            // preserva, respetando la misma regla de no sobrescritura.
+            String reason = "Error inesperado esperando el intento de WDA en curso: " + e.getMessage();
+            client.sendLog(executionId, "ERROR", "❌ [WDA] " + reason);
+            if (!isTerminalError(udid)) {
+                markTerminalError(udid, reason);
+            }
             return new Result(false, reason);
         } finally {
             // Libera el slot SOLO si el Future guardado sigue siendo este (evita

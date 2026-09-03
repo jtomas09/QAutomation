@@ -505,6 +505,46 @@ public class RunnerAgent {
             selfHealing.start();
 
             List<Map<String, String>> initDevices = discoverAllDevices(config);
+
+            // ── TAREA 2 (auditoría iOS) — demostración, NO integración real todavía ──
+            // IOSRunnerReadinessEngine es una autoridad nueva e independiente: se ejecuta
+            // una sola vez al arranque (no en el heartbeat periódico, para no agregar
+            // costo repetido) únicamente para demostrar que puede consultar el estado
+            // real de un dispositivo iOS. No sustituye a DeviceReadinessEvaluator ni a
+            // IosPreflightManager — ninguno de los dos deja de usarse, y JobExecutor
+            // sigue exactamente igual. Envuelto en try/catch para que cualquier fallo
+            // de esta demostración nunca afecte el arranque del Runner.
+            if (config.iosSupported) {
+                for (Map<String, String> d : initDevices) {
+                    if (!"IOS".equals(d.get("platform"))) continue;
+                    String udid = d.get("udid");
+                    if (udid == null || udid.isBlank()) continue;
+                    try {
+                        IOSRunnerReadinessResult readiness =
+                                IOSRunnerReadinessEngine.evaluate(client, "readiness-startup-check", udid);
+                        System.out.println("[IOSRunnerReadinessEngine] " + readiness);
+
+                        // TAREA 3 — Shadow Comparison contra el veredicto que YA calculó
+                        // DeviceReadinessEvaluator dentro de discoverAllDevices()/IOSDeviceScanner.scan()
+                        // (campos "readyForExecution"/"notReadyReason" del propio Map d) — cero
+                        // cómputo nuevo, solo se reutiliza lo que discoverAllDevices ya obtuvo.
+                        // Nota: esta comparación es más limitada que la de IosPreflightManager,
+                        // porque DeviceReadinessEvaluator nunca considera el estado de WDA — ver
+                        // observación arquitectónica en el reporte de TAREA 3.
+                        boolean currentReady = "true".equals(d.get("readyForExecution"));
+                        String  currentReason = d.get("notReadyReason");
+                        String  currentNorm = IOSReadinessShadowComparator.normalizeReadyReason(
+                                currentReady, currentReason);
+                        IOSReadinessShadowComparison shadow =
+                                IOSReadinessShadowComparator.compare(readiness, currentNorm);
+                        IOSReadinessShadowComparator.logComparison(shadow, "DeviceReadinessEvaluator");
+                    } catch (Exception e) {
+                        System.err.println("[IOSRunnerReadinessEngine] evaluación falló (no afecta el arranque): "
+                                + e.getMessage());
+                    }
+                }
+            }
+
             deviceHealer = new DeviceSelfHealingManager(
                     platformTools, appiumMgr, client, config);
             deviceHealer.init(adbFunctional, appiumOk, initDevices.size());

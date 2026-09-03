@@ -742,6 +742,17 @@ public class JobExecutor {
                         WdaLifecycleOwner.release(WdaLifecycleOwner.Consumer.JOB_EXECUTION,
                                 client, job.executionId, receivedUdid));
                 try {
+                    // TAREA 14 — la shadow validation de solo lectura del Engine
+                    // (agregada aquí en TAREA 12) se retiró por ser redundante:
+                    // IosPreflightManager.runPreflight() YA ejecuta su propia
+                    // comparación shadow desde TAREA 3 (hilo daemon al final de
+                    // ese método) — confirmado en la auditoría de TAREA 13. Con
+                    // las dos copias activas, cada Job real disparaba DOS
+                    // evaluaciones independientes de IOSRunnerReadinessEngine en
+                    // instantes distintos, duplicando costo y logs sin ningún
+                    // beneficio adicional. La única ejecución shadow ahora vive
+                    // exclusivamente dentro de IosPreflightManager — sin cambios
+                    // en este método más allá de retirar el bloque agregado.
                     iosResult = IosPreflightManager.runPreflight(
                             client, job.executionId, receivedUdid, WdaLifecycleOwner.Consumer.JOB_EXECUTION);
                 } finally {

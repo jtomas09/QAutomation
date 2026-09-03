@@ -32,6 +32,14 @@ public class IosPreflightManager {
     static final String CACHE_DIR =
             System.getProperty("user.home") + "/.qautomation/wda";
 
+    /**
+     * TAREA 18 — límite del join() sobre el hilo del Shadow (ver runPreflight()).
+     * 20s da margen de sobra frente a los ~2-4s reales observados en esta sesión
+     * para una evaluación completa de IOSRunnerReadinessEngine, sin arriesgar
+     * bloquear un Job real indefinidamente si el Shadow fuera anómalamente lento.
+     */
+    private static final long SHADOW_JOIN_TIMEOUT_MS = 20_000L;
+
     // ── Result ────────────────────────────────────────────────────────────────
 
     public static class IosPreflightResult {
@@ -302,6 +310,39 @@ public class IosPreflightManager {
                 + "   WDA caché        : " + (wdaCached ? "precompilado ✅" : "compilará en primera sesión") + "\n"
                 + "   WDA activo       : " + (wdaReady  ? "sí ✅" : "❌ FALLÓ — " + wdaResult.reason));
 
+        // ── TAREA 3/18 — Shadow Comparison (instrumentada, join acotado) ─────────
+        // Compara el veredicto REAL que este método acaba de calcular (readyForExecution/
+        // notReadyReason, ya asignados arriba, sin recomputar nada) contra
+        // IOSRunnerReadinessEngine — la ÚNICA forma de obtener aquí el veredicto real del
+        // flujo de ejecución sin duplicar su lógica de negocio. Envuelto en try/catch:
+        // cualquier fallo aquí nunca puede afectar el resultado ya calculado ni la ejecución.
+        //
+        // TAREA 18 — evidencia real de TAREA 17 (Job RUN-1010): el hilo daemon original
+        // (sin join) nunca llegó a imprimir su resultado — el Runner se reinició pocos
+        // segundos después de que runPreflight() retornó, matando el hilo daemon a mitad
+        // de su propia evaluación (varias llamadas reales a xcrun/devicectl/xcodebuild,
+        // cada una con su propio timeout, ver IOSRunnerReadinessEngine/CoreDeviceTunnelManager/
+        // AppleDeveloperTeamManager). Un hilo daemon no sobrevive un reinicio del proceso,
+        // sin importar qué tan rápido sea — la única forma de garantizar que el diagnóstico
+        // se imprima es esperar (con límite) a que termine ANTES de retornar de este método,
+        // que es exactamente el punto que SÍ sabemos que el proceso alcanza a completar
+        // (JobExecutor ya espera este retorno). No se introduce ningún executor/scheduler
+        // nuevo — se sigue usando el mismo Thread, solo se le da la oportunidad de terminar
+        // con un join() acotado; si excede el límite, sigue como daemon en segundo plano
+        // (fire-and-forget, comportamiento original) en vez de bloquear el Job real.
+        final boolean finalReadyForExecution = readyForExecution;
+        final String  finalNotReadyReason    = notReadyReason;
+        Thread shadowThread = new Thread(
+                () -> runShadowComparison(client, executionId, udid, finalReadyForExecution, finalNotReadyReason),
+                "ios-readiness-shadow-" + executionId);
+        shadowThread.setDaemon(true);
+        shadowThread.start();
+        try {
+            shadowThread.join(SHADOW_JOIN_TIMEOUT_MS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+
         return new IosPreflightResult(
             teamId, iosVersion, wdaBundleId, wdaCached, wdaReady,
             tunnel.xctraceVisible,
@@ -314,6 +355,61 @@ public class IosPreflightManager {
             deviceUnlocked,
             stabilityLock.checkedAtMs
         );
+    }
+
+    /**
+     * TAREA 18 — log inequívoco del ciclo de vida del hilo del Shadow, asociado
+     * siempre a executionId+udid del Job real (nunca solo udid) para poder
+     * correlacionar con el mismo Job en el Dashboard/log. {@code detail} es
+     * opcional (null en los eventos de ciclo de vida puro).
+     */
+    private static void logShadowEvent(String event, String executionId, String udid, String detail) {
+        System.out.printf("[IOSReadinessShadow] IOS_READINESS_SHADOW %s executionId=%s udid=%s%s%n",
+                event, executionId, udid, detail != null ? " " + detail : "");
+    }
+
+    /**
+     * TAREA 18 — cuerpo real del Shadow, extraído de la lambda del hilo únicamente
+     * para poder invocarlo directamente desde tests (sin threading, sin depender de
+     * un runPreflight() completo contra hardware real) — misma lógica exacta que
+     * antes vivía inline, sin cambiar su comportamiento ni moverla a otra clase.
+     * Nunca lanza hacia el llamador (equivalente al try/catch/finally original) —
+     * ninguna excepción de esta comparación puede afectar al Job real.
+     */
+    static void runShadowComparison(BackendClient client, String executionId, String udid,
+                                     boolean readyForExecution, String notReadyReason) {
+        logShadowEvent("THREAD START", executionId, udid, null);
+        try {
+            logShadowEvent("EVALUATING", executionId, udid, null);
+            IOSRunnerReadinessResult engineResult = IOSRunnerReadinessEngine.evaluate(
+                    client, "shadow-" + executionId, udid);
+            String currentNorm = IOSReadinessShadowComparator.normalizeReadyReason(
+                    readyForExecution, notReadyReason);
+            IOSReadinessShadowComparison shadow =
+                    IOSReadinessShadowComparator.compare(engineResult, currentNorm);
+            System.out.printf(
+                    "[IOSReadinessShadow] IOS_READINESS_SHADOW RESULT executionId=%s udid=%s "
+                    + "engineStatus=%s engineStage=%s engineErrorCode=%s engineWdaErrorCode=%s "
+                    + "engineReason=%s legacyReadyForExecution=%s legacyNotReadyReason=%s "
+                    + "shadowMatch=%s%n",
+                    executionId, udid,
+                    engineResult != null ? engineResult.status : "null",
+                    engineResult != null ? engineResult.lastStageReached : "null",
+                    engineResult != null ? engineResult.errorCode : "null",
+                    engineResult != null ? engineResult.wdaErrorCode : "null",
+                    engineResult != null ? engineResult.reason : "null",
+                    readyForExecution, notReadyReason,
+                    shadow.verdictMatches);
+            IOSReadinessShadowComparator.logComparison(shadow, "IosPreflightManager");
+        } catch (Exception e) {
+            System.err.println("[IOSReadinessShadow] IOS_READINESS_SHADOW ERROR executionId=" + executionId
+                    + " udid=" + udid
+                    + " exceptionClass=" + e.getClass().getName()
+                    + " exceptionMessage=" + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            logShadowEvent("THREAD END", executionId, udid, null);
+        }
     }
 
     // ── 1. Xcode ──────────────────────────────────────────────────────────────
