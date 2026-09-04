@@ -75,13 +75,28 @@ public class IosPreflightManager {
          * warn when the gap exceeds 5 seconds (device may have auto-locked).
          */
         public final long    confirmedUnlockedAtMs;
+        /**
+         * TAREA 19 — diagnóstico estructurado de {@link IOSRunnerReadinessEngine},
+         * capturado del MISMO Shadow síncrono ya ejecutado por este método (TAREA
+         * 3/18) — nunca se dispara una segunda evaluación del Engine solo para
+         * poblar este campo. {@code null} únicamente si el Shadow no llegó a
+         * completar dentro de su propio límite ({@code SHADOW_JOIN_TIMEOUT_MS}) o
+         * si falló con una excepción (ver IOS_READINESS_SHADOW ERROR en el log).
+         * Puramente informativo — {@link #readyForExecution} sigue siendo la única
+         * autoridad productiva; ningún consumidor de este campo puede cancelar el
+         * Job a partir de él todavía.
+         */
+        public final IOSRunnerReadinessResult engineDiagnosis;
+        /** TAREA 19 — comparación ya calculada por el mismo Shadow; ver {@link #engineDiagnosis}. */
+        public final IOSReadinessShadowComparison shadowComparison;
 
         IosPreflightResult(String teamId, String iosVersion,
                            String wdaBundleId, boolean wdaCached, boolean wdaReady,
                            boolean xctraceConfirmed, String tunnelState,
                            String pairingState, String coreDeviceId,
                            String transportType, boolean readyForExecution, String notReadyReason,
-                           boolean deviceUnlocked, long confirmedUnlockedAtMs) {
+                           boolean deviceUnlocked, long confirmedUnlockedAtMs,
+                           IOSReadinessShadowComparison shadowComparison) {
             this.teamId                = teamId;
             this.iosVersion            = iosVersion;
             this.wdaBundleId           = wdaBundleId;
@@ -97,6 +112,8 @@ public class IosPreflightManager {
             this.notReadyReason        = notReadyReason;
             this.deviceUnlocked        = deviceUnlocked;
             this.confirmedUnlockedAtMs = confirmedUnlockedAtMs;
+            this.shadowComparison      = shadowComparison;
+            this.engineDiagnosis       = shadowComparison != null ? shadowComparison.engineResult : null;
         }
     }
 
@@ -332,8 +349,16 @@ public class IosPreflightManager {
         // (fire-and-forget, comportamiento original) en vez de bloquear el Job real.
         final boolean finalReadyForExecution = readyForExecution;
         final String  finalNotReadyReason    = notReadyReason;
+        // TAREA 19 — holder para capturar el resultado YA calculado por este mismo
+        // Shadow síncrono, y exponerlo en IosPreflightResult (diagnóstico integrado)
+        // sin disparar una segunda evaluación del Engine. Un AtomicReference basta
+        // aquí porque solo hay un hilo escritor (el propio shadowThread) y una
+        // lectura posterior al join() — no hace falta ningún executor/cola nuevo.
+        java.util.concurrent.atomic.AtomicReference<IOSReadinessShadowComparison> shadowResultHolder =
+                new java.util.concurrent.atomic.AtomicReference<>();
         Thread shadowThread = new Thread(
-                () -> runShadowComparison(client, executionId, udid, finalReadyForExecution, finalNotReadyReason),
+                () -> shadowResultHolder.set(
+                        runShadowComparison(client, executionId, udid, finalReadyForExecution, finalNotReadyReason)),
                 "ios-readiness-shadow-" + executionId);
         shadowThread.setDaemon(true);
         shadowThread.start();
@@ -353,7 +378,8 @@ public class IosPreflightManager {
             readyForExecution,
             notReadyReason,
             deviceUnlocked,
-            stabilityLock.checkedAtMs
+            stabilityLock.checkedAtMs,
+            shadowResultHolder.get()
         );
     }
 
@@ -376,8 +402,9 @@ public class IosPreflightManager {
      * Nunca lanza hacia el llamador (equivalente al try/catch/finally original) —
      * ninguna excepción de esta comparación puede afectar al Job real.
      */
-    static void runShadowComparison(BackendClient client, String executionId, String udid,
-                                     boolean readyForExecution, String notReadyReason) {
+    static IOSReadinessShadowComparison runShadowComparison(
+            BackendClient client, String executionId, String udid,
+            boolean readyForExecution, String notReadyReason) {
         logShadowEvent("THREAD START", executionId, udid, null);
         try {
             logShadowEvent("EVALUATING", executionId, udid, null);
@@ -401,12 +428,14 @@ public class IosPreflightManager {
                     readyForExecution, notReadyReason,
                     shadow.verdictMatches);
             IOSReadinessShadowComparator.logComparison(shadow, "IosPreflightManager");
+            return shadow;
         } catch (Exception e) {
             System.err.println("[IOSReadinessShadow] IOS_READINESS_SHADOW ERROR executionId=" + executionId
                     + " udid=" + udid
                     + " exceptionClass=" + e.getClass().getName()
                     + " exceptionMessage=" + e.getMessage());
             e.printStackTrace();
+            return null;
         } finally {
             logShadowEvent("THREAD END", executionId, udid, null);
         }

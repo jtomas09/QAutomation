@@ -43,6 +43,18 @@ public class JobExecutor {
     private static final Map<String, String> SUITE_MAP;
 
     /**
+     * TAREA 19 — apaga únicamente el log de diagnóstico estructurado del Engine
+     * (IOS_READINESS_DECISION). Reutiliza la misma convención de configuración
+     * ya usada en todo este archivo/Runner (system properties -D, ver
+     * BACKEND_URL/RUNNER_TOKEN/POLL_INTERVAL_MS) — no se crea ningún mecanismo
+     * de configuración nuevo. Por defecto ACTIVADO: es puramente informativo,
+     * no cambia readyForExecution/notReadyReason ni el comportamiento del Job
+     * en ningún caso, así que no hay razón para que el default sea "apagado".
+     */
+    private static final boolean IOS_ENGINE_DIAGNOSIS_ENABLED =
+            !"false".equalsIgnoreCase(System.getProperty("IOS_ENGINE_DIAGNOSIS_ENABLED"));
+
+    /**
      * Pool de todos los métodos-de-test de México disponibles para el Smoke.
      * Se construye una sola vez desde SUITE_MAP filtrando los filtros con
      * 4+ puntos y prefijo "tests.México." (selector a nivel de método).
@@ -755,6 +767,18 @@ public class JobExecutor {
                     // en este método más allá de retirar el bloque agregado.
                     iosResult = IosPreflightManager.runPreflight(
                             client, job.executionId, receivedUdid, WdaLifecycleOwner.Consumer.JOB_EXECUTION);
+
+                    // TAREA 19 — primera integración estructurada del Engine en el
+                    // flujo real del Job: SOLO lee campos ya calculados por el mismo
+                    // Shadow síncrono que IosPreflightManager ya ejecutó (TAREA 3/18/19)
+                    // — cero llamadas nuevas a IOSRunnerReadinessEngine.evaluate() ni a
+                    // IOSReadinessShadowComparator aquí, evitando un segundo Shadow.
+                    // Puramente informativo: la decisión de continuar/cancelar sigue
+                    // dependiendo EXCLUSIVAMENTE de iosResult.readyForExecution, más
+                    // abajo, sin cambios de ningún tipo en esta tarea.
+                    if (IOS_ENGINE_DIAGNOSIS_ENABLED) {
+                        logIosReadinessDecision(job.executionId, receivedUdid, iosResult);
+                    }
                 } finally {
                     execCtx.unregister(wdaToken);
                 }
@@ -2032,6 +2056,73 @@ public class JobExecutor {
     }
 
     // ── Pre-flight: XCUITest driver ────────────────────────────────────────────
+
+    /**
+     * TAREA 19 — log de diagnóstico estructurado, asociado siempre a este Job
+     * (executionId+udid), combinando el veredicto del Engine (ya calculado por
+     * el Shadow de {@code IosPreflightManager}, nunca recalculado aquí) con el
+     * veredicto real de la autoridad productiva ({@code iosResult.readyForExecution}).
+     *
+     * {@code authority=LEGACY} dice explícitamente que esta tarea NO transfiere
+     * ninguna autoridad — es solo el primer punto donde el Job real "conoce" el
+     * diagnóstico del Engine, preparando (sin activar todavía) una futura
+     * decisión controlada (TAREA 20+).
+     *
+     * {@code comparison} usa las etiquetas de caso A-F ya definidas para esta
+     * integración (MATCH/ENGINE_MORE_RESTRICTIVE/ENGINE_MORE_PERMISSIVE/etc.) —
+     * una clasificación nueva y mínima basada únicamente en dos booleans
+     * (¿Engine=READY?, ¿Legacy=ready?), distinta de la normalización de texto
+     * que ya hace IOSReadinessShadowComparator (no se duplica esa lógica, ni se
+     * modifica esa clase).
+     */
+    // Package-private (no "private") únicamente para poder probar la clasificación
+    // de casos A-F directamente desde tests, sin necesitar un execute() completo
+    // contra hardware real — mismo patrón ya usado en este proyecto para métodos
+    // de decisión pura (ver IOSRecoveryManager.mapAfterRecovery).
+    static void logIosReadinessDecision(String executionId, String udid,
+                                         IosPreflightManager.IosPreflightResult iosResult) {
+        IOSRunnerReadinessResult engine = iosResult.engineDiagnosis;
+        boolean legacyReady = iosResult.readyForExecution;
+        boolean engineReady = engine != null && engine.status == IOSRunnerReadinessResult.Status.READY;
+        IOSRunnerReadinessResult.Status engineStatus = engine != null ? engine.status : null;
+
+        // TAREA 19, sección 10 — casos A-F, en el orden exacto ahí definido.
+        String comparison;
+        if (engine == null) {
+            comparison = "UNKNOWN"; // Shadow no completó a tiempo o falló — ver IOS_READINESS_SHADOW ERROR
+        } else if (engineReady && legacyReady) {
+            comparison = "MATCH"; // Caso A
+        } else if (engineStatus == IOSRunnerReadinessResult.Status.NOT_READY && !legacyReady) {
+            comparison = "MATCH"; // Caso B — ambos de acuerdo en que no está listo
+        } else if (engineStatus == IOSRunnerReadinessResult.Status.NOT_READY && legacyReady) {
+            comparison = "ENGINE_MORE_RESTRICTIVE"; // Caso C — posible falso negativo del Engine
+        } else if (engineReady && !legacyReady) {
+            comparison = "ENGINE_MORE_PERMISSIVE"; // Caso D — posible falso positivo del Engine
+        } else if (engineStatus == IOSRunnerReadinessResult.Status.ACTION_REQUIRED && legacyReady) {
+            comparison = "ENGINE_ACTION_REQUIRED"; // Caso E — deliberadamente no bloqueante todavía
+        } else if (engineStatus == IOSRunnerReadinessResult.Status.ERROR && legacyReady) {
+            comparison = "ENGINE_ERROR"; // Caso F — deliberadamente no bloqueante todavía
+        } else {
+            // Combinaciones no cubiertas explícitamente por la sección 10 (p.ej.
+            // OFFLINE/RECOVERING, o ACTION_REQUIRED/ERROR con legacy también
+            // bloqueando) — se documentan como UNKNOWN en vez de forzar una
+            // etiqueta que no corresponde a ninguno de los 6 casos definidos.
+            comparison = "UNKNOWN";
+        }
+
+        System.out.printf(
+                "[JobExecutor] IOS_READINESS_DECISION executionId=%s udid=%s "
+                + "engineStatus=%s engineStage=%s engineErrorCode=%s engineWdaErrorCode=%s engineReason=%s "
+                + "legacyReadyForExecution=%s legacyNotReadyReason=%s comparison=%s authority=LEGACY%n",
+                executionId, udid,
+                engine != null ? engine.status : "null",
+                engine != null ? engine.lastStageReached : "null",
+                engine != null ? engine.errorCode : "null",
+                engine != null ? engine.wdaErrorCode : "null",
+                engine != null ? engine.reason : "null",
+                legacyReady, iosResult.notReadyReason,
+                comparison);
+    }
 
     private boolean checkIosXcuitestDriver(String executionId) {
         client.sendLog(executionId, "INFO", "Verificando drivers Appium");
