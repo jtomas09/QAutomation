@@ -396,6 +396,25 @@ public class DeviceStreamServer {
         private static final int    TARGET_FPS = 20;
         private static final long   FRAME_MS   = 1000L / TARGET_FPS; // 50 ms per frame
 
+        /**
+         * iOS/WDA ÚNICAMENTE — período de gracia real, medido desde que se abrió ESTA
+         * conexión de Mirror, antes de aceptar "WdaLaunchCoordinator.currentOwner()==null
+         * && !isBuildInFlight" como un "WDA nunca va a arrancar" definitivo. Evidencia
+         * real (2026-09-07): el hilo de fondo que WdaLifecycleOwner.requestForMirror()
+         * dispara necesita ejecutar pasos de preflight (Team ID, túnel CoreDevice,
+         * versión de iOS) antes de llegar a acquire() y marcar isBuildInFlight=true —
+         * eso no ocurrió todavía a los ~960ms que el código anterior toleraba (missCount
+         * > 12 × 80ms), cerrando el stream con framesSent=0 antes de que WDA empezara
+         * siquiera a compilarse. 8s da margen real frente a esos pasos de preflight
+         * (2-4s cada uno, según evidencia de esta misma sesión) sin bloquear
+         * indefinidamente si WDA de verdad no va a arrancar — una vez que
+         * isBuildInFlight(udid) se vuelve true (lo cual sí puede tardar minutos, el
+         * build real de xcodebuild), el resto del loop YA esperaba correctamente sin
+         * límite de tiempo — este período de gracia solo cubre la ventana ANTES de que
+         * esa bandera llegue a activarse.
+         */
+        private static final long WDA_MIRROR_GRACE_MS = 8_000L;
+
         @Override
         public void handle(HttpExchange ex) throws IOException {
             try {
@@ -436,13 +455,54 @@ public class DeviceStreamServer {
                 System.out.println("[MirrorStream][TEMP] Mirror connection accepted — udid=" + udid
                         + " | client: " + ex.getRemoteAddress());
 
+                long mirrorSessionStartMs = System.currentTimeMillis();
                 System.out.println("[MirrorProvider] Creando sesión — udid=" + udid);
                 DeviceMirrorProvider provider = resolveProvider(udid);
-                System.out.println("[MirrorProvider] Provider seleccionado — udid=" + udid
-                        + " provider=" + (provider != null ? provider.name() : "ninguno (plataforma no soportada)"));
                 boolean started = provider != null && provider.start(udid);
+                // FIX real (verificado en vivo — evidencia 2026-09-07): "WDA" solo puede
+                // leerse de provider.name() DESPUÉS de start(), nunca antes. provider es en
+                // realidad un FallbackChainProvider (ver FallbackChainProvider.java) que
+                // envuelve varios candidatos por plataforma — su name() devuelve el nombre
+                // GENÉRICO de la cadena (p.ej. "iOS-Chain") hasta que start(udid) decide cuál
+                // candidato ganó; recién entonces name() delega en winner.name() ("WDA").
+                // Comprobado calculando esto ANTES de start(): isIosMirrorSession daba
+                // siempre false y ningún log [MIRROR][IOS] llegaba a imprimirse, aunque la
+                // sesión real SÍ era WDA/iOS. "WDA" es, con evidencia real (CoreDevice
+                // requiere iOS 27+, no funcional hoy; AVFoundation/libimobiledevice no están
+                // cableados en la cadena real de iOS), el ÚNICO provider real usado por
+                // dispositivos iOS hoy — mismo criterio ya usado más abajo en este archivo
+                // (variable histórica "isWdaProvider"). Cero impacto en sesiones Android
+                // (provider "ADB"/"SCRCPY" — ninguno de estos logs nuevos se imprime ahí).
+                boolean isIosMirrorSession = provider != null && "WDA".equals(provider.name());
                 System.out.println("[MirrorProvider] " + (started ? "Provider iniciado" : "Provider NO pudo iniciar")
                         + " — udid=" + udid);
+                if (isIosMirrorSession) {
+                    System.out.println("[MIRROR][IOS] INIT udid=" + udid + " provider=" + provider.name());
+                    System.out.println("[MIRROR][IOS] START udid=" + udid + " started=" + started);
+                }
+
+                // iOS ÚNICAMENTE — fallo real confirmado en vivo (2026-09-07): cuando
+                // IOSMirrorProvider.start() ve WdaLifecycleOwner.isTerminalError(udid)==true
+                // (el último intento de CUALQUIER consumidor falló de forma terminal),
+                // devuelve false — pero antes de este corte el código de abajo abría el
+                // stream igual y giraba indefinidamente en "Timeout esperando frame": sin un
+                // ganador en FallbackChainProvider, provider.name() nunca resuelve a "WDA",
+                // así que la lógica de abandono (gateada por isWdaProvider más abajo) jamás
+                // se activaba. Evidencia real: missCount>57 sin cortar nunca, cero logs
+                // [MIRROR][IOS] (porque isIosMirrorSession también depende de ese mismo
+                // "WDA" que nunca se resuelve). Cortar aquí, temprano y explícito, en vez de
+                // dejar un stream HTTP 200 colgado para siempre — el usuario ya tiene un
+                // camino real de recuperación (POST /api/device-mirror/{udid}/retry →
+                // WdaLifecycleOwner.resetForRetry()). Gateado por IOSDeviceRegistry.isPresent
+                // (misma fuente que IOSMirrorProvider.isDeviceConnected()) — cero impacto en
+                // sesiones Android (provider "ADB"/"SCRCPY", isPresent() de este registro
+                // siempre false para esos UDIDs).
+                if (!started && IOSDeviceRegistry.isPresent(udid)) {
+                    System.out.println("[MIRROR][IOS][NO_SIGNAL] udid=" + udid
+                            + " reason=PROVIDER_START_FAILED (WDA en estado terminal — requiere Reintentar)");
+                    sendText(ex, 503, "WDA no disponible (estado terminal) — use el boton Reintentar");
+                    return;
+                }
 
                 System.out.println("[DeviceMirror] Stream opened: " + udid
                         + " | provider: " + (provider != null ? provider.name() : "none")
@@ -462,6 +522,14 @@ public class DeviceStreamServer {
                 // TEMP LOG (auditoría Mirror — remover tras validar Problema 1)
                 System.out.println("[MirrorStream][TEMP] MJPEG endpoint initialized — udid=" + udid);
 
+                if (isIosMirrorSession) {
+                    System.out.println("[MIRROR][IOS] CAPTURE_STARTED udid=" + udid);
+                    System.out.println("[MIRROR][IOS] STREAM_STARTED udid=" + udid
+                            + " streamPort=" + port);
+                    System.out.println("[MIRROR][IOS] CLIENT_CONNECTED udid=" + udid
+                            + " client=" + ex.getRemoteAddress());
+                }
+
                 MirrorService.registerStream(udid);
                 // Fase 6 — optimización de latencia: un único ImageWriter JPEG vive
                 // durante toda la conexión en vez de buscarse vía SPI en cada frame
@@ -469,7 +537,9 @@ public class DeviceStreamServer {
                 // registrados cada vez que se llama). No cambia el formato de salida,
                 // solo evita repetir esa búsqueda ~20 veces por segundo.
                 ImageWriter jpegWriter = createJpegWriter();
-                long[] framesSentHolder = {0}; // visible también en el finally, tras cerrar la conexión
+                long[] framesSentHolder     = {0}; // visible también en el finally, tras cerrar la conexión
+                long[] framesReceivedHolder = {0}; // ídem — total de capturas exitosas (antes de codificar/enviar)
+                long[] lastFrameAtMs        = {0}; // ídem — timestamp del último frame recibido (0 = ninguno)
                 try (OutputStream out = ex.getResponseBody()) {
                     if (jpegWriter == null) {
                         System.err.println("[DeviceMirror] No hay ImageWriter JPEG disponible en este JVM.");
@@ -512,7 +582,13 @@ public class DeviceStreamServer {
                             // al terminar una ejecución (WDA ya derribado, el Mirror del
                             // Dashboard seguía golpeando el puerto).
                             if (++missCount > 12) {
-                                if (deviceGone) break; // dispositivo realmente desconectado (~6s)
+                                if (deviceGone) {
+                                    if (isIosMirrorSession) {
+                                        System.out.println("[MIRROR][IOS][NO_SIGNAL] udid=" + udid
+                                                + " reason=DEVICE_DISCONNECTED framesSent=" + framesSentHolder[0]);
+                                    }
+                                    break; // dispositivo realmente desconectado (~6s)
+                                }
 
                                 System.out.println("[MirrorProvider] Timeout esperando frame — udid=" + udid
                                         + " provider=" + (provider != null ? provider.name() : "none")
@@ -532,11 +608,44 @@ public class DeviceStreamServer {
                                 // el siguiente hueco.
                                 boolean isWdaProvider = provider != null && "WDA".equals(provider.name());
                                 if (isWdaProvider) {
-                                    // Condición objetiva de "WDA no se recuperará dentro de esta
-                                    // sesión de stream" — sin cambios respecto al comportamiento
-                                    // original para este provider.
+                                    // FIX real (iOS — evidencia de log 2026-09-07, causa raíz
+                                    // confirmada del "Mirror sin señal"): IOSMirrorProvider.start()
+                                    // dispara WdaLifecycleOwner.requestForMirror(...) en un hilo de
+                                    // fondo asíncrono ("wda-mirror-request") — start() retorna de
+                                    // inmediato, pero ese hilo todavía necesita ejecutar varios pasos
+                                    // de preflight (Team ID, túnel, versión de iOS, etc.) ANTES de
+                                    // siquiera llegar a acquire() y marcar isBuildInFlight(udid)=true.
+                                    // Evidencia real: con missCount>12 alcanzado a solo ~960ms de
+                                    // abierta la conexión, ese hilo de fondo NUNCA había llegado a
+                                    // marcar isBuildInFlight=true todavía — la condición de "abajo"
+                                    // evaluaba currentOwner()==null && !isBuildInFlight como cierta
+                                    // (ambas legítimamente "no, todavía no" en vez de "no, nunca") y
+                                    // el stream se cerraba con framesSent=0 ANTES de que WDA
+                                    // empezara siquiera a compilarse (el build real tomó minutos).
+                                    // Corrección: dar un período de gracia real (tiempo transcurrido
+                                    // desde que se abrió ESTA conexión, no cantidad de misses) antes
+                                    // de aceptar esa condición como definitiva — tiempo suficiente
+                                    // para que el hilo de fondo alcance a registrar su propio estado
+                                    // real. Cero cambios en WdaLifecycleOwner/WdaManager — el fix
+                                    // vive enteramente en la paciencia del propio Mirror.
+                                    long elapsedSinceConnectionMs = System.currentTimeMillis() - mirrorSessionStartMs;
+                                    boolean withinGracePeriod = elapsedSinceConnectionMs < WDA_MIRROR_GRACE_MS;
                                     if (WdaLaunchCoordinator.currentOwner() == null
-                                            && !WdaLifecycleOwner.isBuildInFlight(udid)) break;
+                                            && !WdaLifecycleOwner.isBuildInFlight(udid)
+                                            && !withinGracePeriod) {
+                                        if (isIosMirrorSession) {
+                                            System.out.println("[MIRROR][IOS][NO_SIGNAL] udid=" + udid
+                                                    + " reason=WDA_NOT_STARTING elapsedMs=" + elapsedSinceConnectionMs
+                                                    + " framesSent=" + framesSentHolder[0]);
+                                        }
+                                        break;
+                                    }
+                                    if (isIosMirrorSession && withinGracePeriod) {
+                                        System.out.println("[MIRROR][IOS] esperando arranque de WDA en curso "
+                                                + "(periodo de gracia) — udid=" + udid
+                                                + " elapsedMs=" + elapsedSinceConnectionMs
+                                                + " graceMs=" + WDA_MIRROR_GRACE_MS);
+                                    }
                                 }
                                 // Para el resto de providers, la única condición real para seguir
                                 // esperando es "¿el dispositivo sigue conectado?" (ya evaluado en
@@ -551,10 +660,17 @@ public class DeviceStreamServer {
                         }
                         missCount = 0;
                         tempFrameCount++;
+                        framesReceivedHolder[0]++;
+                        lastFrameAtMs[0] = System.currentTimeMillis();
                         if (!loggedFirstFrame) {
                             System.out.println("[MirrorProvider] Primer frame recibido — udid=" + udid
                                     + " (" + png.length + " bytes PNG)");
                             System.out.println("[Mirror] PNG frame received size=" + png.length + " — udid=" + udid);
+                            if (isIosMirrorSession) {
+                                System.out.println("[MIRROR][IOS] FRAME_RECEIVED udid=" + udid
+                                        + " sizeBytes=" + png.length
+                                        + " elapsedSinceInitMs=" + (System.currentTimeMillis() - mirrorSessionStartMs));
+                            }
                         }
                         if (tempFrameCount <= 3) {
                             System.out.println("[MirrorStream][TEMP] Frame #" + tempFrameCount
@@ -591,6 +707,11 @@ public class DeviceStreamServer {
                             loggedFirstFrame = true;
                             System.out.println("[MirrorProvider] Primer JPEG enviado — udid=" + udid);
                             System.out.println("[Mirror HTTP] First JPEG sent size=" + jpeg.length + " — udid=" + udid);
+                            if (isIosMirrorSession) {
+                                System.out.println("[MIRROR][IOS] FRAME_SENT udid=" + udid
+                                        + " sizeBytes=" + jpeg.length
+                                        + " elapsedSinceInitMs=" + (System.currentTimeMillis() - mirrorSessionStartMs));
+                            }
                         }
                         if (framesSentHolder[0] % 100 == 0) {
                             System.out.println("[Mirror HTTP] Frames sent=" + framesSentHolder[0] + " — udid=" + udid);
@@ -618,6 +739,26 @@ public class DeviceStreamServer {
                     System.out.println("[Mirror HTTP] Frames sent (total)=" + framesSentHolder[0] + " — udid=" + udid);
                     System.out.println("[MirrorProvider] Provider detenido — udid=" + udid);
                     System.out.println("[DeviceMirror] Stream closed: " + udid);
+                    if (isIosMirrorSession) {
+                        long lastFrameAgeMs = lastFrameAtMs[0] == 0
+                                ? -1 // nunca se recibió ningún frame en esta sesión
+                                : System.currentTimeMillis() - lastFrameAtMs[0];
+                        // Métricas agregadas (requisito: nunca un log por frame) — responde,
+                        // de una sola línea greppable, "¿el iPhone generó video?" (framesReceived)
+                        // y "¿el Runner lo reenvió?" (framesSent) para esta sesión completa.
+                        System.out.println("[MIRROR][IOS] SUMMARY udid=" + udid
+                                + " framesReceived=" + framesReceivedHolder[0]
+                                + " framesSent=" + framesSentHolder[0]
+                                + " lastFrameAgeMs=" + lastFrameAgeMs
+                                + " clients=1"
+                                + " streamPort=" + port
+                                + " durationMs=" + (System.currentTimeMillis() - mirrorSessionStartMs));
+                        if (framesSentHolder[0] == 0) {
+                            System.out.println("[MIRROR][IOS][NO_SIGNAL] udid=" + udid
+                                    + " reason=NO_FRAMES_SENT_THIS_SESSION durationMs="
+                                    + (System.currentTimeMillis() - mirrorSessionStartMs));
+                        }
+                    }
                 }
             } catch (Exception e) {
                 System.err.println("[DeviceMirror] Handler error: " + e.getMessage());

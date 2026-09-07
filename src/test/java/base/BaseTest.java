@@ -164,6 +164,30 @@ public class BaseTest {
             DriverFactory.terminateApp(driver, appPackage);
             DriverFactory.activateApp(driver, appPackage);
 
+            // iOS ÚNICAMENTE — causa raíz real confirmada con evidencia de log (2026-09-07):
+            // CinemasHelper cachea "Club Cinépolis ya cerrado"/"sin promos" a nivel de TODA
+            // la suite (iosClubClosedThisRun/iosNoPromosThisRun, reseteados hoy solo una vez
+            // en BaseTest.beforeAllSuite()). Pero terminateApp()+activateApp() de arriba
+            // siempre produce un cold start, y el modal de Club Cinépolis reaparece en CADA
+            // cold start — por lo que a partir del segundo test del run, PromosGuard se salta
+            // el chequeo de Club (cree que ya está cerrado) y los 5 passes de MainNav se
+            // agotan sin nunca ver la pantalla principal, dejando la app atascada en el login
+            // de Club para el resto de la suite (evidencia real: ClubGuard=0ms, "MainNav NUNCA
+            // detectado", y obtenerPeliculasVisibles() descartando 107/107 candidatos como "no
+            // visible" porque están tapados por ese modal). El reset debe ocurrir exactamente
+            // aquí — el único punto real que garantiza un cold start — no en cada @BeforeEach/
+            // @AfterEach (eso anularía la optimización de rendimiento del caché para el caso
+            // normal donde la app NO se relanza). DriverFactory.isIOS() gatea explícitamente
+            // esta llamada; además, CinemasHelper.resetRunCache() solo toca banderas
+            // exclusivas de iOS (Android nunca las lee ni las escribe — ver
+            // CinemasHelper.java, clubAlreadyDismissed = isIOS() && iosClubClosedThisRun),
+            // así que esto no puede alterar el comportamiento de Android aunque se llamara
+            // sin la guarda — se deja explícita de todas formas para que la intención quede
+            // clara y aislada a iOS.
+            if (DriverFactory.isIOS()) {
+                pages.common.CinemasHelper.resetRunCache();
+            }
+
             try { Thread.sleep(300); } catch (InterruptedException ignored) {}
         } catch (Exception ignored) {}
     }

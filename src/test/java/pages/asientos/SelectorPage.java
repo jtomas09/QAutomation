@@ -210,7 +210,25 @@ public class SelectorPage extends BasePage {
         utils.PerfMetrics.startPhase("MovieOpen");
         try {
             int intento = 0;
+            // PERF/iOS (requisitos 9-11): límite razonable de TIEMPO (no de cantidad) para
+            // todo el ciclo de MovieOpen — evidencia real: un candidato inválido no
+            // filtrado (diálogo nativo de Apple ID) costaba ~28s cada uno; en el peor caso
+            // (candidato desconocido, no cubierto por esTextoNoPelicula) el ciclo podía
+            // recorrer decenas de candidatos sin límite. Un límite de TIEMPO, no de
+            // cantidad de candidatos, no penaliza el caso normal (la película real suele
+            // abrir en el intento 1, que siempre se ejecuta sin importar este presupuesto)
+            // y solo corta el ciclo cuando ya se gastó tiempo suficiente como para
+            // considerar que ningún candidato restante va a funcionar mejor que los ya
+            // probados.
+            long presupuestoMovieOpenMs = isIOS() ? 90_000L : Long.MAX_VALUE;
+            long inicioMovieOpen = System.currentTimeMillis();
             for (String nombre : nombresPeliculas) {
+                if (System.currentTimeMillis() - inicioMovieOpen > presupuestoMovieOpenMs) {
+                    log.warn("[SelectorPage] MovieOpen: presupuesto de {}ms agotado tras {} intentos — "
+                            + "deteniendo el ciclo en vez de seguir probando candidatos restantes.",
+                            presupuestoMovieOpenMs, intento);
+                    break;
+                }
                 intento++;
 
                 // FIX real (Problemas 3/4/5 — fail-fast): segunda capa de defensa, además
@@ -1274,7 +1292,22 @@ public class SelectorPage extends BasePage {
      * cartelera) — nunca se duplica esta espera en más de un lugar.
      */
     private List<WebElement> esperarPeliculasVisibles(long timeoutMs) {
-        List<WebElement> peliculas = obtenerPeliculasVisibles();
+        // PERF (iOS — evidencia real 2026-09-07): cada intento de poll de abajo llamaba
+        // obtenerPeliculasVisibles() con su volcado forense EXTENDIDO siempre activo
+        // (hasta 30 elementos × 4 getAttribute() = hasta 120 roundtrips HTTP a WDA,
+        // ~1.7-8.5s cada uno según el log real) — el presupuesto timeoutMs quedaba
+        // agotado por una sola llamada fallida, convirtiendo un "poll de 5s" en 2-3
+        // llamadas consecutivas de 90-140s cada una (MovieDetection real: 281-493s).
+        // Los intentos de POLL ahora usan el diagnóstico barato (diagnosticoCompleto=
+        // false — sigue logueando candidatosCrudos/evaluados y el detalle "DESCARTADO"
+        // por elemento, ya calculado sin costo extra; solo se omite el volcado de
+        // atributos type/name/label/value que exige llamadas HTTP adicionales). El
+        // volcado caro y completo se reserva para UNA sola vez, al final, solo si tras
+        // agotar el presupuesto real de timeoutMs realmente no hay películas — que es
+        // exactamente cuando ese detalle hace falta para diagnosticar (requisito: no
+        // recorrer cientos de elementos innecesariamente, pero sí poder diagnosticar
+        // un fallo real).
+        List<WebElement> peliculas = obtenerPeliculasVisibles(false);
         if (!peliculas.isEmpty()) return peliculas;
 
         try {
@@ -1282,10 +1315,17 @@ public class SelectorPage extends BasePage {
         } catch (Exception ignored) {}
 
         long end = System.currentTimeMillis() + timeoutMs;
-        peliculas = obtenerPeliculasVisibles();
+        peliculas = obtenerPeliculasVisibles(false);
         while (peliculas.isEmpty() && System.currentTimeMillis() < end) {
             sleep(400);
-            peliculas = obtenerPeliculasVisibles();
+            peliculas = obtenerPeliculasVisibles(false);
+        }
+        if (peliculas.isEmpty()) {
+            // Último intento, ahora sí con el volcado forense completo — se acepta el
+            // costo una única vez porque el flujo ya va a fallar de todas formas y este
+            // es el diagnóstico que permite saber POR QUÉ (requisito 8: registrar motivo
+            // exacto del descarte).
+            peliculas = obtenerPeliculasVisibles(true);
         }
         return peliculas;
     }
@@ -1298,7 +1338,20 @@ public class SelectorPage extends BasePage {
     // PlatformLocator.byExactText(). El filtro de "no vacío tras trim" (normalize-space)
     // no se replica en el predicate: el bucle de abajo ya descarta texto.isBlank()
     // inmediatamente después (obtenerTextoSeguro), mismo resultado final.
-    private List<WebElement> obtenerPeliculasVisibles() {
+    /**
+     * @param diagnosticoCompleto si es {@code false} (usado por los polls intermedios
+     *                            de {@link #esperarPeliculasVisibles(long)}), se omite
+     *                            el volcado extendido de atributos (type/name/label/
+     *                            value) de hasta 30 elementos — esa parte es la que
+     *                            hace decenas de llamadas HTTP adicionales a WDA y
+     *                            convertía cada intento fallido en 90-140s reales (ver
+     *                            comentario de esperarPeliculasVisibles()). El resto del
+     *                            diagnóstico (candidatosCrudos/evaluados + el motivo
+     *                            "DESCARTADO"/"ACEPTADO" por elemento) siempre se loguea
+     *                            igual, sin costo adicional, porque ya se calcula como
+     *                            parte del propio filtro.
+     */
+    private List<WebElement> obtenerPeliculasVisibles(boolean diagnosticoCompleto) {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
@@ -1398,7 +1451,7 @@ public class SelectorPage extends BasePage {
             // acotado a los primeros 30 candidatos crudos (mismo criterio de "no volcar
             // todo el árbol" que ya usa IOSLocatorDebug) para no sumar demasiada latencia
             // extra a un camino que ya está fallando.
-            if (isIOS() && primerLoteCrudo != null) {
+            if (diagnosticoCompleto && isIOS() && primerLoteCrudo != null) {
                 int limite = Math.min(30, primerLoteCrudo.size());
                 for (int i = 0; i < limite; i++) {
                     WebElement el = primerLoteCrudo.get(i);
@@ -2512,8 +2565,18 @@ public class SelectorPage extends BasePage {
                     + "': la cartelera no muestra películas — contexto incorrecto para buscar 'Filtros'.");
         }
 
-        By btnFiltros = By.xpath("//*[contains(@text,'Filtros') or contains(@content-desc,'Filtros')]");
-        By btnAplicar = By.xpath("//*[contains(@text,'Aplicar')]");
+        // iOS ÚNICAMENTE — mismo problema y misma solución que en
+        // seleccionarFiltroSalaJunior() (ver su comentario): @text/@content-desc no
+        // existen en XCUITest. btnFiltros conserva el XPath Android EXACTO original
+        // (incluida la rama OR de content-desc, por eso se usa PlatformLocator.of(...)
+        // en vez de byTextContains(), cuyo lado Android no incluye esa rama). btnAplicar
+        // sí coincide exactamente con byTextContains("Aplicar") — se reutiliza tal cual.
+        By btnFiltros = pages.common.PlatformLocator.of(
+                By.xpath("//*[contains(@text,'Filtros') or contains(@content-desc,'Filtros')]"),
+                io.appium.java_client.AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'Filtros' OR name CONTAINS 'Filtros' OR value CONTAINS 'Filtros'")
+        ).resolve(isIOS());
+        By btnAplicar = pages.common.PlatformLocator.byTextContains("Aplicar").resolve(isIOS());
 
         try {
             log.info("[SelectorPage] Abriendo panel de filtros para seleccionar '{}'...", textoFiltro);
@@ -2553,15 +2616,24 @@ public class SelectorPage extends BasePage {
     }
 
     private WebElement encontrarElementoFiltro(String textoFiltro) {
-        String[][] xpaths = {
-            { "//*[@text='" + textoFiltro + "']" },
-            { "//android.widget.TextView[@text='" + textoFiltro + "']" },
-            { "//*[contains(@text,'" + textoFiltro + "')]" },
-            { "//*[contains(@content-desc,'" + textoFiltro + "')]" }
-        };
-        for (String[] xp : xpaths) {
+        // iOS ÚNICAMENTE — Android conserva EXACTAMENTE su lista de XPaths original,
+        // sin ningún cambio. Los 4 XPaths de abajo son @text/@content-desc, atributos
+        // que no existen en XCUITest — se agrega una lista NSPredicate equivalente
+        // (exacto, luego contains, sobre label/name/value) solo para el camino iOS.
+        List<By> candidatos = isIOS() ? List.of(
+                io.appium.java_client.AppiumBy.iOSNsPredicateString(
+                        "label == '" + textoFiltro + "' OR name == '" + textoFiltro + "' OR value == '" + textoFiltro + "'"),
+                io.appium.java_client.AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS '" + textoFiltro + "' OR name CONTAINS '" + textoFiltro + "' OR value CONTAINS '" + textoFiltro + "'")
+        ) : List.of(
+                By.xpath("//*[@text='" + textoFiltro + "']"),
+                By.xpath("//android.widget.TextView[@text='" + textoFiltro + "']"),
+                By.xpath("//*[contains(@text,'" + textoFiltro + "')]"),
+                By.xpath("//*[contains(@content-desc,'" + textoFiltro + "')]")
+        );
+        for (By locator : candidatos) {
             try {
-                List<WebElement> found = driver.findElements(By.xpath(xp[0]));
+                List<WebElement> found = driver.findElements(locator);
                 for (WebElement el : found) {
                     try {
                         if (el.isDisplayed()) return el;
@@ -2645,9 +2717,29 @@ public class SelectorPage extends BasePage {
     }
 
     public void seleccionarFiltroSalaJunior() {
-        By btnFiltros    = By.xpath("//*[contains(@text,'Filtros')]");
-        By txtSalaJunior = By.xpath("//android.widget.TextView[@text='Sala Junior']");
-        By btnAplicar    = By.xpath("//*[contains(@text,'Aplicar')]");
+        // iOS ÚNICAMENTE — causa raíz real confirmada con evidencia de log (2026-09-07):
+        // los tres locators de abajo usaban exclusivamente @text/android.widget.TextView,
+        // atributos del árbol de accesibilidad de Android/UiAutomator2 que NO EXISTEN en
+        // XCUITest/iOS (que expone name/label/value) — este método nunca tuvo rama iOS,
+        // a diferencia de casi todo el resto de la clase. Resultado real: waitAndGet()
+        // agotaba siempre sus 6s de timeout en iOS sin importar el estado real de la app
+        // ("Expected condition failed: waiting for visibility of element located by
+        // By.xpath: //*[contains(@text,'Filtros')]"). btnFiltros/btnAplicar reutilizan
+        // PlatformLocator.byTextContains(...) — mismo XPath Android exacto que ya existía
+        // aquí (//*[contains(@text,'Filtros'|'Aplicar')]), sin ningún cambio de
+        // comportamiento para Android — solo se agrega el lado iOS (NSPredicate sobre
+        // label/name/value) que antes no existía. txtSalaJunior conserva EXACTAMENTE el
+        // XPath Android original (//android.widget.TextView[@text='Sala Junior'], más
+        // específico que el genérico de PlatformLocator.byExactText — por eso se
+        // construye aquí con PlatformLocator.of(...) en vez de reutilizar ese helper) y
+        // agrega el NSPredicate iOS equivalente.
+        By btnFiltros    = pages.common.PlatformLocator.byTextContains("Filtros").resolve(isIOS());
+        By txtSalaJunior = pages.common.PlatformLocator.of(
+                By.xpath("//android.widget.TextView[@text='Sala Junior']"),
+                io.appium.java_client.AppiumBy.iOSNsPredicateString(
+                        "label == 'Sala Junior' OR name == 'Sala Junior' OR value == 'Sala Junior'")
+        ).resolve(isIOS());
+        By btnAplicar    = pages.common.PlatformLocator.byTextContains("Aplicar").resolve(isIOS());
 
         try {
             log.info("[SelectorPage] Abriendo pantalla de filtros para Sala Junior...");
@@ -2892,6 +2984,20 @@ public class SelectorPage extends BasePage {
             "cuenta digital", "tarjeta física", "tarjeta fisica", "código qr", "codigo qr",
             "club cinépolis", "club cinepolis", "regístrate", "registrate",
             "recuperar contraseña", "recuperar contrasena", "cerrar sesión", "cerrar sesion",
+            // iOS ÚNICAMENTE — evidencia real (log 2026-09-07): el diálogo NATIVO del
+            // sistema "Contraseña de la cuenta de Apple" quedó abierto sobre la app en un
+            // test real, y sus 5 elementos ("Contraseña de la cuenta de Apple", "Ingresa
+            // la contraseña de tu cuenta de Apple para continuar.", "Olvidé la
+            // contraseña", "Conectar", "Cancelar") pasaron el filtro de longitud (5-80) y
+            // no calzaban con ningún término de Club Cinépolis, así que el código los
+            // trató como 5 candidatos legítimos de película e intentó "abrir" cada botón
+            // del diálogo del sistema (~28s por intento, 141s en total) antes de fallar
+            // con "no se pudo abrir ninguna desde Ver sinopsis". Se agregan solo las 3
+            // frases largas y específicas del diálogo (nunca "conectar"/"cancelar" sueltos:
+            // esas dos son demasiado genéricas y podrían aparecer legítimamente en textos
+            // reales de la cartelera — no se agregan sin evidencia de que sea seguro).
+            "contraseña de la cuenta de apple", "ingresa la contraseña de tu cuenta de apple",
+            "olvidé la contraseña", "olvide la contrasena",
     };
 
     private boolean esTextoNoPelicula(String txt) {
