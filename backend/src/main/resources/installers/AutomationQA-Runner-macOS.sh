@@ -862,6 +862,19 @@ PLIST_EOF
 
     chmod 644 "$PLIST_FILE"
 
+    # ── HOME explicito para el LaunchAgent ───────────────────────────────────
+    # Endurecimiento defensivo, consistente con runner/service/macos/
+    # com.automationqa.runner.plist (que ya fija HOME) — NO es la causa raiz de
+    # fallos de firma iOS tipo "No Accounts": Apple Developer Discovery corre
+    # dentro del mismo proceso RunnerAgent y ya resuelve HOME correctamente sin
+    # esto (confirmado con evidencia real, ver investigacion WDA). Pero fijarlo
+    # explicitamente evita depender del HOME implicito que launchd asigna.
+    if [ -x "$plistbuddy" ]; then
+        "$plistbuddy" -c "Add :EnvironmentVariables dict" "$PLIST_FILE" >/dev/null 2>&1 || true
+        "$plistbuddy" -c "Add :EnvironmentVariables:HOME string $HOME" "$PLIST_FILE" >/dev/null 2>&1 \
+            || "$plistbuddy" -c "Set :EnvironmentVariables:HOME $HOME" "$PLIST_FILE" >/dev/null 2>&1 || true
+    fi
+
     # ── Reinsertar SMTP_* preservadas (nunca se imprime el valor) ───────────
     if [ -n "$smtp_host_prev$smtp_port_prev$smtp_user_prev$smtp_pass_prev$smtp_from_prev" ] && [ -x "$plistbuddy" ]; then
         "$plistbuddy" -c "Add :EnvironmentVariables dict" "$PLIST_FILE" >/dev/null 2>&1 || true
