@@ -538,7 +538,7 @@ public class SelectorPage extends BasePage {
             for (SeatMap.Seat seat : result.seats) {
                 intento++;
                 long tClick = System.currentTimeMillis();
-                boolean ok = tapRapidoEnButacaDesdeLabel(seat.element);
+                boolean ok = tapRapidoEnButacaDesdeLabel(seat);
                 utils.PerfMetrics.attempt("SeatSelection", intento, seat.toString(), System.currentTimeMillis() - tClick, ok ? "OK" : "FAIL");
                 if (ok) {
                     sleep(80);
@@ -1770,9 +1770,21 @@ public class SelectorPage extends BasePage {
             return null;
         }
 
-        List<WebElement> asientos = map.allSeats().stream()
-            .map(s -> s.element)
-            .collect(Collectors.toList());
+        // FIX real (causa raíz CONFIRMADA — mismo hallazgo que SeatSelectionEngine/
+        // tapRapidoEnButacaDesdeLabel para "Múltiples Asientos"/"Consecutivos"): esta
+        // lista guardaba solo el WebElement y llamaba asiento.getRect() en vivo en cada
+        // iteración (y tapDirecto() volvía a llamar getRect() una SEGUNDA vez sobre el
+        // mismo elemento) — en iOS, tras el primer tap real que muta el árbol XCUI,
+        // TODAS las demás referencias del MISMO escaneo quedan stale, así que casi todos
+        // los getRect() de esta lista lanzaban excepción y el loop las saltaba con
+        // "continue" SIN tapear realmente la app. El resultado: aunque el loop iteraba
+        // hasta 20 veces, casi nunca se acumulaban 11 selecciones REALES en la app, así
+        // que la alerta de límite nunca llegaba a dispararse. Se conservan los
+        // SeatMap.Seat completos (con x/y ya capturados en el escaneo original) y se
+        // tapea directo por coordenadas — mismo patrón ya usado con éxito en
+        // seleccionarYDeseleccionar3AsientosConsecutivosDisponibles() de este archivo —
+        // sin depender de ningún getRect() en vivo.
+        List<SeatMap.Seat> asientos = new ArrayList<>(map.allSeats());
 
         Collections.shuffle(asientos);
 
@@ -1780,28 +1792,17 @@ public class SelectorPage extends BasePage {
         int maxIntentos = Math.min(asientos.size(), 20);
 
         for (int i = 0; i < maxIntentos; i++) {
-            WebElement asiento = asientos.get(i);
+            SeatMap.Seat asiento = asientos.get(i);
 
-            // Leer rect una sola vez: evita llamadas extra a getText() + getAttribute()
-            // que construirKeyAsiento() y describirAsiento() harían por separado
-            org.openqa.selenium.Rectangle rect;
+            log.debug("[SelectorPage] Tap asiento #{} -> ({},{})", (i + 1), asiento.x, asiento.y);
+
             try {
-                rect = asiento.getRect();
+                tapW3C(asiento.x, asiento.y);
             } catch (Exception e) {
                 continue;
             }
-
-            int tapX = rect.getX() + (rect.getWidth() / 2);
-            int tapY = rect.getY() + (rect.getHeight() / 2);
-
-            log.debug("[SelectorPage] Tap asiento #{} -> ({},{})", (i + 1), tapX, tapY);
-
-            if (tapDirecto(asiento)) {
-                seleccionados.add("(" + tapX + "," + tapY + ")");
-                sleep(60);
-            } else {
-                continue;
-            }
+            seleccionados.add("(" + asiento.x + "," + asiento.y + ")");
+            sleep(60);
 
             // La alerta solo puede aparecer al intentar seleccionar el asiento #11.
             // No tiene sentido verificarla en los primeros 9 taps: ahorra 9 llamadas WebDriver.
@@ -1815,14 +1816,25 @@ public class SelectorPage extends BasePage {
 
         throw new RuntimeException("No apareció la alerta de límite máximo de asientos.");
     }
+    // FIX real (causa ra\u00edz CONFIRMADA \u2014 "No apareci\u00f3 la alerta de l\u00edmite m\u00e1ximo de
+    // asientos" en iOS): este locator usaba exclusivamente @text (atributo de
+    // Android/UiAutomator2 que no existe en XCUITest/iOS), igual que
+    // seleccionarFiltroSalaJunior() antes de su propio fix \u2014 nunca tuvo rama iOS.
+    // Mismo patr\u00f3n NSPredicate (label/value CONTAINS) ya validado en este archivo por
+    // estaVisibleAlertaRestricciones()/aceptarYContinuarLocator(), mismo texto exacto
+    // que ya usa la rama Android \u2014 sin cambio de comportamiento para Android.
     private boolean estaVisibleAlertaLimiteAsientos() {
         try {
+            By locator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'l\u00edmite m\u00e1ximo de asientos' OR value CONTAINS 'l\u00edmite m\u00e1ximo de asientos' " +
+                        "OR label CONTAINS 'Aceptar y continuar' OR value CONTAINS 'Aceptar y continuar'")
+                    : By.xpath(
+                        "//*[contains(@text,'Alcanzaste el l\u00edmite m\u00e1ximo de asientos') or " +
+                        "contains(@text,'l\u00edmite m\u00e1ximo de asientos') or " +
+                        "contains(@text,'Aceptar y continuar')]");
             // Una sola llamada al driver en lugar de 3 separadas
-            return !driver.findElements(By.xpath(
-                    "//*[contains(@text,'Alcanzaste el l\u00edmite m\u00e1ximo de asientos') or " +
-                    "contains(@text,'l\u00edmite m\u00e1ximo de asientos') or " +
-                    "contains(@text,'Aceptar y continuar')]"
-            )).isEmpty();
+            return !driver.findElements(locator).isEmpty();
         } catch (Exception ignored) {}
         return false;
     }
@@ -1832,17 +1844,24 @@ public class SelectorPage extends BasePage {
         boolean botonVisible = false;
 
         try {
-            tituloVisible = !driver.findElements(
-                    By.xpath("//*[contains(@text,'Alcanzaste el límite máximo de asientos')]")
-            ).isEmpty();
+            By tituloLocator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'límite máximo de asientos' OR value CONTAINS 'límite máximo de asientos'")
+                    : By.xpath("//*[contains(@text,'Alcanzaste el límite máximo de asientos')]");
+            tituloVisible = !driver.findElements(tituloLocator).isEmpty();
 
-            mensajeVisible = !driver.findElements(
-                    By.xpath("//*[contains(@text,'limitado la compra y selección de asientos a 10 por transacción')]")
-            ).isEmpty();
+            By mensajeLocator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'selección de asientos a 10 por transacción' " +
+                        "OR value CONTAINS 'selección de asientos a 10 por transacción'")
+                    : By.xpath("//*[contains(@text,'limitado la compra y selección de asientos a 10 por transacción')]");
+            mensajeVisible = !driver.findElements(mensajeLocator).isEmpty();
 
-            botonVisible = !driver.findElements(
-                    By.xpath("//*[contains(@text,'Aceptar y continuar')]")
-            ).isEmpty();
+            By botonLocator = isIOS()
+                    ? AppiumBy.iOSNsPredicateString(
+                        "label CONTAINS 'Aceptar y continuar' OR value CONTAINS 'Aceptar y continuar'")
+                    : By.xpath("//*[contains(@text,'Aceptar y continuar')]");
+            botonVisible = !driver.findElements(botonLocator).isEmpty();
         } catch (Exception ignored) {
         }
 
@@ -2734,10 +2753,17 @@ public class SelectorPage extends BasePage {
         // construye aquí con PlatformLocator.of(...) en vez de reutilizar ese helper) y
         // agrega el NSPredicate iOS equivalente.
         By btnFiltros    = pages.common.PlatformLocator.byTextContains("Filtros").resolve(isIOS());
+        // FIX real (TAREA 23 — causa raíz investigada: "La opción Sala Junior no está
+        // disponible en el panel de filtros" en iOS a pesar de que el botón "Filtros" ya
+        // abre correctamente el panel tras el fix anterior). El match EXACTO anterior
+        // (label == 'Sala Junior') es frágil ante cualquier espacio/salto de línea o
+        // icono compartiendo el mismo nodo de texto — se amplía a CONTAINS, mismo texto
+        // exacto, sin inventar un atributo/identificador nuevo. XPath Android
+        // intencionalmente sin cambios.
         By txtSalaJunior = pages.common.PlatformLocator.of(
                 By.xpath("//android.widget.TextView[@text='Sala Junior']"),
                 io.appium.java_client.AppiumBy.iOSNsPredicateString(
-                        "label == 'Sala Junior' OR name == 'Sala Junior' OR value == 'Sala Junior'")
+                        "label CONTAINS 'Sala Junior' OR name CONTAINS 'Sala Junior' OR value CONTAINS 'Sala Junior'")
         ).resolve(isIOS());
         By btnAplicar    = pages.common.PlatformLocator.byTextContains("Aplicar").resolve(isIOS());
 
@@ -2749,10 +2775,36 @@ public class SelectorPage extends BasePage {
                 tapElementCenter(filtros);
             }
 
-            pausa(1200);
+            if (isIOS()) {
+                // iOS ÚNICAMENTE — espera por condición real (aparición de "Aplicar",
+                // señal de que el panel de filtros terminó de renderizar) en vez de un
+                // sleep fijo; tope de 3s, igual de acotado que el pausa(1200) anterior en
+                // el peor caso, pero sale antes si el panel ya está listo. Android
+                // conserva su pausa(1200) original sin cambios (rama else).
+                smartWait(() -> !driver.findElements(btnAplicar).isEmpty(), 3000, 200);
+            } else {
+                pausa(1200);
+            }
 
             // Verificar si existe la opción antes de intentar interactuar
             java.util.List<WebElement> opciones = driver.findElements(txtSalaJunior);
+
+            if (isIOS()) {
+                // iOS ÚNICAMENTE — la opción puede requerir scroll dentro del panel de
+                // filtros (lista más larga que el viewport visible). Acotado a 3 intentos
+                // con recheck real tras cada scroll — nunca reescanea nada más, solo
+                // repite la misma búsqueda de txtSalaJunior. Si tras esto sigue sin
+                // aparecer, se concluye ausencia real (no se fuerza el resultado).
+                int intentosScroll = 0;
+                while ((opciones == null || opciones.isEmpty()) && intentosScroll < 3) {
+                    intentosScroll++;
+                    log.debug("[SelectorPage] Sala Junior no visible aún, scroll {} de 3 en panel de filtros...", intentosScroll);
+                    try { slowSwipeUp(); } catch (Exception ignored) {}
+                    pausa(400);
+                    opciones = driver.findElements(txtSalaJunior);
+                }
+            }
+
             if (opciones == null || opciones.isEmpty()) {
                 log.warn("[SelectorPage] La opción Sala Junior no está disponible en el panel de filtros.");
                 // Panel queda abierto para que TestSteps capture el screenshot del panel
@@ -3072,7 +3124,7 @@ public class SelectorPage extends BasePage {
                 log.info("[SelectorPage] Intentando seleccionar asiento rápido: {}", seat);
 
                 long tClick = System.currentTimeMillis();
-                boolean ok = tapRapidoEnButacaDesdeLabel(seat.element);
+                boolean ok = tapRapidoEnButacaDesdeLabel(seat);
                 utils.PerfMetrics.attempt("SeatSelection", i + 1, seat.toString(), System.currentTimeMillis() - tClick, ok ? "OK" : "FAIL");
                 if (ok) {
                     sleep(150);
@@ -3190,8 +3242,8 @@ public class SelectorPage extends BasePage {
 
     // Sin modificador (package-private): reutilizado por SeatSelectionEngine — ver
     // comentario de buildSeatMap().
-    boolean tapRapidoEnButacaDesdeLabel(WebElement el) {
-        if (!SeatUiSnapshot.ENABLED) return tapRapidoEnButacaDesdeLabelInterno(el);
+    boolean tapRapidoEnButacaDesdeLabel(SeatMap.Seat seat) {
+        if (!SeatUiSnapshot.ENABLED) return tapRapidoEnButacaDesdeLabelInterno(seat);
 
         // Instrumentación exclusiva de investigación (SEAT_SNAPSHOT_DEBUG=true, OFF por
         // defecto) — captura TODO el árbol + pantalla antes/después de este tap, guarda
@@ -3201,7 +3253,7 @@ public class SelectorPage extends BasePage {
         // exactamente el mismo que sin esta instrumentación.
         String pageSourceAntes = safePageSource();
         byte[] screenshotAntes = takeScreenshot();
-        boolean resultado = tapRapidoEnButacaDesdeLabelInterno(el);
+        boolean resultado = tapRapidoEnButacaDesdeLabelInterno(seat);
         sleep(400);
         String pageSourceDespues = safePageSource();
         byte[] screenshotDespues = takeScreenshot();
@@ -3215,51 +3267,70 @@ public class SelectorPage extends BasePage {
         try { return driver.getPageSource(); } catch (Exception e) { return ""; }
     }
 
-    private boolean tapRapidoEnButacaDesdeLabelInterno(WebElement el) {
+    private boolean tapRapidoEnButacaDesdeLabelInterno(SeatMap.Seat seat) {
+        WebElement el = seat.element;
+        int centerX, centerY;
         try {
             org.openqa.selenium.Rectangle r = el.getRect();
-
-            int centerX = r.getX() + (r.getWidth() / 2);
-            int centerY = r.getY() + (r.getHeight() / 2);
-
-            int[][] puntos = new int[][]{
-                    {centerX, centerY},
-                    {centerX - 8, centerY - 8},
-                    {centerX + 8, centerY - 8},
-                    {centerX - 8, centerY + 8},
-                    {centerX + 8, centerY + 8}
-            };
-
-            for (int[] p : puntos) {
-                try {
-                    tapW3C(p[0], p[1]);
-                    return true;
-                } catch (Exception ignored) {
-                }
-            }
-
-            try {
-                WebElement parent = el.findElement(By.xpath(".."));
-                int px = parent.getRect().getX() + (parent.getRect().getWidth() / 2);
-                int py = parent.getRect().getY() + (parent.getRect().getHeight() / 2);
-                tapW3C(px, py);
-                return true;
-            } catch (Exception ignored) {
-            }
-
-            try {
-                WebElement grandParent = el.findElement(By.xpath("../.."));
-                int gx = grandParent.getRect().getX() + (grandParent.getRect().getWidth() / 2);
-                int gy = grandParent.getRect().getY() + (grandParent.getRect().getHeight() / 2);
-                tapW3C(gx, gy);
-                return true;
-            } catch (Exception ignored) {
-            }
-
-            return false;
+            centerX = r.getX() + (r.getWidth() / 2);
+            centerY = r.getY() + (r.getHeight() / 2);
         } catch (Exception e) {
-            return false;
+            // FIX real (causa raíz CONFIRMADA con evidencia de log real — iOS, "Selección
+            // de Múltiples Asientos": A5 -> OK, luego TODOS los candidatos restantes del
+            // MISMO escaneo (A7, A3, A13, A8...) -> FAIL, con describir(el) mostrando
+            // label/value/name/type=N/D — es decir, cada getAttribute()/getRect() sobre
+            // esos WebElement lanzaba excepción): en iOS, tras el primer tap que muta el
+            // árbol XCUI, TODAS las demás referencias WebElement obtenidas en el MISMO
+            // escaneo quedan stale (StaleElementReferenceException) — el.getRect() ya no
+            // es confiable para ningún candidato salvo el primero tapeado. Se usan las
+            // coordenadas YA capturadas en el escaneo original (SeatMap.Seat.x/y) — el
+            // asiento no cambia de posición en pantalla al tapear otro (solo cambia su
+            // estado visual "seleccionado"), así que ese punto sigue siendo válido. Este
+            // es un fallback EXCLUSIVO de esta rama de excepción: el intento primario
+            // (el.getRect() en vivo) se conserva sin cambios, así que el comportamiento en
+            // Android (donde getRect() no falla tras un tap previo, evidencia ya
+            // documentada en este mismo archivo) es idéntico al actual.
+            log.debug("[SelectorPage] getRect() falló para {} ({}) — usando coordenadas del escaneo original.",
+                    seat, e.getClass().getSimpleName());
+            centerX = seat.x;
+            centerY = seat.y;
         }
+
+        int[][] puntos = new int[][]{
+                {centerX, centerY},
+                {centerX - 8, centerY - 8},
+                {centerX + 8, centerY - 8},
+                {centerX - 8, centerY + 8},
+                {centerX + 8, centerY + 8}
+        };
+
+        for (int[] p : puntos) {
+            try {
+                tapW3C(p[0], p[1]);
+                return true;
+            } catch (Exception ignored) {
+            }
+        }
+
+        try {
+            WebElement parent = el.findElement(By.xpath(".."));
+            int px = parent.getRect().getX() + (parent.getRect().getWidth() / 2);
+            int py = parent.getRect().getY() + (parent.getRect().getHeight() / 2);
+            tapW3C(px, py);
+            return true;
+        } catch (Exception ignored) {
+        }
+
+        try {
+            WebElement grandParent = el.findElement(By.xpath("../.."));
+            int gx = grandParent.getRect().getX() + (grandParent.getRect().getWidth() / 2);
+            int gy = grandParent.getRect().getY() + (grandParent.getRect().getHeight() / 2);
+            tapW3C(gx, gy);
+            return true;
+        } catch (Exception ignored) {
+        }
+
+        return false;
     }
 
 

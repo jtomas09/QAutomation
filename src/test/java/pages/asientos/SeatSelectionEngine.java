@@ -191,7 +191,7 @@ final class SeatSelectionEngine {
                 intento, candidato.number, locator, describir(objetivo));
 
             long tClick = System.currentTimeMillis();
-            boolean tapOk = page.tapRapidoEnButacaDesdeLabel(objetivo);
+            boolean tapOk = page.tapRapidoEnButacaDesdeLabel(candidato);
             long tiempoTap = System.currentTimeMillis() - tClick;
             if (tapOk) tapsExitosos++;
 

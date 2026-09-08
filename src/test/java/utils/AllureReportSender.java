@@ -46,6 +46,14 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 
 // PDF merge
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.JPEGFactory;
+import java.awt.image.BufferedImage;
 
 // ✅ Tu loader JSON
 import utils.config.ConfigLoader;
@@ -621,6 +629,33 @@ public class AllureReportSender {
             long testsBytes  = testsPdf.toFile().length();
             long totalBytes  = allureBytes + testsBytes;
 
+            // FIX real (causa raíz confirmada — evidencia real, PDF de una sola prueba
+            // "Selección de Múltiples Asientos.pdf", 2026-09-07: 1536 KB -> 365 KB tras
+            // recomprimir sus imágenes embebidas como JPEG calidad 0.5, sin perder texto
+            // ni páginas): PdfReportGenerator embebe cada captura de pantalla sin
+            // recomprimir (PDImageXObject.createFromFile del PNG crudo) — con 9 pruebas
+            // en la suite real, el PDF fusionado llegó a 13253 KB, muy por encima del
+            // límite real de AWS SES (10 MB de mensaje MIME final, ~7.5 MB de datos
+            // crudos antes de la inflación ~33% de base64 — el límite de 7 MB ya
+            // reflejaba esa restricción real del proveedor, no se toca aquí). En vez de
+            // descartar el adjunto o modificar PdfReportGenerator (fuera de alcance —
+            // la generación individual no está rota), se recomprime el PDF YA FUSIONADO
+            // reutilizando PDFBox (ya es dependencia del proyecto, usado para el propio
+            // merge) — mismo texto/páginas, capturas re-codificadas como JPEG.
+            if (totalBytes > SMTP_MAX_ATTACH_BYTES) {
+                Path comprimido = tryCompressPdfImages(testsPdf, 0.5f);
+                if (comprimido != null) {
+                    long comprimidoBytes = comprimido.toFile().length();
+                    log.info("[AllureReportSender] PDF de tests comprimido: {} KB -> {} KB",
+                            testsBytes / 1024, comprimidoBytes / 1024);
+                    if (comprimidoBytes < testsBytes) {
+                        testsPdf    = comprimido;
+                        testsBytes  = comprimidoBytes;
+                        totalBytes  = allureBytes + testsBytes;
+                    }
+                }
+            }
+
             if (totalBytes <= SMTP_MAX_ATTACH_BYTES) {
                 MimeBodyPart testsPart = new MimeBodyPart();
                 testsPart.attachFile(testsPdf.toFile());
@@ -629,8 +664,8 @@ public class AllureReportSender {
                 log.info("[AllureReportSender] Per-test PDF attached: {} ({} KB)",
                         testsPdf.getFileName(), testsBytes / 1024);
             } else {
-                log.warn("[AllureReportSender] Per-test PDF omitido: tamaño total {}/{} KB supera límite SMTP.",
-                        totalBytes / 1024, SMTP_MAX_ATTACH_BYTES / 1024);
+                log.warn("[AllureReportSender] Per-test PDF omitido: tamaño total {}/{} KB supera límite SMTP "
+                        + "incluso tras intentar comprimir.", totalBytes / 1024, SMTP_MAX_ATTACH_BYTES / 1024);
                 // El correo ya incluye el Allure PDF; informar al destinatario
                 // que el PDF de tests individuales no se adjuntó por tamaño.
             }
@@ -695,6 +730,44 @@ public class AllureReportSender {
 
         } catch (Exception e) {
             log.warn("[AllureReportSender] Could not merge per-test PDFs: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Recomprime las imágenes embebidas (capturas de pantalla) de un PDF ya fusionado,
+     * reencodándolas como JPEG a la calidad indicada — el texto y la estructura de
+     * páginas no se tocan. Escribe el resultado en un archivo nuevo (nunca sobrescribe
+     * el original) y devuelve su ruta, o {@code null} si la compresión falla o no reduce
+     * el tamaño (en cuyo caso el llamador debe seguir usando el archivo original).
+     */
+    private static Path tryCompressPdfImages(Path input, float jpegQuality) {
+        Path output = input.resolveSibling(
+                input.getFileName().toString().replace(".pdf", "_comprimido.pdf"));
+        try {
+            try (PDDocument doc = PDDocument.load(input.toFile())) {
+                for (PDPage page : doc.getPages()) {
+                    PDResources res = page.getResources();
+                    if (res == null) continue;
+                    for (COSName name : res.getXObjectNames()) {
+                        PDXObject xobj;
+                        try { xobj = res.getXObject(name); } catch (Exception e) { continue; }
+                        if (!(xobj instanceof PDImageXObject)) continue;
+                        try {
+                            BufferedImage bufImg = ((PDImageXObject) xobj).getImage();
+                            PDImageXObject jpegImg = JPEGFactory.createFromImage(doc, bufImg, jpegQuality);
+                            res.put(name, jpegImg);
+                        } catch (Exception e) {
+                            log.debug("[AllureReportSender] No se pudo recomprimir una imagen del PDF: {}", e.getMessage());
+                        }
+                    }
+                }
+                doc.save(output.toFile());
+            }
+            return Files.exists(output) ? output : null;
+        } catch (Exception e) {
+            log.warn("[AllureReportSender] No se pudo comprimir el PDF de tests: {}", e.getMessage());
+            try { Files.deleteIfExists(output); } catch (Exception ignored) {}
             return null;
         }
     }
