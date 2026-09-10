@@ -13,6 +13,16 @@ import java.util.regex.Pattern;
  *
  * ── Evidencia real usada para cada patrón (sin inventar ninguno) ───────────
  *
+ *   IOS_ACCOUNT_SESSION_REQUIRED (TAREA 26A)
+ *     Marcador exclusivo "[APPLE-SIGNING-PROBE] ACCOUNT_SESSION_REQUIRED", que
+ *     {@link AppleSigningProbe} antepone a su propio mensaje cuando una operación
+ *     REAL de xcodebuild (no una simple lectura de Keychain/plist) reprodujo "No
+ *     Accounts" ANTES de intentar compilar WDA — evidencia real: TAREA 24/25,
+ *     hardware físico, 00008110-000129261482601E. Comprobado con máxima prioridad
+ *     porque es la señal más específica posible (el propio probe ya clasificó el
+ *     evento; este método solo la transporta a través de
+ *     {@code WdaLifecycleOwner.TERMINAL_ERRORS}, que solo almacena texto).
+ *
  *   IOS_DEVELOPER_TRUST_REQUIRED
  *     "Invalid trust settings. Restore system default trust settings for
  *      certificate ..." / "The application could not be launched because the
@@ -62,6 +72,19 @@ public final class IOSWdaErrorClassifier {
 
     // ── Patrones — cada uno con evidencia citada en el Javadoc de clase ────────
 
+    /**
+     * TAREA 26A — marcador estable y exclusivo de {@link AppleSigningProbe}, nunca
+     * presente en la salida RAW de xcodebuild (que dice "No Accounts:" sin este
+     * prefijo). Máxima prioridad: es la señal MÁS específica posible — el propio
+     * probe ya determinó de antemano, con una operación real, que se trata
+     * exactamente de esto, no una inferencia posterior sobre texto ambiguo. Agregar
+     * este patrón es puramente aditivo: ningún texto existente (raw de xcodebuild,
+     * ya cubierto por SIGNING_PAT más abajo) puede coincidir con él, así que no
+     * cambia la clasificación de ningún llamador existente.
+     */
+    private static final Pattern ACCOUNT_SESSION_PROBE_PAT = Pattern.compile(
+            java.util.regex.Pattern.quote("[APPLE-SIGNING-PROBE] ACCOUNT_SESSION_REQUIRED"));
+
     private static final Pattern INVALID_TRUST_SETTINGS_PAT = Pattern.compile(
             "(?i)invalid trust settings");
 
@@ -91,6 +114,12 @@ public final class IOSWdaErrorClassifier {
      */
     public static IOSWdaErrorCode classify(String errorText) {
         if (errorText == null || errorText.isBlank()) return IOSWdaErrorCode.UNKNOWN;
+
+        // TAREA 26A — comprobado ANTES que cualquier otro patrón (ver Javadoc de
+        // ACCOUNT_SESSION_PROBE_PAT): es un marcador exclusivo del probe, nunca
+        // ambiguo con el resto de los patrones de abajo.
+        if (ACCOUNT_SESSION_PROBE_PAT.matcher(errorText).find())
+            return IOSWdaErrorCode.IOS_ACCOUNT_SESSION_REQUIRED;
 
         if (isDeveloperTrustError(errorText))            return IOSWdaErrorCode.IOS_DEVELOPER_TRUST_REQUIRED;
         if (PROVISIONING_PAT.matcher(errorText).find())  return IOSWdaErrorCode.IOS_PROVISIONING_REQUIRED;

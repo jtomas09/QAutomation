@@ -214,14 +214,59 @@ public class IosPreflightManager {
                     + " | teamId: " + (teamId.isBlank() ? "no detectado" : teamId));
         }
 
-        // 7. WDA verification and pre-start — ver WdaLifecycleOwner, ÚNICA autoridad
-        // del Runner para construir/iniciar/verificar/detener WDA. wdaCached ya no
-        // decide SI se construye — solo si se intenta primero el camino rápido antes
-        // de caer al build completo. Si otro llamador (ejecución real o el Mirror) ya
-        // tiene un intento en curso para este mismo UDID, esta llamada se une a él en
-        // vez de disparar una segunda compilación.
-        WdaLifecycleOwner.Result wdaResult = WdaLifecycleOwner.acquire(
-                consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
+        // 6.5. Apple Signing Probe (TAREA 25) — SOLO cuando de verdad se va a intentar
+        // una compilación nueva (wdaCached=false): si el WDA cacheado ya es válido, no
+        // habrá ninguna compilación real y el probe no aportaría nada, solo costo.
+        // La TAREA 24 (auditoría) determinó que "USABLE" arriba (detectAppleTeamId) solo
+        // refleja estado LOCAL (Keychain + snapshot de Xcode.plist) — nunca si xcodebuild
+        // puede REALMENTE completar el provisioning en vivo contra el portal de Apple.
+        // El probe ejecuta una operación real (xcodebuild build, no test — ver Javadoc de
+        // AppleSigningProbe) mucho más barata (~5s medido en el caso de fallo real, contra
+        // varios minutos y dos intentos de "xcodebuild test") para detectar ESA brecha
+        // antes de pagar el costo del build completo. Cero cambios a WdaLifecycleOwner:
+        // se usa su constructor Result ya accesible en este mismo paquete para expresar
+        // "no listo" sin invocar acquire() cuando el probe ya anticipó la misma causa de
+        // fallo — si el probe da READY, el flujo siguiente (acquire) es exactamente el
+        // mismo de siempre, sin ningún cambio de comportamiento.
+        WdaLifecycleOwner.Result wdaResult;
+        boolean wdaBuildStarted;
+        if (!wdaCached) {
+            AppleSigningProbe.Result probeResult =
+                    AppleSigningProbe.probe(client, executionId, udid, teamId, wdaBundleId);
+            wdaBuildStarted = probeResult.status() == AppleSigningProbe.Status.READY;
+            if (!wdaBuildStarted) {
+                wdaResult = new WdaLifecycleOwner.Result(false, probeResult.reason());
+                if (probeResult.status() == AppleSigningProbe.Status.ACCOUNT_SESSION_REQUIRED) {
+                    // TAREA 26A — persiste el diagnóstico estructurado en el mismo lugar
+                    // que WdaLifecycleOwner ya usa para "último fallo conocido"
+                    // (TERMINAL_ERRORS), vía su método YA PÚBLICO markTerminalError() —
+                    // cero cambios a WdaLifecycleOwner.java, cero cambios a su
+                    // concurrencia/BUILD_EXECUTOR/INFLIGHT/Consumer/retries. Esto es lo
+                    // que permite que: (a) IOSMirrorProvider.start() (vía isTerminalError)
+                    // deje de reintentar el build para este UDID hasta un /retry explícito
+                    // — mismo mecanismo ya usado hoy para otros errores terminales; y (b)
+                    // IOSRunnerReadinessEngine.evaluate() (que ya lee terminalErrorReason()
+                    // y lo reclasifica con IOSWdaErrorClassifier) reporte ACTION_REQUIRED +
+                    // IOS_ACCOUNT_SESSION_REQUIRED en vez de cualquier código genérico —
+                    // ver el marcador agregado a IOSWdaErrorClassifier/AppleSigningProbe.
+                    WdaLifecycleOwner.markTerminalError(udid, probeResult.reason());
+                }
+            } else {
+                // 7. WDA verification and pre-start — ver WdaLifecycleOwner, ÚNICA
+                // autoridad del Runner para construir/iniciar/verificar/detener WDA.
+                // wdaCached ya no decide SI se construye — solo si se intenta primero el
+                // camino rápido antes de caer al build completo. Si otro llamador
+                // (ejecución real o el Mirror) ya tiene un intento en curso para este
+                // mismo UDID, esta llamada se une a él en vez de disparar una segunda
+                // compilación.
+                wdaResult = WdaLifecycleOwner.acquire(
+                        consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
+            }
+        } else {
+            wdaBuildStarted = false; // camino de caché — ninguna compilación se intenta
+            wdaResult = WdaLifecycleOwner.acquire(
+                    consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
+        }
         boolean wdaReady = wdaResult.ready;
 
         // Invalidate cache only when a real WDA launch failure occurred:
@@ -286,14 +331,16 @@ public class IosPreflightManager {
         if (!deviceUnlocked) {
             readyForExecution = false;
             notReadyReason    = "Pantalla bloqueada al final del Pre-flight — desbloquea el iPhone y reintenta";
-        } else if (tunnel.transportType == DevicectlParser.TransportType.UNKNOWN) {
+        } else if (!CoreDeviceTunnelManager.isConnectedForAppium(tunnel)) {
+            // TAREA 27 — mismo criterio transporte/túnel que antes (ver
+            // CoreDeviceTunnelManager.isConnectedForAppium(), extraído de esta misma
+            // lógica para que IOSRunnerReadinessEngine deje de divergir usando
+            // xctraceVisible) — mensajes y condiciones idénticos a los de antes.
             readyForExecution = false;
-            notReadyReason    = "Tipo de transporte no identificado (transportType=UNKNOWN)";
-        } else if (tunnel.transportType == DevicectlParser.TransportType.LOCAL_NETWORK
-                && !"connected".equalsIgnoreCase(tunnel.tunnelState)) {
-            readyForExecution = false;
-            notReadyReason    = "Wi-Fi / Bonjour — túnel CoreDevice " + tunnel.tunnelState
-                              + " (conecta USB o ejecuta: xcrun devicectl device connection connect)";
+            notReadyReason = tunnel.transportType == DevicectlParser.TransportType.UNKNOWN
+                    ? "Tipo de transporte no identificado (transportType=UNKNOWN)"
+                    : "Wi-Fi / Bonjour — túnel CoreDevice " + tunnel.tunnelState
+                      + " (conecta USB o ejecuta: xcrun devicectl device connection connect)";
         } else if ("unpaired".equalsIgnoreCase(tunnel.pairingState)) {
             readyForExecution = false;
             notReadyReason    = "Dispositivo no emparejado — desbloquea el iPhone y acepta «Confiar en este Mac»";

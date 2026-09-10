@@ -23,6 +23,48 @@ package qa.cinepolis.runner;
  * System properties are treated as "not yet checked" (optimistic) when null,
  * and only block readiness when explicitly "false".  This avoids false negatives
  * on first startup before DependencySelfHealingManager has run its first cycle.
+ *
+ * ── TAREA 26C — última puerta: WdaLifecycleOwner.TERMINAL_ERRORS ────────────────
+ * Esta clase alimenta /api/devices/sync → Dashboard "Dispositivos Conectados"
+ * (Pipeline A) — completamente separado de IosPreflightManager/IOSRunnerReadinessEngine
+ * (Pipeline B, el que decide si una ejecución real procede). TAREA 26B demostró con
+ * evidencia que Pipeline A nunca consultaba WdaLifecycleOwner: un dispositivo con un
+ * error terminal real conocido (p.ej. IOS_ACCOUNT_SESSION_REQUIRED) podía seguir
+ * apareciendo como "listo" en el Dashboard aunque el flujo de ejecución real ya
+ * supiera que no podía usarlo — la regla operativa que motiva esta tarea.
+ *
+ * Corrección mínima: después de que TODOS los chequeos de conectividad de este
+ * archivo (transporte/túnel/pairing/Appium/Xcode) ya habrían declarado el
+ * dispositivo listo, se hace UNA última consulta de solo lectura a
+ * {@link WdaLifecycleOwner#isTerminalError} — la MISMA fuente que ya usa
+ * {@link IOSRunnerReadinessEngine} — y, si existe, se reclasifica su texto con
+ * {@link IOSWdaErrorClassifier} (el clasificador YA existente, sin duplicar ningún
+ * patrón) únicamente para producir el mensaje humano sugerido cuando el código es
+ * {@code IOS_ACCOUNT_SESSION_REQUIRED}; para cualquier otro código se conserva el
+ * texto original de {@code terminalErrorReason()} sin reformatear, igual que ya
+ * hacen IosPreflightManager/IOSRunnerReadinessEngine. Esta clase NO reimplementa
+ * signing/provisioning/trust/account-session/recovery — solo lee un veredicto ya
+ * calculado por la autoridad existente.
+ *
+ * Nunca convierte un dispositivo genuinamente listo en "no listo" por error: la
+ * consulta ocurre DESPUÉS de los chequeos de conectividad, así que un dispositivo
+ * físicamente desconectado o sin túnel siempre reporta esa razón (más inmediata),
+ * nunca queda enmascarado por un terminalError potencialmente más antiguo.
+ *
+ * Por qué es seguro ante stale state (nunca bloquea permanentemente un dispositivo
+ * que ya volvió a estar sano):
+ *   - {@code TERMINAL_ERRORS} vive en memoria del proceso del Runner — un reinicio
+ *     del Runner lo vacía por completo (Escenario C de la tarea), nunca sobrevive
+ *     entre reinicios.
+ *   - Cualquier intento real que encuentre WDA ya sano (una ejecución de Job vía
+ *     {@code WdaLifecycleOwner.acquire()}, o el propio Mirror vía
+ *     {@code requestForMirror()}) ya limpia este mismo estado automáticamente
+ *     ({@code resetForRetry()}, ver el comentario "evidencia real (Fase 16)" en
+ *     {@code WdaLifecycleOwner.java}) — esta clase nunca necesita su propio
+ *     mecanismo de limpieza porque nunca es la única vía de escritura del estado;
+ *     solo lo LEE.
+ *   - Esta clase JAMÁS llama a {@code markTerminalError}/{@code resetForRetry} —
+ *     de solo lectura, cero cambios al ciclo de vida real de {@code WdaLifecycleOwner}.
  */
 public final class DeviceReadinessEvaluator {
 
@@ -74,8 +116,13 @@ public final class DeviceReadinessEvaluator {
     /**
      * Evaluates readiness from DeviceInfo (devicectl JSON path — Xcode 15+/26).
      * Called by IOSDeviceScanner.applyDeviceInfo().
+     *
+     * @param udid UDID físico del dispositivo — TAREA 26C, usado únicamente para la
+     *             última consulta de solo lectura a WdaLifecycleOwner (ver Javadoc
+     *             de clase). Puede ser {@code null}/vacío (degrada de forma segura:
+     *             simplemente omite esa consulta, comportamiento idéntico al anterior).
      */
-    public static Readiness evaluate(DevicectlParser.DeviceInfo info) {
+    public static Readiness evaluate(DevicectlParser.DeviceInfo info, String udid) {
         Presence     presence = presenceFrom(info.transportType);
         TunnelStatus tunnel   = tunnelFrom(info.tunnelState);
 
@@ -106,6 +153,11 @@ public final class DeviceReadinessEvaluator {
             return fail(presence, tunnel, "Xcode no disponible o no instalado (XCODE_OK=false)");
         }
 
+        // 4. TAREA 26C — última puerta: ¿el flujo de ejecución real ya sabe que este
+        //    UDID no puede usarse ahora mismo? (ver Javadoc de clase)
+        Readiness terminal = terminalErrorOverride(presence, tunnel, udid);
+        if (terminal != null) return terminal;
+
         return new Readiness(presence, tunnel, true, null);
     }
 
@@ -114,15 +166,39 @@ public final class DeviceReadinessEvaluator {
      *
      * xcrun xctrace '== Devices ==' guarantees the device is physically accessible.
      * Presence and tunnel are UNKNOWN because xctrace does not expose transport details.
+     *
+     * @param udid ver {@link #evaluate(DevicectlParser.DeviceInfo, String)}.
      */
-    public static Readiness evaluateXctrace() {
+    public static Readiness evaluateXctrace(String udid) {
         if (systemCheckFailed("APPIUM_OK")) {
             return fail(Presence.UNKNOWN, TunnelStatus.UNKNOWN, "Appium no disponible (APPIUM_OK=false)");
         }
         if (isMacOs() && systemCheckFailed("XCODE_OK")) {
             return fail(Presence.UNKNOWN, TunnelStatus.UNKNOWN, "Xcode no disponible o no instalado (XCODE_OK=false)");
         }
+        Readiness terminal = terminalErrorOverride(Presence.UNKNOWN, TunnelStatus.UNKNOWN, udid);
+        if (terminal != null) return terminal;
+
         return new Readiness(Presence.UNKNOWN, TunnelStatus.UNKNOWN, true, null);
+    }
+
+    /**
+     * TAREA 26C — ver Javadoc de clase para la justificación completa (autoridad
+     * reutilizada, por qué es seguro ante stale state). Devuelve {@code null} cuando
+     * no hay nada que reportar (sin UDID, o sin error terminal vigente) — el llamador
+     * continúa con su propio veredicto {@code readyForExecution=true} sin cambios.
+     */
+    private static Readiness terminalErrorOverride(Presence presence, TunnelStatus tunnel, String udid) {
+        if (udid == null || udid.isBlank()) return null;
+        if (!WdaLifecycleOwner.isTerminalError(udid)) return null;
+
+        String reason = WdaLifecycleOwner.terminalErrorReason(udid);
+        IOSWdaErrorCode code = reason != null ? IOSWdaErrorClassifier.classify(reason) : IOSWdaErrorCode.UNKNOWN;
+        String humanReason = code == IOSWdaErrorCode.IOS_ACCOUNT_SESSION_REQUIRED
+                ? "Acción requerida: inicia sesión o vuelve a autenticar tu cuenta Apple en Xcode "
+                  + "antes de ejecutar la suite."
+                : reason;
+        return fail(presence, tunnel, humanReason);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

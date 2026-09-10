@@ -10,10 +10,12 @@ package qa.cinepolis.runner;
  * (p.ej. no existe IOS_CERTIFICATE_EXPIRED, IOS_DEVICE_NOT_PROVISIONED, etc. —
  * no hay mensajes reales que las justifiquen todavía).
  *
- * Esta clasificación NO ejecuta ninguna acción, NO decide readyForExecution, y
- * NO es todavía consumida por IOSRunnerReadinessEngine ni por el flujo real de
- * ejecución (JobExecutor/IosPreflightManager/WdaLifecycleOwner/WdaManager) —
- * queda preparada para una tarea posterior.
+ * Esta clasificación NO ejecuta ninguna acción, NO decide readyForExecution — salvo
+ * {@link #IOS_ACCOUNT_SESSION_REQUIRED} (TAREA 26A), que {@link IOSRunnerReadinessEngine}
+ * sí consume explícitamente para producir {@code Status.ACTION_REQUIRED}. El resto de
+ * los códigos siguen sin ser consumidos por el flujo real de ejecución
+ * (JobExecutor/IosPreflightManager/WdaLifecycleOwner/WdaManager) — queda preparado
+ * para una tarea posterior.
  */
 public enum IOSWdaErrorCode {
     /** No hubo error — uso reservado para llamadores, el clasificador nunca lo devuelve. */
@@ -23,5 +25,18 @@ public enum IOSWdaErrorCode {
     IOS_PROVISIONING_REQUIRED,
     IOS_WDA_BUILD_FAILED,
     IOS_WDA_STARTUP_FAILED,
+    /**
+     * TAREA 25/26A — {@link AppleSigningProbe} determinó, ANTES de intentar compilar
+     * WDA, que xcodebuild no puede completar el provisioning automático porque la
+     * sesión de cuenta Apple ID que necesita para llamar en vivo al portal de Apple
+     * no está disponible ahora mismo — evidencia real: TAREA 24/25, mensaje "No
+     * Accounts". Distinto de {@link #IOS_SIGNING_REQUIRED} (que solo describe la
+     * MISMA frase cuando aparece en la salida RAW de xcodebuild, sin que el probe la
+     * haya evaluado de antemano) para poder distinguir en el futuro "el probe ya lo
+     * anticipó" de "se descubrió a mitad de un build real". NO implica que la sesión
+     * haya "expirado" — TAREA 24 dejó ese mecanismo explícitamente sin demostrar;
+     * solo que no está disponible en este momento.
+     */
+    IOS_ACCOUNT_SESSION_REQUIRED,
     UNKNOWN
 }

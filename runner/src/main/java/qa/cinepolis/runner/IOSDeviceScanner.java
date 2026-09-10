@@ -365,7 +365,7 @@ public class IOSDeviceScanner {
         d.put("source",          source);
         // xctrace-discovered devices: no DeviceInfo available — evaluate system health only
         if ("xctrace".equals(source)) {
-            DeviceReadinessEvaluator.Readiness r = DeviceReadinessEvaluator.evaluateXctrace();
+            DeviceReadinessEvaluator.Readiness r = DeviceReadinessEvaluator.evaluateXctrace(udid);
             d.put("presence",          r.presence.name());
             d.put("tunnel",            r.tunnel.name());
             d.put("readyForExecution", String.valueOf(r.readyForExecution));
@@ -422,7 +422,7 @@ public class IOSDeviceScanner {
         device.put("tunnelState",   tunnel);
 
         // DeviceAvailability model: Presence, TunnelStatus, ReadyForExecution
-        DeviceReadinessEvaluator.Readiness r = DeviceReadinessEvaluator.evaluate(info);
+        DeviceReadinessEvaluator.Readiness r = DeviceReadinessEvaluator.evaluate(info, device.get("udid"));
         device.put("presence",          r.presence.name());
         device.put("tunnel",            r.tunnel.name());
         device.put("readyForExecution", String.valueOf(r.readyForExecution));

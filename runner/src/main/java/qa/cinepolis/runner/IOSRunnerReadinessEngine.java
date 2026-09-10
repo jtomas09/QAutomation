@@ -61,9 +61,22 @@ public final class IOSRunnerReadinessEngine {
         // ── DISCOVERED / CONNECTED / PAIRED ─────────────────────────────────
         // Lectura pura — CoreDeviceTunnelManager.readConnectionState() no ejecuta
         // ninguna acción de recuperación (no mata daemons, no reconecta).
+        //
+        // TAREA 27 — FIX real (causa raíz de la divergencia Engine vs Preflight,
+        // evidencia real 2026-09-10): antes, "connected" dependía únicamente de
+        // xctraceVisible, una señal independiente de devicectl que puede quedar
+        // desactualizada para USB incluso con el dispositivo genuinamente utilizable
+        // (confirmado: devicectl siguió reportando "available (paired)" mientras
+        // xctrace dejó de listarlo, incluso tras 60s de recuperación activa completa).
+        // IosPreflightManager.runPreflight() nunca dependió de xctraceVisible para
+        // WIRED — ver CoreDeviceTunnelManager.isConnectedForAppium(), extraída de esa
+        // misma lógica ya correcta para que ambos flujos compartan un único criterio.
         CoreDeviceTunnelManager.DeviceConnectionState conn = CoreDeviceTunnelManager.readConnectionState(udid);
         boolean xctraceVisible = conn != null ? conn.xctraceVisible : CoreDeviceTunnelManager.isVisibleInXctrace(udid);
-        boolean connected      = xctraceVisible;
+        // Fallback cuando devicectl no devuelve nada en absoluto (conn==null): xctrace
+        // sigue siendo la única señal disponible — mismo criterio ya usado por
+        // CoreDeviceTunnelManager.ensureTunnelConnected() en ese mismo caso.
+        boolean connected      = conn != null ? CoreDeviceTunnelManager.isConnectedForAppium(conn) : xctraceVisible;
         String  transportType  = conn != null ? conn.transportType.name() : "UNKNOWN";
         String  tunnelState    = conn != null ? conn.tunnelState : "unknown";
         String  pairingState   = conn != null ? conn.pairingState : "unknown";
@@ -124,6 +137,32 @@ public final class IOSRunnerReadinessEngine {
                     "IOS_DEVELOPER_TRUST_REQUIRED", terminalClassification);
         }
         log("TRUST", "OK");
+
+        // ── ACCOUNT SESSION (TAREA 26A) ──────────────────────────────────────
+        // AppleSigningProbe (TAREA 25) puede determinar, ANTES de intentar compilar
+        // WDA, que xcodebuild no puede completar el provisioning automático porque
+        // la sesión de cuenta Apple ID que necesita para llamar en vivo al portal de
+        // Apple no está disponible — distinto de "certificado no confiado en el
+        // dispositivo" (TRUST, arriba) y de "no hay provisioning profile instalado"
+        // (chequeo estático más abajo, PROVISIONED): aquí Team/certificado SÍ pueden
+        // ser USABLE localmente (evidencia TAREA 24), pero xcodebuild ya demostró en
+        // vivo que no puede usarlos. Mismo mecanismo que TRUST arriba — se lee vía
+        // WdaLifecycleOwner.terminalErrorReason(), sin disparar ningún intento nuevo
+        // aquí; IosPreflightManager es quien llama markTerminalError() cuando el
+        // probe reporta ACCOUNT_SESSION_REQUIRED. NO se afirma que la sesión haya
+        // "expirado" (TAREA 24 dejó ese mecanismo explícitamente sin demostrar) —
+        // solo que no está disponible ahora mismo.
+        boolean accountSessionRequired =
+                terminalClassification == IOSWdaErrorCode.IOS_ACCOUNT_SESSION_REQUIRED;
+        if (accountSessionRequired) {
+            log("ACCOUNT SESSION", "REQUIRED");
+            logErrorClassification(udid, terminalClassification, terminalReason);
+            return finish(r, start, IOSRunnerReadinessResult.Status.ACTION_REQUIRED,
+                    IOSRunnerReadinessResult.Stage.TRUSTED,
+                    "La sesión de Apple ID / Xcode necesaria para provisioning automático no está "
+                    + "disponible ahora mismo — requiere reautenticación en Xcode.",
+                    "IOS_ACCOUNT_SESSION_REQUIRED", terminalClassification);
+        }
 
         // ── PROVISIONED (Team / certificado / perfil) ───────────────────────
         String teamId = AppleDeveloperTeamManager.selectTeam(client, executionId);

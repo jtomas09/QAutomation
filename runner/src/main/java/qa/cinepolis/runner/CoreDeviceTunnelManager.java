@@ -58,13 +58,77 @@ public final class CoreDeviceTunnelManager {
         /**
          * True when the device is accessible to Appium's XCUITest driver.
          *
-         * xctraceVisible is the definitive gate. tunnelState is NOT a gate — Xcode 16+/26
-         * may report disconnected while WDA can still respond via USB.
+         * TAREA 28 — FIX real: antes usaba {@code xctraceVisible} como gate definitivo
+         * — exactamente la misma causa raíz ya corregida en TAREA 27 para
+         * {@code IOSRunnerReadinessEngine} (ver {@link CoreDeviceTunnelManager#isConnectedForAppium},
+         * evidencia real: {@code xcrun xctrace list devices} dejó de listar un iPhone
+         * WIRED+paired mientras {@code devicectl} lo seguía reportando "available
+         * (paired)" de forma continua, incluso DESPUÉS de que
+         * {@link #ensureTunnelConnected} completara sus ~67s de recuperación activa
+         * completa — incluyendo reiniciar el daemon {@code remotedeviced} — sin lograr
+         * que xctrace lo resincronizara). Ese mismo {@code xctraceVisible} era, aquí,
+         * lo único que decidía si {@code ensureTunnelConnected()} se saltaba la
+         * recuperación (línea ~161) — es decir, un dispositivo que {@code devicectl} ya
+         * reportaba utilizable disparaba de todas formas esa recuperación costosa (y,
+         * según la misma evidencia, no siempre efectiva contra este caso concreto) solo
+         * porque xctrace, una señal de un subsistema de Apple independiente y
+         * demostrablemente no siempre sincronizada, no lo veía.
+         *
+         * Ahora delega en {@link CoreDeviceTunnelManager#isConnectedForAppium}
+         * (transportType+tunnelState — la misma fuente de verdad que
+         * {@code IosPreflightManager.runPreflight()} ya usa en producción desde TAREA 27)
+         * en vez de xctraceVisible; {@code pairingState} se sigue evaluando exactamente
+         * igual que antes, sin cambios. {@code xctraceVisible} sigue existiendo como
+         * campo informativo (se sigue registrando/mostrando en los logs de diagnóstico
+         * de esta clase) — solo deja de ser un GATE de esta decisión.
          */
         public boolean isReadyForAppium() {
-            if (!xctraceVisible) return false;
-            return !"unpaired".equalsIgnoreCase(pairingState);
+            if ("unpaired".equalsIgnoreCase(pairingState)) return false;
+            return CoreDeviceTunnelManager.isConnectedForAppium(this);
         }
+    }
+
+    /**
+     * TAREA 27 — única fuente de verdad de "¿este estado de conexión permite crear una
+     * sesión Appium?", extraída de la lógica YA EXISTENTE y ya probada en producción
+     * de {@code IosPreflightManager.runPreflight()} (antes vivía ahí, duplicada como
+     * un if/else inline, y nunca la usaba {@link IOSRunnerReadinessEngine}, que en su
+     * lugar trataba {@code xctraceVisible} como "gate definitivo" — exactamente la
+     * causa de la divergencia).
+     *
+     * Evidencia real (2026-09-10, UDID 00008110-000129261482601E, transporte WIRED):
+     * {@code xcrun xctrace list devices} dejó de listar el iPhone (visible momentos
+     * antes) mientras {@code xcrun devicectl list devices} lo siguió reportando
+     * "available (paired)" de forma continua — confirmado además que
+     * {@link #ensureTunnelConnected} completó su recuperación ACTIVA completa
+     * (killall remotedeviced + 60s de polling, ~67.7s reales) sin lograr que xctrace
+     * volviera a listarlo. xctrace es una señal independiente de devicectl (procesos
+     * y cachés distintos) y, para USB, puede quedar desactualizada sin que eso
+     * signifique que el dispositivo dejó de ser utilizable — exactamente el criterio
+     * que {@code runPreflight()} ya aplicaba correctamente (nunca dependió de
+     * xctraceVisible para WIRED) y que este método ahora comparte.
+     *
+     *   WIRED                                 → true  (USB — Appium puede crear
+     *                                             sesión sin depender del túnel)
+     *   LOCAL_NETWORK + tunnelState=connected → true
+     *   LOCAL_NETWORK + cualquier otro estado → false
+     *   UNKNOWN                               → false
+     *
+     * {@code pairingState=unpaired} se sigue evaluando por separado en ambos
+     * llamadores (sin cambios) — este método solo decide transporte/túnel.
+     *
+     * No reemplaza a {@link DeviceConnectionState#isReadyForAppium()} (que sigue
+     * usando xctraceVisible y decide si {@link #ensureTunnelConnected} intenta
+     * recuperación activa — fuera del alcance de esta tarea, ver limitaciones) ni
+     * modifica ningún comportamiento de recuperación/polling existente.
+     */
+    public static boolean isConnectedForAppium(DeviceConnectionState state) {
+        if (state == null) return false;
+        if (state.transportType == DevicectlParser.TransportType.WIRED) return true;
+        if (state.transportType == DevicectlParser.TransportType.LOCAL_NETWORK) {
+            return "connected".equalsIgnoreCase(state.tunnelState);
+        }
+        return false; // UNKNOWN
     }
 
     // ── Public API ─────────────────────────────────────────────────────────────
