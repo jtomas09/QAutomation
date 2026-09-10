@@ -2004,14 +2004,30 @@ public class SelectorPage extends BasePage {
      * Devuelve {@code true} si el diálogo de "Asiento especial" está visible en pantalla.
      */
     private void verificarPantallaAsientosOSkip() {
-        // Indicadores que confirman que estamos en el mapa de asientos
+        // Indicadores que confirman que estamos en el mapa de asientos.
+        //
+        // FIX real (TAREA 37 — causa raíz confirmada con evidencia de log en TAREA 36):
+        // este XPath usaba EXCLUSIVAMENTE @text (atributo que no existe en XCUITest/iOS
+        // — WDA nunca lo expone), así que en iOS "enAsientos" daba SIEMPRE false, sin
+        // importar si la app realmente estaba en la pantalla de asientos, disparando un
+        // Assumptions.abort() (SKIP) incondicional en el 100% de las corridas iOS de
+        // "Validación de Alerta en Asiento Especial" — confirmado en el log real:
+        // SKIP en ~1.2s, sin ninguna búsqueda de asiento intermedia (único caller de
+        // este método). El propio archivo ya tiene, unas líneas más arriba, la
+        // implementación iOS correcta y ya validada para esta misma pregunta
+        // ("¿estoy en la pantalla de asientos?"): estaEnPantallaDeAsientos(). Android
+        // conserva el XPath EXACTO de siempre, sin ningún cambio — solo se reutiliza
+        // estaEnPantallaDeAsientos() para la rama iOS, en vez de duplicar/inventar un
+        // NSPredicate nuevo.
         String xpath =
             "//*[contains(@text,'Asientos') or contains(@text,'Pantalla Sala') or " +
             "contains(@text,'Paso 2') or contains(@text,'Paso 3') or " +
             "contains(@text,'Selecciona') or contains(@text,'selecciona')]";
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-            boolean enAsientos = !driver.findElements(By.xpath(xpath)).isEmpty();
+            boolean enAsientos = isIOS()
+                    ? estaEnPantallaDeAsientos()
+                    : !driver.findElements(By.xpath(xpath)).isEmpty();
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
 
             if (!enAsientos) {
