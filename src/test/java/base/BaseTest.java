@@ -104,6 +104,16 @@ public class BaseTest {
             // Cache por-ejecución de iOS (Club cerrado / sin promos) — nunca permanente
             // entre suites, ver CinemasHelper.resetRunCache().
             pages.common.CinemasHelper.resetRunCache();
+            // TAREA 33: pages.ios.IOSCinemasHelper (TAREA 32) mantiene su PROPIA copia
+            // independiente de este mismo caché (clubClosedThisRun/noPromosThisRun) —
+            // ver dismissPromosGuard(String) más abajo, ahora la ruta LIVE para iOS
+            // dentro de este @BeforeEach. Se resetea aquí también, sin isIOS(), igual
+            // que la línea anterior — es un no-op inofensivo para Android (nada lee
+            // esos campos fuera de pages.ios.IOSCinemasHelper). CinemasHelper.resetRunCache()
+            // NO se elimina: tests.México.alimentos.MenuAtmosfera todavía llama a
+            // CinemasHelper.dismissTransientPromosGuard() de forma independiente y
+            // sigue dependiendo de su propio caché.
+            pages.ios.IOSCinemasHelper.resetRunCache();
 
             try { clearDirectory(Paths.get("build", "reportes-pdf")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "reports", "allure-report")); } catch (Exception ignored) {}
@@ -186,10 +196,37 @@ public class BaseTest {
             // clara y aislada a iOS.
             if (DriverFactory.isIOS()) {
                 pages.common.CinemasHelper.resetRunCache();
+                // TAREA 33: ver nota equivalente en beforeAllSuite() — resetea también
+                // el caché independiente de pages.ios.IOSCinemasHelper (TAREA 32), ya
+                // que dismissPromosGuard(String) usa esa clase para iOS ahora. Se
+                // mantiene la llamada a CinemasHelper.resetRunCache() sin cambios
+                // (MenuAtmosfera sigue dependiendo de ella, ver TAREA 33).
+                pages.ios.IOSCinemasHelper.resetRunCache();
             }
 
             try { Thread.sleep(300); } catch (InterruptedException ignored) {}
         } catch (Exception ignored) {}
+    }
+
+    /**
+     * TAREA 33 — punto único de selección de plataforma para PromosGuard/ClubGuard/
+     * ZoneGuard/MainNav. Android sigue exactamente la misma ruta de siempre
+     * (CinemasHelper.dismissTransientPromosGuard(where), instancia nueva por llamada,
+     * igual que antes). iOS ahora usa la implementación real migrada en TAREA 32
+     * (pages.ios.IOSCinemasHelper.dismissPromosGuard(where)) en vez de la rama
+     * isIOS() de CinemasHelper — esa rama de CinemasHelper deja de ser LIVE para el
+     * camino de BaseTest, aunque NO se eliminó (ver TAREA 33: sigue siendo necesaria
+     * para tests.México.alimentos.MenuAtmosfera, que la invoca de forma
+     * independiente). Este if(isIOS()) vive aquí — en BaseTest, capa de orquestación
+     * — nunca dentro de CinemasHelper/SelectorPage/BasePage/SeatSelectionEngine.
+     * Mismo algoritmo, mismos timeouts/sleeps/reintentos que antes en ambos casos.
+     */
+    private void dismissPromosGuard(String where) {
+        if (DriverFactory.isIOS()) {
+            new pages.ios.IOSCinemasHelper(driver).dismissPromosGuard(where);
+        } else {
+            new CinemasHelper(driver).dismissTransientPromosGuard(where);
+        }
     }
 
     private void ensureAppRunning() {
@@ -293,11 +330,11 @@ public class BaseTest {
                     Thread.currentThread().getName(), DriverFactory.isIOS() ? "iOS" : "Android");
             autoScrollOnAppOpen(driver);
             log.debug("[BaseTest] Invoking PromosGuard after auto-scroll...");
-            new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach");
+            dismissPromosGuard("BaseTest@BeforeEach");
             log.debug("[BaseTest] PromosGuard finished.");
             ensureAppRunning();
             log.debug("[BaseTest] ensureAppRunning after PromosGuard (REUSE_DRIVER=false).");
-            new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach:reactivate");
+            dismissPromosGuard("BaseTest@BeforeEach:reactivate");
             log.debug("[BaseTest] Second PromosGuard finished.");
 
         } else {
@@ -318,7 +355,7 @@ public class BaseTest {
 
             autoScrollOnAppOpen(driver);
             log.debug("[BaseTest] Invoking PromosGuard after auto-scroll...");
-            new CinemasHelper(driver).dismissTransientPromosGuard("BaseTest@BeforeEach");
+            dismissPromosGuard("BaseTest@BeforeEach");
             log.debug("[BaseTest] PromosGuard finished.");
         }
 

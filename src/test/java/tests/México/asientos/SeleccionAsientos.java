@@ -1,6 +1,8 @@
 package tests.México.asientos;
 
 import base.BaseTest;
+import config.DriverFactory;
+import flujos.ios.IOSAsientosFlow;
 import io.qameta.allure.Epic;
 import io.qameta.allure.Story;
 import org.junit.jupiter.api.*;
@@ -12,15 +14,27 @@ import utils.TestSteps;
 public class SeleccionAsientos extends BaseTest {
 
     private AsientosPagina page;
+    // TAREA 31 — punto de entrada iOS (ver flujos.ios.IOSAsientosFlow). Android sigue
+    // usando exclusivamente `page` como siempre; `iosFlow` solo se crea/usa en
+    // DriverFactory.isIOS()==true, nunca al revés.
+    private IOSAsientosFlow iosFlow;
 
     @BeforeEach
     void setUp() {
         page = new AsientosPagina(driver);
+        if (DriverFactory.isIOS()) {
+            iosFlow = new IOSAsientosFlow(driver);
+        }
     }
 
     private void seleccionarPeliculaYHorario() {
-        TestSteps.run("Selección de Película y horario", () ->
-            page.seleccionarPeliculaRandomYHorarioDescartandoAlertas(), driver);
+        if (DriverFactory.isIOS()) {
+            TestSteps.run("Selección de Película y horario", () ->
+                iosFlow.seleccionarPeliculaRandomYHorarioDescartandoAlertas(), driver);
+        } else {
+            TestSteps.run("Selección de Película y horario", () ->
+                page.seleccionarPeliculaRandomYHorarioDescartandoAlertas(), driver);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -33,6 +47,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void seleccion1Asiento() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionar1Asiento(driver);
+            return;
+        }
         TestSteps.run("Selección de asiento disponible", () -> page.seleccionarAsientoRandomDisponible(), driver);
         TestSteps.run("Continuar con asiento seleccionado", () -> page.continuar(), driver);
     }
@@ -43,6 +61,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void seleccionMultiplesAsientos() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionar3AsientosAleatorios(driver);
+            return;
+        }
         TestSteps.run("Selección de 3 asientos disponibles", () -> page.seleccionar3AsientosRandomDisponibles(), driver);
         TestSteps.run("Continuar con asientos seleccionados", () -> page.continuar(), driver);
     }
@@ -53,6 +75,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void seleccionAsientosConsecutivos() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionar3AsientosConsecutivos(driver);
+            return;
+        }
         TestSteps.run("Selección de 3 asientos consecutivos", () -> page.seleccionar3AsientosConsecutivosDisponibles(), driver);
         TestSteps.run("Continuar con asientos seleccionados", () -> page.continuar(), driver);
     }
@@ -63,6 +89,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void seleccionAsientosYDeseleccion() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionarYDeseleccionar3AsientosConsecutivos(driver);
+            return;
+        }
         TestSteps.run("Pantalla de asientos", () ->
             page.seleccionarYDeseleccionar3AsientosConsecutivosDisponibles(), driver);
     }
@@ -73,6 +103,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void seleccion11Asientos() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.validarLimite10Asientos(driver);
+            return;
+        }
         TestSteps.run("Pantalla de asientos", () ->
             page.seleccionarMasDe10AsientosYValidarAlerta(), driver);
     }
@@ -83,6 +117,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void cambioHorarioAsientos() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.cambiarHorario(driver);
+            return;
+        }
         TestSteps.run("Pantalla de asientos", () ->
             page.cambiarHorarioEnPantallaAsientos(), driver);
     }
@@ -92,6 +130,10 @@ public class SeleccionAsientos extends BaseTest {
     @DisplayName("Verificación de Banner en Asientos 3D")
     @Story("Asientos")
     void asientos3D() {
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionarFiltro3D(driver);
+            return;
+        }
         try {
             TestSteps.run("Seleccionar filtro 3D", () -> page.seleccionarFiltro3D(), driver);
         } catch (org.opentest4j.TestAbortedException e) {
@@ -108,6 +150,10 @@ public class SeleccionAsientos extends BaseTest {
     @Story("Asientos")
     void alertaAsientoEspecial() {
         seleccionarPeliculaYHorario();
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionarAsientoEspecialYValidarAlerta(driver);
+            return;
+        }
         try {
             TestSteps.run("Seleccionar asiento especial", () -> page.seleccionarAsientoEspecial(), driver);
         } catch (org.opentest4j.TestAbortedException e) {
@@ -121,6 +167,10 @@ public class SeleccionAsientos extends BaseTest {
     @DisplayName("Verificación de Banner en Sala Junior")
     @Story("Asientos")
     void asientosSalaJunior() {
+        if (DriverFactory.isIOS()) {
+            iosFlow.seleccionarSalaJunior(driver);
+            return;
+        }
         try {
             TestSteps.run("Seleccionar filtro Sala Junior", () -> page.seleccionarFiltroSalaJunior(), driver);
         } catch (org.opentest4j.TestAbortedException e) {

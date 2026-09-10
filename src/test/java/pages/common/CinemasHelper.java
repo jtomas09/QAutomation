@@ -1549,7 +1549,13 @@ public class CinemasHelper extends BasePage {
      * Usa isVisibleInstant (wait=0) para evitar 4×10 s de espera cuando la app
      * aún está animando tras cerrar Club — diferencia crítica de rendimiento.
      */
-    private boolean isMainNavVisible() {
+    // TAREA 32: visibilidad ampliada de private a public — CERO cambio de
+    // comportamiento (mismo cuerpo, mismos locators TAB_*). Necesario para que
+    // pages.ios.IOSCinemasHelper pueda reutilizar esta misma detección (compartida
+    // con la navegación a Alimentos vía los locators TAB_*, ver goToAlimentosTab())
+    // sin duplicar los locators TAB_CARTELERA/TAB_HORARIOS/TAB_ALIMENTOS/
+    // TAB_ALIMENTOS_ALT en dos archivos distintos.
+    public boolean isMainNavVisible() {
         return isVisibleInstant(TAB_CARTELERA)
             || isVisibleInstant(TAB_HORARIOS)
             || isVisibleInstant(TAB_ALIMENTOS)
@@ -1601,7 +1607,11 @@ public class CinemasHelper extends BasePage {
         }
     }
 
-    private boolean isLocationChangePopupVisible() {
+    // TAREA 32: visibilidad ampliada de private a public — CERO cambio de
+    // comportamiento. Reutilizado también por pages.ios.IOSCinemasHelper (mismo
+    // POPUP_ZONA_DETECTION, que además usa dismissLocationPopupIfPresent() —
+    // método público ya usado por otros países — no se duplica ese locator).
+    public boolean isLocationChangePopupVisible() {
         // implicitlyWait=0: evita 10s de espera por pass cuando el popup no está presente.
         try {
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
@@ -1616,7 +1626,11 @@ public class CinemasHelper extends BasePage {
         return false;
     }
 
-    private void dismissLocationChangePopupIfPresent(String where) {
+    // TAREA 32: visibilidad ampliada de private a public — CERO cambio de
+    // comportamiento (incluida la rama Android-específica UiAutomator sin tocar).
+    // Reutilizado por pages.ios.IOSCinemasHelper para no duplicar esta lógica
+    // (incluye lógica Android real, además de la iOS) en dos archivos.
+    public void dismissLocationChangePopupIfPresent(String where) {
         long t0 = System.currentTimeMillis();
         if (!isLocationChangePopupVisible()) {
             log.debug("[CinemasHelper][ZonaGuard] Popup zona no visible -> SKIP where={}", where);
