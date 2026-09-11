@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @ExtendWith(PdfReportExtension.class)
+@ExtendWith(NetworkMonitoringExtension.class)
 public class BaseTest {
 
     private static final Logger log = LoggerFactory.getLogger(BaseTest.class);

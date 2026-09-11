@@ -47,6 +47,9 @@ public class RunnerConfig {
     public String  projectName;    // set at startup for banner display only — not persisted
     public String  workspaceDir;   // {agentDataDir}/workspace — workspace root (auto-set)
 
+    // ── Network Monitoring (captura HTTP/HTTPS del dispositivo, opt-in) ───────
+    public NetworkMonitoringConfig networkMonitoring;
+
     public static RunnerConfig fromEnv() {
         RunnerConfig c = new RunnerConfig();
 
@@ -69,6 +72,11 @@ public class RunnerConfig {
         c.agentDataDir   = env("AGENT_DATA_DIR", defaultDataDir);
         c.workspaceDir   = c.agentDataDir + File.separator + "workspace";
         // repoUrl / repoBranch / projectName are populated at runtime from GET /api/runner/config
+
+        // Network Monitoring — mismo patrón env(key,default) que el resto de esta
+        // clase, sin sistema de configuración nuevo. enabled=false por defecto:
+        // cero cambio de comportamiento hasta que se active explícitamente.
+        c.networkMonitoring = NetworkMonitoringConfig.fromEnv(RunnerConfig::env);
 
         // Auto-detect OS and hostname
         c.os           = detectOs();

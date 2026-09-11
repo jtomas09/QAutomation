@@ -563,6 +563,10 @@ public class JobExecutor {
         List<TestCaseResult> testCases = new ArrayList<>();
         boolean iosRecordingActive = false;
         boolean iosCleanupDone     = false; // prevents double-cleanup in finally safety net
+        // Network Monitoring — inactivo por defecto (networkMonitoring.enabled=false);
+        // NetworkMonitoringManager.start() nunca lanza, así que este valor solo cambia
+        // si la captura realmente se activó y preparó con éxito.
+        NetworkMonitoringManager.Session networkSession = NetworkMonitoringManager.Session.INACTIVE;
         // Hoisted outside try so finally can access them for cleanup and finalization
         final boolean isPlatformIos = "ios".equalsIgnoreCase(nvl(job.platform, ""));
         final String  iosUdid       = nvl(job.udid, "");
@@ -1015,6 +1019,28 @@ public class JobExecutor {
                         client, job.executionId, receivedUdid, videosDir) != null;
             }
 
+            // ── Network Monitoring (opt-in, networkMonitoring.enabled=false por defecto) ──
+            // Arranca ANTES de construir `cmd`/`pb` para poder inyectar el puerto del
+            // proxy y la ruta de evidencia como -D flags que la JVM de test (más abajo)
+            // recibirá igual que cualquier otra capability (mismo mecanismo que
+            // -DxcodeOrgId=/-DupdatedWDABundleId=/etc. ya usado en este método).
+            networkSession = NetworkMonitoringManager.start(
+                    client, job.executionId, config.networkMonitoring,
+                    java.nio.file.Path.of(config.agentDataDir), receivedUdid, isAndroid,
+                    java.nio.file.Path.of(workDir, "build", "network-evidence"));
+            if (networkSession.active()) {
+                cmd.add("-DnetworkMonitoringEnabled=true");
+                cmd.add("-DnetworkMonitoringEventsFile=" + networkSession.eventsFilePath());
+                cmd.add("-DnetworkMonitoringEvidenceDir=" + networkSession.evidenceBaseDir());
+                cmd.add("-DnetworkMonitoringCaptureRequestBody=" + config.networkMonitoring.captureRequestBody);
+                cmd.add("-DnetworkMonitoringCaptureResponseBody=" + config.networkMonitoring.captureResponseBody);
+                cmd.add("-DnetworkMonitoringMaxResponseBodySize=" + config.networkMonitoring.maxResponseBodySize);
+                cmd.add("-DnetworkMonitoringAttachToAllure=" + config.networkMonitoring.attachToAllure);
+                cmd.add("-DnetworkMonitoringSaveAllTraffic=" + config.networkMonitoring.saveAllTraffic);
+                cmd.add("-DnetworkMonitoringSaveErrors=" + config.networkMonitoring.saveErrors);
+                cmd.add("-DnetworkMonitoringRedact=" + config.networkMonitoring.redactSensitiveData);
+            }
+
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(projectDir);
             pb.redirectErrorStream(true);
@@ -1133,6 +1159,16 @@ public class JobExecutor {
 
             // Stop recording before any other work (must precede uploadVideos to finalize MP4)
             if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId);
+
+            // Network Monitoring: el Job ya corrió (hubo oportunidad real de generar
+            // tráfico) — se verifica AQUÍ si el handshake TLS tuvo éxito, antes de
+            // detener el proxy, para poder persistir TRUSTED cuando corresponda.
+            if (networkSession.active()) {
+                NetworkMonitoringManager.verifyAndPersistTrust(client, job.executionId,
+                        config.networkMonitoring, java.nio.file.Path.of(config.agentDataDir),
+                        receivedUdid, networkSession.caFingerprintSha256());
+                NetworkMonitoringManager.stop(client, job.executionId);
+            }
 
             if (wasAborted.get()) {
                 // On abort: still clean up the device so banner disappears
@@ -1319,6 +1355,7 @@ public class JobExecutor {
         } catch (Exception e) {
             // Each step is independently protected — a failure here must never prevent sendResult()
             try { if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId); } catch (Exception ignored) {}
+            try { if (networkSession.active()) NetworkMonitoringManager.stop(client, job.executionId); } catch (Exception ignored) {}
             // iOS cleanup in the catch path — runs before sendResult so messages are visible
             if (isPlatformIos && !iosUdid.isBlank() && !iosCleanupDone) {
                 try {
@@ -1355,6 +1392,8 @@ public class JobExecutor {
             // Safety net: guarantees cleanup and execution finalization regardless of what failed above.
             // IOSVideoRecordingManager.stop() is idempotent — no-op if already called.
             try { if (iosRecordingActive) IOSVideoRecordingManager.stop(client, job.executionId); } catch (Exception ignored) {}
+            // NetworkMonitoringManager.stop() es igual de idempotente — mismo criterio.
+            try { if (networkSession.active()) NetworkMonitoringManager.stop(client, job.executionId); } catch (Exception ignored) {}
             if (!iosCleanupDone && isPlatformIos && !iosUdid.isBlank()) {
                 try {
                     IOSExecutionCleanupManager.cleanup(client, job.executionId, iosUdid,
