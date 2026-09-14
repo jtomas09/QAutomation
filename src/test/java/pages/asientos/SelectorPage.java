@@ -1760,61 +1760,141 @@ public class SelectorPage extends BasePage {
         takeScreenshot("Asientos deseleccionados - " + result.strategy);
         return seleccionados;
     }
+    // FIX real (causa raíz CONFIRMADA con evidencia real — RUN-1003: la captura de
+    // pantalla del fallo mostró "Asientos seleccionados: 6" pese a que el loop había
+    // ejecutado 20 taps — la versión anterior contaba TAPS EJECUTADOS como si fueran
+    // asientos seleccionados, sin verificar nada contra la app. Igual que en
+    // SeatSelectionEngine ("Selección de Múltiples Asientos"), la ÚNICA fuente de
+    // verdad es el contador real del botón "Continuar": se tapea, se lee el contador,
+    // y solo si subió exactamente en 1 se cuenta como confirmado. Se detiene EN CUANTO
+    // el contador llega a 11 (nunca sigue tapeando hasta 20 si ya se alcanzó el
+    // objetivo) y valida la alerta INMEDIATAMENTE después de confirmar el asiento #11.
+    private static final int OBJETIVO_LIMITE_ASIENTOS = 11;
+
     public List<String> seleccionarMasDe10AsientosYValidarAlerta() {
+        long tTotalInicio = System.currentTimeMillis();
         SeatMap map = buildSeatMap();
         log.info("[SelectorPage] {}", map.getSummary());
 
-        if (map.getTotalSeats() < 11) {
+        if (map.getTotalSeats() < OBJETIVO_LIMITE_ASIENTOS) {
             org.junit.jupiter.api.Assumptions.abort(
                 "Menos de 11 asientos disponibles (detectados: " + map.getTotalSeats() + "). Se omite la prueba.");
             return null;
         }
 
-        // FIX real (causa raíz CONFIRMADA — mismo hallazgo que SeatSelectionEngine/
-        // tapRapidoEnButacaDesdeLabel para "Múltiples Asientos"/"Consecutivos"): esta
-        // lista guardaba solo el WebElement y llamaba asiento.getRect() en vivo en cada
-        // iteración (y tapDirecto() volvía a llamar getRect() una SEGUNDA vez sobre el
-        // mismo elemento) — en iOS, tras el primer tap real que muta el árbol XCUI,
-        // TODAS las demás referencias del MISMO escaneo quedan stale, así que casi todos
-        // los getRect() de esta lista lanzaban excepción y el loop las saltaba con
-        // "continue" SIN tapear realmente la app. El resultado: aunque el loop iteraba
-        // hasta 20 veces, casi nunca se acumulaban 11 selecciones REALES en la app, así
-        // que la alerta de límite nunca llegaba a dispararse. Se conservan los
-        // SeatMap.Seat completos (con x/y ya capturados en el escaneo original) y se
-        // tapea directo por coordenadas — mismo patrón ya usado con éxito en
-        // seleccionarYDeseleccionar3AsientosConsecutivosDisponibles() de este archivo —
-        // sin depender de ningún getRect() en vivo.
-        List<SeatMap.Seat> asientos = new ArrayList<>(map.allSeats());
+        List<SeatMap.Seat> candidatos = new ArrayList<>(map.allNumberedSeats());
+        Collections.shuffle(candidatos);
 
-        Collections.shuffle(asientos);
-
+        int initialCount = contarAsientosSeleccionadosPorBotonContinuar();
+        int contadorActual = initialCount;
         List<String> seleccionados = new ArrayList<>();
-        int maxIntentos = Math.min(asientos.size(), 20);
 
-        for (int i = 0; i < maxIntentos; i++) {
-            SeatMap.Seat asiento = asientos.get(i);
+        // Presupuesto acotado de intentos reales (objetivo + margen de reintentos por
+        // candidatos obsoletos/no disponibles) — nunca ilimitado, pero con espacio
+        // real de recuperación, a diferencia del loop de "20 taps ciegos" anterior.
+        final int RETRY_BUDGET = 10;
+        final int maxIntentos = Math.min(candidatos.size(), OBJETIVO_LIMITE_ASIENTOS + RETRY_BUDGET);
 
-            log.debug("[SelectorPage] Tap asiento #{} -> ({},{})", (i + 1), asiento.x, asiento.y);
+        int idxCandidato = 0;
+        int attempt = 0;
+        while (contadorActual < OBJETIVO_LIMITE_ASIENTOS && idxCandidato < maxIntentos) {
+            SeatMap.Seat asiento = candidatos.get(idxCandidato++);
+            attempt++;
+            int beforeCount = contadorActual;
 
+            // Re-localizar antes de cada tap — nunca confiar ciegamente en el
+            // WebElement/posición del escaneo original tras cambios de UI previos
+            // (mismo mecanismo ya aplicado en SeatSelectionEngine, con el mismo
+            // fallback a coordenadas cacheadas si la relocalización falla).
+            //
+            // FIX real (evidencia real de RUN-1005: el contador osciló hacia ABAJO
+            // varias veces — attempt=7 6->5, attempt=11 8->7, etc. — nunca llegó a 11
+            // pese a 21 intentos). Causa raíz: reubicarAsientoPorNumero(numero) busca
+            // por TEXTO DE ASIENTO ("7", "9", etc.), y ese número NO es único en todo
+            // el mapa — cada FILA tiene su propio asiento "7" (ver captura del mapa:
+            // filas A-L, cada una numerada 1..N). Al reubicar por número podía devolver
+            // el asiento "7" de OTRA fila (ya seleccionado en un intento previo) en vez
+            // del asiento "7" de la fila que realmente correspondía a este candidato —
+            // tapearlo de nuevo lo DESELECCIONA (comportamiento normal de toggle de la
+            // app), bajando el contador. Se descarta la relocalización si su Y queda a
+            // más de un alto de fila del Y cacheado (las filas están separadas por
+            // decenas de px; la misma fila real nunca se mueve tanto) — en ese caso se
+            // usa la coordenada cacheada del escaneo original, nunca ambigua.
+            final int TOLERANCIA_FILA_PX = 40;
+            int tapX = asiento.x, tapY = asiento.y;
             try {
-                tapW3C(asiento.x, asiento.y);
-            } catch (Exception e) {
-                continue;
+                WebElement fresco = reubicarAsientoPorNumero(asiento.number);
+                if (fresco != null) {
+                    org.openqa.selenium.Rectangle r = fresco.getRect();
+                    int freshY = r.getY() + r.getHeight() / 2;
+                    if (Math.abs(freshY - asiento.y) <= TOLERANCIA_FILA_PX) {
+                        tapX = r.getX() + r.getWidth() / 2;
+                        tapY = freshY;
+                    }
+                    // si el Y no coincide con la fila esperada, se descarta esta
+                    // relocalización (probable colisión de número entre filas) y se
+                    // conserva tapX/tapY = coordenada cacheada, ya inicializada arriba.
+                }
+            } catch (Exception ignored) {
+                // se conservan las coordenadas cacheadas del escaneo original
             }
-            seleccionados.add("(" + asiento.x + "," + asiento.y + ")");
-            sleep(60);
 
-            // La alerta solo puede aparecer al intentar seleccionar el asiento #11.
-            // No tiene sentido verificarla en los primeros 9 taps: ahorra 9 llamadas WebDriver.
-            if (i >= 9 && estaVisibleAlertaLimiteAsientos()) {
-                validarAlertaLimiteAsientos();
-                log.info("[SelectorPage] Alerta de límite detectada. Asientos tapeados: {}", seleccionados.size());
-                takeScreenshot("Alerta limite asientos");
-                return seleccionados;
+            boolean tapOk;
+            try {
+                tapW3C(tapX, tapY);
+                tapOk = true;
+            } catch (Exception e) {
+                tapOk = false;
+            }
+
+            boolean confirmed = false;
+            if (tapOk) {
+                sleep(400);
+                contadorActual = contarAsientosSeleccionadosPorBotonContinuar();
+                confirmed = contadorActual == beforeCount + 1;
+                if (confirmed) seleccionados.add("A" + asiento.number);
+            }
+
+            log.info("[SeatLimit] initialCount={} targetCount={} attempt={} beforeCount={} afterCount={} confirmed={} alertDetected={} totalMs={}",
+                    initialCount, OBJETIVO_LIMITE_ASIENTOS, attempt, beforeCount, contadorActual, confirmed, false,
+                    System.currentTimeMillis() - tTotalInicio);
+
+            if (!confirmed) {
+                log.warn("[SelectorPage] Asiento A{} descartado (tapOk={}, contador {} -> {}) — siguiente candidato.",
+                        asiento.number, tapOk, beforeCount, contadorActual);
             }
         }
 
-        throw new RuntimeException("No apareció la alerta de límite máximo de asientos.");
+        if (contadorActual < OBJETIVO_LIMITE_ASIENTOS) {
+            throw new RuntimeException("Solo se pudieron seleccionar " + contadorActual
+                    + " de " + OBJETIVO_LIMITE_ASIENTOS + " asientos reales.");
+        }
+
+        // Contador confirmó 11 asientos reales — verificar la alerta INMEDIATAMENTE,
+        // sin ningún tap ni verificación adicional.
+        if (estaVisibleAlertaLimiteAsientos()) {
+            validarAlertaLimiteAsientos();
+            log.info("[SeatLimit] alertDetected=true tras confirmar {} asientos reales.", contadorActual);
+            log.info("[SelectorPage] Alerta de límite detectada. Asientos confirmados: {}", seleccionados.size());
+            takeScreenshot("Alerta limite asientos");
+            return seleccionados;
+        }
+
+        // La alerta no apareció pese a 11 asientos reales confirmados: se ejecuta
+        // ÚNICAMENTE la estrategia de diagnóstico ya definida (sin tocar el locator) —
+        // capturar el page source inmediatamente para determinar si la alerta existe
+        // en el árbol pero el locator no la detectó, o si realmente no se disparó.
+        String pageSourceTimestamp = java.time.Instant.now().toString();
+        String pageSource = "";
+        try { pageSource = driver.getPageSource(); } catch (Exception ignored) {}
+        boolean alertPresentInSource = pageSource.contains("límite máximo de asientos")
+                || pageSource.contains("Aceptar y continuar");
+        log.info("[SeatLimit] alertDetected=false alertPresentInSource={} alertLocatorMatch={} pageSourceTimestamp={}",
+                alertPresentInSource, false, pageSourceTimestamp);
+        takeScreenshot("Sin alerta tras 11 asientos confirmados");
+
+        throw new RuntimeException("No apareció la alerta de límite máximo de asientos "
+                + "(11 asientos reales confirmados por el contador; alertPresentInSource=" + alertPresentInSource + ").");
     }
     // FIX real (causa ra\u00edz CONFIRMADA \u2014 "No apareci\u00f3 la alerta de l\u00edmite m\u00e1ximo de
     // asientos" en iOS): este locator usaba exclusivamente @text (atributo de
@@ -1893,42 +1973,50 @@ public class SelectorPage extends BasePage {
         // Guardia: verificar que estamos en la pantalla de asientos
         verificarPantallaAsientosOSkip();
 
-        // Fase 1: intento rápido por contentDescription o resourceId
-        driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
-        try {
-            List<WebElement> porDesc = driver.findElements(By.xpath(
-                    "//*[contains(@content-desc,'especial') or contains(@content-desc,'Especial') or " +
-                    "contains(@content-desc,'discapacidad') or contains(@content-desc,'Discapacidad') or " +
-                    "contains(@content-desc,'accesible') or contains(@content-desc,'Accesible') or " +
-                    "contains(@content-desc,'wheelchair') or contains(@content-desc,'Wheelchair') or " +
-                    "contains(@content-desc,'PRM') or contains(@content-desc,'prm') or " +
-                    "contains(@resource-id,'especial') or contains(@resource-id,'special') or " +
-                    "contains(@resource-id,'wheelchair') or contains(@resource-id,'accessible')]"
-            ));
-            int screenHeight = driver.manage().window().getSize().getHeight();
-            int mapTop    = (int) (screenHeight * 0.28);
-            int mapBottom = (int) (screenHeight * 0.94);
+        // FIX real (TAREA performance — diagnóstico RUN-1003: 373s de silencio total en
+        // "Validación de Alerta en Asiento Especial"). Fase 1 original buscaba por
+        // @content-desc/@resource-id — atributos EXCLUSIVOS del modelo Android/
+        // UiAutomator2 que WDA/XCUITest nunca expone en iOS (mismo hallazgo ya
+        // documentado en este archivo para otros locators legacy sin rama iOS). En iOS
+        // esta fase JAMÁS puede encontrar nada; se omite por completo y se pasa
+        // directo a la estrategia nativa de iOS (Fase 2).
+        if (!isIOS()) {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            try {
+                List<WebElement> porDesc = driver.findElements(By.xpath(
+                        "//*[contains(@content-desc,'especial') or contains(@content-desc,'Especial') or " +
+                        "contains(@content-desc,'discapacidad') or contains(@content-desc,'Discapacidad') or " +
+                        "contains(@content-desc,'accesible') or contains(@content-desc,'Accesible') or " +
+                        "contains(@content-desc,'wheelchair') or contains(@content-desc,'Wheelchair') or " +
+                        "contains(@content-desc,'PRM') or contains(@content-desc,'prm') or " +
+                        "contains(@resource-id,'especial') or contains(@resource-id,'special') or " +
+                        "contains(@resource-id,'wheelchair') or contains(@resource-id,'accessible')]"
+                ));
+                int screenHeight = driver.manage().window().getSize().getHeight();
+                int mapTop    = (int) (screenHeight * 0.28);
+                int mapBottom = (int) (screenHeight * 0.94);
 
-            for (WebElement el : porDesc) {
-                try {
-                    org.openqa.selenium.Rectangle r = el.getRect();
-                    int centerY = r.getY() + (r.getHeight() / 2);
-                    int centerX = r.getX() + (r.getWidth() / 2);
-                    if (centerY < mapTop || centerY > mapBottom || centerX < 20) continue;
+                for (WebElement el : porDesc) {
+                    try {
+                        org.openqa.selenium.Rectangle r = el.getRect();
+                        int centerY = r.getY() + (r.getHeight() / 2);
+                        int centerX = r.getX() + (r.getWidth() / 2);
+                        if (centerY < mapTop || centerY > mapBottom || centerX < 20) continue;
 
-                    tapW3C(centerX, centerY);
-                    sleep(600);
-                    if (estaVisibleAlertaAsientoEspecial()) {
-                        log.info("[SelectorPage] Asiento especial encontrado por contentDescription.");
-                        takeScreenshot("Asiento especial seleccionado");
-                        return "asiento=" + obtenerTextoSeguro(el) + " [especial]";
-                    }
-                    tapW3C(centerX, centerY);
-                    sleep(300);
-                } catch (Exception ignored) {}
+                        tapW3C(centerX, centerY);
+                        sleep(600);
+                        if (estaVisibleAlertaAsientoEspecial()) {
+                            log.info("[SelectorPage] Asiento especial encontrado por contentDescription.");
+                            takeScreenshot("Asiento especial seleccionado");
+                            return "asiento=" + obtenerTextoSeguro(el) + " [especial]";
+                        }
+                        tapW3C(centerX, centerY);
+                        sleep(300);
+                    } catch (Exception ignored) {}
+                }
+            } finally {
+                driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
             }
-        } finally {
-            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
         }
 
         // Fase 2: búsqueda sistemática — primero extremos de fila (donde suelen estar los especiales)
@@ -1941,46 +2029,69 @@ public class SelectorPage extends BasePage {
             Map<Integer, List<WebElement>> filas = agruparAsientosPorFilaFlexible(asientos);
             // Solo extremos de fila: los asientos especiales siempre están al inicio/fin de fila.
             // Probar el interior dispara taps innecesarios y alarga el test varios minutos.
-            List<WebElement> prioritarios = new ArrayList<>();
+            //
+            // FIX real (TAREA performance): se capturan x/y/texto de cada extremo UNA
+            // sola vez aquí — antes de cualquier tap — en vez de guardar el WebElement y
+            // volver a llamar getRect() DENTRO del loop en cada intento. Mismo hallazgo
+            // ya confirmado en este archivo para "Selección de Múltiples Asientos"/">10
+            // Asientos": tras el primer tap del loop, el árbol XCUITest se invalida y
+            // getRect() sobre CUALQUIER WebElement de este mismo escaneo deja de ser
+            // confiable para los candidatos restantes. La coordenada en sí sigue siendo
+            // válida (el asiento no cambia de posición en pantalla al tapear otro, solo
+            // cambia su estado visual — ya validado en tapRapidoEnButacaDesdeLabel()).
+            record CandidatoEspecial(int x, int y, String texto) {}
+            List<CandidatoEspecial> prioritarios = new ArrayList<>();
 
             for (List<WebElement> fila : filas.values()) {
                 fila.sort((a, b) -> Integer.compare(a.getRect().getX(), b.getRect().getX()));
-                if (!fila.isEmpty()) {
-                    prioritarios.add(fila.get(0));
-                    if (fila.size() > 1) prioritarios.add(fila.get(fila.size() - 1));
+                if (fila.isEmpty()) continue;
+                WebElement primero = fila.get(0);
+                org.openqa.selenium.Rectangle rp = primero.getRect();
+                prioritarios.add(new CandidatoEspecial(
+                        rp.getX() + rp.getWidth() / 2, rp.getY() + rp.getHeight() / 2, obtenerTextoSeguro(primero)));
+                if (fila.size() > 1) {
+                    WebElement ultimo = fila.get(fila.size() - 1);
+                    org.openqa.selenium.Rectangle ru = ultimo.getRect();
+                    prioritarios.add(new CandidatoEspecial(
+                            ru.getX() + ru.getWidth() / 2, ru.getY() + ru.getHeight() / 2, obtenerTextoSeguro(ultimo)));
                 }
             }
 
-            List<WebElement> orden = new ArrayList<>(prioritarios);
-            int maxIntentos = Math.min(orden.size(), 25);
+            int maxIntentos = Math.min(prioritarios.size(), 25);
 
             // implicitlyWait=0 evita que estaVisibleAlertaAsientoEspecial() espere
             // 10 segundos por tap fallido → de ~270s a ~20s para los 25 intentos.
             driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
             try {
                 for (int i = 0; i < maxIntentos; i++) {
-                    WebElement asiento = orden.get(i);
-                    try {
-                        org.openqa.selenium.Rectangle r = asiento.getRect();
-                        int centerX = r.getX() + r.getWidth() / 2;
-                        int centerY = r.getY() + r.getHeight() / 2;
-                        String txt = obtenerTextoSeguro(asiento);
+                    long tAttempt = System.currentTimeMillis();
+                    CandidatoEspecial c = prioritarios.get(i);
 
-                        log.debug("[SelectorPage] Probando asiento {}/{}: asiento={} en ({},{})", (i + 1), maxIntentos, txt, centerX, centerY);
+                    long tTap = System.currentTimeMillis();
+                    tapW3C(c.x(), c.y());
+                    sleep(600);
+                    long tapMs = System.currentTimeMillis() - tTap;
 
-                        tapW3C(centerX, centerY);
-                        sleep(600);
+                    long tVerify = System.currentTimeMillis();
+                    boolean esEspecial = estaVisibleAlertaAsientoEspecial();
+                    long verifyMs = System.currentTimeMillis() - tVerify;
 
-                        if (estaVisibleAlertaAsientoEspecial()) {
-                            log.info("[SelectorPage] Asiento especial detectado: asiento={}", txt);
-                            takeScreenshot("Asiento especial seleccionado");
-                            return "asiento=" + txt + " [especial]";
-                        }
+                    // FIX real (evidencia real — RUN-1005: refreshSourceMs costaba ~2.4s
+                    // por intento fallido, ~29s en 12 intentos, SIN ningún beneficio
+                    // funcional — no recalculaba candidatos, solo confirmaba que la app
+                    // respondía). Se retira: puro overhead medido sin justificación una
+                    // vez cuantificado su costo real.
+                    log.info("[PERF][AsientoEspecial] fase=2 candidatos={} intento={} tapMs={} verifyMs={} refreshSourceMs=0 totalMs={}",
+                            maxIntentos, (i + 1), tapMs, verifyMs, System.currentTimeMillis() - tAttempt);
 
-                        tapW3C(centerX, centerY);
-                        sleep(200);
+                    if (esEspecial) {
+                        log.info("[SelectorPage] Asiento especial detectado: asiento={}", c.texto());
+                        takeScreenshot("Asiento especial seleccionado");
+                        return "asiento=" + c.texto() + " [especial]";
+                    }
 
-                    } catch (Exception ignored) {}
+                    tapW3C(c.x(), c.y());
+                    sleep(200);
                 }
             } finally {
                 driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
@@ -2502,8 +2613,137 @@ public class SelectorPage extends BasePage {
             throw e;
         }
     }
+    private static final java.util.regex.Pattern PATRON_HORARIO =
+            java.util.regex.Pattern.compile("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$");
+
     // Mismo hallazgo/fix que obtenerHorariosDisponibles() — sin rama iOS, siempre vacío.
+    //
+    // FIX real (TAREA performance — diagnóstico RUN-1003: 177s de silencio total en
+    // "Cambio de Horario en el Mapa de Asientos"): la versión anterior llamaba
+    // driver.findElements(locator) UNA vez (barato) pero luego iteraba TODOS los
+    // elementos devueltos llamando el.isDisplayed()/el.getRect() INDIVIDUALMENTE —
+    // en la pantalla de asientos ese predicado NSPredicate ("value != nil" /
+    // "value/label != nil") matchea también los ~186 botones de asiento, cada uno
+    // disparando un round-trip WDA real antes de llegar al filtro de texto/posición
+    // que los descarta. Se reemplaza por el MISMO patrón ya probado en este archivo
+    // para el mapa de asientos (intentarEscaneoRapidoConPageSource() /
+    // SeatUiSnapshot): UNA sola driver.getPageSource(), parseo local del XML
+    // (x/y/width/height/label/value/name ya vienen ahí, sin round-trip alguno), y
+    // solo se piden WebElement reales para el puñado de candidatos que YA pasaron el
+    // filtro de texto+posición en el XML. Se conserva el criterio original
+    // (isDisplayed/getRect por elemento) como fallback exclusivo de Android y como
+    // red de seguridad si el conteo de la vía rápida no cuadra — mismo espíritu
+    // defensivo que intentarEscaneoRapidoConPageSource().
     private List<WebElement> obtenerHorariosVisiblesEnPantallaAsientos() {
+        long tTotal = System.currentTimeMillis();
+        if (isIOS()) {
+            List<WebElement> rapido = obtenerHorariosVisiblesRapido(tTotal);
+            if (rapido != null) return rapido;
+        }
+        return obtenerHorariosVisiblesLento(tTotal);
+    }
+
+    /** Vía rápida (solo iOS): page source único + filtro en memoria. {@code null} si no se pudo verificar. */
+    // FIX real (evidencia real — RUN-1005: "vía rápida descartada: desajuste de orden
+    // idx=1 real='Paso 2 de 4' xml='A'"). El primer diseño emparejaba findElements()
+    // con el page source POR ÍNDICE/ORDEN — válido para el mapa de asientos
+    // (intentarEscaneoRapidoConPageSource, todos hermanos en un único contenedor
+    // plano) pero NO para este locator: matchea elementos dispersos por toda la
+    // pantalla (barra de horarios, indicador de pasos "Paso 2 de 4", etc.), y WDA no
+    // garantiza que ese orden coincida con el recorrido DFS del XML. La verificación
+    // de orden hacía su trabajo (nunca usó datos incorrectos) pero descartaba la vía
+    // rápida siempre, cayendo a la lenta sin ninguna mejora real. Se elimina la
+    // dependencia de ORDEN: se filtra candidatos SOLO con datos del page source (cero
+    // llamadas WDA), y para el puñado de textos que sobreviven el filtro se hace UNA
+    // consulta adicional, dirigida por TEXTO EXACTO (no por índice) — sin ambigüedad
+    // posible y sin isDisplayed()/getRect() por candidato.
+    private List<WebElement> obtenerHorariosVisiblesRapido(long tTotal) {
+        long t0 = System.currentTimeMillis();
+        String pageSource;
+        try {
+            pageSource = driver.getPageSource();
+        } catch (Exception e) {
+            return null;
+        }
+        long pageSourceMs = System.currentTimeMillis() - t0;
+
+        long t1 = System.currentTimeMillis();
+        List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(pageSource).nodos;
+        long parseMs = System.currentTimeMillis() - t1;
+
+        int screenHeight = driver.manage().window().getSize().getHeight();
+        double top = screenHeight * 0.10, bottom = screenHeight * 0.32;
+
+        // Candidatos identificados ÚNICAMENTE con datos ya presentes en el XML —
+        // ningún findElements()/isDisplayed()/getRect() individual todavía.
+        LinkedHashSet<String> textosCandidatos = new LinkedHashSet<>();
+        int totalCandidatosXml = 0;
+        for (SeatUiSnapshot.Nodo n : nodos) {
+            boolean tipoValido = "XCUIElementTypeStaticText".equals(n.tag) || "XCUIElementTypeButton".equals(n.tag);
+            if (!tipoValido) continue;
+            String value = n.attrs.get("value");
+            String label = n.attrs.get("label");
+            boolean pasaPredicado = (value != null && !value.isBlank()) || (label != null && !label.isBlank());
+            if (!pasaPredicado) continue;
+            totalCandidatosXml++;
+
+            String txt = textoDeNodoHorario(n);
+            if (!PATRON_HORARIO.matcher(txt).matches()) continue;
+
+            double y = n.num("y"), h = n.num("height");
+            if (Double.isNaN(y) || Double.isNaN(h)) continue;
+            double centerY = y + (h / 2);
+            if (centerY > top && centerY < bottom) textosCandidatos.add(txt);
+        }
+
+        if (textosCandidatos.isEmpty()) {
+            long totalMs = System.currentTimeMillis() - tTotal;
+            log.info("[PERF][HorariosVisibles] pageSourceMs={} parseMs={} candidatos={} horariosEncontrados=0 totalMs={} via=rapida",
+                    pageSourceMs, parseMs, totalCandidatosXml, totalMs);
+            return new ArrayList<>();
+        }
+
+        // Consulta ÚNICA y dirigida por texto exacto — nunca por orden/índice.
+        StringBuilder predicado = new StringBuilder();
+        for (String txt : textosCandidatos) {
+            if (predicado.length() > 0) predicado.append(" OR ");
+            String escapado = txt.replace("'", "\\'");
+            predicado.append("label == '").append(escapado).append("' OR value == '").append(escapado).append("'");
+        }
+        List<WebElement> encontrados;
+        try {
+            encontrados = driver.findElements(AppiumBy.iOSNsPredicateString(predicado.toString()));
+        } catch (Exception e) {
+            return null; // consulta dirigida falló — cae a la vía lenta, garantiza corrección
+        }
+
+        Map<String, WebElement> unicos = new LinkedHashMap<>();
+        for (WebElement el : encontrados) {
+            String txt = obtenerTextoSeguro(el);
+            if (textosCandidatos.contains(txt)) unicos.putIfAbsent(txt, el);
+        }
+
+        List<WebElement> resultado = new ArrayList<>(unicos.values());
+        long totalMs = System.currentTimeMillis() - tTotal;
+        log.info("[PERF][HorariosVisibles] pageSourceMs={} parseMs={} candidatos={} horariosEncontrados={} totalMs={} via=rapida",
+                pageSourceMs, parseMs, totalCandidatosXml, resultado.size(), totalMs);
+        for (WebElement el : resultado) {
+            log.debug(" - {}", obtenerTextoSeguro(el));
+        }
+        return resultado;
+    }
+
+    private String textoDeNodoHorario(SeatUiSnapshot.Nodo n) {
+        String value = n.attrs.get("value");
+        if (value != null && !value.isBlank()) return value.trim();
+        String label = n.attrs.get("label");
+        if (label != null && !label.isBlank()) return label.trim();
+        String name = n.attrs.get("name");
+        return name == null ? "" : name.trim();
+    }
+
+    /** Vía original (Android siempre; iOS solo como fallback si la vía rápida no pudo verificarse). */
+    private List<WebElement> obtenerHorariosVisiblesLento(long tTotal) {
         List<WebElement> resultado = new ArrayList<>();
         Map<String, WebElement> unicos = new LinkedHashMap<>();
 
@@ -2524,7 +2764,7 @@ public class SelectorPage extends BasePage {
                         if (!el.isDisplayed()) continue;
 
                         String txt = obtenerTextoSeguro(el);
-                        if (!txt.matches("^(1[0-2]|[1-9]):[0-5]\\d\\s?(AM|PM|am|pm)$")) continue;
+                        if (!PATRON_HORARIO.matcher(txt).matches()) continue;
 
                         int y = el.getRect().getY() + (el.getRect().getHeight() / 2);
                         int screenHeight = driver.manage().window().getSize().getHeight();
@@ -2547,7 +2787,9 @@ public class SelectorPage extends BasePage {
 
         resultado.addAll(unicos.values());
 
-        log.debug("[SelectorPage] Horarios visibles en pantalla de asientos: {}", resultado.size());
+        long totalMs = System.currentTimeMillis() - tTotal;
+        log.info("[PERF][HorariosVisibles] pageSourceMs=0 parseMs=0 candidatos=n/a horariosEncontrados={} totalMs={} via=lenta",
+                resultado.size(), totalMs);
         for (WebElement el : resultado) {
             log.debug(" - {}", obtenerTextoSeguro(el));
         }

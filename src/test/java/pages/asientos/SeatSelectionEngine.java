@@ -130,13 +130,25 @@ final class SeatSelectionEngine {
         // sigue en investigación.
         int tapsExitosos = 0;
 
+        // FIX real (TAREA performance/failure — diagnóstico RUN-1003, "Selección de
+        // Múltiples Asientos": A6 confirmado, luego A1 y A15 con describir()=N/D en
+        // TODOS los atributos — el WebElement de candidato.element, cacheado en el
+        // escaneo inicial, queda obsoleto tras el primer tap real que muta el árbol
+        // XCUITest). El freno de seguridad anterior (`tapsExitosos >= count`) no dejaba
+        // NINGÚN margen de reintento: si 2 de los primeros 3 taps caían en un handle
+        // obsoleto, el motor fallaba sin remedio aunque quedaran 180+ candidatos
+        // viables. Se reemplaza por un presupuesto acotado de intentos totales
+        // (objetivo + margen fijo) — sigue habiendo un límite duro de taps reales
+        // sobre la app (no crece sin control), pero permite descartar unos pocos
+        // candidatos obsoletos y seguir con el siguiente sin fallar de inmediato.
+        final int RETRY_BUDGET = 6;
+        final int maxIntentosTotales = count + RETRY_BUDGET;
+
         while (seleccionados.size() < count) {
-            if (tapsExitosos >= count) {
-                log.warn("[SeatSelectionEngine] DETENIDO por freno de seguridad: ya se ejecutaron {} "
-                    + "tap(s) exitoso(s) (>= {} solicitados) aunque el motor solo confirmó {} — no se "
-                    + "intentan más candidatos para no seguir seleccionando asientos reales de más en "
-                    + "la app mientras el indicador de confirmación sigue en investigación.",
-                    tapsExitosos, count, seleccionados.size());
+            if (intento >= maxIntentosTotales) {
+                log.warn("[SeatSelectionEngine] DETENIDO por freno de seguridad: se alcanzó el presupuesto "
+                    + "de {} intento(s) totales (objetivo={} + margen={}) con solo {} confirmado(s) — no se "
+                    + "intentan más candidatos.", maxIntentosTotales, count, RETRY_BUDGET, seleccionados.size());
                 break;
             }
 
@@ -156,27 +168,44 @@ final class SeatSelectionEngine {
             intento++;
             excluidos.add(candidato.number);
 
-            // FIX real (causa raíz CONFIRMADA con diagnóstico en vivo contra dispositivo
-            // Android real — evidencia: log [DIAG-ASIENTO], candidato A7. El elemento
-            // re-resuelto por reubicarAsientoPorNumero() [UiSelector().text("7")] y
-            // candidato.element [el mismo TextView del escaneo inicial] tenían EXACTAMENTE
-            // los mismos atributos — className=android.widget.TextView, text=7, enabled=true,
-            // clickable=false, focusable=false, displayed=true — sin ninguna excepción al
-            // consultarlos justo después del escaneo. La hipótesis "el locator encuentra el
-            // TextView en vez del contenedor interactivo" queda descartada: candidato.element
-            // ES ese mismo TextView, y es exactamente lo que "Selección de Asientos
-            // Consecutivos"/"...Deselección" tocan con éxito (tapRapidoEnButacaDesdeLabel()
-            // tapea por COORDENADAS via getRect(), nunca depende de clickable/enabled). La
-            // causa real es que reubicarAsientoPorNumero() — una consulta AndroidUIAutomator
-            // fresca por texto — es intermitentemente poco confiable en este árbol (evidencia:
-            // la MISMA consulta resuelta segundos antes sin problema falló luego con
-            // "no respondió label/enabled" sin que nada se hubiera tocado todavía). Se elimina
-            // esa re-resolución y su chequeo label/enabled asociado (que solo protegía contra
-            // un handle roto por esa MISMA re-resolución) y se reutiliza candidato.element
-            // directamente — la mecánica ya validada en Consecutivos/Deselección — para
-            // Android y iOS por igual, ya que ambos flujos ya prueban que tocar varios
-            // candidato.element distintos del mismo escaneo, en secuencia, funciona.
+            int beforeCount = contadorPrevio;
+
+            // FIX real (ver comentario del RETRY_BUDGET arriba): antes de tapear, se
+            // intenta revalidar/relocalizar el candidato con una consulta DIRIGIDA por
+            // número (reubicarAsientoPorNumero — un solo elemento, no un re-escaneo
+            // completo del mapa) para obtener una coordenada fresca. Es exactamente el
+            // mecanismo que el historial de este archivo documentó como "arregla iOS
+            // pero es intermitente en Android" cuando se usaba como ÚNICA fuente de
+            // verdad (incluida la confirmación por atributos) — aquí se usa SOLO para
+            // refrescar x/y antes del tap, nunca para confirmar la selección (eso sigue
+            // siendo 100% el contador de "Continuar"), y con fallback inmediato a
+            // candidato.element/candidato.x/y si la relocalización falla — nunca peor
+            // que el comportamiento anterior.
+            // FIX real (evidencia real — RUN-1005, ">10 Asientos" con el mismo
+            // mecanismo: el contador osciló hacia abajo varias veces porque
+            // reubicarAsientoPorNumero(numero) puede devolver el asiento de OTRA FILA
+            // con el mismo número visible — cada fila tiene su propio "7", "9", etc. —
+            // y tapear ese duplicado DESELECCIONA un asiento ya confirmado en vez de
+            // seleccionar uno nuevo. Se descarta la relocalización si su Y queda lejos
+            // del Y cacheado del candidato original (filas distintas están separadas
+            // por decenas de px; la misma fila real nunca se mueve tanto).
+            final int TOLERANCIA_FILA_PX = 40;
+            boolean revalidated = false;
             WebElement objetivo = candidato.element;
+            try {
+                WebElement fresco = page.reubicarAsientoPorNumero(candidato.number);
+                if (fresco != null) {
+                    int freshY = fresco.getRect().getY() + fresco.getRect().getHeight() / 2;
+                    if (Math.abs(freshY - candidato.y) <= TOLERANCIA_FILA_PX) {
+                        objetivo = fresco;
+                        revalidated = true;
+                    }
+                    // Y lejano del esperado → probable colisión de número entre filas;
+                    // se conserva candidato.element (coordenadas cacheadas) sin cambio.
+                }
+            } catch (Exception ignored) {
+                // se conserva candidato.element / coordenadas cacheadas sin cambio
+            }
 
             if (objetivo == null) {
                 log.warn("[SeatSelectionEngine] Intento {} → A{} sin elemento en el escaneo original — "
@@ -184,49 +213,45 @@ final class SeatSelectionEngine {
                 utils.PerfMetrics.attempt("SeatSelection", intento, "A" + candidato.number, 0, "FAIL-SIN-ELEMENTO");
                 continue;
             }
-            String locator = "scan-original (candidato.element, x=" + candidato.x + " y=" + candidato.y + ")";
-            long tiempoResolver = 0; // no hay resolución adicional — se reutiliza el handle del escaneo
+            String locator = revalidated
+                    ? "relocalizado (reubicarAsientoPorNumero)"
+                    : "scan-original (candidato.element, x=" + candidato.x + " y=" + candidato.y + ")";
+            long tiempoResolver = 0;
 
-            log.info("[SeatSelectionEngine] Intento {} → A{} usa el elemento del escaneo original ({}): {}",
+            log.info("[SeatSelectionEngine] Intento {} → A{} usa {}: {}",
                 intento, candidato.number, locator, describir(objetivo));
 
             long tClick = System.currentTimeMillis();
-            boolean tapOk = page.tapRapidoEnButacaDesdeLabel(candidato);
+            boolean tapOk = revalidated
+                    ? tapDirectoSobreElemento(objetivo, candidato)
+                    : page.tapRapidoEnButacaDesdeLabel(candidato);
             long tiempoTap = System.currentTimeMillis() - tClick;
             if (tapOk) tapsExitosos++;
 
             long tValidacion = System.currentTimeMillis();
             boolean confirmado = false;
+            int afterCount = beforeCount;
             String estadoFinal = "no se validó (tap falló)";
             if (tapOk) {
                 page.sleep(400);
-                if (contadorPrevio >= 0) {
-                    // Mecanismo real: el contador del botón "Continuar" debe subir
-                    // exactamente en 1 — no depende de qué asiento se tocó.
-                    int contadorNuevo = page.contarAsientosSeleccionadosPorBotonContinuar();
-                    confirmado = contadorNuevo == contadorPrevio + 1;
-                    estadoFinal = String.format("contador Continuar %d -> %d (esperado %d)",
-                        contadorPrevio, contadorNuevo, contadorPrevio + 1);
-                    if (!confirmado && contadorNuevo != contadorPrevio) {
-                        log.warn("[SeatSelectionEngine] Anomalía: contador Continuar cambió de forma "
-                            + "inesperada ({} -> {}) tras A{}.", contadorPrevio, contadorNuevo, candidato.number);
-                    }
-                    contadorPrevio = contadorNuevo; // resincroniza siempre con el valor real observado
-                } else {
-                    // Sin evidencia del indicador en esta plataforma (no-iOS) — se conserva
-                    // el criterio anterior en vez de asumir el mismo indicador sin prueba.
-                    WebElement revalidado = page.reubicarAsientoPorNumero(candidato.number);
-                    if (revalidado != null) {
-                        confirmado = estaSeleccionado(revalidado);
-                        estadoFinal = describir(revalidado);
-                    } else {
-                        estadoFinal = "no se pudo revalidar A" + candidato.number + " tras el tap (búsqueda dirigida, sin escaneo completo)";
-                    }
+                // Única fuente de verdad: el contador real de "Continuar" — nunca se
+                // interpreta un tap ejecutado como selección exitosa por sí solo.
+                afterCount = page.contarAsientosSeleccionadosPorBotonContinuar();
+                confirmado = afterCount == beforeCount + 1;
+                estadoFinal = String.format("contador Continuar %d -> %d (esperado %d)",
+                    beforeCount, afterCount, beforeCount + 1);
+                if (!confirmado && afterCount != beforeCount) {
+                    log.warn("[SeatSelectionEngine] Anomalía: contador Continuar cambió de forma "
+                        + "inesperada ({} -> {}) tras A{}.", beforeCount, afterCount, candidato.number);
                 }
+                contadorPrevio = afterCount; // resincroniza siempre con el valor real observado
             }
             long tiempoValidacion = System.currentTimeMillis() - tValidacion;
 
             log.info("[SeatSelectionEngine] Después del tap A{} → {}", candidato.number, estadoFinal);
+            log.info("[SeatSelection] requested={} beforeCount={} candidate=A{} tap={} afterCount={} "
+                    + "confirmed={} attempt={} revalidated={}",
+                    count, beforeCount, candidato.number, tapOk, afterCount, confirmado, intento, revalidated);
             utils.PerfMetrics.note("SeatSelection", String.format(
                 "intento=%d asiento=A%d locator=%s resolverMs=%d tapMs=%d validacionMs=%d",
                 intento, candidato.number, locator, tiempoResolver, tiempoTap, tiempoValidacion));
@@ -238,21 +263,27 @@ final class SeatSelectionEngine {
                 log.info("[SeatSelectionEngine] Asiento confirmado: A{}", candidato.number);
             } else {
                 log.warn("[SeatSelectionEngine] Asiento A{} descartado (tapOk={}, confirmado=false) — "
-                    + "se intenta otro candidato del mismo escaneo inicial (sin reescanear).", candidato.number, tapOk);
+                    + "se intenta el siguiente candidato (relocalizado).", candidato.number, tapOk);
             }
         }
 
         if (seleccionados.size() < count) {
             throw new RuntimeException(
-                "Solo se pudieron seleccionar " + seleccionados.size() + " de " + count + " asientos.");
+                "Solo se pudieron seleccionar " + seleccionados.size() + " de " + count + " asientos reales confirmados por el contador de \"Continuar\".");
         }
         return seleccionados;
     }
 
-    private static boolean estaSeleccionado(WebElement el) {
-        return "true".equalsIgnoreCase(el.getAttribute("selected"));
+    /** Tap directo por getRect() de un elemento recién relocalizado, con fallback a las coordenadas cacheadas del escaneo original. */
+    private boolean tapDirectoSobreElemento(WebElement fresco, SeatMap.Seat candidatoOriginal) {
+        try {
+            org.openqa.selenium.Rectangle r = fresco.getRect();
+            page.tapW3C(r.getX() + r.getWidth() / 2, r.getY() + r.getHeight() / 2);
+            return true;
+        } catch (Exception e) {
+            return page.tapRapidoEnButacaDesdeLabel(candidatoOriginal);
+        }
     }
-
 
     private static String describir(WebElement el) {
         return String.format("label=%s value=%s name=%s type=%s enabled=%s selected=%s frame=%s",

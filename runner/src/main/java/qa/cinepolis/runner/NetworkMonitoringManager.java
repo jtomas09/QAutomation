@@ -52,7 +52,11 @@ public final class NetworkMonitoringManager {
     public static Session start(BackendClient client, String executionId,
                                  NetworkMonitoringConfig cfg, Path agentDataDir,
                                  String udid, boolean isAndroid, Path evidenceRootDir) {
-        if (cfg == null || !cfg.enabled) return Session.INACTIVE;
+        if (cfg == null || !cfg.enabled) {
+            try { client.sendLog(executionId, "INFO", "[NETWORK] enabled=false — Network Monitoring deshabilitado por configuración."); }
+            catch (Exception ignored) {}
+            return Session.INACTIVE;
+        }
 
         NetworkRuntimeReadiness readiness = new NetworkRuntimeReadiness();
         try {
@@ -162,6 +166,22 @@ public final class NetworkMonitoringManager {
             }
 
             client.sendLog(executionId, "INFO", "[NETWORK] Monitoring started");
+
+            // Resumen consolidado de estado real — NO declara Network Monitoring como
+            // funcional solo porque mitmdump arrancó: expone explícitamente proxy/puerto/
+            // dispositivo/confianza de CA y dónde debe aparecer la evidencia, para que
+            // pueda verificarse contra los archivos reales tras la corrida en vez de
+            // asumir éxito.
+            String hostIpResumen;
+            try { hostIpResumen = java.net.InetAddress.getLocalHost().getHostAddress(); }
+            catch (Exception e) { hostIpResumen = "desconocido"; }
+            client.sendLog(executionId, "INFO", String.format(
+                    "[NETWORK] enabled=true proxy=%s port=%d device=%s caTrusted=%s "
+                    + "trafficFile=%s/{executionId}/{suite}/{test}/network-traffic.json "
+                    + "errorsFile=%s/{executionId}/{suite}/{test}/network-errors.json",
+                    hostIpResumen, port, (udid == null ? "n/a" : udid), trusted,
+                    evidenceRootDir, evidenceRootDir));
+
             return new Session(true, port, eventsFile.toString(), evidenceRootDir.toString(), caFingerprint);
 
         } catch (Exception e) {
@@ -207,26 +227,52 @@ public final class NetworkMonitoringManager {
         if (cfg == null || !cfg.enabled || udid == null || udid.isBlank()
                 || caFingerprintSha256 == null || eventsFile == null) return;
         try {
-            if (!Files.exists(eventsFile)) return;
-            boolean sawSuccess = false;
-            for (String line : Files.readAllLines(eventsFile)) {
-                if (line.contains("\"type\":\"tls_handshake\"") || line.contains("\"type\": \"tls_handshake\"")) {
-                    if (line.contains("\"SUCCESS\"")) { sawSuccess = true; break; }
-                }
-                // Un flow HTTP(S) decodificado con éxito también es evidencia positiva.
-                if (line.contains("\"type\":\"http_flow\"") || line.contains("\"type\": \"http_flow\"")) {
-                    sawSuccess = true;
-                    break;
-                }
+            if (!Files.exists(eventsFile)) {
+                client.sendLog(executionId, "WARN",
+                        "[NETWORK MONITORING FAILED] Paso fallido: 9/10 (archivo network-traffic.json / "
+                        + "events.ndjson no existe) — el proxy nunca escribió ningún evento.");
+                return;
             }
+
+            int tlsSuccessCount = 0, tlsFailedCount = 0, httpFlowCount = 0, totalLines = 0;
+            for (String line : Files.readAllLines(eventsFile)) {
+                if (line.isBlank()) continue;
+                totalLines++;
+                boolean isTls = line.contains("\"type\":\"tls_handshake\"") || line.contains("\"type\": \"tls_handshake\"");
+                boolean isHttp = line.contains("\"type\":\"http_flow\"") || line.contains("\"type\": \"http_flow\"");
+                if (isTls && line.contains("\"SUCCESS\"")) tlsSuccessCount++;
+                else if (isTls) tlsFailedCount++;
+                if (isHttp) httpFlowCount++;
+            }
+            boolean sawSuccess = tlsSuccessCount > 0 || httpFlowCount > 0;
+
             DeviceTrustStore trustStore = new DeviceTrustStore(agentDataDir);
             if (sawSuccess) {
                 trustStore.markTrusted(udid, caFingerprintSha256);
                 client.sendLog(executionId, "INFO",
                         "[NETWORK] ✓ Confianza de certificado confirmada para " + udid
-                        + " — no se pedirá de nuevo en próximas ejecuciones.");
+                        + " — no se pedirá de nuevo en próximas ejecuciones. httpFlows=" + httpFlowCount
+                        + " tlsSuccess=" + tlsSuccessCount);
+            } else if (totalLines == 0) {
+                client.sendLog(executionId, "WARN",
+                        "[NETWORK MONITORING FAILED] Paso fallido: 7/10 (ninguna request real capturada) — "
+                        + "el dispositivo probablemente no está enviando tráfico a través del proxy "
+                        + "(revisar paso 4: configuración de red del dispositivo).");
+            } else if (tlsFailedCount > 0) {
+                client.sendLog(executionId, "WARN",
+                        "[NETWORK MONITORING FAILED] Paso fallido: 6/10 (HTTPS handshake) — se detectaron "
+                        + tlsFailedCount + " intento(s) de conexión TLS rechazados por el dispositivo "
+                        + "(CA no confiable todavía para " + udid + "). Tráfico plano/no-HTTPS puede seguir "
+                        + "siendo observable; ver banner de configuración manual ya emitido al iniciar.");
+            } else {
+                client.sendLog(executionId, "WARN",
+                        "[NETWORK MONITORING FAILED] Paso fallido: 6/10 (HTTPS handshake) — no se observó "
+                        + "ningún handshake TLS exitoso ni fallido, y tampoco tráfico HTTP plano, para " + udid + ".");
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            client.sendLog(executionId, "WARN",
+                    "[NETWORK MONITORING FAILED] No se pudo evaluar la evidencia de red: " + e.getMessage());
+        }
     }
 
     // ── Android ──────────────────────────────────────────────────────────────
