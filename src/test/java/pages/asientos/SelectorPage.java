@@ -59,13 +59,64 @@ public class SelectorPage extends BasePage {
     // Se agrega la rama iOS vía NSPredicate; el lado Android se deja BYTE-IDÉNTICO
     // al original (mismo tipo de elemento android.widget.TextView, no el wildcard
     // //* que usaría PlatformLocator.byExactText()) para no cambiar su comportamiento.
+    //
+    // FIX real #2 (causa raíz confirmada con page source real, captura de
+    // diagnóstico RUN-1009/RUN-1010): el predicate anterior ("label == 'Continuar'
+    // OR name == 'Continuar' OR value == 'Continuar'") nunca podía resolver al
+    // botón real. El botón real es un XCUIElementTypeButton cuyo name/label es
+    // "Continuar, N" (N = cantidad de asientos, ej. "Continuar, 1") — el predicate
+    // de igualdad exacta contra 'Continuar' (sin sufijo) solo podía matchear el
+    // XCUIElementTypeStaticText hijo, interno, con accessible="false". El tap
+    // terminaba sin excepción (Appium no falla al tocar un elemento encontrado)
+    // pero nunca producía la navegación real — confirmado en dos corridas reales
+    // consecutivas (page source capturado + RUN-1010 fallando exactamente en la
+    // verificación de salida de pantalla). Se corrige exigiendo el tipo real del
+    // elemento (XCUIElementTypeButton) y un match por prefijo (BEGINSWITH) que
+    // tolera el sufijo dinámico de cantidad.
     private static final PlatformLocator CONTINUAR_BUTTON = PlatformLocator.of(
             By.xpath("//android.widget.TextView[@text=\"Continuar\"]"),
-            AppiumBy.iOSNsPredicateString("label == 'Continuar' OR name == 'Continuar' OR value == 'Continuar'")
+            AppiumBy.iOSNsPredicateString(
+                "type == 'XCUIElementTypeButton' AND (label BEGINSWITH 'Continuar' OR name BEGINSWITH 'Continuar')")
     );
 
+    /**
+     * FIX real (evidencia de page source real — captura de diagnóstico en
+     * ejecución RUN-1009, suite "asientos-seleccion1"): el botón "Continuar"
+     * puede seguir con enabled="false" un instante después de que el asiento ya
+     * aparece en "Asientos seleccionados" (posible validación asíncrona de
+     * disponibilidad del lado de la app). Tocar un botón deshabilitado en iOS no
+     * hace nada y no lanza excepción — antes esto pasaba en silencio: el método
+     * "terminaba bien" sin que la app navegara. Ahora se espera (acotado, sin
+     * tocar ningún timeout global) a que el botón esté realmente habilitado antes
+     * de tocarlo, y se verifica después, contra la UI real, que la navegación
+     * realmente ocurrió — igual que ya se exige en el resto de la selección de
+     * asientos (nunca asumir un resultado a partir de una acción, siempre medir).
+     */
     public void continuar() {
+        By locator = CONTINUAR_BUTTON.resolve(isIOS());
+        boolean habilitado = smartWait(() -> elementoHabilitado(locator), 5000, 200);
+        if (!habilitado) {
+            throw new RuntimeException("El botón Continuar nunca se habilitó tras seleccionar asiento(s).");
+        }
         this.click(CONTINUAR_BUTTON);
+        boolean salioDeAsientos = smartWait(() -> !estaEnPantallaDeAsientos(), 3000, 150);
+        if (!salioDeAsientos) {
+            throw new RuntimeException("Continuar() no navegó fuera de la pantalla de asientos "
+                    + "(el tap no tuvo efecto — ver estaEnPantallaDeAsientos()).");
+        }
+    }
+
+    /** Mismo patrón de implicitlyWait(0) ya usado en estaRealmenteEnPantallaDeAsientos(). */
+    private boolean elementoHabilitado(By locator) {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            List<WebElement> els = driver.findElements(locator);
+            return !els.isEmpty() && els.get(0).isEnabled();
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
     }
 
     public void seleccionarPeliculaRandomYHorario() {
@@ -1691,6 +1742,24 @@ public class SelectorPage extends BasePage {
         return false;
     }
 
+    // FIX real (TAREA arquitectura — eliminar trabajo repetido entre tests):
+    // wrapper PÚBLICO de la misma verificación de arriba, con implicitlyWait=0
+    // explícito (nunca hereda el wait implícito de 10s por defecto — si la pantalla
+    // NO es la de asientos, esta llamada debe fallar RÁPIDO, en un solo round-trip,
+    // no bloquear 10s). Es la única pieza de infraestructura que necesita
+    // SeleccionAsientos para decidir, de forma segura y verificable, si puede
+    // reutilizar la pantalla de asientos actual en vez de repetir PromosGuard +
+    // MovieDetection + MovieOpen + ScheduleSelection — nunca se asume, siempre se
+    // verifica contra la UI real antes de confiar en el estado cacheado.
+    public boolean estaRealmenteEnPantallaDeAsientos() {
+        try {
+            driver.manage().timeouts().implicitlyWait(Duration.ofMillis(0));
+            return estaEnPantallaDeAsientos();
+        } finally {
+            driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(10));
+        }
+    }
+
     private boolean clicSeguroEnElemento(WebElement el) {
         try {
             el.click();
@@ -1771,6 +1840,57 @@ public class SelectorPage extends BasePage {
     // objetivo) y valida la alerta INMEDIATAMENTE después de confirmar el asiento #11.
     private static final int OBJETIVO_LIMITE_ASIENTOS = 11;
 
+    /**
+     * Identidad lógica de un candidato. {@code rowIndex} se conserva SOLO para
+     * logging/diagnóstico (es relativo al escaneo, no estable entre dos escaneos
+     * distintos — evidencia real RUN-1006: el mismo asiento físico puede caer en un
+     * rowIndex diferente tras un re-scan, lo que hizo que la deduplicación anterior
+     * "fila:numero" no detectara que ya estaba confirmado, causando una deselección
+     * real en attempt=24, 9→8). La identidad real usada para excluir/comparar entre
+     * escaneos es POSICIÓN FÍSICA (x,y) + número — ver {@link #mismoAsientoFisico}.
+     */
+    private record CandidatoLimite(int rowIndex, int number, int x, int y, String label) {
+        String candidateId() { return rowIndex + ":" + number; }
+    }
+
+    /** Un asiento ya confirmado por el contador — identidad física para comparar entre escaneos. */
+    private record AsientoConfirmado(int x, int y, int number) {}
+
+    private static final int TOLERANCIA_FILA_PX = 40;
+    // Tolerancia espacial para "es el mismo asiento físico" entre dos escaneos
+    // distintos — menor que el ancho/alto típico de un botón de asiento, así que
+    // dos asientos REALES distintos nunca caen dentro de esta distancia entre sí.
+    private static final double TOLERANCIA_MISMO_ASIENTO_PX = 30.0;
+
+    private boolean mismoAsientoFisico(int x1, int y1, int x2, int y2) {
+        double dx = x1 - x2, dy = y1 - y2;
+        return Math.sqrt(dx * dx + dy * dy) <= TOLERANCIA_MISMO_ASIENTO_PX;
+    }
+
+    private List<CandidatoLimite> construirPoolCandidatosLimite(SeatMap map) {
+        List<CandidatoLimite> pool = new ArrayList<>();
+        List<SeatMap.Row> rows = map.getRows();
+        for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+            for (SeatMap.Seat seat : rows.get(rowIdx).seats) {
+                if (seat.number <= 0) continue;
+                pool.add(new CandidatoLimite(rowIdx, seat.number, seat.x, seat.y, seat.toString()));
+            }
+        }
+        Collections.shuffle(pool);
+        return pool;
+    }
+
+    /** Cuenta números de asiento que aparecen en más de una fila — para el diagnóstico final. */
+    private int contarNumerosDuplicadosEntreFilas(List<CandidatoLimite> pool) {
+        Map<Integer, Set<Integer>> filasPorNumero = new LinkedHashMap<>();
+        for (CandidatoLimite c : pool) {
+            filasPorNumero.computeIfAbsent(c.number(), k -> new HashSet<>()).add(c.rowIndex());
+        }
+        int duplicados = 0;
+        for (Set<Integer> filas : filasPorNumero.values()) if (filas.size() > 1) duplicados++;
+        return duplicados;
+    }
+
     public List<String> seleccionarMasDe10AsientosYValidarAlerta() {
         long tTotalInicio = System.currentTimeMillis();
         SeatMap map = buildSeatMap();
@@ -1782,62 +1902,100 @@ public class SelectorPage extends BasePage {
             return null;
         }
 
-        List<SeatMap.Seat> candidatos = new ArrayList<>(map.allNumberedSeats());
-        Collections.shuffle(candidatos);
+        List<CandidatoLimite> pool = construirPoolCandidatosLimite(map);
+        int duplicateSeatNumbers = contarNumerosDuplicadosEntreFilas(pool);
 
         int initialCount = contarAsientosSeleccionadosPorBotonContinuar();
         int contadorActual = initialCount;
         List<String> seleccionados = new ArrayList<>();
+        List<AsientoConfirmado> confirmados = new ArrayList<>(); // identidad FÍSICA — nunca se re-tapea
+        Set<String> descartados = new HashSet<>(); // candidateId ya fallido en ESTE pool — no se reintenta de inmediato
 
-        // Presupuesto acotado de intentos reales (objetivo + margen de reintentos por
-        // candidatos obsoletos/no disponibles) — nunca ilimitado, pero con espacio
-        // real de recuperación, a diferencia del loop de "20 taps ciegos" anterior.
+        // Presupuesto acotado (objetivo + margen) — nunca ilimitado. Si se agota sin
+        // llegar a 11, se hace UN ÚNICO re-scan completo del mapa (estado actual real,
+        // no el escaneo original) y se concede una segunda ola pequeña de intentos —
+        // nunca un re-scan por cada candidato fallido (eso costaría ~50s cada vez,
+        // ver [PERF][EsperarMapa]/escaneoRapido — "límite razonable" explícito).
         final int RETRY_BUDGET = 10;
-        final int maxIntentos = Math.min(candidatos.size(), OBJETIVO_LIMITE_ASIENTOS + RETRY_BUDGET);
+        final int SEGUNDA_OLA = 5;
+        int maxIntentos = Math.min(pool.size(), OBJETIVO_LIMITE_ASIENTOS + RETRY_BUDGET);
 
-        int idxCandidato = 0;
-        int attempt = 0;
-        while (contadorActual < OBJETIVO_LIMITE_ASIENTOS && idxCandidato < maxIntentos) {
-            SeatMap.Seat asiento = candidatos.get(idxCandidato++);
+        int attempt = 0, idx = 0, relocalizedCount = 0, failedCount = 0, excludedAlreadyConfirmed = 0;
+        boolean sourceRefreshed = false;
+
+        while (contadorActual < OBJETIVO_LIMITE_ASIENTOS) {
+            if (idx >= pool.size() || attempt >= maxIntentos) {
+                if (sourceRefreshed) break; // ya se usó el único re-scan permitido — se agotó de verdad
+                sourceRefreshed = true;
+                SeatMap freshMap = buildSeatMap();
+                List<CandidatoLimite> freshPool = construirPoolCandidatosLimite(freshMap);
+                // FIX real (evidencia RUN-1006, attempt=24: 9->8, una deselección real).
+                // La exclusión anterior comparaba "fila:numero" del escaneo VIEJO contra
+                // el NUEVO — el rowIndex no es estable entre dos buildSeatMap() distintos
+                // (el mismo asiento físico puede enumerarse en otra fila). Se excluye por
+                // POSICIÓN FÍSICA (x,y) contra la lista de confirmados reales, nunca por
+                // índice de fila — así un asiento ya confirmado NUNCA vuelve a tapearse
+                // aunque su rowIndex cambie en el nuevo escaneo.
+                int antesDelFiltro = freshPool.size();
+                freshPool.removeIf(c -> confirmados.stream().anyMatch(cf ->
+                        cf.number() == c.number() && mismoAsientoFisico(cf.x(), cf.y(), c.x(), c.y())));
+                excludedAlreadyConfirmed += antesDelFiltro - freshPool.size();
+                log.info("[SeatLimit] sourceRefresh=true — presupuesto agotado sin llegar a {}, re-escaneando estado actual "
+                        + "del mapa. candidatosNuevos={} excluidosPorYaConfirmados={}",
+                        OBJETIVO_LIMITE_ASIENTOS, freshPool.size(), antesDelFiltro - freshPool.size());
+                pool = freshPool;
+                idx = 0;
+                maxIntentos = attempt + Math.min(pool.size(), SEGUNDA_OLA);
+                continue;
+            }
+
+            CandidatoLimite c = pool.get(idx++);
+            if (descartados.contains(c.candidateId())) continue; // no reintentar inmediatamente el mismo candidato
+
+            // Verificación defensiva final antes de tapear — nunca tocar un candidato
+            // que represente físicamente un asiento YA confirmado, sin importar de
+            // dónde vino (mismo pool o pool refrescado). "available=false" ⇒ se
+            // descarta SIN tapear y SIN gastar un intento del presupuesto.
+            AsientoConfirmado match = confirmados.stream()
+                    .filter(cf -> cf.number() == c.number() && mismoAsientoFisico(cf.x(), cf.y(), c.x(), c.y()))
+                    .findFirst().orElse(null);
+            boolean alreadyConfirmed = match != null;
+            double distancePrevious = match != null
+                    ? Math.sqrt(Math.pow(match.x() - c.x(), 2) + Math.pow(match.y() - c.y(), 2)) : -1;
+            if (alreadyConfirmed) {
+                log.info("[SeatLimit] candidateId={} seatNumber={} rowIndex={} x={} y={} label={} matchedPrevious=true "
+                        + "distancePrevious={} alreadyConfirmed=true available=false candidateState=ALREADY_CONFIRMED",
+                        c.candidateId(), c.number(), c.rowIndex(), c.x(), c.y(), c.label(), String.format("%.1f", distancePrevious));
+                excludedAlreadyConfirmed++;
+                continue;
+            }
+
             attempt++;
             int beforeCount = contadorActual;
 
-            // Re-localizar antes de cada tap — nunca confiar ciegamente en el
-            // WebElement/posición del escaneo original tras cambios de UI previos
-            // (mismo mecanismo ya aplicado en SeatSelectionEngine, con el mismo
-            // fallback a coordenadas cacheadas si la relocalización falla).
-            //
-            // FIX real (evidencia real de RUN-1005: el contador osciló hacia ABAJO
-            // varias veces — attempt=7 6->5, attempt=11 8->7, etc. — nunca llegó a 11
-            // pese a 21 intentos). Causa raíz: reubicarAsientoPorNumero(numero) busca
-            // por TEXTO DE ASIENTO ("7", "9", etc.), y ese número NO es único en todo
-            // el mapa — cada FILA tiene su propio asiento "7" (ver captura del mapa:
-            // filas A-L, cada una numerada 1..N). Al reubicar por número podía devolver
-            // el asiento "7" de OTRA fila (ya seleccionado en un intento previo) en vez
-            // del asiento "7" de la fila que realmente correspondía a este candidato —
-            // tapearlo de nuevo lo DESELECCIONA (comportamiento normal de toggle de la
-            // app), bajando el contador. Se descarta la relocalización si su Y queda a
-            // más de un alto de fila del Y cacheado (las filas están separadas por
-            // decenas de px; la misma fila real nunca se mueve tanto) — en ese caso se
-            // usa la coordenada cacheada del escaneo original, nunca ambigua.
-            final int TOLERANCIA_FILA_PX = 40;
-            int tapX = asiento.x, tapY = asiento.y;
+            // Re-localizar por (fila+número) antes de cada tap — nunca confiar
+            // ciegamente en la coordenada del escaneo original tras cambios de UI
+            // previos. reubicarAsientoPorNumero(numero) puede devolver el asiento de
+            // OTRA fila con el mismo número visible — se descarta esa relocalización
+            // si su Y no coincide con la fila esperada (tolerancia de fila), evitando
+            // el bug real ya documentado (deselección por colisión de número).
+            boolean revalidated = false;
+            int tapX = c.x(), tapY = c.y();
             try {
-                WebElement fresco = reubicarAsientoPorNumero(asiento.number);
+                WebElement fresco = reubicarAsientoPorNumero(c.number());
                 if (fresco != null) {
                     org.openqa.selenium.Rectangle r = fresco.getRect();
                     int freshY = r.getY() + r.getHeight() / 2;
-                    if (Math.abs(freshY - asiento.y) <= TOLERANCIA_FILA_PX) {
+                    if (Math.abs(freshY - c.y()) <= TOLERANCIA_FILA_PX) {
                         tapX = r.getX() + r.getWidth() / 2;
                         tapY = freshY;
+                        revalidated = true;
                     }
-                    // si el Y no coincide con la fila esperada, se descarta esta
-                    // relocalización (probable colisión de número entre filas) y se
-                    // conserva tapX/tapY = coordenada cacheada, ya inicializada arriba.
                 }
             } catch (Exception ignored) {
-                // se conservan las coordenadas cacheadas del escaneo original
+                // se conservan las coordenadas cacheadas del candidato
             }
+            if (revalidated) relocalizedCount++;
 
             boolean tapOk;
             try {
@@ -1852,22 +2010,76 @@ public class SelectorPage extends BasePage {
                 sleep(400);
                 contadorActual = contarAsientosSeleccionadosPorBotonContinuar();
                 confirmed = contadorActual == beforeCount + 1;
-                if (confirmed) seleccionados.add("A" + asiento.number);
+                if (confirmed) {
+                    seleccionados.add("F" + c.rowIndex() + "A" + c.number());
+                    confirmados.add(new AsientoConfirmado(c.x(), c.y(), c.number()));
+                }
             }
+            if (!confirmed) { descartados.add(c.candidateId()); failedCount++; }
 
-            log.info("[SeatLimit] initialCount={} targetCount={} attempt={} beforeCount={} afterCount={} confirmed={} alertDetected={} totalMs={}",
-                    initialCount, OBJETIVO_LIMITE_ASIENTOS, attempt, beforeCount, contadorActual, confirmed, false,
-                    System.currentTimeMillis() - tTotalInicio);
-
-            if (!confirmed) {
-                log.warn("[SelectorPage] Asiento A{} descartado (tapOk={}, contador {} -> {}) — siguiente candidato.",
-                        asiento.number, tapOk, beforeCount, contadorActual);
-            }
+            log.info("[SeatLimit] attempt={} beforeCount={} afterCount={} confirmed={} seatNumber={} rowIndex={} x={} y={} "
+                    + "label={} candidateId={} matchedPrevious=false alreadyConfirmed=false candidateState={} "
+                    + "revalidated={} sourceRefresh={} availableCandidates={}",
+                    attempt, beforeCount, contadorActual, confirmed, c.number(), c.rowIndex(), tapX, tapY, c.label(),
+                    c.candidateId(), confirmed ? "AVAILABLE_CANDIDATE" : "NOT_SELECTABLE",
+                    revalidated, sourceRefreshed, pool.size() - idx);
         }
 
+        // La única fuente de verdad del tamaño real de la selección es el contador
+        // (contadorActual), NUNCA seleccionados.size() — un candidato puede quedar
+        // registrado como confirmado y luego ser deseleccionado por un tap posterior
+        // que caiga sobre él sin que este método lo sepa (evidencia RUN-1006). Se
+        // reporta el avance NETO real: contadorActual - initialCount.
+        //
+        // FIX real (TAREA RUN-1007 — distinguir causa sin gastar NI UN tap adicional):
+        // toda la información de este diagnóstico ya estaba disponible de los
+        // intentos REALES ya ejecutados (nunca se piden atributos en vivo a
+        // candidatos nunca tocados — eso reintroduciría el mismo costo O(n) de WDA
+        // ya eliminado en otras partes de este archivo). `failedCount` cuenta
+        // candidatos que SÍ se tapearon de verdad y no incrementaron el contador —
+        // con la identidad física ya verificada (0 deselecciones esta corrida), una
+        // tasa alta de fallo REAL es evidencia de asientos no disponibles en el
+        // inventario en vivo, no de un bug de identidad/relocalización.
         if (contadorActual < OBJETIVO_LIMITE_ASIENTOS) {
-            throw new RuntimeException("Solo se pudieron seleccionar " + contadorActual
-                    + " de " + OBJETIVO_LIMITE_ASIENTOS + " asientos reales.");
+            int unknownCandidates = Math.max(0, pool.size() - idx);
+            double tasaFalloReal = attempt > 0 ? (double) failedCount / attempt : 0;
+
+            String classification;
+            String reason;
+            if (attempt == 0) {
+                // Nunca se pudo tapear NADA real (todo descartado antes de tapear) —
+                // eso sí sería síntoma de automatización, no de disponibilidad.
+                classification = "AUTOMATION_SELECTION_FAILURE";
+                reason = "Ningún candidato llegó a tapearse realmente (0 intentos ejecutados).";
+            } else if (tasaFalloReal >= 0.30 && failedCount >= 5) {
+                classification = "INSUFFICIENT_SELECTABLE_SEATS";
+                reason = String.format(
+                        "%.0f%% (%d/%d) de los intentos REALES (tap + verificación por contador) no "
+                        + "confirmaron selección, sin ninguna deselección detectada (identidad física "
+                        + "verificada, excludedAlreadyConfirmed=%d) — evidencia de asientos no disponibles "
+                        + "en el inventario en vivo de la app, no de un fallo de automatización.",
+                        tasaFalloReal * 100, failedCount, attempt, excludedAlreadyConfirmed);
+            } else {
+                classification = "AUTOMATION_SELECTION_FAILURE";
+                reason = String.format(
+                        "Tasa de fallo real baja (%.0f%%, %d/%d) pero no se alcanzó el objetivo — no hay "
+                        + "evidencia suficiente de que los asientos restantes sean genuinamente "
+                        + "inseleccionables; posible problema de automatización pendiente de investigar.",
+                        tasaFalloReal * 100, failedCount, attempt);
+            }
+
+            log.warn("[SeatLimit] TARGET_NOT_REACHABLE classification={} confirmed={} target={} "
+                    + "candidatesExamined={} availableCandidates={} nonSelectableCandidates={} "
+                    + "alreadyConfirmed={} unknownCandidates={} duplicateSeatNumbers={} relocalizedCandidates={} "
+                    + "reason={}",
+                    classification, contadorActual, OBJETIVO_LIMITE_ASIENTOS, attempt, pool.size(), failedCount,
+                    excludedAlreadyConfirmed, unknownCandidates, duplicateSeatNumbers, relocalizedCount, reason);
+
+            throw new RuntimeException(String.format(
+                    "Solo se pudieron seleccionar %d de %d asientos reales. classification=%s "
+                    + "candidatesExamined=%d nonSelectableCandidates=%d alreadyConfirmed=%d unknownCandidates=%d",
+                    contadorActual, OBJETIVO_LIMITE_ASIENTOS, classification, attempt, failedCount,
+                    excludedAlreadyConfirmed, unknownCandidates));
         }
 
         // Contador confirmó 11 asientos reales — verificar la alerta INMEDIATAMENTE,
@@ -2026,7 +2238,22 @@ public class SelectorPage extends BasePage {
         if (asientos.isEmpty()) asientos = obtenerAsientosDelMapaAmplio();
 
         if (!asientos.isEmpty()) {
-            Map<Integer, List<WebElement>> filas = agruparAsientosPorFilaFlexible(asientos);
+            // FIX real (evidencia real — RUN-1005: 330s de silencio total entre el
+            // escaneo del mapa y el primer tap de Fase 2). Causa raíz CONFIRMADA (no
+            // esperarYObtenerAsientosDelMapa(), que solo tomó 49.7s): el agrupamiento
+            // por fila ya hacía UN getRect() por elemento (correcto, O(n)), pero el
+            // fila.sort(...) posterior comparaba con getRect() EN VIVO dentro del
+            // comparador — TimSort hace O(n·log n) comparaciones, cada una con hasta 2
+            // getRect() — para ~184 candidatos en ~12 filas de ~15 elementos eso son
+            // más de mil round-trips WDA redundantes para datos que ya se habían leído
+            // una vez. Se cachea el Rectangle de cada elemento UNA sola vez (misma
+            // pasada que ya hace agruparAsientosPorFilaFlexible) y se ordena sobre esa
+            // caché — nunca más de un getRect() por elemento en total.
+            Map<WebElement, org.openqa.selenium.Rectangle> rectCache = new LinkedHashMap<>();
+            for (WebElement el : asientos) {
+                try { rectCache.put(el, el.getRect()); } catch (Exception ignored) {}
+            }
+            Map<Integer, List<WebElement>> filas = agruparAsientosPorFilaFlexibleConCache(asientos, rectCache);
             // Solo extremos de fila: los asientos especiales siempre están al inicio/fin de fila.
             // Probar el interior dispara taps innecesarios y alarga el test varios minutos.
             //
@@ -2043,15 +2270,15 @@ public class SelectorPage extends BasePage {
             List<CandidatoEspecial> prioritarios = new ArrayList<>();
 
             for (List<WebElement> fila : filas.values()) {
-                fila.sort((a, b) -> Integer.compare(a.getRect().getX(), b.getRect().getX()));
+                fila.sort((a, b) -> Integer.compare(rectCache.get(a).getX(), rectCache.get(b).getX()));
                 if (fila.isEmpty()) continue;
                 WebElement primero = fila.get(0);
-                org.openqa.selenium.Rectangle rp = primero.getRect();
+                org.openqa.selenium.Rectangle rp = rectCache.get(primero);
                 prioritarios.add(new CandidatoEspecial(
                         rp.getX() + rp.getWidth() / 2, rp.getY() + rp.getHeight() / 2, obtenerTextoSeguro(primero)));
                 if (fila.size() > 1) {
                     WebElement ultimo = fila.get(fila.size() - 1);
-                    org.openqa.selenium.Rectangle ru = ultimo.getRect();
+                    org.openqa.selenium.Rectangle ru = rectCache.get(ultimo);
                     prioritarios.add(new CandidatoEspecial(
                             ru.getX() + ru.getWidth() / 2, ru.getY() + ru.getHeight() / 2, obtenerTextoSeguro(ultimo)));
                 }
@@ -2099,6 +2326,8 @@ public class SelectorPage extends BasePage {
         } else {
             log.debug("[SelectorPage] Fase2 omitida: no se detectaron asientos con número (posible función agotada).");
         }
+
+        log.info("[PERF][EsperarMapa] specialSeatsDetected=false (fase 2 agotada sin encontrar asiento especial)");
 
         // Fase 3: buscar android.view.View sin texto dentro del mapa
         // Los asientos especiales en apps Compose aparecen como View vacíos (ícono de silla de ruedas)
@@ -3682,6 +3911,8 @@ public class SelectorPage extends BasePage {
                 if (!asientos.isEmpty() && tieneAlMenosUnAsientoNumerado(asientos)) {
                     log.debug("[SelectorPage] Mapa listo: {} asientos.", asientos.size());
                     logResumenEscaneoMapa(iteraciones, sumaScanMs, maxScanMs, System.currentTimeMillis() - loopStart, "OK");
+                    log.info("[PERF][EsperarMapa] pageSourceMs=n/a parseMs=n/a wdaCalls={} pollAttempts={} candidates={} mapDetected=true totalMs={}",
+                            iteraciones, iteraciones, asientos.size(), System.currentTimeMillis() - loopStart);
                     return asientos;
                 }
                 try { Thread.sleep(250); } catch (InterruptedException ignored) {}
@@ -3691,6 +3922,8 @@ public class SelectorPage extends BasePage {
         }
 
         logResumenEscaneoMapa(iteraciones, sumaScanMs, maxScanMs, System.currentTimeMillis() - loopStart, "TIMEOUT");
+        log.info("[PERF][EsperarMapa] pageSourceMs=n/a parseMs=n/a wdaCalls={} pollAttempts={} candidates=0 mapDetected=false totalMs={}",
+                iteraciones, iteraciones, System.currentTimeMillis() - loopStart);
         log.warn("[SelectorPage] Tiempo agotado escaneando el mapa.");
         return Collections.emptyList();
     }
@@ -4156,12 +4389,18 @@ public class SelectorPage extends BasePage {
 
 
 
-    private Map<Integer, List<WebElement>> agruparAsientosPorFilaFlexible(List<WebElement> asientos) {
+    // FIX real: acepta un cache de Rectangle ya resuelto (una sola llamada getRect()
+    // por elemento, hecha por el llamador) en vez de volver a invocar getRect() aquí
+    // — ver comentario en seleccionarAsientoEspecial() sobre el costo real medido
+    // (~330s) del patrón anterior (agrupar con getRect() + sort con MÁS getRect()).
+    private Map<Integer, List<WebElement>> agruparAsientosPorFilaFlexibleConCache(
+            List<WebElement> asientos, Map<WebElement, org.openqa.selenium.Rectangle> rectCache) {
         Map<Integer, List<WebElement>> filas = new LinkedHashMap<>();
         int toleranciaY = 24;
 
         for (WebElement asiento : asientos) {
-            org.openqa.selenium.Rectangle r = asiento.getRect();
+            org.openqa.selenium.Rectangle r = rectCache.get(asiento);
+            if (r == null) continue; // getRect() falló al construir el cache — se descarta, no se reintenta en vivo
             int y = r.getY() + (r.getHeight() / 2);
 
             Integer filaExistente = null;

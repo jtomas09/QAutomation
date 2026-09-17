@@ -22,7 +22,8 @@ class NetworkEvidenceWriterTest {
                 "2026-09-11T10:00:00Z", 1000L, method, url, "example.com", "/api/x",
                 Map.of(), Map.of(), "", false, "application/json",
                 statusCode, Map.of(), responseBody, false, "application/json", durationMs,
-                errorType, null);
+                errorType, null,
+                "2026-09-11T10:00:00Z", "2026-09-11T10:00:01Z", (long) (responseBody == null ? 0 : responseBody.length()), "HTTP/1.1");
     }
 
     @Test
@@ -81,13 +82,28 @@ class NetworkEvidenceWriterTest {
         );
 
         String json = NetworkEvidenceWriter.toErrorsJson(
-                "20260910-184500-001", "Smoke", "SeleccionAsientosTest", errors);
+                "20260910-184500-001", "Smoke", "SeleccionAsientosTest", "iPhone", "iOS", errors);
 
         JsonNode root = MAPPER.readTree(json);
         assertEquals(2, root.get("errors").size());
         assertEquals(500, root.get("errors").get(0).get("statusCode").asInt());
         assertTrue(root.get("errors").get(0).get("responseBody").asText().contains("Internal Server Error"));
         assertEquals(404, root.get("errors").get(1).get("statusCode").asInt());
+        assertEquals("SeleccionAsientosTest", root.get("errors").get(0).get("test").asText());
+        assertEquals("/api/x", root.get("errors").get(0).get("endpoint").asText());
+    }
+
+    @Test
+    @DisplayName("cada evento lleva su propia correlación test/suite/executionId — UNKNOWN si no se puede determinar")
+    void embedsCorrelationPerEventWithUnknownFallback() throws Exception {
+        List<NetworkEvidenceWriter.NetworkEvent> events = List.of(
+                event("GET", "https://example/api/cinemas", 200, "{}", 320L, NetworkEventClassifier.ErrorType.SUCCESS));
+
+        String json = NetworkEvidenceWriter.toTrafficJson(
+                "exec-1", "Smoke", null, "device", "iOS", "t0", "t1", events);
+        JsonNode root = MAPPER.readTree(json);
+        assertEquals("UNKNOWN", root.get("requests").get(0).get("test").asText());
+        assertEquals("exec-1", root.get("requests").get(0).get("executionId").asText());
     }
 
     @Test

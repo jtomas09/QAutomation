@@ -838,6 +838,14 @@ install_launch_agent() {
         <string>-DAPPIUM_HOME=${APPIUM_HOME_DIR}</string>
         <string>-DFFMPEG_BIN=${ffmpeg_bin}</string>
         <string>-DPOLL_INTERVAL_MS=30000</string>
+        <string>-DNETWORK_MONITORING_ENABLED=true</string>
+        <string>-DNETWORK_MONITORING_CAPTURE_REQUEST_BODY=true</string>
+        <string>-DNETWORK_MONITORING_CAPTURE_RESPONSE_BODY=true</string>
+        <string>-DNETWORK_MONITORING_MAX_RESPONSE_BODY_SIZE=1048576</string>
+        <string>-DNETWORK_MONITORING_ATTACH_TO_ALLURE=true</string>
+        <string>-DNETWORK_MONITORING_SAVE_ALL_TRAFFIC=true</string>
+        <string>-DNETWORK_MONITORING_SAVE_ERRORS=true</string>
+        <string>-DNETWORK_MONITORING_REDACT_SENSITIVE_DATA=true</string>
         <string>-jar</string>
         <string>${JAR_DST}</string>
     </array>

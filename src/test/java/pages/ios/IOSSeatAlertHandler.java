@@ -33,8 +33,25 @@ public class IOSSeatAlertHandler extends IOSBasePage {
         return legacy.estaVisibleAlertaAsientoEspecial();
     }
 
-    /** Valida y maneja (acepta o cancela) la alerta de asiento especial. */
+    /**
+     * Valida y maneja (acepta o cancela) la alerta de asiento especial.
+     *
+     * FIX real (TAREA arquitectura — matriz estática de transiciones): "Aceptar y
+     * continuar" es, por nombre y función, una acción de progresión — no existe
+     * evidencia real (page source) de que la app permanezca en la pantalla de
+     * asientos después de aceptar. Ante la duda, se invalida de forma conservadora
+     * (mismo criterio que ya aplica {@code SelectorPage.continuar()}: cualquier tap
+     * que pueda avanzar el flujo invalida, nunca se asume que "se quedó igual").
+     * Ningún test de esta suite necesita reutilizar el mapa de asientos después de
+     * este método — el siguiente test (Sala Junior) requiere la pantalla de
+     * filtros, no el mapa de asientos — así que invalidar aquí no cuesta ninguna
+     * optimización real y sí cierra un riesgo: sin esto, un relanzamiento podía
+     * omitirse por error si la app en realidad ya había avanzado.
+     */
     public void validarYManejarAlertaAsientoEspecial(boolean aceptar) {
         legacy.validarYManejarAlertaAsientoEspecial(aceptar);
+        if (aceptar) {
+            utils.SuiteExecutionContext.invalidateNavigation();
+        }
     }
 }

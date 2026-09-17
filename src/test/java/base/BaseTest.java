@@ -87,6 +87,17 @@ public class BaseTest {
     private static final AtomicBoolean MEXICO_CINEMA_CHECKED = new AtomicBoolean(false);
     private static volatile String     lastAlimentosCinema   = null;
 
+    // FIX real (TAREA arquitectura — reemplaza el boolean skipNextRelaunch de una
+    // iteración anterior): la decisión de relanzar la app ya NO depende de un flag
+    // especial fijado por cada test — depende ÚNICAMENTE de
+    // utils.SuiteExecutionContext.isSeatMapContextValid(), un estado LÓGICO que
+    // solo queda en true cuando la navegación real (en pages.ios/flujos.ios) marcó
+    // "sigo en la pantalla de asientos" y ninguna acción posterior lo invalidó
+    // (p. ej. "Continuar" hacia confirmación, o un cambio de horario). Cualquier
+    // otra suite que extienda BaseTest y nunca llame a esos métodos de contexto
+    // simplemente nunca lo pone en true — su comportamiento (relanzar siempre)
+    // queda exactamente igual que hoy, sin ningún cambio.
+
     @BeforeAll
     public static void beforeAllSuite() {
         if (RUN_INIT_DONE.compareAndSet(false, true)) {
@@ -115,6 +126,10 @@ public class BaseTest {
             // CinemasHelper.dismissTransientPromosGuard() de forma independiente y
             // sigue dependiendo de su propio caché.
             pages.ios.IOSCinemasHelper.resetRunCache();
+            // Estado lógico de suite (película/horario/pantalla actual) — nunca debe
+            // sobrevivir entre clases de test distintas dentro de la misma JVM/tarea
+            // Gradle (ver utils.SuiteExecutionContext).
+            utils.SuiteExecutionContext.resetAll();
 
             try { clearDirectory(Paths.get("build", "reportes-pdf")); } catch (Exception ignored) {}
             try { clearDirectory(Paths.get("build", "reports", "allure-report")); } catch (Exception ignored) {}
@@ -495,8 +510,28 @@ public class BaseTest {
                         // sin importar cuándo ocurra el relaunch, porque terminateApp()
                         // ya mata el proceso — activateApp() después siempre produce un
                         // cold start, ya sea aquí o en el próximo setUp.
-                        relaunchAppSafe();
-                        log.info("[BaseTest] App terminada y relanzada tras test (dispositivo nunca queda inactivo).");
+                        //
+                        // FIX real (TAREA arquitectura — ciclo de vida, no flags por
+                        // transición): la decisión ahora es 100% genérica, dirigida por
+                        // datos — utils.SuiteExecutionContext.isSeatMapContextValid()
+                        // solo es true cuando la navegación real marcó "sigo en la
+                        // pantalla de asientos" y NADA la invalidó después (ver
+                        // IOSSeatMap.continuar() → invalidateNavigation(),
+                        // IOSAsientosFlow.seleccionarPeliculaRandomYHorarioDescartandoAlertas()
+                        // → markMovieAndScheduleSelected()). Ningún test necesita fijar
+                        // ningún flag especial — el mismo mecanismo aplica a CUALQUIER
+                        // test futuro que use ese contexto correctamente. Cualquier otra
+                        // suite que nunca toque SuiteExecutionContext obtiene
+                        // isSeatMapContextValid()==false siempre → relanzamiento idéntico
+                        // al comportamiento actual, sin ningún cambio.
+                        if (utils.SuiteExecutionContext.isSeatMapContextValid()) {
+                            log.info("[BaseTest] Relanzamiento omitido — SuiteExecutionContext indica que la "
+                                    + "pantalla de asientos sigue vigente (película/horario sin invalidar).");
+                        } else {
+                            relaunchAppSafe();
+                            utils.SuiteExecutionContext.resetAll();
+                            log.info("[BaseTest] App terminada y relanzada tras test (dispositivo nunca queda inactivo).");
+                        }
                     }
                 } catch (Exception ignored) {}
             }
@@ -517,6 +552,7 @@ public class BaseTest {
                 try {
                     log.info("[BaseTest] Relaunching app after tearDown exception...");
                     relaunchAppSafe();
+                    utils.SuiteExecutionContext.resetAll();
                 } catch (Exception ignored) {}
             }
 
@@ -531,6 +567,9 @@ public class BaseTest {
     @AfterAll
     public void afterAllSuiteAndCloseDriverIfNeeded() {
         log.info("[EMAIL FLOW] Entrando a @AfterAll (BaseTest): {}", getClass().getSimpleName());
+        // Estado lógico de suite — nunca debe filtrarse a la siguiente clase de test
+        // que reutilice la misma JVM/tarea Gradle.
+        try { utils.SuiteExecutionContext.resetAll(); } catch (Exception ignored) {}
         try {
             suiteEnd = System.currentTimeMillis();
             long duration = suiteEnd - suiteStart;

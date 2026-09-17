@@ -82,6 +82,14 @@ public class IOSAsientosFlow {
     public void seleccionarPeliculaRandomYHorarioDescartandoAlertas() {
         movieSelector.abrirPeliculaYMostrarHorarios();
         scheduleSelector.seleccionarPrimerHorarioDescartandoAlertas();
+        // FIX real (TAREA arquitectura — ciclo de vida de suite): solo se llega
+        // aquí si AMBOS pasos terminaron sin excepción, es decir, la navegación
+        // realmente terminó en la pantalla de asientos. Es la única fuente de
+        // verdad para utils.SuiteExecutionContext — nunca se marca "por si acaso"
+        // desde la capa de test. La selección es aleatoria (no se rastrea el
+        // nombre exacto de película/horario todavía), se registra de forma
+        // honesta en vez de inventar un valor específico.
+        utils.SuiteExecutionContext.markMovieAndScheduleSelected("(aleatorio)", "(aleatorio)");
     }
 
     // ─── Flujos de selección de asientos ─────────────────────────────────────
@@ -122,12 +130,37 @@ public class IOSAsientosFlow {
             () -> seatMap.seleccionarMasDe10AsientosYValidarAlerta(), driver);
     }
 
+    /**
+     * Verificación barata (un solo round-trip WDA, sin espera implícita) de si la
+     * app sigue en la pantalla de asientos ahora mismo — nunca asumido, siempre
+     * comprobado contra la UI real antes de que el llamador decida reutilizar
+     * estado en vez de repetir navegación completa.
+     */
+    public boolean estaEnPantallaDeAsientos() {
+        return seatMap.estaEnPantallaDeAsientos();
+    }
+
     // ─── Flujos de funciones especiales ──────────────────────────────────────
 
     /** Cambia el horario desde la pantalla de mapa de asientos. */
     public void cambiarHorario(AppiumDriver driver) {
         TestSteps.run("Pantalla de asientos",
             () -> scheduleSelector.cambiarHorarioEnPantallaAsientos(), driver);
+        // FIX real (TAREA arquitectura — reducir reconstrucción repetitiva): el
+        // método cambiarHorarioEnPantallaAsientos() solo puede terminar sin excepción
+        // si el cambio de horario realmente ocurrió y la app permanece EN LA MISMA
+        // pantalla de asientos (es la premisa del propio método, no una suposición
+        // nueva) — la película sigue siendo la misma; el ÚNICO dato que cambió es el
+        // texto exacto del horario, que este método no devuelve. Antes se invalidaba
+        // el horario (perdiendo la reutilización para el siguiente test, aunque la
+        // pantalla siguiera siendo válida); ahora se re-marca con un valor honesto
+        // ("(horario cambiado)", mismo patrón que "(aleatorio)" en
+        // seleccionarPeliculaRandomYHorarioDescartandoAlertas()) en vez de perder el
+        // contexto — sigue siendo SEAT_MAP con película+horario conocidos, así que el
+        // siguiente test que llame a seleccionarPeliculaYHorario() puede reutilizarlo
+        // (tras reverificar contra la UI real, nunca a ciegas).
+        utils.SuiteExecutionContext.markMovieAndScheduleSelected(
+                utils.SuiteExecutionContext.movieSelected(), "(horario cambiado)");
     }
 
     /**

@@ -143,7 +143,7 @@ public class NetworkMonitoringExtension implements BeforeEachCallback, AfterEach
         }
 
         if (SAVE_ERRORS && !errors.isEmpty()) {
-            String errorsJson = NetworkEvidenceWriter.toErrorsJson(EXECUTION_ID, suite, testName, errors);
+            String errorsJson = NetworkEvidenceWriter.toErrorsJson(EXECUTION_ID, suite, testName, device, platform, errors);
             Path errorsFile = testDir.resolve("network-errors.json");
             Files.writeString(errorsFile, errorsJson, StandardCharsets.UTF_8);
             log.info("[NETWORK] Evidence saved: {}", errorsFile);
@@ -183,6 +183,11 @@ public class NetworkMonitoringExtension implements BeforeEachCallback, AfterEach
         String  networkErrorType = node.hasNonNull("networkErrorType") ? node.get("networkErrorType").asText() : null;
         Long    durationMs = node.hasNonNull("durationMs") ? node.get("durationMs").asLong() : null;
 
+        String requestTimestamp  = epochMillisToIso(node, "requestTimestampEpochMillis");
+        String responseTimestamp = epochMillisToIso(node, "responseTimestampEpochMillis");
+        Long   responseSize      = node.hasNonNull("responseSize") ? node.get("responseSize").asLong() : null;
+        String protocol          = node.hasNonNull("protocol") ? node.get("protocol").asText() : null;
+
         return new NetworkEvidenceWriter.NetworkEvent(
                 node.path("timestamp").asText(""),
                 node.path("epochMillis").asLong(0),
@@ -202,8 +207,18 @@ public class NetworkMonitoringExtension implements BeforeEachCallback, AfterEach
                 node.path("responseContentType").asText(""),
                 durationMs,
                 utils.NetworkEventClassifier.classify(statusCode, networkErrorType),
-                node.hasNonNull("networkErrorMessage") ? node.get("networkErrorMessage").asText() : null
+                node.hasNonNull("networkErrorMessage") ? node.get("networkErrorMessage").asText() : null,
+                requestTimestamp, responseTimestamp, responseSize, protocol
         );
+    }
+
+    private static String epochMillisToIso(JsonNode node, String field) {
+        if (!node.hasNonNull(field)) return null;
+        try {
+            return Instant.ofEpochMilli(node.get(field).asLong()).toString();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static Map<String, String> toStringMap(JsonNode obj) {

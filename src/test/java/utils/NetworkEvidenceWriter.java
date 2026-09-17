@@ -22,7 +22,8 @@ public final class NetworkEvidenceWriter {
             boolean requestBodyTruncated, String requestContentType,
             Integer statusCode, Map<String, String> responseHeaders, String responseBody,
             boolean responseBodyTruncated, String responseContentType, Long durationMs,
-            NetworkEventClassifier.ErrorType errorType, String networkErrorMessage
+            NetworkEventClassifier.ErrorType errorType, String networkErrorMessage,
+            String requestTimestamp, String responseTimestamp, Long responseSize, String protocol
     ) {}
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -46,7 +47,8 @@ public final class NetworkEvidenceWriter {
                 e.statusCode(), e.responseHeaders(),
                 exceeds ? "[TRUNCATED - SIZE LIMIT EXCEEDED]" : e.responseBody(),
                 exceeds || e.responseBodyTruncated(),
-                e.responseContentType(), e.durationMs(), e.errorType(), e.networkErrorMessage()
+                e.responseContentType(), e.durationMs(), e.errorType(), e.networkErrorMessage(),
+                e.requestTimestamp(), e.responseTimestamp(), e.responseSize(), e.protocol()
         );
     }
 
@@ -82,35 +84,54 @@ public final class NetworkEvidenceWriter {
         summary.put("networkErrors", networkErrors);
 
         ArrayNode requests = root.putArray("requests");
-        for (NetworkEvent e : events) requests.add(toEventNode(e, true));
+        for (NetworkEvent e : events) requests.add(toEventNode(e, true, executionId, suite, test, platform, device));
 
         return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
     }
 
-    public static String toErrorsJson(String executionId, String suite, String test,
-                                       List<NetworkEvent> errorEvents) throws Exception {
+    public static String toErrorsJson(String executionId, String suite, String test, String device,
+                                       String platform, List<NetworkEvent> errorEvents) throws Exception {
         ObjectNode root = MAPPER.createObjectNode();
-        root.put("executionId", executionId);
-        root.put("suite", suite);
-        root.put("test", test);
+        root.put("executionId", correlationOrUnknown(executionId));
+        root.put("suite", correlationOrUnknown(suite));
+        root.put("test", correlationOrUnknown(test));
         ArrayNode errors = root.putArray("errors");
-        for (NetworkEvent e : errorEvents) errors.add(toEventNode(e, false));
+        for (NetworkEvent e : errorEvents) errors.add(toEventNode(e, false, executionId, suite, test, platform, device));
         return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
     }
 
-    private static ObjectNode toEventNode(NetworkEvent e, boolean compact) {
+    /**
+     * Correlación test↔request (requisito explícito): cada evento lleva
+     * executionId/suite/test/platform/device propios, no solo heredados del
+     * root del archivo — permite identificar el test de origen aunque el
+     * evento se procese fuera de su carpeta por-test. Si algún dato de
+     * correlación no pudo determinarse (blank/null), se usa "UNKNOWN"
+     * explícitamente en vez de omitirlo o inventarlo.
+     */
+    private static ObjectNode toEventNode(NetworkEvent e, boolean compact, String executionId, String suite,
+                                           String test, String platform, String device) {
         ObjectNode node = MAPPER.createObjectNode();
         node.put("timestamp", e.timestamp());
+        node.put("executionId", correlationOrUnknown(executionId));
+        node.put("suite", correlationOrUnknown(suite));
+        node.put("test", correlationOrUnknown(test));
+        node.put("platform", correlationOrUnknown(platform));
+        node.put("device", correlationOrUnknown(device));
         node.put("method", e.method());
         node.put("url", e.url());
+        node.put("host", e.host());
+        node.put("path", e.path());
+        node.put("endpoint", e.path());
+        if (e.protocol() != null) node.put("protocol", e.protocol());
         if (e.statusCode() != null) node.put("statusCode", e.statusCode()); else node.putNull("statusCode");
         if (e.durationMs() != null) node.put("durationMs", e.durationMs());
+        if (e.requestTimestamp() != null) node.put("requestTimestamp", e.requestTimestamp());
+        if (e.responseTimestamp() != null) node.put("responseTimestamp", e.responseTimestamp());
+        if (e.responseSize() != null) node.put("responseSize", e.responseSize());
         if (NetworkEventClassifier.isError(e.errorType())) {
             node.put("errorType", e.errorType().name());
         }
         if (!compact) {
-            node.put("host", e.host());
-            node.put("path", e.path());
             ObjectNode reqHeaders = node.putObject("requestHeaders");
             if (e.requestHeaders() != null) e.requestHeaders().forEach(reqHeaders::put);
             ObjectNode resHeaders = node.putObject("responseHeaders");
@@ -120,5 +141,9 @@ public final class NetworkEvidenceWriter {
             if (e.networkErrorMessage() != null) node.put("networkErrorMessage", e.networkErrorMessage());
         }
         return node;
+    }
+
+    private static String correlationOrUnknown(String value) {
+        return (value == null || value.isBlank()) ? "UNKNOWN" : value;
     }
 }

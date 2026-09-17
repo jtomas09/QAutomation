@@ -129,6 +129,12 @@ final class SeatSelectionEngine {
         // como máximo, mientras el verdadero indicador de selección (SeatUiSnapshot)
         // sigue en investigación.
         int tapsExitosos = 0;
+        // Identidad FÍSICA (x,y,número) de cada asiento ya confirmado por el contador
+        // — nunca se vuelve a tapear, sin importar de qué candidato/número provenga
+        // el siguiente intento (mismo fix aplicado en seleccionarMasDe10Asientos()
+        // tras evidencia real de deselección por colisión de número entre filas).
+        List<int[]> confirmadosFisicos = new ArrayList<>(); // {x, y, number}
+        final double TOLERANCIA_MISMO_ASIENTO_PX = 30.0;
 
         // FIX real (TAREA performance/failure — diagnóstico RUN-1003, "Selección de
         // Múltiples Asientos": A6 confirmado, luego A1 y A15 con describir()=N/D en
@@ -163,6 +169,24 @@ final class SeatSelectionEngine {
                 log.warn("[SeatSelectionEngine] Sin más candidatos ({}/{} confirmados, {} descartados, {} taps exitosos).",
                     seleccionados.size(), count, excluidos.size(), tapsExitosos);
                 break;
+            }
+
+            // Verificación defensiva ANTES de gastar un intento del presupuesto: nunca
+            // tapear un candidato que represente físicamente un asiento YA confirmado
+            // por el contador, sin importar su número/fila de origen (mismo fix que
+            // seleccionarMasDe10Asientos() tras evidencia real de deselección por
+            // colisión de número entre filas — RUN-1006, attempt=24: 9→8).
+            final double distanciaPrevia = confirmadosFisicos.stream()
+                    .filter(cf -> cf[2] == candidato.number)
+                    .mapToDouble(cf -> Math.sqrt(Math.pow(cf[0] - candidato.x, 2) + Math.pow(cf[1] - candidato.y, 2)))
+                    .min().orElse(-1);
+            if (distanciaPrevia >= 0 && distanciaPrevia <= TOLERANCIA_MISMO_ASIENTO_PX) {
+                log.info("[SeatSelection] candidateId=A{} seatNumber={} x={} y={} matchedPrevious=true "
+                        + "distancePrevious={} alreadyConfirmed=true available=false",
+                        candidato.number, candidato.number, candidato.x, candidato.y,
+                        String.format("%.1f", distanciaPrevia));
+                excluidos.add(candidato.number);
+                continue; // no cuenta contra el presupuesto de intentos — nunca se tapeó
             }
 
             intento++;
@@ -250,8 +274,11 @@ final class SeatSelectionEngine {
 
             log.info("[SeatSelectionEngine] Después del tap A{} → {}", candidato.number, estadoFinal);
             log.info("[SeatSelection] requested={} beforeCount={} candidate=A{} tap={} afterCount={} "
-                    + "confirmed={} attempt={} revalidated={}",
-                    count, beforeCount, candidato.number, tapOk, afterCount, confirmado, intento, revalidated);
+                    + "confirmed={} attempt={} revalidated={} candidateId=A{} seatNumber={} x={} y={} "
+                    + "matchedPrevious=false alreadyConfirmed=false available=true",
+                    count, beforeCount, candidato.number, tapOk, afterCount, confirmado, intento, revalidated,
+                    candidato.number, candidato.number, candidato.x, candidato.y);
+            if (confirmado) confirmadosFisicos.add(new int[]{candidato.x, candidato.y, candidato.number});
             utils.PerfMetrics.note("SeatSelection", String.format(
                 "intento=%d asiento=A%d locator=%s resolverMs=%d tapMs=%d validacionMs=%d",
                 intento, candidato.number, locator, tiempoResolver, tiempoTap, tiempoValidacion));

@@ -31,6 +31,14 @@
         <!-- EDIT_ME: directorio raiz del proyecto -->
         <string>-DWORK_DIR=/Users/EDIT_ME/Documents/QAutomation</string>
         <string>-DAPPIUM_HUB=http://127.0.0.1:4723</string>
+        <string>-DNETWORK_MONITORING_ENABLED=true</string>
+        <string>-DNETWORK_MONITORING_CAPTURE_REQUEST_BODY=true</string>
+        <string>-DNETWORK_MONITORING_CAPTURE_RESPONSE_BODY=true</string>
+        <string>-DNETWORK_MONITORING_MAX_RESPONSE_BODY_SIZE=1048576</string>
+        <string>-DNETWORK_MONITORING_ATTACH_TO_ALLURE=true</string>
+        <string>-DNETWORK_MONITORING_SAVE_ALL_TRAFFIC=true</string>
+        <string>-DNETWORK_MONITORING_SAVE_ERRORS=true</string>
+        <string>-DNETWORK_MONITORING_REDACT_SENSITIVE_DATA=true</string>
         <string>-jar</string>
         <!-- EDIT_ME: ruta al JAR instalado -->
         <string>/Users/EDIT_ME/Library/Application Support/AutomationQA/runner/cinepolis-runner.jar</string>

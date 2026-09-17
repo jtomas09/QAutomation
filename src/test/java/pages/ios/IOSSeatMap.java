@@ -36,6 +36,13 @@ public class IOSSeatMap extends IOSBasePage {
     /** Confirma la compra/selección actual (botón "Continuar"). */
     public void continuar() {
         legacy.continuar();
+        // FIX real (TAREA arquitectura — ciclo de vida de suite): "Continuar"
+        // navega hacia adelante, fuera de la pantalla de asientos (confirmación/
+        // pago) — quien realmente conoce este hecho es este método, no la clase
+        // de test. Invalida el contexto aquí mismo, en el momento exacto en que
+        // deja de ser cierto — nunca se invalida "todo" de forma genérica después
+        // de cada test.
+        utils.SuiteExecutionContext.invalidateNavigation();
     }
 
     /** Selecciona 1 asiento disponible al azar. Devuelve su identificador. */
@@ -71,5 +78,15 @@ public class IOSSeatMap extends IOSBasePage {
     /** Selecciona un asiento especial (discapacidad). Devuelve su identificador. */
     public String seleccionarAsientoEspecial() {
         return legacy.seleccionarAsientoEspecial();
+    }
+
+    /**
+     * Verifica (una sola llamada, sin espera implícita) si la app sigue mostrando
+     * la pantalla de asientos ahora mismo. Usado para decidir de forma SEGURA (nunca
+     * asumida) si un test puede reutilizar la pantalla actual en vez de repetir
+     * PromosGuard/MovieDetection/MovieOpen/ScheduleSelection.
+     */
+    public boolean estaEnPantallaDeAsientos() {
+        return legacy.estaRealmenteEnPantallaDeAsientos();
     }
 }
