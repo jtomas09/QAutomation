@@ -228,44 +228,76 @@ public class IosPreflightManager {
         // "no listo" sin invocar acquire() cuando el probe ya anticipó la misma causa de
         // fallo — si el probe da READY, el flujo siguiente (acquire) es exactamente el
         // mismo de siempre, sin ningún cambio de comportamiento.
+        // TAREA — WDA_ALREADY_AVAILABLE: causa raíz real del bloqueo reportado (probe de
+        // 90s → UNKNOWN → ReadyForExecution=false) es que este bloque solo consultaba el
+        // caché EN DISCO (Keychain/plist/perfil, ver validateCachedWda arriba) — nunca si
+        // WDA ya estaba REALMENTE vivo y respondiendo en el dispositivo ahora mismo. Esa
+        // señal en vivo (WdaManager.isWdaRunning(), HTTP GET a /status) YA EXISTE y ya es
+        // la autoridad que WdaLifecycleOwner.acquire() usa como fast path (línea ~327 de
+        // esa clase) — pero antes solo se llegaba a acquire() si wdaCached=true O si el
+        // probe (hasta 90s) confirmaba READY primero. Si el caché en disco estaba inválido
+        // (p. ej. certificado huérfano de un Team anterior — exactamente la evidencia
+        // reportada) pero WDA seguía vivo de una sesión previa, el Runner pagaba el probe
+        // completo y podía fallar sin necesidad. Verificar esto ANTES del probe reutiliza
+        // la MISMA autoridad ya existente — cero lógica de signing/Team nueva o duplicada.
+        boolean wdaAlreadyRunning = WdaManager.isWdaRunning();
+        // TAREA — decisión pura y testeable (mismo patrón que classify()/
+        // classifyMissingTeam(): la I/O real —isWdaRunning()/loadWdaCache()— se resuelve
+        // arriba; esta función solo decide QUÉ camino tomar dado el resultado ya conocido.
+        // El estado vivo de WDA NUNCA cede prioridad al caché en disco — ver
+        // decidePreflightPath().
+        PreflightPath path = decidePreflightPath(wdaAlreadyRunning, wdaCached);
+        if (path == PreflightPath.SKIP_PROBE_WDA_ALREADY_RUNNING) {
+            client.sendTechLog(executionId,
+                    "✅ [APPLE-SIGNING-PROBE] Omitido — WDA_ALREADY_AVAILABLE: WebDriverAgent ya "
+                    + "responde en vivo (verificado vía /status), sin importar el estado del caché "
+                    + "en disco. No hace falta ejecutar xcodebuild ni resolver Team/certificado.");
+        }
+
         WdaLifecycleOwner.Result wdaResult;
         boolean wdaBuildStarted;
-        if (!wdaCached) {
-            AppleSigningProbe.Result probeResult =
-                    AppleSigningProbe.probe(client, executionId, udid, teamId, wdaBundleId);
-            wdaBuildStarted = probeResult.status() == AppleSigningProbe.Status.READY;
-            if (!wdaBuildStarted) {
-                wdaResult = new WdaLifecycleOwner.Result(false, probeResult.reason());
-                if (probeResult.status() == AppleSigningProbe.Status.ACCOUNT_SESSION_REQUIRED) {
-                    // TAREA 26A — persiste el diagnóstico estructurado en el mismo lugar
-                    // que WdaLifecycleOwner ya usa para "último fallo conocido"
-                    // (TERMINAL_ERRORS), vía su método YA PÚBLICO markTerminalError() —
-                    // cero cambios a WdaLifecycleOwner.java, cero cambios a su
-                    // concurrencia/BUILD_EXECUTOR/INFLIGHT/Consumer/retries. Esto es lo
-                    // que permite que: (a) IOSMirrorProvider.start() (vía isTerminalError)
-                    // deje de reintentar el build para este UDID hasta un /retry explícito
-                    // — mismo mecanismo ya usado hoy para otros errores terminales; y (b)
-                    // IOSRunnerReadinessEngine.evaluate() (que ya lee terminalErrorReason()
-                    // y lo reclasifica con IOSWdaErrorClassifier) reporte ACTION_REQUIRED +
-                    // IOS_ACCOUNT_SESSION_REQUIRED en vez de cualquier código genérico —
-                    // ver el marcador agregado a IOSWdaErrorClassifier/AppleSigningProbe.
-                    WdaLifecycleOwner.markTerminalError(udid, probeResult.reason());
-                }
-            } else {
-                // 7. WDA verification and pre-start — ver WdaLifecycleOwner, ÚNICA
-                // autoridad del Runner para construir/iniciar/verificar/detener WDA.
-                // wdaCached ya no decide SI se construye — solo si se intenta primero el
-                // camino rápido antes de caer al build completo. Si otro llamador
-                // (ejecución real o el Mirror) ya tiene un intento en curso para este
-                // mismo UDID, esta llamada se une a él en vez de disparar una segunda
-                // compilación.
+        switch (path) {
+            case SKIP_PROBE_WDA_ALREADY_RUNNING -> {
+                wdaBuildStarted = false; // no se intentó ninguna compilación — no hacía falta
                 wdaResult = WdaLifecycleOwner.acquire(
                         consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
             }
-        } else {
-            wdaBuildStarted = false; // camino de caché — ninguna compilación se intenta
-            wdaResult = WdaLifecycleOwner.acquire(
-                    consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
+            case RUN_SIGNING_PROBE -> {
+                AppleSigningProbe.Result probeResult =
+                        AppleSigningProbe.probe(client, executionId, udid, teamId, wdaBundleId);
+                wdaBuildStarted = impliesReadyToAcquire(probeResult.status());
+                if (!wdaBuildStarted) {
+                    wdaResult = new WdaLifecycleOwner.Result(false, probeResult.reason());
+                    // TAREA 26A (ampliado): las tres clasificaciones de abajo comparten la
+                    // misma consecuencia — reintentar el build automáticamente no puede
+                    // arreglar ninguna de ellas (requieren acción humana, aunque distinta en
+                    // cada caso: reautenticar cuenta, o limpiar un certificado/Team huérfano)
+                    // — persistir el diagnóstico estructurado evita reintentos automáticos
+                    // inútiles hasta un /retry explícito, mismo mecanismo ya usado para otros
+                    // errores terminales. Cero cambios a WdaLifecycleOwner.java
+                    // (markTerminalError ya era público).
+                    if (probeResult.status() == AppleSigningProbe.Status.ACCOUNT_SESSION_REQUIRED
+                            || probeResult.status() == AppleSigningProbe.Status.APPLE_ACCOUNT_NOT_AUTHENTICATED
+                            || probeResult.status() == AppleSigningProbe.Status.APPLE_TEAM_NOT_AVAILABLE) {
+                        WdaLifecycleOwner.markTerminalError(udid, probeResult.reason());
+                    }
+                } else {
+                    // 7. WDA verification and pre-start — ver WdaLifecycleOwner, ÚNICA
+                    // autoridad del Runner para construir/iniciar/verificar/detener WDA.
+                    // wdaCached ya no decide SI se construye — solo si se intenta primero el
+                    // camino rápido antes de caer al build completo. Si otro llamador
+                    // (ejecución real o el Mirror) ya tiene un intento en curso para este
+                    // mismo UDID, esta llamada se une a él en vez de disparar una segunda
+                    // compilación.
+                    wdaResult = WdaLifecycleOwner.acquire(
+                            consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
+                }
+            }
+            default -> { // USE_CACHED_WDA
+                wdaBuildStarted = false; // camino de caché — ninguna compilación se intenta
+                wdaResult = WdaLifecycleOwner.acquire(
+                        consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
+            }
         }
         boolean wdaReady = wdaResult.ready;
 
@@ -527,6 +559,44 @@ public class IosPreflightManager {
 
     public static String detectAppleTeamId(BackendClient client, String executionId) {
         return AppleDeveloperTeamManager.selectTeam(client, executionId);
+    }
+
+    // ── 6.5. Apple Signing Probe — decisión de fast path (WDA_ALREADY_AVAILABLE) ──
+
+    /**
+     * Los tres caminos posibles de runPreflight() tras conocer si WDA ya responde en
+     * vivo y si el caché en disco es válido. El estado vivo de WDA SIEMPRE gana sobre
+     * el caché — nunca al revés (ver {@link #decidePreflightPath}).
+     */
+    enum PreflightPath { SKIP_PROBE_WDA_ALREADY_RUNNING, RUN_SIGNING_PROBE, USE_CACHED_WDA }
+
+    /**
+     * Decisión PURA (sin I/O) de qué camino tomar — extraída para poder testear la
+     * regla real de runPreflight() sin xcodebuild/hardware, mismo patrón que
+     * {@link AppleSigningProbe#classify} / {@code classifyMissingTeam}. La entrada
+     * ({@code wdaAlreadyRunning}, resultado de {@link WdaManager#isWdaRunning()}, y
+     * {@code wdaCached}, resultado de {@code validateCachedWda()}) ya se resolvió en
+     * el llamador — aquí solo se decide, nunca se ejecuta nada.
+     *
+     * Prioridad explícita (TAREA — el caché NO debe ganarle al estado vivo):
+     * 1. WDA vivo y respondiendo → se omite el probe SIEMPRE, sin importar el caché.
+     * 2. WDA no vivo, caché inválido → hace falta el probe antes de construir.
+     * 3. WDA no vivo, caché válido → se usa el camino rápido de caché (sin probe).
+     */
+    static PreflightPath decidePreflightPath(boolean wdaAlreadyRunning, boolean wdaCached) {
+        if (wdaAlreadyRunning) {
+            return PreflightPath.SKIP_PROBE_WDA_ALREADY_RUNNING;
+        }
+        return wdaCached ? PreflightPath.USE_CACHED_WDA : PreflightPath.RUN_SIGNING_PROBE;
+    }
+
+    /**
+     * Regla real de runPreflight() para decidir si el resultado del probe habilita
+     * seguir hacia {@code WdaLifecycleOwner.acquire()} — extraída para poder testear
+     * esta regla concreta sin invocar xcodebuild.
+     */
+    static boolean impliesReadyToAcquire(AppleSigningProbe.Status status) {
+        return status == AppleSigningProbe.Status.READY;
     }
 
     // ── 3. iOS Version ────────────────────────────────────────────────────────

@@ -3,6 +3,8 @@ package qa.cinepolis.runner;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -88,15 +90,46 @@ class AppleSigningProbeTest {
     }
 
     @Test
-    @DisplayName("7. Salida genérica de xcodebuild sin relación con signing -> UNKNOWN")
-    void genericXcodebuildOutput_classifiesAsUnknown() {
+    @DisplayName("7. '** BUILD FAILED **' + exitCode!=0, sin señal de cuenta/provisioning/confianza -> BUILD_FAILURE")
+    void genericXcodebuildOutput_classifiesAsBuildFailure() {
         // Sintético: salida de xcodebuild real en forma (fases de build) pero sin
-        // ninguna señal de cuenta/provisioning/confianza ni "BUILD SUCCEEDED".
+        // ninguna señal de cuenta/provisioning/confianza. Antes se perdía dentro del
+        // UNKNOWN genérico pese a haber evidencia inequívoca de fallo real de build
+        // (TAREA — Apple-Signing-Probe: "no ocultar la causa real detrás de UNKNOWN
+        // cuando exista evidencia suficiente para clasificar").
         AppleSigningProbe.Result r = AppleSigningProbe.classify(
                 "Prepare packages\nCreateBuildRequest\nComputeTargetDependencyGraph\n"
                 + "note: Building targets in dependency order\n** BUILD FAILED **\n",
                 65, 15000L);
-        assertEquals(AppleSigningProbe.Status.UNKNOWN, r.status());
+        assertEquals(AppleSigningProbe.Status.BUILD_FAILURE, r.status());
+    }
+
+    @Test
+    @DisplayName("9. Keychain requiere interacción del usuario -> SIGNING_ERROR (KEYCHAIN_ACCESS_FAILURE)")
+    void keychainInteractionNotAllowed_classifiesAsSigningError() {
+        // Evidencia real y documentada: errSecInteractionNotAllowed = -25308, texto
+        // exacto que devuelve SecCopyErrorMessageString para ese OSStatus — ocurre
+        // cuando codesign/security necesita el diálogo "Siempre permitir" del Keychain
+        // y no hay sesión de UI (típico de un proceso lanzado por LaunchAgent).
+        AppleSigningProbe.Result r = AppleSigningProbe.classify(
+                "security: SecKeychainItemCopyContent: User interaction is not allowed.",
+                65, 2000L);
+        assertEquals(AppleSigningProbe.Status.SIGNING_ERROR, r.status());
+    }
+
+    @Test
+    @DisplayName("10. Timeout con salida parcial clasificable no debe perderse como UNKNOWN ciego")
+    void partialOutputBeforeTimeout_isStillClassifiable() {
+        // Simula lo que antes se descartaba en el branch de timeout: si la salida ya
+        // capturada (aunque el proceso siga vivo/se mate después) contiene evidencia
+        // real, classify() debe reconocerla igual que en el camino normal — con
+        // exitCode=-1 (sentinel usado en el timeout real) para que READY sea
+        // estructuralmente imposible.
+        AppleSigningProbe.Result r = AppleSigningProbe.classify(
+                "/path/WebDriverAgent.xcodeproj: error: No Accounts: Add a new account in Accounts "
+                + "settings. (in target 'WebDriverAgentRunner' from project 'WebDriverAgent')",
+                -1, 90000L);
+        assertEquals(AppleSigningProbe.Status.ACCOUNT_SESSION_REQUIRED, r.status());
     }
 
     @Test
@@ -107,5 +140,47 @@ class AppleSigningProbeTest {
 
         AppleSigningProbe.Result rNull = AppleSigningProbe.classify(null, 1, 100L);
         assertEquals(AppleSigningProbe.Status.UNKNOWN, rNull.status());
+    }
+
+    // ── AppleSigningProbe.classifyMissingTeam(DiscoveryResult, long) ──────────────
+    // TAREA — Apple Signing Probe robusto: distinguir "Xcode no tiene ninguna cuenta
+    // configurada" (requiere intervención humana) de "sí hay cuenta(s), pero ninguna
+    // resolvió a un Team utilizable" (p. ej. certificado huérfano de un Team anterior —
+    // NO requiere volver a iniciar sesión). Mismo patrón que
+    // AppleDeveloperTeamManager.discoverCandidates(..., DiscoveryResult): la fuente
+    // (Xcode.plist real) se resuelve en el llamador — estos tests pasan un
+    // DiscoveryResult sintético, sin tocar el archivo real ni requerir Xcode.
+
+    @Test
+    @DisplayName("11. Xcode.plist leído correctamente pero sin ningún Team -> APPLE_ACCOUNT_NOT_AUTHENTICATED")
+    void noAuthenticatedTeamsAtAll_classifiesAsAccountNotAuthenticated() {
+        AppleDeveloperAccountProvider.DiscoveryResult accounts =
+                AppleDeveloperAccountProvider.DiscoveryResult.available(Map.of());
+        AppleSigningProbe.Result r = AppleSigningProbe.classifyMissingTeam(accounts, 50L);
+        assertEquals(AppleSigningProbe.Status.APPLE_ACCOUNT_NOT_AUTHENTICATED, r.status());
+        assertEquals(50L, r.probeDurationMs());
+    }
+
+    @Test
+    @DisplayName("12. Cuenta(s) autenticada(s) pero teamId no resuelto -> APPLE_TEAM_NOT_AVAILABLE (no pide login)")
+    void authenticatedTeamsButNoneUsable_classifiesAsTeamNotAvailable() {
+        // Evidencia real citada en la tarea: Team C32VD96Q84 con estado ORPHAN_CERTIFICATE.
+        AppleDeveloperAccountProvider.DiscoveryResult accounts =
+                AppleDeveloperAccountProvider.DiscoveryResult.available(Map.of("C32VD96Q84", "Jairo Tomás Baza"));
+        AppleSigningProbe.Result r = AppleSigningProbe.classifyMissingTeam(accounts, 50L);
+        assertEquals(AppleSigningProbe.Status.APPLE_TEAM_NOT_AVAILABLE, r.status());
+        // Evidencia del requisito explícito de la tarea: NO pedir reautenticación cuando
+        // la cuenta sigue autenticada y el problema real es otro (Team/certificado).
+        assertTrue(r.reason().contains("no requiere volver a iniciar sesión"));
+    }
+
+    @Test
+    @DisplayName("13. Registro de cuentas de Xcode ilegible -> APPLE_TEAM_NOT_AVAILABLE (sin asumir desautenticación)")
+    void xcodeAccountRegistryUnreadable_classifiesAsTeamNotAvailableWithoutAssuming() {
+        AppleDeveloperAccountProvider.DiscoveryResult accounts =
+                AppleDeveloperAccountProvider.DiscoveryResult.unavailable("com.apple.dt.Xcode.plist no existe");
+        AppleSigningProbe.Result r = AppleSigningProbe.classifyMissingTeam(accounts, 50L);
+        assertEquals(AppleSigningProbe.Status.APPLE_TEAM_NOT_AVAILABLE, r.status());
+        assertTrue(r.reason().contains("no existe"));
     }
 }

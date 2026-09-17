@@ -1,6 +1,7 @@
 package qa.cinepolis.runner;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -69,7 +70,15 @@ final class AppleSigningProbe {
 
     private AppleSigningProbe() {}
 
-    enum Status { READY, ACCOUNT_SESSION_REQUIRED, PROVISIONING_REQUIRED, SIGNING_ERROR, UNKNOWN }
+    enum Status {
+        READY, ACCOUNT_SESSION_REQUIRED, PROVISIONING_REQUIRED, SIGNING_ERROR, BUILD_FAILURE, TIMEOUT, UNKNOWN,
+        // TAREA — distinguen, ANTES de invocar xcodebuild, "Xcode no tiene ninguna cuenta
+        // configurada" (requiere intervención humana real) de "sí hay cuenta(s) pero
+        // ninguna resolvió a un Team/certificado utilizable" (p. ej. certificado huérfano
+        // de un Team anterior — NO requiere volver a iniciar sesión). Ver el branch de
+        // teamId en blanco dentro de probe().
+        APPLE_ACCOUNT_NOT_AUTHENTICATED, APPLE_TEAM_NOT_AVAILABLE
+    }
 
     record Result(Status status, String reason, long probeDurationMs) {}
 
@@ -108,24 +117,47 @@ final class AppleSigningProbe {
                 + "[APPLE-SIGNING-PROBE] Bundle: " + wdaBundleId);
 
         if (isBlank(teamId)) {
-            return report(client, executionId, t0, new Result(Status.ACCOUNT_SESSION_REQUIRED,
-                    "Team ID no detectado — agrega tu Apple ID en Xcode → Settings → Accounts.",
-                    System.currentTimeMillis() - t0));
+            // TAREA — reutiliza XcodeAccountProvider, la MISMA fuente local (Xcode.plist)
+            // que AppleDeveloperTeamManager ya consulta para resolver teamId — sin red, sin
+            // xcodebuild, sin ninguna acción nueva.
+            AppleDeveloperAccountProvider.DiscoveryResult accounts =
+                    new XcodeAccountProvider().discoverAuthenticatedTeams();
+            return report(client, executionId, t0,
+                    classifyMissingTeam(accounts, System.currentTimeMillis() - t0));
         }
 
         String projectPath = WdaManager.findWdaProjectPath();
         if (projectPath == null) {
             return report(client, executionId, t0, new Result(Status.UNKNOWN,
-                    "WebDriverAgent.xcodeproj no encontrado — no se puede ejecutar el probe.",
+                    "WDA_PROJECT_NOT_FOUND — WebDriverAgent.xcodeproj no encontrado — no se puede ejecutar el probe.",
                     System.currentTimeMillis() - t0));
         }
 
+        List<String> command = buildCommand(projectPath, udid, teamId, wdaBundleId);
+
+        // TAREA — logging diagnóstico permanente ANTES de ejecutar. Ningún valor aquí es
+        // secreto: Team/bundle/UDID ya se registran hoy en otros logs del Runner.
+        client.sendTechLog(executionId,
+                "[APPLE-SIGNING-PROBE] command=" + String.join(" ", command) + "\n"
+                + "[APPLE-SIGNING-PROBE] workingDirectory=" + System.getProperty("user.dir") + "\n"
+                + "[APPLE-SIGNING-PROBE] project=" + projectPath + "\n"
+                + "[APPLE-SIGNING-PROBE] scheme=WebDriverAgentRunner\n"
+                + "[APPLE-SIGNING-PROBE] destination=id=" + udid + "\n"
+                + "[APPLE-SIGNING-PROBE] team=" + teamId + "\n"
+                + "[APPLE-SIGNING-PROBE] signingIdentity=Apple Development\n"
+                + "[APPLE-SIGNING-PROBE] updatedWDABundleId=" + wdaBundleId);
+
         String output;
         int exitCode;
+        PhaseTracker phase = new PhaseTracker();
         try {
-            Process p = new ProcessBuilder(buildCommand(projectPath, udid, teamId, wdaBundleId))
+            Process p = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start();
+
+            client.sendTechLog(executionId,
+                    "[APPLE-SIGNING-PROBE] PROCESS_STARTED pid=" + p.pid()
+                    + " startTime=" + Instant.now());
 
             StringBuilder sb = new StringBuilder();
             Thread reader = new Thread(() -> {
@@ -134,6 +166,11 @@ final class AppleSigningProbe {
                     int n;
                     while ((n = in.read(buf)) != -1) {
                         sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                        String newPhase = phase.observe(sb);
+                        if (newPhase != null) {
+                            client.sendTechLog(executionId,
+                                    "[APPLE-SIGNING-PROBE] XCODEBUILD_PHASE: " + newPhase);
+                        }
                     }
                 } catch (Exception ignored) {
                     // El proceso terminó / stream cerrado — nada que hacer.
@@ -146,21 +183,77 @@ final class AppleSigningProbe {
             if (!finished) {
                 killTree(p);
                 joinQuietly(reader);
-                return report(client, executionId, t0, new Result(Status.UNKNOWN,
-                        "El probe no terminó dentro de " + PROBE_TIMEOUT_MS + "ms.",
-                        System.currentTimeMillis() - t0));
+                long durationMs = System.currentTimeMillis() - t0;
+                output = sb.toString();
+                // TAREA — causa raíz real del UNKNOWN ciego anterior: se descartaba toda
+                // la salida ya capturada en vez de clasificarla. exitCode=-1 (sentinel,
+                // el proceso fue matado, nunca terminó solo) hace estructuralmente
+                // imposible reportar READY aquí — classify() exige exitCode==0 para eso.
+                Result partial = classify(output, -1, durationMs);
+                if (partial.status() != Status.UNKNOWN) {
+                    return report(client, executionId, t0, partial);
+                }
+                String lastPhase = phase.last() == null ? "PROCESS_STARTED_BUT_NO_OUTPUT" : phase.last();
+                return report(client, executionId, t0, new Result(Status.TIMEOUT,
+                        "WDA_PROBE_TIMEOUT — el probe no terminó dentro de " + PROBE_TIMEOUT_MS
+                        + "ms sin ninguna evidencia clasificable en la salida capturada. "
+                        + "Última fase observada: " + lastPhase + ".",
+                        durationMs));
             }
             joinQuietly(reader);
             exitCode = p.exitValue();
             output = sb.toString();
         } catch (Exception e) {
             return report(client, executionId, t0, new Result(Status.UNKNOWN,
-                    "No se pudo ejecutar el probe: " + e.getMessage(),
+                    "XCODEBUILD_NOT_STARTED — no se pudo ejecutar el probe: " + e.getMessage(),
                     System.currentTimeMillis() - t0));
         }
 
         Result classified = classify(output, exitCode, System.currentTimeMillis() - t0);
         return report(client, executionId, t0, classified);
+    }
+
+    /**
+     * Detección de fase basada en marcadores REALES de la salida estándar de
+     * xcodebuild (las mismas líneas que xcodebuild imprime en cualquier build,
+     * documentadas y observables en cualquier ejecución — no se inventa ningún
+     * texto nuevo). Uso exclusivamente diagnóstico: nunca decide READY/UNKNOWN,
+     * solo permite saber, ante un timeout, hasta dónde llegó realmente el proceso
+     * antes de matarlo — distingue "nunca imprimió nada" de "llegó a compilar/firmar
+     * pero se quedó ahí".
+     */
+    private static final class PhaseTracker {
+        private static final String[][] ORDERED_PHASES = {
+            {"CreateBuildRequest", "BUILD_REQUEST_CREATED"},
+            {"ComputeTargetDependencyGraph", "DEPENDENCY_GRAPH_COMPUTED"},
+            {"GatherProvisioningInputs", "PROVISIONING_RESOLUTION"},
+            {"=== BUILD TARGET", "BUILD_STARTED"},
+            {"CodeSign ", "CODE_SIGNING_STARTED"},
+            {"** BUILD FAILED **", "BUILD_FAILED"},
+            {"** BUILD SUCCEEDED **", "BUILD_SUCCEEDED"},
+        };
+
+        private int lastIndex = -1;
+
+        /** Devuelve el nombre de la nueva fase si avanzó respecto a la última observada, o null. */
+        String observe(CharSequence accumulated) {
+            String text = accumulated.toString();
+            int highest = lastIndex;
+            for (int i = 0; i < ORDERED_PHASES.length; i++) {
+                if (text.contains(ORDERED_PHASES[i][0])) {
+                    highest = Math.max(highest, i);
+                }
+            }
+            if (highest > lastIndex) {
+                lastIndex = highest;
+                return ORDERED_PHASES[highest][1];
+            }
+            return null;
+        }
+
+        String last() {
+            return lastIndex >= 0 ? ORDERED_PHASES[lastIndex][1] : null;
+        }
     }
 
     private static List<String> buildCommand(String projectPath, String udid, String teamId, String wdaBundleId) {
@@ -186,6 +279,41 @@ final class AppleSigningProbe {
     }
 
     /**
+     * Clasificación pura del caso "teamId en blanco" — recibe el {@link
+     * AppleDeveloperAccountProvider.DiscoveryResult} ya resuelto (mismo patrón que
+     * {@code AppleDeveloperTeamManager.discoverCandidates(..., DiscoveryResult)}: la
+     * fuente se resuelve en el llamador, la decisión es pura y testeable sin tocar
+     * Xcode.plist real). "available" significa "se pudo LEER el registro de cuentas de
+     * Xcode", nunca "hay/no hay cuenta" (ver Javadoc de {@code DiscoveryResult}) — solo
+     * cuando {@code available=true} Y el mapa de Teams está vacío hay evidencia real de
+     * que Xcode no tiene ninguna cuenta configurada.
+     */
+    static Result classifyMissingTeam(AppleDeveloperAccountProvider.DiscoveryResult accounts, long probeDurationMs) {
+        if (accounts.available() && accounts.teamNamesById().isEmpty()) {
+            return new Result(Status.APPLE_ACCOUNT_NOT_AUTHENTICATED,
+                    "APPLE_ACCOUNT_NOT_AUTHENTICATED — Xcode no tiene ninguna cuenta de Apple ID "
+                    + "configurada. Requiere agregar una cuenta en Xcode → Settings → Accounts "
+                    + "(única acción de este diagnóstico que sí requiere intervención humana).",
+                    probeDurationMs);
+        }
+        if (accounts.available()) {
+            return new Result(Status.APPLE_TEAM_NOT_AVAILABLE,
+                    "APPLE_TEAM_NOT_AVAILABLE — Xcode tiene cuenta(s) autenticada(s) ("
+                    + String.join(", ", accounts.teamNamesById().keySet())
+                    + "), pero ninguna resolvió a un Team con certificado/perfil utilizable "
+                    + "(posible certificado huérfano de un Team anterior) — no requiere volver "
+                    + "a iniciar sesión.",
+                    probeDurationMs);
+        }
+        // No se pudo ni siquiera leer el registro de cuentas de Xcode — no hay evidencia
+        // suficiente para afirmar que la cuenta está desautenticada, así que no se asume.
+        return new Result(Status.APPLE_TEAM_NOT_AVAILABLE,
+                "APPLE_TEAM_NOT_AVAILABLE — Team ID no detectado y no se pudo verificar el "
+                + "registro de cuentas de Xcode (" + accounts.unavailableReason() + ").",
+                probeDurationMs);
+    }
+
+    /**
      * Clasificación pura — sin efectos secundarios, no ejecuta nada. Es la única parte
      * de esta clase cubierta por tests unitarios (no requiere Xcode/Apple ID/hardware).
      */
@@ -196,6 +324,23 @@ final class AppleSigningProbe {
         // de clase para el porqué (causa raíz vs síntoma derivado, evidencia TAREA 24).
         if (containsIgnoreCase(text, "no accounts:")) {
             return new Result(Status.ACCOUNT_SESSION_REQUIRED, ACCOUNT_SESSION_REQUIRED_REASON, probeDurationMs);
+        }
+
+        // TAREA — KEYCHAIN_ACCESS_FAILURE: error REAL y documentado de macOS
+        // Security.framework (errSecInteractionNotAllowed = -25308; "User interaction
+        // is not allowed" es el texto exacto que SecCopyErrorMessageString devuelve
+        // para ese OSStatus). Ocurre cuando codesign/security necesita mostrar el
+        // diálogo "Siempre permitir" del Keychain y no hay sesión de UI disponible —
+        // el caso típico de un proceso lanzado por un LaunchAgent. No es un problema
+        // de certificado ni de cuenta: es acceso al Keychain en sí.
+        if (containsIgnoreCase(text, "user interaction is not allowed")
+                || containsIgnoreCase(text, "errsecinteractionnotallowed")
+                || text.contains("-25308")) {
+            return new Result(Status.SIGNING_ERROR,
+                    "KEYCHAIN_ACCESS_FAILURE — Keychain requiere interacción del usuario "
+                    + "('User interaction is not allowed' / errSecInteractionNotAllowed) — "
+                    + "inaccesible en un proceso sin sesión de UI (LaunchAgent).",
+                    probeDurationMs);
         }
 
         IOSWdaErrorCode code = IOSWdaErrorClassifier.classify(text);
@@ -224,6 +369,18 @@ final class AppleSigningProbe {
                     probeDurationMs);
         }
 
+        // TAREA — XCODEBUILD_BUILD_FAILURE: evidencia real e inequívoca ("** BUILD
+        // FAILED **") que antes se perdía dentro del UNKNOWN genérico. Se exige
+        // exitCode != 0 (igual que READY exige == 0 para "build succeeded") para no
+        // clasificar así por una coincidencia de texto sin exit code coherente.
+        if (exitCode != 0 && containsIgnoreCase(text, "** build failed **")) {
+            return new Result(Status.BUILD_FAILURE,
+                    "XCODEBUILD_BUILD_FAILURE — xcodebuild terminó con \"** BUILD FAILED **\" "
+                    + "(exitCode=" + exitCode + ") sin ninguna señal de cuenta/provisioning/confianza "
+                    + "— revisar el log completo del build para la causa específica.",
+                    probeDurationMs);
+        }
+
         // IOS_WDA_BUILD_FAILED / IOS_WDA_STARTUP_FAILED / UNKNOWN del clasificador
         // compartido, o cualquier salida vacía/no reconocida — nunca se oculta como
         // READY (regla explícita de TAREA 25): se trata como bloqueante por precaución.
@@ -233,6 +390,20 @@ final class AppleSigningProbe {
                 probeDurationMs);
     }
 
+    /**
+     * NOTA IMPORTANTE (causa raíz investigada de "wdaBuildStarted=false" en timeout):
+     * el campo {@code wdaBuildStarted} de este log NUNCA significó "el proceso
+     * xcodebuild se lanzó" — significa exclusivamente "el probe terminó y clasificó
+     * READY". Antes de esta corrección, un timeout devolvía UNKNOWN directamente sin
+     * clasificar la salida ya capturada, así que "wdaBuildStarted=false" no aportaba
+     * ninguna evidencia real sobre qué hizo xcodebuild en esos 90s. Ahora, ante un
+     * timeout, primero se reclasifica la salida parcial (ver {@link #probe}) y solo
+     * se llega aquí con {@link Status#TIMEOUT} cuando esa salida parcial tampoco
+     * tenía ninguna señal reconocible — el nombre del campo se conserva sin cambios
+     * (evita romper cualquier consumidor externo que ya lo parsee), pero ahora casi
+     * nunca es el único dato disponible: los logs XCODEBUILD_PHASE y el `reason`
+     * (que ahora incluye la última fase observada) dan la evidencia real que faltaba.
+     */
     private static Result report(BackendClient client, String executionId, long t0, Result result) {
         long durationMs = System.currentTimeMillis() - t0;
         client.sendTechLog(executionId,
