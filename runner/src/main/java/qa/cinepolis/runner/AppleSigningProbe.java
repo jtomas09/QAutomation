@@ -320,9 +320,31 @@ final class AppleSigningProbe {
     static Result classify(String output, int exitCode, long probeDurationMs) {
         String text = output == null ? "" : output;
 
+        // TAREA — PRIORIDAD MÁXIMA, causa raíz real encontrada (evidencia RUN-1002): el
+        // orden anterior comprobaba patrones de fallo ANTES de comprobar éxito, sin
+        // condicionarlos al exit code. Un build que termina con exitCode=0 y el marcador
+        // oficial "** BUILD SUCCEEDED **" puede seguir conteniendo, en su log completo,
+        // menciones no-fatales a "provisioning profile" (p. ej. un warning informativo,
+        // o texto de una fase intermedia que el build superó sin problema) — con el
+        // orden anterior, eso bastaba para clasificar INCORRECTAMENTE un build
+        // realmente exitoso como PROVISIONING_REQUIRED, nunca llegando a comprobar
+        // "build succeeded". Ahora el éxito inequívoco (exitCode==0 + marcador oficial)
+        // se comprueba PRIMERO — ninguna clasificación de fallo de abajo puede activarse
+        // si el build realmente tuvo éxito.
+        if (exitCode == 0 && containsIgnoreCase(text, "build succeeded")) {
+            return new Result(Status.READY,
+                    "xcodebuild pudo resolver signing/provisioning correctamente.",
+                    probeDurationMs);
+        }
+
+        // A partir de aquí NO hubo evidencia de éxito real — cada clasificación de fallo
+        // exige además exitCode != 0 (nunca solo texto): "la clasificación debe estar
+        // basada en evidencia real: exit code + errores de signing/provisioning", nunca
+        // en una coincidencia de texto aislada de lo que realmente pasó.
+
         // "No Accounts" gana sobre "No profiles for" cuando ambos aparecen — ver Javadoc
         // de clase para el porqué (causa raíz vs síntoma derivado, evidencia TAREA 24).
-        if (containsIgnoreCase(text, "no accounts:")) {
+        if (exitCode != 0 && containsIgnoreCase(text, "no accounts:")) {
             return new Result(Status.ACCOUNT_SESSION_REQUIRED, ACCOUNT_SESSION_REQUIRED_REASON, probeDurationMs);
         }
 
@@ -333,9 +355,10 @@ final class AppleSigningProbe {
         // diálogo "Siempre permitir" del Keychain y no hay sesión de UI disponible —
         // el caso típico de un proceso lanzado por un LaunchAgent. No es un problema
         // de certificado ni de cuenta: es acceso al Keychain en sí.
-        if (containsIgnoreCase(text, "user interaction is not allowed")
-                || containsIgnoreCase(text, "errsecinteractionnotallowed")
-                || text.contains("-25308")) {
+        if (exitCode != 0
+                && (containsIgnoreCase(text, "user interaction is not allowed")
+                    || containsIgnoreCase(text, "errsecinteractionnotallowed")
+                    || text.contains("-25308"))) {
             return new Result(Status.SIGNING_ERROR,
                     "KEYCHAIN_ACCESS_FAILURE — Keychain requiere interacción del usuario "
                     + "('User interaction is not allowed' / errSecInteractionNotAllowed) — "
@@ -343,30 +366,26 @@ final class AppleSigningProbe {
                     probeDurationMs);
         }
 
-        IOSWdaErrorCode code = IOSWdaErrorClassifier.classify(text);
-        switch (code) {
-            case IOS_PROVISIONING_REQUIRED:
-                return new Result(Status.PROVISIONING_REQUIRED,
-                        "No existe un provisioning profile válido para el bundle solicitado.",
-                        probeDurationMs);
-            case IOS_SIGNING_REQUIRED:
-                // Solo se llega aquí si IOSWdaErrorClassifier detectó "no accounts:" por
-                // una vía distinta a la comprobación explícita de arriba — normalizado al
-                // mismo estado para no exponer dos nombres distintos para la misma causa.
-                return new Result(Status.ACCOUNT_SESSION_REQUIRED, ACCOUNT_SESSION_REQUIRED_REASON, probeDurationMs);
-            case IOS_DEVELOPER_TRUST_REQUIRED:
-                return new Result(Status.SIGNING_ERROR,
-                        "xcodebuild reportó un problema de confianza/certificado de firma "
-                        + "(no de cuenta ni de provisioning).",
-                        probeDurationMs);
-            default:
-                break;
-        }
-
-        if (exitCode == 0 && containsIgnoreCase(text, "build succeeded")) {
-            return new Result(Status.READY,
-                    "xcodebuild pudo resolver signing/provisioning correctamente.",
-                    probeDurationMs);
+        if (exitCode != 0) {
+            IOSWdaErrorCode code = IOSWdaErrorClassifier.classify(text);
+            switch (code) {
+                case IOS_PROVISIONING_REQUIRED:
+                    return new Result(Status.PROVISIONING_REQUIRED,
+                            "No existe un provisioning profile válido para el bundle solicitado.",
+                            probeDurationMs);
+                case IOS_SIGNING_REQUIRED:
+                    // Solo se llega aquí si IOSWdaErrorClassifier detectó "no accounts:" por
+                    // una vía distinta a la comprobación explícita de arriba — normalizado al
+                    // mismo estado para no exponer dos nombres distintos para la misma causa.
+                    return new Result(Status.ACCOUNT_SESSION_REQUIRED, ACCOUNT_SESSION_REQUIRED_REASON, probeDurationMs);
+                case IOS_DEVELOPER_TRUST_REQUIRED:
+                    return new Result(Status.SIGNING_ERROR,
+                            "xcodebuild reportó un problema de confianza/certificado de firma "
+                            + "(no de cuenta ni de provisioning).",
+                            probeDurationMs);
+                default:
+                    break;
+            }
         }
 
         // TAREA — XCODEBUILD_BUILD_FAILURE: evidencia real e inequívoca ("** BUILD

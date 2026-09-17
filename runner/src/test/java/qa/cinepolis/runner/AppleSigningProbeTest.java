@@ -70,6 +70,53 @@ class AppleSigningProbeTest {
     }
 
     @Test
+    @DisplayName("14. exitCode=0 + BUILD SUCCEEDED + warning no-fatal mencionando provisioning -> READY, NUNCA PROVISIONING_REQUIRED")
+    void buildSucceededWithBenignProvisioningWarning_stillClassifiesAsReady() {
+        // TAREA — causa raíz real encontrada (evidencia RUN-1002): el orden anterior de
+        // classify() comprobaba patrones de fallo (incluida la delegación a
+        // IOSWdaErrorClassifier, que matchea "provisioning profile" con un simple
+        // .find()) ANTES de comprobar éxito real, y sin exigir exitCode!=0. Un build
+        // genuinamente exitoso (exitCode=0) que además contiene, en cualquier parte de
+        // su log completo, un mensaje no-fatal que menciona "provisioning profile"
+        // (nota/advertencia, no un error) terminaba mal clasificado como
+        // PROVISIONING_REQUIRED, sin llegar nunca a comprobar "BUILD SUCCEEDED". Ahora
+        // el éxito inequívoco se comprueba PRIMERO.
+        AppleSigningProbe.Result r = AppleSigningProbe.classify(
+                "note: Using new build system\n"
+                + "note: A provisioning profile was found but is set to expire soon — "
+                + "consider renewing it before it expires.\n"
+                + "Build description signature: abc123\n"
+                + "** BUILD SUCCEEDED **\n",
+                0, 38000L);
+        assertEquals(AppleSigningProbe.Status.READY, r.status());
+    }
+
+    @Test
+    @DisplayName("15. exitCode=65 + error real de provisioning (sin BUILD SUCCEEDED) -> PROVISIONING_REQUIRED")
+    void realProvisioningErrorWithNonZeroExit_classifiesAsProvisioningRequired() {
+        // Complementa el caso 2 dejando explícito el contraste directo con el caso 14:
+        // el ÚNICO diferenciador real entre PROVISIONING_REQUIRED y READY es el exit
+        // code + la presencia real de "BUILD SUCCEEDED", nunca solo el texto.
+        AppleSigningProbe.Result r = AppleSigningProbe.classify(
+                "/path/WebDriverAgent.xcodeproj: error: No profiles for 'io.qautomation.wda' were "
+                + "found: Xcode couldn't find any iOS App Development provisioning profiles "
+                + "matching 'io.qautomation.wda'.\n** BUILD FAILED **\n",
+                65, 6200L);
+        assertEquals(AppleSigningProbe.Status.PROVISIONING_REQUIRED, r.status());
+    }
+
+    @Test
+    @DisplayName("16. exitCode=0 + producto de WDA generado (READY) -> impliesReadyToAcquire=true, continúa a install/verification")
+    void wdaProductBuiltSuccessfully_impliesProceedToAcquire() {
+        AppleSigningProbe.Result r = AppleSigningProbe.classify(
+                "CompileSwift normal arm64 ...\n** BUILD SUCCEEDED **\n", 0, 45000L);
+        assertEquals(AppleSigningProbe.Status.READY, r.status());
+        assertTrue(IosPreflightManager.impliesReadyToAcquire(r.status()),
+                "READY debe implicar continuar hacia WdaLifecycleOwner.acquire() para instalar/verificar, "
+                + "nunca declarar ReadyForExecution=true solo porque xcodebuild terminó bien.");
+    }
+
+    @Test
     @DisplayName("6. 'No Accounts' + 'No profiles for' juntos (caso real) -> ACCOUNT_SESSION_REQUIRED, no PROVISIONING_REQUIRED")
     void noAccountsAndNoProfilesTogether_accountWins() {
         // Evidencia real EXACTA: automationqa-runner.log, ejecución real contra el

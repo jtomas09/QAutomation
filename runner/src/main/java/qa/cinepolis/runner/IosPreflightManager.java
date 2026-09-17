@@ -289,6 +289,24 @@ public class IosPreflightManager {
                     // (ejecución real o el Mirror) ya tiene un intento en curso para este
                     // mismo UDID, esta llamada se une a él en vez de disparar una segunda
                     // compilación.
+                    //
+                    // TAREA — AppleSigningProbe NUNCA es una segunda autoridad de WDA: su
+                    // READY solo habilita llegar aquí, nunca declara wdaReady/ReadyForExecution
+                    // por sí mismo — eso sigue siendo exclusivo de wdaResult.ready, calculado
+                    // más abajo a partir de LO QUE acquire() confirma de verdad contra /status.
+                    //
+                    // Sobre el "doble build" (probe = xcodebuild build, acquire = xcodebuild
+                    // test, mismo proyecto/scheme, sin "clean" entre ambos): es una compilación
+                    // real dos veces invocada, pero NO dos compilaciones completas desde cero —
+                    // Xcode reutiliza su propio DerivedData/caché de módulos entre invocaciones
+                    // consecutivas del mismo proyecto+scheme+configuración (nada aquí lo borra
+                    // ni lo fuerza a limpiar), así que la segunda invocación solo recompila lo
+                    // que de verdad cambió (típicamente nada) y paga sobre todo el costo de
+                    // instalar/lanzar/verificar — trabajo que el probe deliberadamente NO hace
+                    // (ver Javadoc de AppleSigningProbe: "build", no "test", para poder fallar
+                    // barato). Es un costo aceptado a cambio de fallar en ~5s en vez de varios
+                    // minutos cuando signing/provisioning está roto — no una duplicación
+                    // accidental ni una segunda autoridad paralela.
                     wdaResult = WdaLifecycleOwner.acquire(
                             consumer, client, executionId, udid, teamId, wdaBundleId, wdaCached);
                 }
