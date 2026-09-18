@@ -150,8 +150,8 @@ final class SeatSelectionEngine {
         final int RETRY_BUDGET = 6;
         final int maxIntentosTotales = count + RETRY_BUDGET;
 
-        while (seleccionados.size() < count) {
-            if (intento >= maxIntentosTotales) {
+        while (!seleccionCompleta(seleccionados.size(), count)) {
+            if (presupuestoAgotado(intento, maxIntentosTotales)) {
                 log.warn("[SeatSelectionEngine] DETENIDO por freno de seguridad: se alcanzó el presupuesto "
                     + "de {} intento(s) totales (objetivo={} + margen={}) con solo {} confirmado(s) — no se "
                     + "intentan más candidatos.", maxIntentosTotales, count, RETRY_BUDGET, seleccionados.size());
@@ -176,15 +176,13 @@ final class SeatSelectionEngine {
             // por el contador, sin importar su número/fila de origen (mismo fix que
             // seleccionarMasDe10Asientos() tras evidencia real de deselección por
             // colisión de número entre filas — RUN-1006, attempt=24: 9→8).
-            final double distanciaPrevia = confirmadosFisicos.stream()
+            final boolean yaConfirmadoFisicamente = confirmadosFisicos.stream()
                     .filter(cf -> cf[2] == candidato.number)
-                    .mapToDouble(cf -> Math.sqrt(Math.pow(cf[0] - candidato.x, 2) + Math.pow(cf[1] - candidato.y, 2)))
-                    .min().orElse(-1);
-            if (distanciaPrevia >= 0 && distanciaPrevia <= TOLERANCIA_MISMO_ASIENTO_PX) {
+                    .anyMatch(cf -> mismoAsientoFisico(cf[0], cf[1], candidato.x, candidato.y, TOLERANCIA_MISMO_ASIENTO_PX));
+            if (yaConfirmadoFisicamente) {
                 log.info("[SeatSelection] candidateId=A{} seatNumber={} x={} y={} matchedPrevious=true "
-                        + "distancePrevious={} alreadyConfirmed=true available=false",
-                        candidato.number, candidato.number, candidato.x, candidato.y,
-                        String.format("%.1f", distanciaPrevia));
+                        + "alreadyConfirmed=true available=false",
+                        candidato.number, candidato.number, candidato.x, candidato.y);
                 excluidos.add(candidato.number);
                 continue; // no cuenta contra el presupuesto de intentos — nunca se tapeó
             }
@@ -205,19 +203,24 @@ final class SeatSelectionEngine {
             // siendo 100% el contador de "Continuar"), y con fallback inmediato a
             // candidato.element/candidato.x/y si la relocalización falla — nunca peor
             // que el comportamiento anterior.
-            // FIX real (evidencia real — RUN-1005, ">10 Asientos" con el mismo
-            // mecanismo: el contador osciló hacia abajo varias veces porque
-            // reubicarAsientoPorNumero(numero) puede devolver el asiento de OTRA FILA
-            // con el mismo número visible — cada fila tiene su propio "7", "9", etc. —
-            // y tapear ese duplicado DESELECCIONA un asiento ya confirmado en vez de
-            // seleccionar uno nuevo. Se descarta la relocalización si su Y queda lejos
-            // del Y cacheado del candidato original (filas distintas están separadas
-            // por decenas de px; la misma fila real nunca se mueve tanto).
+            // FIX real (evidencia real — RUN-1005, ">10 Asientos": el contador osciló
+            // hacia abajo varias veces porque reubicarAsientoPorNumero(numero) podía
+            // devolver el asiento de OTRA FILA con el mismo número visible — cada fila
+            // tiene su propio "7", "9", etc. — y tapear ese duplicado DESELECCIONA un
+            // asiento ya confirmado en vez de seleccionar uno nuevo). Doble defensa:
+            // reubicarAsientoPorNumero(numero, expectedY) ahora elige, entre TODOS los
+            // candidatos con ese número, el más cercano a expectedY (causa raíz real de
+            // "solo 2 de 3 confirmados", evidencia RUN-1004 — antes devolvía el primero
+            // visible/de la lista sin importar la fila, así que casi nunca acertaba) — y
+            // esta comprobación de tolerancia se conserva de todas formas como segunda
+            // defensa independiente, por si el más cercano igual queda demasiado lejos
+            // (filas distintas están separadas por decenas de px; la misma fila real
+            // nunca se mueve tanto).
             final int TOLERANCIA_FILA_PX = 40;
             boolean revalidated = false;
             WebElement objetivo = candidato.element;
             try {
-                WebElement fresco = page.reubicarAsientoPorNumero(candidato.number);
+                WebElement fresco = page.reubicarAsientoPorNumero(candidato.number, candidato.y);
                 if (fresco != null) {
                     int freshY = fresco.getRect().getY() + fresco.getRect().getHeight() / 2;
                     if (Math.abs(freshY - candidato.y) <= TOLERANCIA_FILA_PX) {
@@ -261,7 +264,7 @@ final class SeatSelectionEngine {
                 // Única fuente de verdad: el contador real de "Continuar" — nunca se
                 // interpreta un tap ejecutado como selección exitosa por sí solo.
                 afterCount = page.contarAsientosSeleccionadosPorBotonContinuar();
-                confirmado = afterCount == beforeCount + 1;
+                confirmado = esSeleccionConfirmada(beforeCount, afterCount);
                 estadoFinal = String.format("contador Continuar %d -> %d (esperado %d)",
                     beforeCount, afterCount, beforeCount + 1);
                 if (!confirmado && afterCount != beforeCount) {
@@ -294,7 +297,7 @@ final class SeatSelectionEngine {
             }
         }
 
-        if (seleccionados.size() < count) {
+        if (!seleccionCompleta(seleccionados.size(), count)) {
             throw new RuntimeException(
                 "Solo se pudieron seleccionar " + seleccionados.size() + " de " + count + " asientos reales confirmados por el contador de \"Continuar\".");
         }
@@ -325,5 +328,39 @@ final class SeatSelectionEngine {
 
     private static String safe(Supplier<String> fn) {
         try { return fn.get(); } catch (Exception e) { return "N/D"; }
+    }
+
+    // ── Decisiones puras (sin I/O) — extraídas del loop de select() para poder
+    // testear la lógica de confirmación/reintento/identidad sin hardware real. ──
+
+    /**
+     * Único criterio de confirmación real: el contador de "Continuar" avanzó
+     * EXACTAMENTE en 1 respecto al valor observado antes del tap — nunca se
+     * interpreta un tap ejecutado (o cualquier otro valor de afterCount, incluida
+     * una anomalía donde el contador baja o sube más de 1) como selección exitosa.
+     */
+    static boolean esSeleccionConfirmada(int beforeCount, int afterCount) {
+        return afterCount == beforeCount + 1;
+    }
+
+    /** Éxito solo cuando el número de asientos confirmados alcanzó el objetivo. */
+    static boolean seleccionCompleta(int confirmados, int objetivo) {
+        return confirmados >= objetivo;
+    }
+
+    /** Freno de seguridad — independiente de tapOk/confirmado (ver comentario junto al loop). */
+    static boolean presupuestoAgotado(int intentosRealizados, int maxIntentosTotales) {
+        return intentosRealizados >= maxIntentosTotales;
+    }
+
+    /**
+     * Identidad FÍSICA de un asiento — dos candidatos representan el mismo asiento
+     * real si su distancia euclidiana cae dentro de la tolerancia, sin importar de
+     * qué número/fila provenga cada uno (evidencia real: RUN-1006, deselección por
+     * colisión de número entre filas).
+     */
+    static boolean mismoAsientoFisico(int x1, int y1, int x2, int y2, double toleranciaPx) {
+        double distancia = Math.sqrt(Math.pow(x1 - x2, 2) + Math.pow(y1 - y2, 2));
+        return distancia <= toleranciaPx;
     }
 }

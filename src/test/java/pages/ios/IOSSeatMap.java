@@ -79,14 +79,4 @@ public class IOSSeatMap extends IOSBasePage {
     public String seleccionarAsientoEspecial() {
         return legacy.seleccionarAsientoEspecial();
     }
-
-    /**
-     * Verifica (una sola llamada, sin espera implícita) si la app sigue mostrando
-     * la pantalla de asientos ahora mismo. Usado para decidir de forma SEGURA (nunca
-     * asumida) si un test puede reutilizar la pantalla actual en vez de repetir
-     * PromosGuard/MovieDetection/MovieOpen/ScheduleSelection.
-     */
-    public boolean estaEnPantallaDeAsientos() {
-        return legacy.estaRealmenteEnPantallaDeAsientos();
-    }
 }

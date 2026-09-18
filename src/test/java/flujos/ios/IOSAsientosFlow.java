@@ -130,16 +130,6 @@ public class IOSAsientosFlow {
             () -> seatMap.seleccionarMasDe10AsientosYValidarAlerta(), driver);
     }
 
-    /**
-     * Verificación barata (un solo round-trip WDA, sin espera implícita) de si la
-     * app sigue en la pantalla de asientos ahora mismo — nunca asumido, siempre
-     * comprobado contra la UI real antes de que el llamador decida reutilizar
-     * estado en vez de repetir navegación completa.
-     */
-    public boolean estaEnPantallaDeAsientos() {
-        return seatMap.estaEnPantallaDeAsientos();
-    }
-
     // ─── Flujos de funciones especiales ──────────────────────────────────────
 
     /** Cambia el horario desde la pantalla de mapa de asientos. */

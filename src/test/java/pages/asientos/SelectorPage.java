@@ -1982,7 +1982,7 @@ public class SelectorPage extends BasePage {
             boolean revalidated = false;
             int tapX = c.x(), tapY = c.y();
             try {
-                WebElement fresco = reubicarAsientoPorNumero(c.number());
+                WebElement fresco = reubicarAsientoPorNumero(c.number(), c.y());
                 if (fresco != null) {
                     org.openqa.selenium.Rectangle r = fresco.getRect();
                     int freshY = r.getY() + r.getHeight() / 2;
@@ -3966,18 +3966,81 @@ public class SelectorPage extends BasePage {
     // (label/name) ya documentado como el lugar real donde vive el número de asiento
     // en iOS; en Android reutiliza el mismo patrón UiSelector().text() ya usado en
     // otros escaneos de este archivo.
-    WebElement reubicarAsientoPorNumero(int numero) {
+    // FIX real (causa raíz de "solo 2 de 3 confirmados" — evidencia RUN-1004,
+    // pages.asientos.SeatSelectionEngine: intentos 2-9 de 9 usaron "scan-original"
+    // porque reubicarAsientoPorNumero() nunca volvió a encontrar el asiento correcto
+    // tras el primer tap real, 7 de 8 con candidato.element completamente muerto
+    // (describir()="N/D" en TODOS los atributos, incluido frame) — cayendo a
+    // coordenadas cacheadas del escaneo inicial, que fallan en cuanto la UI cambia
+    // tras cada selección real (aparece/crece el panel "Asientos seleccionados")):
+    // el número de asiento se repite UNA VEZ POR FILA en cualquier mapa real (fila A
+    // tiene un "12", fila F también tiene un "12", etc.) — el predicate de abajo
+    // encuentra un candidato POR FILA, nunca uno solo. La versión anterior devolvía
+    // el primero visible (o el primero de la lista) sin importar la fila — casi
+    // nunca era el asiento correcto salvo coincidencia, y SeatSelectionEngine/
+    // seleccionarMasDe10Asientos() ya lo descartaban por su propio chequeo de
+    // tolerancia de fila, perdiendo la relocalización y cayendo de vuelta a
+    // coordenadas cacheadas cada vez. Ahora se recibe la Y esperada (posición física
+    // ya conocida del candidato, la misma "identidad física" que ya usa el resto de
+    // este archivo) y se elige, entre TODOS los encontrados, el más cercano a esa Y
+    // — sigue siendo UNA sola consulta findElements() por asiento (el mismo costo de
+    // antes); solo cambia CUÁL de sus resultados se usa. El llamador conserva su
+    // propio chequeo de tolerancia de fila para decidir si confiar en el resultado.
+    WebElement reubicarAsientoPorNumero(int numero, int expectedY) {
         try {
             List<WebElement> encontrados = isIOS()
                 ? driver.findElements(AppiumBy.iOSNsPredicateString(predicadoAsientoPorNumero(numero)))
                 : driver.findElements(AppiumBy.androidUIAutomator(uiSelectorAsientoPorNumero(numero)));
+            List<WebElement> validos = new java.util.ArrayList<>();
+            List<Integer> centrosY = new java.util.ArrayList<>();
+            int getRectFallidos = 0;
             for (WebElement el : encontrados) {
-                try { if (el.isDisplayed()) return el; } catch (Exception ignored) {}
+                try {
+                    org.openqa.selenium.Rectangle r = el.getRect();
+                    validos.add(el);
+                    centrosY.add(r.getY() + r.getHeight() / 2);
+                } catch (Exception ignored) {
+                    getRectFallidos++;
+                }
             }
-            return encontrados.isEmpty() ? null : encontrados.get(0);
+            int indice = indiceMasCercanoPorY(centrosY, expectedY);
+            // FIX real (visibilidad — evidencia RUN-1005: la corrección de desambiguación
+            // de fila NO resolvió "solo 2 de 3 confirmados"; revalidated=false persistió
+            // en la mayoría de los intentos incluso con esta corrección aplicada). Antes
+            // este resultado quedaba en silencio total (catch vacío) — no había forma de
+            // saber si "no relocalizó" significaba encontrados=0, todos con getRect()
+            // fallido, o algo distinto. Se registra explícitamente para no repetir un
+            // fallo silencioso en la próxima validación real.
+            if (indice < 0) {
+                log.warn("[SeatSelection] reubicarAsientoPorNumero(numero={}, expectedY={}) SIN resultado usable — "
+                        + "encontrados={} getRectFallidos={} validos={}",
+                        numero, expectedY, encontrados.size(), getRectFallidos, validos.size());
+            }
+            return indice >= 0 ? validos.get(indice) : null;
         } catch (Exception e) {
+            log.warn("[SeatSelection] reubicarAsientoPorNumero(numero={}, expectedY={}) lanzó excepción: {}",
+                    numero, expectedY, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Algoritmo puro (sin WDA) que elige, entre varias posiciones Y ya leídas, el
+     * índice de la más cercana a expectedY — extraído de reubicarAsientoPorNumero()
+     * para poder testear la desambiguación de fila sin hardware. -1 si la lista
+     * está vacía.
+     */
+    static int indiceMasCercanoPorY(List<Integer> centrosY, int expectedY) {
+        int mejorIndice = -1;
+        int mejorDistancia = Integer.MAX_VALUE;
+        for (int i = 0; i < centrosY.size(); i++) {
+            int distancia = Math.abs(centrosY.get(i) - expectedY);
+            if (distancia < mejorDistancia) {
+                mejorDistancia = distancia;
+                mejorIndice = i;
+            }
+        }
+        return mejorIndice;
     }
 
     /** Locator exacto usado por reubicarAsientoPorNumero() — solo para instrumentación/logs. */

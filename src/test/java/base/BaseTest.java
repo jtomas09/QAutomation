@@ -57,6 +57,13 @@ public class BaseTest {
 
     private static volatile boolean driverCreatedOnce = false;
 
+    // TAREA arquitectura — "no debe existir un reset fallido que pase inadvertido": si
+    // resetApplicationBetweenTests() falla (APPLICATION_RESET_FAILED), el siguiente
+    // @BeforeEach lo detecta aquí y aborta ese test explícitamente en vez de arrancar
+    // como si el estado de la app fuera válido. Se consume (vuelve a false) en cuanto
+    // se usa, para no cascadear el fallo a TODOS los tests restantes de la suite.
+    private static volatile boolean pendingResetFailure = false;
+
     private static final boolean AUTO_SCROLL_ON_OPEN =
             "true".equalsIgnoreCase(System.getProperty("AUTO_SCROLL_ON_OPEN",
                     System.getenv().getOrDefault("AUTO_SCROLL_ON_OPEN", "false")));
@@ -87,16 +94,13 @@ public class BaseTest {
     private static final AtomicBoolean MEXICO_CINEMA_CHECKED = new AtomicBoolean(false);
     private static volatile String     lastAlimentosCinema   = null;
 
-    // FIX real (TAREA arquitectura — reemplaza el boolean skipNextRelaunch de una
-    // iteración anterior): la decisión de relanzar la app ya NO depende de un flag
-    // especial fijado por cada test — depende ÚNICAMENTE de
-    // utils.SuiteExecutionContext.isSeatMapContextValid(), un estado LÓGICO que
-    // solo queda en true cuando la navegación real (en pages.ios/flujos.ios) marcó
-    // "sigo en la pantalla de asientos" y ninguna acción posterior lo invalidó
-    // (p. ej. "Continuar" hacia confirmación, o un cambio de horario). Cualquier
-    // otra suite que extienda BaseTest y nunca llame a esos métodos de contexto
-    // simplemente nunca lo pone en true — su comportamiento (relanzar siempre)
-    // queda exactamente igual que hoy, sin ningún cambio.
+    // TAREA arquitectura — REQUISITO FUNCIONAL NO NEGOCIABLE: com.cinepolis.go se
+    // reinicia SIEMPRE entre escenarios (ver resetApplicationBetweenTests() /
+    // tearDown()). Esta decisión ya NO depende de SuiteExecutionContext ni de en qué
+    // pantalla haya quedado el test anterior — ese acoplamiento (una iteración previa
+    // de esta misma tarea) quedó eliminado explícitamente. Lo único que se reutiliza
+    // entre escenarios es la infraestructura (WDA/Appium/Driver); el estado funcional
+    // de la app siempre se resetea.
 
     @BeforeAll
     public static void beforeAllSuite() {
@@ -181,47 +185,91 @@ public class BaseTest {
         return null;
     }
 
-    private void relaunchAppSafe() {
-        try {
-            if (driver == null) return;
-            String appPackage = getAppPackageSafe();
-            if (appPackage == null || appPackage.isBlank()) return;
+    /**
+     * TAREA arquitectura — RESET DE APLICACIÓN ENTRE ESCENARIOS.
+     *
+     * Único punto de reset entre tests: reinicia SIEMPRE {@code com.cinepolis.go}
+     * (nunca condicionado a SuiteExecutionContext ni a en qué pantalla terminó el
+     * test anterior — ver Javadoc de clase de {@link utils.SuiteExecutionContext}).
+     * Reutiliza infraestructura (WDA/Appium/Driver — nunca se toca aquí) y resetea
+     * ÚNICAMENTE el estado funcional de la app: terminate → launch → verificar que
+     * está realmente en primer plano (condición real de Appium, sin sleep fijo) →
+     * invalidar el estado lógico de la suite.
+     *
+     * Lanza {@link IllegalStateException} si la app nunca vuelve a primer plano
+     * dentro del límite — un reset que no puede confirmarse es un fallo real, no un
+     * detalle a ignorar (ver tearDown()/APPLICATION_RESET_FAILED).
+     */
+    private void resetApplicationBetweenTests() {
+        if (driver == null) return;
+        String appPackage = getAppPackageSafe();
+        if (appPackage == null || appPackage.isBlank()) return;
 
-            DriverFactory.terminateApp(driver, appPackage);
-            DriverFactory.activateApp(driver, appPackage);
+        long t0 = System.currentTimeMillis();
+        log.info("[Lifecycle] Application reset START");
+        log.info("[PERF][Lifecycle] ApplicationReset START");
 
-            // iOS ÚNICAMENTE — causa raíz real confirmada con evidencia de log (2026-09-07):
-            // CinemasHelper cachea "Club Cinépolis ya cerrado"/"sin promos" a nivel de TODA
-            // la suite (iosClubClosedThisRun/iosNoPromosThisRun, reseteados hoy solo una vez
-            // en BaseTest.beforeAllSuite()). Pero terminateApp()+activateApp() de arriba
-            // siempre produce un cold start, y el modal de Club Cinépolis reaparece en CADA
-            // cold start — por lo que a partir del segundo test del run, PromosGuard se salta
-            // el chequeo de Club (cree que ya está cerrado) y los 5 passes de MainNav se
-            // agotan sin nunca ver la pantalla principal, dejando la app atascada en el login
-            // de Club para el resto de la suite (evidencia real: ClubGuard=0ms, "MainNav NUNCA
-            // detectado", y obtenerPeliculasVisibles() descartando 107/107 candidatos como "no
-            // visible" porque están tapados por ese modal). El reset debe ocurrir exactamente
-            // aquí — el único punto real que garantiza un cold start — no en cada @BeforeEach/
-            // @AfterEach (eso anularía la optimización de rendimiento del caché para el caso
-            // normal donde la app NO se relanza). DriverFactory.isIOS() gatea explícitamente
-            // esta llamada; además, CinemasHelper.resetRunCache() solo toca banderas
-            // exclusivas de iOS (Android nunca las lee ni las escribe — ver
-            // CinemasHelper.java, clubAlreadyDismissed = isIOS() && iosClubClosedThisRun),
-            // así que esto no puede alterar el comportamiento de Android aunque se llamara
-            // sin la guarda — se deja explícita de todas formas para que la intención quede
-            // clara y aislada a iOS.
-            if (DriverFactory.isIOS()) {
-                pages.common.CinemasHelper.resetRunCache();
-                // TAREA 33: ver nota equivalente en beforeAllSuite() — resetea también
-                // el caché independiente de pages.ios.IOSCinemasHelper (TAREA 32), ya
-                // que dismissPromosGuard(String) usa esa clase para iOS ahora. Se
-                // mantiene la llamada a CinemasHelper.resetRunCache() sin cambios
-                // (MenuAtmosfera sigue dependiendo de ella, ver TAREA 33).
-                pages.ios.IOSCinemasHelper.resetRunCache();
+        long tTerminate0 = System.currentTimeMillis();
+        log.info("[Lifecycle] Terminating {}", appPackage);
+        DriverFactory.terminateApp(driver, appPackage);
+        long terminateMs = System.currentTimeMillis() - tTerminate0;
+        log.info("[Lifecycle] {} terminated", appPackage);
+        log.info("[PERF][Lifecycle] ApplicationTerminate={}ms", terminateMs);
+
+        long tLaunch0 = System.currentTimeMillis();
+        log.info("[Lifecycle] Launching {}", appPackage);
+        DriverFactory.activateApp(driver, appPackage);
+        long launchMs = System.currentTimeMillis() - tLaunch0;
+        log.info("[PERF][Lifecycle] ApplicationLaunch={}ms", launchMs);
+
+        // Verificación real (InteractsWithApps.queryAppState — mismo mecanismo que
+        // ya usa Appium/XCUITest para reportar el estado del proceso), acotada, sin
+        // sleep fijo: sale en cuanto la app confirma estar en primer plano.
+        long tReady0 = System.currentTimeMillis();
+        long readyDeadline = tReady0 + 15_000L;
+        boolean foreground = false;
+        while (System.currentTimeMillis() < readyDeadline) {
+            if (DriverFactory.queryAppState(driver, appPackage)
+                    == io.appium.java_client.appmanagement.ApplicationState.RUNNING_IN_FOREGROUND) {
+                foreground = true;
+                break;
             }
+            try { Thread.sleep(150); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+        }
+        long readyMs = System.currentTimeMillis() - tReady0;
+        if (!foreground) {
+            throw new IllegalStateException("[Lifecycle] " + appPackage
+                    + " nunca confirmó estar en primer plano tras el relanzamiento (timeout="
+                    + readyMs + "ms).");
+        }
+        log.info("[Lifecycle] {} ready", appPackage);
+        log.info("[PERF][Lifecycle] ApplicationReady={}ms", readyMs);
 
-            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
-        } catch (Exception ignored) {}
+        // iOS ÚNICAMENTE — causa raíz real confirmada con evidencia de log (2026-09-07):
+        // CinemasHelper cachea "Club Cinépolis ya cerrado"/"sin promos" a nivel de TODA
+        // la suite (iosClubClosedThisRun/iosNoPromosThisRun, reseteados hoy solo una vez
+        // en BaseTest.beforeAllSuite()). Pero terminateApp()+activateApp() de arriba
+        // siempre produce un cold start, y el modal de Club Cinépolis reaparece en CADA
+        // cold start — por lo que a partir del segundo test del run, PromosGuard se salta
+        // el chequeo de Club (cree que ya está cerrado) y los 5 passes de MainNav se
+        // agotan sin nunca ver la pantalla principal, dejando la app atascada en el login
+        // de Club para el resto de la suite (evidencia real: ClubGuard=0ms, "MainNav NUNCA
+        // detectado", y obtenerPeliculasVisibles() descartando 107/107 candidatos como "no
+        // visible" porque están tapados por ese modal). DriverFactory.isIOS() gatea
+        // explícitamente esta llamada; además, CinemasHelper.resetRunCache() solo toca
+        // banderas exclusivas de iOS (Android nunca las lee ni las escribe — ver
+        // CinemasHelper.java, clubAlreadyDismissed = isIOS() && iosClubClosedThisRun).
+        if (DriverFactory.isIOS()) {
+            pages.common.CinemasHelper.resetRunCache();
+            pages.ios.IOSCinemasHelper.resetRunCache();
+        }
+
+        utils.SuiteExecutionContext.resetAll();
+        log.info("[Lifecycle] SuiteExecutionContext invalidated");
+
+        long totalMs = System.currentTimeMillis() - t0;
+        log.info("[Lifecycle] Application reset END total={}ms", totalMs);
+        log.info("[PERF][Lifecycle] ApplicationReset TOTAL={}ms", totalMs);
     }
 
     /**
@@ -254,7 +302,7 @@ public class BaseTest {
             try {
                 DriverFactory.activateApp(driver, appPackage);
             } catch (Exception e) {
-                relaunchAppSafe();
+                resetApplicationBetweenTests();
             }
         } catch (Exception ignored) {}
     }
@@ -324,6 +372,18 @@ public class BaseTest {
 
     @BeforeEach
     public void setUp(TestInfo testInfo) {
+        // TAREA arquitectura — "el siguiente escenario NO debe ejecutarse como si el
+        // estado fuera válido" cuando el reset del test anterior falló. Se consume de
+        // inmediato (evita que UN reset fallido tumbe el resto de la suite completa).
+        if (pendingResetFailure) {
+            pendingResetFailure = false;
+            throw new IllegalStateException(
+                    "[Lifecycle] Test abortado — el reset de aplicación del escenario anterior "
+                    + "falló (APPLICATION_RESET_FAILED); el estado de la app no puede darse por "
+                    + "válido para: " + testInfo.getDisplayName());
+        }
+
+        log.info("[Lifecycle] TEST START: {}", testInfo.getDisplayName());
         long tBeforeEach0 = System.currentTimeMillis();
         log.info("[TRACE] Entrando BaseTest.beforeEach() | hilo={} plataforma={} test={} hora={}",
                 Thread.currentThread().getName(), DriverFactory.isIOS() ? "iOS" : "Android",
@@ -491,49 +551,28 @@ public class BaseTest {
                 // El conteo definitivo lo hace PdfReportExtension.SuiteMailer desde BaseTestStatusRegistry.
                 log.info("[BaseTest] TEST ENDING: {}", testInfo.getDisplayName());
             }
+            log.info("[Lifecycle] TEST END: {}", testInfo.getDisplayName());
 
             if (REUSE_DRIVER) {
-                try {
-                    if (driver != null) {
-                        // Antes: solo terminateApp() aquí, dejando el dispositivo en
-                        // SpringBoard hasta que el @BeforeEach del SIGUIENTE test lo
-                        // relanzara (ensureAppRunning()). Ese hueco no tiene cota: si
-                        // este era el ÚLTIMO test de la suite, ningún @BeforeEach
-                        // futuro llega, y el dispositivo queda sin ninguna interacción
-                        // durante todo el post-procesamiento final (PDF/Allure/SMTP,
-                        // que puede tardar varios minutos) — tiempo suficiente para que
-                        // iOS aplique su Auto-Lock configurado y solicite el passcode
-                        // en pleno curso de la ejecución. Se reutiliza relaunchAppSafe()
-                        // (terminate+activate juntos, ya usado en el camino de excepción
-                        // de este mismo método) para que el relanzamiento sea inmediato:
-                        // el estado "fresco" que el siguiente test necesita es idéntico
-                        // sin importar cuándo ocurra el relaunch, porque terminateApp()
-                        // ya mata el proceso — activateApp() después siempre produce un
-                        // cold start, ya sea aquí o en el próximo setUp.
-                        //
-                        // FIX real (TAREA arquitectura — ciclo de vida, no flags por
-                        // transición): la decisión ahora es 100% genérica, dirigida por
-                        // datos — utils.SuiteExecutionContext.isSeatMapContextValid()
-                        // solo es true cuando la navegación real marcó "sigo en la
-                        // pantalla de asientos" y NADA la invalidó después (ver
-                        // IOSSeatMap.continuar() → invalidateNavigation(),
-                        // IOSAsientosFlow.seleccionarPeliculaRandomYHorarioDescartandoAlertas()
-                        // → markMovieAndScheduleSelected()). Ningún test necesita fijar
-                        // ningún flag especial — el mismo mecanismo aplica a CUALQUIER
-                        // test futuro que use ese contexto correctamente. Cualquier otra
-                        // suite que nunca toque SuiteExecutionContext obtiene
-                        // isSeatMapContextValid()==false siempre → relanzamiento idéntico
-                        // al comportamiento actual, sin ningún cambio.
-                        if (utils.SuiteExecutionContext.isSeatMapContextValid()) {
-                            log.info("[BaseTest] Relanzamiento omitido — SuiteExecutionContext indica que la "
-                                    + "pantalla de asientos sigue vigente (película/horario sin invalidar).");
-                        } else {
-                            relaunchAppSafe();
-                            utils.SuiteExecutionContext.resetAll();
-                            log.info("[BaseTest] App terminada y relanzada tras test (dispositivo nunca queda inactivo).");
-                        }
+                // TAREA arquitectura — REQUISITO FUNCIONAL NO NEGOCIABLE: la app se
+                // reinicia SIEMPRE entre escenarios, sin ninguna condición basada en
+                // SuiteExecutionContext ni en qué pantalla haya quedado el test anterior
+                // (PASS, FAIL, SKIP tras iniciar, excepción, timeout, fallo de
+                // continuar()/navegación — todos llegan aquí igual, @AfterEach de JUnit
+                // corre siempre). Se reutiliza infraestructura (WDA/Appium/Driver — nada
+                // de eso se toca en resetApplicationBetweenTests()); se resetea el estado
+                // funcional de la app. Un reset fallido NUNCA se oculta: se registra
+                // explícitamente y el siguiente test se aborta en su propio @BeforeEach
+                // (ver pendingResetFailure) en vez de arrancar como si el estado fuera
+                // válido.
+                if (driver != null) {
+                    try {
+                        resetApplicationBetweenTests();
+                    } catch (Exception e) {
+                        pendingResetFailure = true;
+                        log.error("[Lifecycle] APPLICATION_RESET_FAILED — {}", e.getMessage(), e);
                     }
-                } catch (Exception ignored) {}
+                }
             }
 
             // NOTA: BaseTestStatusRegistry.clear(testKey) NO va aquí. @AfterEach corre
@@ -550,10 +589,12 @@ public class BaseTest {
 
             if (REUSE_DRIVER) {
                 try {
-                    log.info("[BaseTest] Relaunching app after tearDown exception...");
-                    relaunchAppSafe();
-                    utils.SuiteExecutionContext.resetAll();
-                } catch (Exception ignored) {}
+                    log.info("[Lifecycle] Relanzando app tras excepción en tearDown...");
+                    resetApplicationBetweenTests();
+                } catch (Exception resetEx) {
+                    pendingResetFailure = true;
+                    log.error("[Lifecycle] APPLICATION_RESET_FAILED — {}", resetEx.getMessage(), resetEx);
+                }
             }
 
         } finally {

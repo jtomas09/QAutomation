@@ -144,6 +144,22 @@ public class DriverFactory {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Condición real de Appium/XCUITest (InteractsWithApps) para saber si la app ya
+     * está corriendo en primer plano — usada para reemplazar esperas fijas al
+     * verificar que un relanzamiento realmente terminó, en vez de un sleep a ciegas.
+     */
+    public static io.appium.java_client.appmanagement.ApplicationState queryAppState(AppiumDriver d, String appId) {
+        if (d == null || appId == null || appId.isBlank()) {
+            return io.appium.java_client.appmanagement.ApplicationState.NOT_RUNNING;
+        }
+        try {
+            return isIOS() ? ((IOSDriver) d).queryAppState(appId) : ((AndroidDriver) d).queryAppState(appId);
+        } catch (Exception e) {
+            return io.appium.java_client.appmanagement.ApplicationState.NOT_RUNNING;
+        }
+    }
+
     public static void hideKeyboard(AppiumDriver d) {
         if (d == null) return;
         try { d.executeScript("mobile: hideKeyboard"); } catch (Exception ignored) {}

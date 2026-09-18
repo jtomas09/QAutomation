@@ -4,26 +4,32 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Estado LÓGICO de la suite en ejecución — nunca WebElement/MobileElement/By/
- * Rectangle/referencias WDA de ningún tipo. Reemplaza el patrón anterior de
- * "un boolean por transición" (p. ej. {@code skipNextRelaunch},
- * {@code pantallaAsientosReutilizable}) por un mecanismo único, genérico y
- * auto-descriptivo: quien REALMENTE modifica la navegación (las clases de
- * {@code pages.ios}/{@code flujos.ios}, no la clase de test) es quien marca o
- * invalida el estado, en el momento exacto en que deja de ser cierto — nunca se
- * invalida "todo" de forma incondicional después de cada test.
+ * Estado LÓGICO del escenario en ejecución — nunca WebElement/MobileElement/By/
+ * Rectangle/referencias WDA de ningún tipo.
  *
- * {@link base.BaseTest#tearDown} y cualquier test que llame a
- * {@code seleccionarPeliculaYHorario()} consultan este contexto para decidir si
- * pueden omitir preparación repetida (PromosGuard, ClubGuard, MovieDetection,
- * MovieOpen, ScheduleSelection, cold start de app) — pero SIEMPRE deben
- * reverificar contra la UI real antes de confiar en él (ver
- * {@code SelectorPage.estaRealmenteEnPantallaDeAsientos()}); este contexto nunca
- * es, por sí solo, prueba suficiente de que la pantalla realmente está ahí.
+ * TAREA arquitectura (requisito funcional no negociable): la aplicación
+ * {@code com.cinepolis.go} se reinicia SIEMPRE entre escenarios de
+ * {@code SeleccionAsientos} (ver {@code base.BaseTest#resetApplicationBetweenTests()}),
+ * sin ninguna excepción basada en este contexto. Una iteración PREVIA de esta
+ * misma arquitectura usaba {@code isSeatMapContextValid()} para OMITIR ese
+ * relanzamiento y la navegación completa cuando la pantalla de asientos parecía
+ * seguir vigente — ese acoplamiento (contexto → decisión de lifecycle) fue
+ * explícitamente eliminado: este contexto ya NO controla si la app se reinicia
+ * ni si un test puede saltarse su propia navegación.
  *
- * Estático porque JUnit 5 crea una instancia nueva de la clase de test por cada
- * {@code @Test} (lifecycle PER_METHOD, el default) — este es el único estado que
- * debe sobrevivir entre esas instancias, dentro de la misma suite/JVM.
+ * Su única responsabilidad ahora es representar, de forma puramente informativa/
+ * diagnóstica, qué ocurrió DURANTE el escenario actual (qué película/horario se
+ * seleccionó, en qué pantalla terminó) — útil para logging, nunca como entrada de
+ * una decisión de lifecycle entre tests. {@code resetApplicationBetweenTests()}
+ * invalida este contexto por completo (misma llamada, {@link #resetAll()}) en
+ * cada reset, así que ningún estado del escenario anterior puede sobrevivir al
+ * siguiente.
+ *
+ * Estático porque el ciclo de vida de {@code SeleccionAsientos} es
+ * {@code TestInstance.Lifecycle.PER_CLASS} (una sola instancia de test para toda
+ * la suite, ver {@code base.BaseTest}) — un campo estático es, de todas formas, la
+ * forma correcta de representar un estado que conceptualmente pertenece a la
+ * EJECUCIÓN, no a una instancia de test en particular.
  */
 public final class SuiteExecutionContext {
 
@@ -110,17 +116,12 @@ public final class SuiteExecutionContext {
         log.debug("[SuiteExecutionContext] invalidateNavigation()");
     }
 
-    // ── Consultas ────────────────────────────────────────────────────────────
-
-    /**
-     * true SOLO si el contexto lógico afirma "película + horario seleccionados y
-     * pantalla de asientos activa". NUNCA es, por sí solo, prueba suficiente —
-     * el llamador SIEMPRE debe reverificar contra la UI real antes de confiar en
-     * el ahorro de navegación (ver {@code estaRealmenteEnPantallaDeAsientos()}).
-     */
-    public static boolean isSeatMapContextValid() {
-        return currentScreen == Screen.SEAT_MAP && movieSelected != null && scheduleSelected != null;
-    }
+    // ── Consultas (solo informativas — nunca controlan lifecycle entre tests) ──
+    // TAREA arquitectura: isSeatMapContextValid() se eliminó — su único propósito
+    // era decidir si se podía omitir el reinicio de la app o la navegación entre
+    // escenarios, exactamente el acoplamiento que esta tarea prohíbe. El hecho de
+    // que currentScreen()==SEAT_MAP nunca debe usarse como evidencia para evitar
+    // un relanzamiento.
 
     public static String movieSelected()    { return movieSelected; }
     public static String scheduleSelected() { return scheduleSelected; }

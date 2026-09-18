@@ -31,25 +31,14 @@ public class SeleccionAsientos extends BaseTest {
         }
     }
 
-    // FIX real (TAREA arquitectura — reemplaza el boolean pantallaAsientosReutilizable
-    // de una iteración anterior): ya no hay ningún flag propio de esta clase. La
-    // decisión de omitir navegación depende ÚNICAMENTE de
-    // utils.SuiteExecutionContext.isSeatMapContextValid() — un estado LÓGICO que
-    // solo es true cuando la navegación real (en pages.ios/flujos.ios) marcó "sigo
-    // en la pantalla de asientos" y ningún test posterior lo invalidó. Este mismo
-    // método sirve para CUALQUIER test que llegue a llamarlo, sin necesidad de
-    // hardcodear "después del test 4" o "después del test 5" — si un futuro test
-    // deja el contexto válido, este método lo reutiliza automáticamente; si no,
-    // cae al camino de navegación completo de siempre. Nunca se asume: siempre se
-    // reverifica contra la UI real antes de confiar en el contexto.
+    // TAREA arquitectura — REQUISITO FUNCIONAL NO NEGOCIABLE: cada escenario ejecuta
+    // SIEMPRE su propia navegación completa (película + horario), sin importar cómo
+    // terminó el escenario anterior. Una iteración PREVIA de esta arquitectura omitía
+    // esta navegación cuando SuiteExecutionContext indicaba que la pantalla de
+    // asientos seguía vigente — ese atajo quedó explícitamente eliminado: la app se
+    // reinicia entre cada test (ver BaseTest.resetApplicationBetweenTests()), así que
+    // esa reutilización de estado ya no aplicaría de todas formas.
     private void seleccionarPeliculaYHorario() {
-        if (DriverFactory.isIOS() && utils.SuiteExecutionContext.isSeatMapContextValid()
-                && iosFlow.estaEnPantallaDeAsientos()) {
-            log.info("[SeleccionAsientos] Pantalla de asientos reutilizada (SuiteExecutionContext: "
-                    + "movie={} schedule={}) — navegación completa omitida.",
-                    utils.SuiteExecutionContext.movieSelected(), utils.SuiteExecutionContext.scheduleSelected());
-            return;
-        }
         if (DriverFactory.isIOS()) {
             TestSteps.run("Selección de Película y horario", () ->
                 iosFlow.seleccionarPeliculaRandomYHorarioDescartandoAlertas(), driver);
@@ -113,11 +102,6 @@ public class SeleccionAsientos extends BaseTest {
         seleccionarPeliculaYHorario();
         if (DriverFactory.isIOS()) {
             iosFlow.seleccionarYDeseleccionar3AsientosConsecutivos(driver);
-            // Este flujo nunca navega hacia adelante (selecciona y luego
-            // deselecciona — vuelve a 0 asientos elegidos, en la MISMA pantalla).
-            // No hace falta marcar nada aquí: SuiteExecutionContext ya sigue
-            // válido porque nada lo invalidó — el siguiente test que llame a
-            // seleccionarPeliculaYHorario() lo detecta automáticamente.
             return;
         }
         TestSteps.run("Pantalla de asientos", () ->
@@ -131,13 +115,6 @@ public class SeleccionAsientos extends BaseTest {
     void seleccion11Asientos() {
         seleccionarPeliculaYHorario();
         if (DriverFactory.isIOS()) {
-            // Nota: si este método lanza (TARGET_NOT_REACHABLE, el caso más común
-            // hoy), la línea de abajo nunca se ejecuta — pero eso no importa: el
-            // contexto de suite YA quedó marcado válido por
-            // seleccionarPeliculaYHorario() más arriba, y este flujo NUNCA navega
-            // fuera de la pantalla de asientos (ni en éxito ni en fallo), así que
-            // nada necesita invalidarlo. tearDown() reverificará contra la UI real
-            // antes de confiar en ese estado, sin importar cómo terminó este test.
             iosFlow.validarLimite10Asientos(driver);
             return;
         }
@@ -159,16 +136,8 @@ public class SeleccionAsientos extends BaseTest {
             page.cambiarHorarioEnPantallaAsientos(), driver);
     }
 
-    // FIX real (TAREA arquitectura — orquestación de suite): reordenado a @Order(8)
-    // (antes 7). Este test nunca marca ni consulta SuiteExecutionContext (su propia
-    // selección de película/horario usa movieSelector.seleccionarPeliculaRandomYHorario()
-    // directamente, no el método que sí marca el contexto) — no hay evidencia de que
-    // termine en el mapa de asientos, así que no participa del grupo reutilizable.
-    // Se corre después de alertaAsientoEspecial (ahora @Order(7)) para que ESE test
-    // sí pueda heredar el contexto válido dejado por cambioHorarioAsientos — mover
-    // este test no cambia su resultado funcional, solo su posición en la secuencia.
     @Test
-    @Order(8)
+    @Order(7)
     @DisplayName("Verificación de Banner en Asientos 3D")
     @Story("Asientos")
     void asientos3D() {
@@ -186,17 +155,8 @@ public class SeleccionAsientos extends BaseTest {
         TestSteps.run("Selección de Película y horario", () -> page.seleccionarPeliculaRandomYHorario(), driver);
     }
 
-    // FIX real (TAREA arquitectura — orquestación de suite): reordenado a @Order(7)
-    // (antes 8), inmediatamente después de cambioHorarioAsientos (@Order(6)). Ambos
-    // llaman a seleccionarPeliculaYHorario() y cambioHorarioAsientos ahora conserva
-    // el contexto como válido tras un cambio de horario exitoso (ver
-    // IOSAsientosFlow.cambiarHorario() — ya no invalida, remarca con el mismo
-    // movieSelected() y un horario honesto "(horario cambiado)") — este test puede
-    // heredar esa preparación sin repetir MovieDetection/MovieOpen/ScheduleSelection.
-    // Mismo criterio de siempre: seleccionarPeliculaYHorario() reverifica contra la
-    // UI real antes de confiar en el contexto, nunca lo asume ciegamente.
     @Test
-    @Order(7)
+    @Order(8)
     @DisplayName("Validación de Alerta en Asiento Especial")
     @Story("Asientos")
     void alertaAsientoEspecial() {
