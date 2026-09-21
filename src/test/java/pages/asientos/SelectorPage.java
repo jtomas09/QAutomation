@@ -880,6 +880,9 @@ public class SelectorPage extends BasePage {
             // por texto exacto justo antes de tocarlo, y ante StaleElement o "sin transición
             // confirmada" se corta la ronda actual en vez de seguir iterando un snapshot ya
             // desactualizado (en vez de reintentar 10 veces contra el mismo estado inválido).
+            // Nombre histórico — en realidad acumula CUALQUIER horario ya probado sin éxito
+            // (alerta inesperada O sin transición confirmada, ver FIX real más abajo), nunca
+            // solo alertas. Nunca se reintenta un horario que ya está aquí.
             Set<String> descartadosPorAlerta = new LinkedHashSet<>();
             int intentoGlobal = 0;
 
@@ -986,10 +989,23 @@ public class SelectorPage extends BasePage {
                             return hora;
                         }
 
+                        // FIX real — root cause confirmado con evidencia RUN-1002 (13 horarios
+                        // detectados, "No se encontró ningún horario sin alertas inesperadas"
+                        // tras probar SOLO 1 de 13): SIN-TRANSICION cortaba la RONDA completa sin
+                        // marcar alertaDescartada=true, lo que además rompía el loop EXTERNO
+                        // (`if (!alertaDescartada) break;`) y abortaba TODA la búsqueda dejando
+                        // 12 horarios nunca intentados — un solo horario problemático bastaba
+                        // para tirar el test entero. Mismo tratamiento que un horario con alerta:
+                        // se descarta ESTE horario específico (nunca se reintenta ciegamente) y
+                        // se continúa con el resto en la siguiente ronda — sin tocar ningún
+                        // timeout/smartWait existente.
                         log.warn("[SelectorPage] Click en '{}' no lanzó excepción pero la pantalla de horarios "
-                                + "sigue visible — transición no confirmada, se corta esta ronda.", hora);
+                                + "sigue visible — transición no confirmada; se descarta ESTE horario y se "
+                                + "prueba el siguiente (no toda la búsqueda).", hora);
+                        descartadosPorAlerta.add(hora);
+                        alertaDescartada = true;
                         resultado = "SIN-TRANSICION";
-                        break; // el snapshot de esta ronda puede ya no reflejar la pantalla real
+                        break; // el snapshot de esta ronda puede ya no reflejar la pantalla real — se reconstruye en la siguiente ronda
 
                     } catch (StaleElementReferenceException stale) {
                         // Requisito explícito: NO seguir usando el WebElement anterior. Se
@@ -4231,6 +4247,16 @@ public class SelectorPage extends BasePage {
     // siempre disponible) Y por intentarEscaneoRapidoConPageSource() (camino rápido,
     // ver más abajo), para garantizar que ambos identifiquen EXACTAMENTE el mismo
     // conjunto de candidatos crudos. Nunca diverge entre los dos caminos.
+    // EXPERIMENTO CERRADO (evidencia real, RUN-1003 vs RUN-1004): se probó reemplazar
+    // MATCHES por LIKE (glob sin motor de regex) para el mismo chequeo de longitud
+    // 1-2, con la hipótesis de que el costo de ~175s en findElements() venía de la
+    // complejidad del regex. Resultado real: findElementsMs=175520 (MATCHES) vs
+    // findElementsMs=177447 (LIKE) — sin diferencia significativa (dentro del ruido
+    // de medición). CONCLUSIÓN DOCUMENTADA: el costo está dominado por el
+    // snapshot/recorrido del árbol de accesibilidad completo que XCUITest/WDA debe
+    // generar para evaluar CUALQUIER predicate contra la app entera — no por MATCHES
+    // vs LIKE. Se revierte a MATCHES (sin razón funcional para conservar LIKE); no
+    // repetir este experimento con otros operadores del predicate.
     private static final String PREDICADO_CANDIDATOS_ASIENTO_IOS =
             "(type == 'XCUIElementTypeButton' OR type == 'XCUIElementTypeStaticText') "
             + "AND ((name != nil AND name MATCHES '.{1,2}') "
@@ -4313,17 +4339,83 @@ public class SelectorPage extends BasePage {
     // verificaciones falla, devuelve null — el llamador cae al camino ya probado
     // (elemento por elemento), sin arriesgar la detección de asientos.
     private List<WebElement> intentarEscaneoRapidoConPageSource(int mapTop, int mapBottom) {
+        // TAREA — instrumentación de causa raíz (Prioridad 1, "no aceptar una métrica
+        // genérica de ~196s sin saber dónde se consumieron"): el log real (RUN-1005)
+        // mostraba [PERF][EsperarMapa] con pageSourceMs=n/a parseMs=n/a — el desglose
+        // NUNCA se calculaba dentro de este método pese a que el 100% del tiempo del
+        // escaneo vive aquí (esperarYObtenerAsientosDelMapa solo ejecutó 1 iteración
+        // de su loop, ver [PERF][EsperarMapa] wdaCalls=1 — el "wdaCalls" de ESE log no
+        // cuenta las llamadas reales de WDA que ocurren dentro de esta única
+        // iteración: findElements + getPageSource + hasta 6 getAttribute de muestra).
+        // Se mide cada etapa por separado para poder atribuir el costo real antes de
+        // decidir qué optimizar — sin cambiar ninguna condición de salida existente.
+        long t0 = System.currentTimeMillis();
         try {
             List<WebElement> crudos = driver.findElements(
                     AppiumBy.iOSNsPredicateString(PREDICADO_CANDIDATOS_ASIENTO_IOS));
+            long tFindElements = System.currentTimeMillis();
+            long findElementsMs = tFindElements - t0;
             if (crudos.isEmpty()) return null;
 
-            List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(driver.getPageSource()).nodos;
+            String pageSource = driver.getPageSource();
+            long tPageSource = System.currentTimeMillis();
+            long pageSourceMs = tPageSource - tFindElements;
+
+            List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(pageSource).nodos;
+            long tParse = System.currentTimeMillis();
+            long parseMs = tParse - tPageSource;
+
             List<SeatUiSnapshot.Nodo> nodosFiltrados = new ArrayList<>();
             for (SeatUiSnapshot.Nodo n : nodos) {
                 if (!"XCUIElementTypeButton".equals(n.tag) && !"XCUIElementTypeStaticText".equals(n.tag)) continue;
                 String texto = textoDeNodo(n);
                 if (!texto.isBlank() && texto.length() <= 2) nodosFiltrados.add(n);
+            }
+            long tFilter = System.currentTimeMillis();
+            long filterMs = tFilter - tParse;
+
+            // TAREA — investigación de contenedor (Acción 2/4): puramente informativo,
+            // reutiliza el pageSource YA obtenido arriba (cero llamadas WDA nuevas).
+            // Responde con evidencia real, no suposición, si existe un ancestro común
+            // que acote el mapa de asientos y si tiene algún atributo (name/label/
+            // value) que lo haga localizable de forma independiente vía predicate —
+            // si no lo tiene, NO se inventa ningún locator (ver log al respecto).
+            try {
+                if (!nodosFiltrados.isEmpty()) {
+                    int minDepth = Integer.MAX_VALUE, maxDepth = Integer.MIN_VALUE;
+                    long sumDepth = 0;
+                    for (SeatUiSnapshot.Nodo n : nodosFiltrados) {
+                        if (n.depth < minDepth) minDepth = n.depth;
+                        if (n.depth > maxDepth) maxDepth = n.depth;
+                        sumDepth += n.depth;
+                    }
+                    double avgDepth = sumDepth / (double) nodosFiltrados.size();
+                    SeatUiSnapshot.Nodo lca = SeatUiSnapshot.ancestroComunMasProfundo(nodos, nodosFiltrados);
+                    if (lca != null) {
+                        boolean tieneIdentidad = tieneAtributoNoVacio(lca, "name")
+                                || tieneAtributoNoVacio(lca, "label")
+                                || tieneAtributoNoVacio(lca, "value");
+                        log.info("[PERF][ContenedorAsientos] candidatos={} depthMin={} depthMax={} depthAvg={} "
+                                + "lcaTag={} lcaDepth={} lcaBounds=x{},y{},{}x{} lcaLocalizableIndependiente={} "
+                                + "lcaAttrs={}",
+                                nodosFiltrados.size(), minDepth, maxDepth, String.format("%.1f", avgDepth),
+                                lca.tag, lca.depth, lca.attrs.get("x"), lca.attrs.get("y"),
+                                lca.attrs.get("width"), lca.attrs.get("height"), tieneIdentidad, lca.attrs);
+                        if (!tieneIdentidad) {
+                            log.info("[PERF][ContenedorAsientos] CONCLUSIÓN: el ancestro común más profundo "
+                                    + "NO tiene name/label/value — no hay forma de localizarlo de forma "
+                                    + "independiente vía -ios predicate string sin inventar un locator. "
+                                    + "No se intenta scoping.");
+                        }
+                    } else {
+                        log.info("[PERF][ContenedorAsientos] candidatos={} depthMin={} depthMax={} depthAvg={} "
+                                + "— sin ancestro común (candidatos en subárboles distintos, ningún contenedor "
+                                + "único los engloba a todos).",
+                                nodosFiltrados.size(), minDepth, maxDepth, String.format("%.1f", avgDepth));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[PERF][ContenedorAsientos] análisis descartado por excepción: {}", e.getMessage());
             }
 
             int n = crudos.size();
@@ -4331,12 +4423,16 @@ public class SelectorPage extends BasePage {
                 utils.PerfMetrics.note("SeatSelection", String.format(
                         "escaneoRapido descartado: conteo no coincide (findElements=%d, pageSource=%d)",
                         n, nodosFiltrados.size()));
+                log.info("[PERF][EscaneoRapido] findElementsMs={} pageSourceMs={} parseMs={} filterMs={} "
+                        + "candidatos={} descartado=conteo totalMs={}",
+                        findElementsMs, pageSourceMs, parseMs, filterMs, n, System.currentTimeMillis() - t0);
                 return null;
             }
 
             Set<Integer> muestra = new HashSet<>();
             for (int i = 0; i < Math.min(3, n); i++) muestra.add(i);
             for (int i = Math.max(0, n - 3); i < n; i++) muestra.add(i);
+            long tSample0 = System.currentTimeMillis();
             for (int i : muestra) {
                 String textoReal = textoAsientoRapido(crudos.get(i));
                 String textoXml = textoDeNodo(nodosFiltrados.get(i));
@@ -4344,9 +4440,14 @@ public class SelectorPage extends BasePage {
                     utils.PerfMetrics.note("SeatSelection", String.format(
                             "escaneoRapido descartado: desajuste de orden en idx=%d real='%s' xml='%s'",
                             i, textoReal, textoXml));
+                    log.info("[PERF][EscaneoRapido] findElementsMs={} pageSourceMs={} parseMs={} filterMs={} "
+                            + "sampleVerificationMs={} candidatos={} descartado=orden totalMs={}",
+                            findElementsMs, pageSourceMs, parseMs, filterMs,
+                            System.currentTimeMillis() - tSample0, n, System.currentTimeMillis() - t0);
                     return null;
                 }
             }
+            long sampleVerificationMs = System.currentTimeMillis() - tSample0;
 
             Map<String, WebElement> unicos = new LinkedHashMap<>();
             // FIX real (evidencia — RUN-1013: ~120s ocultos dentro de new SeatMap(raw),
@@ -4354,6 +4455,7 @@ public class SelectorPage extends BasePage {
             // aquí): se guarda posición+texto ya resueltos por elemento — buildSeatMap()
             // los reutiliza si el resultado final coincide 1:1 con este cache.
             Map<WebElement, SeatMap.RawSeat> cache = new LinkedHashMap<>();
+            long tBuild0 = System.currentTimeMillis();
             for (int i = 0; i < n; i++) {
                 SeatUiSnapshot.Nodo nodo = nodosFiltrados.get(i);
                 double x = nodo.num("x"), y = nodo.num("y"), w = nodo.num("width"), h = nodo.num("height");
@@ -4366,13 +4468,26 @@ public class SelectorPage extends BasePage {
                 cache.putIfAbsent(el, new SeatMap.RawSeat(el, (int) x, (int) y, (int) w, (int) h, textoDeNodo(nodo)));
             }
 
+            long buildMs = System.currentTimeMillis() - tBuild0;
+            long totalMs = System.currentTimeMillis() - t0;
+
             utils.PerfMetrics.note("SeatSelection", String.format(
                     "escaneoRapido OK: %d candidatos -> %d filtrados (sin getRect/getAttribute individuales)",
                     n, unicos.size()));
+            // TAREA — desglose real solicitado (Prioridad 1): total = findElements +
+            // pageSource + parse + filter + sampleVerification + build. Reemplaza el
+            // "pageSourceMs=n/a parseMs=n/a" que [PERF][EsperarMapa] venía registrando
+            // sin datos reales.
+            log.info("[PERF][EscaneoRapido] findElementsMs={} pageSourceMs={} parseMs={} filterMs={} "
+                    + "sampleVerificationMs={} buildMs={} candidatos={} filtrados={} totalMs={}",
+                    findElementsMs, pageSourceMs, parseMs, filterMs, sampleVerificationMs, buildMs,
+                    n, unicos.size(), totalMs);
             cacheEscaneoRapido = cache;
             return new ArrayList<>(unicos.values());
         } catch (Exception e) {
             utils.PerfMetrics.note("SeatSelection", "escaneoRapido descartado por excepción: " + e.getMessage());
+            log.info("[PERF][EscaneoRapido] excepcion totalMs={} mensaje={}",
+                    System.currentTimeMillis() - t0, e.getMessage());
             return null;
         }
     }
@@ -4382,6 +4497,16 @@ public class SelectorPage extends BasePage {
         if (label != null && !label.isBlank()) return label.trim();
         String name = n.attrs.get("name");
         return name == null ? "" : name.trim();
+    }
+
+    /** true si el nodo tiene ese atributo con un valor real (no null, no vacío) — usado
+     *  para decidir si un ancestro candidato a "contenedor" sería localizable de forma
+     *  independiente vía -ios predicate string (name/label/value/type son los únicos
+     *  atributos que ese locator puede evaluar; x/y/width/height NO son predicate-
+     *  queryables en XCUITest). */
+    private boolean tieneAtributoNoVacio(SeatUiSnapshot.Nodo n, String atributo) {
+        String v = n.attrs.get(atributo);
+        return v != null && !v.isBlank();
     }
 
     private List<WebElement> escanearMapaConUIAutomator(int mapTop, int mapBottom) {

@@ -63,6 +63,16 @@ final class SeatUiSnapshot {
     static final class Nodo {
         final String tag;
         final Map<String, String> attrs; // atributos crudos tal cual vienen del XML
+        // TAREA — instrumentación de profundidad/contenedor (sin efecto en matching ni
+        // en ningún flujo existente): índice de este nodo y de su padre dentro de la
+        // lista PLANA que devuelve capturar() (mismo orden de documento que ya usa
+        // intentarEscaneoRapidoConPageSource() para emparejar con findElements()), y
+        // profundidad respecto a la raíz. Permite reconstruir la cadena de ancestros
+        // de cualquier nodo sin volver a tocar WDA — el page source ya fue leído una
+        // sola vez.
+        int index = -1;
+        int parentIndex = -1;
+        int depth = -1;
 
         Nodo(String tag, Map<String, String> attrs) {
             this.tag = tag;
@@ -104,15 +114,16 @@ final class SeatUiSnapshot {
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             Document doc = factory.newDocumentBuilder()
                     .parse(new ByteArrayInputStream(pageSourceXml.getBytes(StandardCharsets.UTF_8)));
-            recorrer(doc.getDocumentElement(), nodos);
+            recorrer(doc.getDocumentElement(), nodos, -1, 0);
         } catch (Exception e) {
             log.warn("[SeatUiSnapshot] No se pudo parsear el page source capturado: {}", e.getMessage());
         }
         return new Snapshot(pageSourceXml, nodos);
     }
 
-    private static void recorrer(Node nodo, List<Nodo> out) {
+    private static void recorrer(Node nodo, List<Nodo> out, int parentIndex, int depth) {
         if (nodo == null) return;
+        int miIndex = parentIndex;
         if (nodo.getNodeType() == Node.ELEMENT_NODE) {
             Map<String, String> attrs = new LinkedHashMap<>();
             NamedNodeMap nnm = nodo.getAttributes();
@@ -122,13 +133,49 @@ final class SeatUiSnapshot {
                     attrs.put(a.getNodeName(), a.getNodeValue());
                 }
             }
-            out.add(new Nodo(nodo.getNodeName(), attrs));
+            Nodo n = new Nodo(nodo.getNodeName(), attrs);
+            n.index = out.size();
+            n.parentIndex = parentIndex;
+            n.depth = depth;
+            miIndex = n.index;
+            out.add(n);
         }
         Node hijo = nodo.getFirstChild();
         while (hijo != null) {
-            recorrer(hijo, out);
+            recorrer(hijo, out, miIndex, depth + 1);
             hijo = hijo.getNextSibling();
         }
+    }
+
+    /** Cadena de ancestros de un nodo, de la raíz (índice 0) hasta él mismo (inclusive). */
+    static List<Nodo> cadenaAncestros(List<Nodo> todos, Nodo n) {
+        List<Nodo> cadena = new ArrayList<>();
+        Nodo actual = n;
+        while (actual != null) {
+            cadena.add(0, actual);
+            actual = actual.parentIndex >= 0 ? todos.get(actual.parentIndex) : null;
+        }
+        return cadena;
+    }
+
+    /**
+     * Ancestro común más profundo (LCA) de un conjunto de nodos — el contenedor más
+     * pequeño que los engloba a TODOS. Puramente informativo (no ejecuta nada contra
+     * WDA): permite responder "¿existe un contenedor real que acote el mapa de
+     * asientos?" a partir del page source ya obtenido, sin adivinar.
+     */
+    static Nodo ancestroComunMasProfundo(List<Nodo> todos, List<Nodo> candidatos) {
+        if (candidatos.isEmpty()) return null;
+        List<Nodo> comun = cadenaAncestros(todos, candidatos.get(0));
+        for (int i = 1; i < candidatos.size(); i++) {
+            List<Nodo> otra = cadenaAncestros(todos, candidatos.get(i));
+            int max = Math.min(comun.size(), otra.size());
+            int coincide = 0;
+            while (coincide < max && comun.get(coincide).index == otra.get(coincide).index) coincide++;
+            comun = comun.subList(0, coincide);
+            if (comun.isEmpty()) return null;
+        }
+        return comun.get(comun.size() - 1);
     }
 
     /**
