@@ -34,6 +34,10 @@ public class RunnerConfigController {
         body.put("appPackage",    store.getAppPackage());
         body.put("appActivity",   store.getAppActivity());
         body.put("configured",    true);
+        // TAREA — toggle de captura de tráfico: valor explícito siempre presente
+        // (nunca ausente), para que el Runner nunca tenga que asumir un default por
+        // su cuenta al deserializar la respuesta.
+        body.put("networkMonitoringEnabled", store.isNetworkMonitoringEnabled());
         return ResponseEntity.ok(body);
     }
 
@@ -42,9 +46,13 @@ public class RunnerConfigController {
             @RequestBody RunnerConfigRequest req) {
         store.setConfig(req.repositoryUrl(), req.branch(), req.projectName());
         store.setAndroidConfig(req.appPackage(), req.appActivity());
+        if (req.networkMonitoringEnabled() != null) {
+            store.setNetworkMonitoringEnabled(req.networkMonitoringEnabled());
+        }
         return ResponseEntity.ok(Map.of("result", "ok"));
     }
 
     record RunnerConfigRequest(String repositoryUrl, String branch, String projectName,
-                               String appPackage, String appActivity) {}
+                               String appPackage, String appActivity,
+                               Boolean networkMonitoringEnabled) {}
 }

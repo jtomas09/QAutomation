@@ -38,4 +38,26 @@ public class NetworkMonitoringConfig {
     public interface RunnerConfigEnvReader {
         String get(String key, String def);
     }
+
+    // TAREA — toggle de captura de tráfico desde el Dashboard: `enabled` ya no debe
+    // depender únicamente del valor congelado al arrancar la JVM (env/-D, vía
+    // fromEnv() arriba) — JobExecutor lo sobreescribe con el valor FRESCO que llega
+    // en cada Job vía GET /api/runner/config (mismo mecanismo ya usado para
+    // repositoryUrl/branch/appPackage, sin reinicio del Runner). Se devuelve una
+    // copia nueva (nunca se muta el objeto compartido de RunnerConfig, que vive
+    // durante toda la vida del proceso) con el resto de los campos (captureRequestBody,
+    // maxResponseBodySize, etc.) intactos — esos sí siguen viniendo del arranque de
+    // la JVM, ya que el Dashboard solo controla el ON/OFF, no el resto del detalle.
+    public NetworkMonitoringConfig withEnabled(boolean enabled) {
+        NetworkMonitoringConfig copy = new NetworkMonitoringConfig();
+        copy.enabled             = enabled;
+        copy.captureRequestBody  = this.captureRequestBody;
+        copy.captureResponseBody = this.captureResponseBody;
+        copy.maxResponseBodySize = this.maxResponseBodySize;
+        copy.attachToAllure      = this.attachToAllure;
+        copy.saveAllTraffic      = this.saveAllTraffic;
+        copy.saveErrors          = this.saveErrors;
+        copy.redactSensitiveData = this.redactSensitiveData;
+        return copy;
+    }
 }

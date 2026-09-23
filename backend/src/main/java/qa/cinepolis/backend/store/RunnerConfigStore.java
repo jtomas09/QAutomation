@@ -30,6 +30,13 @@ public class RunnerConfigStore {
     private volatile String projectName;
     private volatile String appPackage;
     private volatile String appActivity;
+    // TAREA — toggle de captura de tráfico de red (Network Monitoring) desde el
+    // Dashboard: por defecto false para instalaciones nuevas Y existentes que no
+    // tengan aún esta propiedad — nunca debe activarse solo porque el Runner se
+    // actualizó. Mismo mecanismo ya usado para repo/branch/appPackage: el Runner lo
+    // consulta fresco en cada Job (JobExecutor.execute() -> GET /api/runner/config),
+    // así que cambiarlo aquí no requiere reiniciar ningún Runner.
+    private volatile boolean networkMonitoringEnabled;
 
     public RunnerConfigStore() {
         this.repositoryUrl = getEnv("REPO_URL",             DEFAULT_REPO_URL);
@@ -37,6 +44,7 @@ public class RunnerConfigStore {
         this.projectName   = getEnv("PROJECT_NAME",         DEFAULT_PROJECT_NAME);
         this.appPackage    = getEnv("ANDROID_APP_PACKAGE",  DEFAULT_APP_PACKAGE);
         this.appActivity   = getEnv("ANDROID_APP_ACTIVITY", DEFAULT_APP_ACTIVITY);
+        this.networkMonitoringEnabled = Boolean.parseBoolean(getEnv("NETWORK_MONITORING_ENABLED", "false"));
     }
 
     public String  getRepositoryUrl() { return repositoryUrl; }
@@ -45,6 +53,12 @@ public class RunnerConfigStore {
     public String  getAppPackage()    { return appPackage;    }
     public String  getAppActivity()   { return appActivity;   }
     public boolean isConfigured()     { return true; }  // always configured via defaults
+    public boolean isNetworkMonitoringEnabled() { return networkMonitoringEnabled; }
+
+    /** Dashboard toggle — aplicado a todos los Runners sin reinicio. */
+    public void setNetworkMonitoringEnabled(boolean enabled) {
+        this.networkMonitoringEnabled = enabled;
+    }
 
     /** Admin override — applied to all Runners without restart. */
     public void setConfig(String repositoryUrl, String branch, String projectName) {

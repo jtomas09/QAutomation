@@ -507,16 +507,23 @@ public class BackendClient {
         public final String  appPackage;
         public final String  appActivity;
         public final boolean configured;
+        // TAREA — toggle de captura de tráfico de red desde el Dashboard. Ausente en
+        // el JSON (backend viejo sin este campo) -> false, NUNCA true — mismo criterio
+        // que el resto de esta clase (nunca asumir un valor a partir de un campo
+        // faltante).
+        public final boolean networkMonitoringEnabled;
 
         public RunnerConfigResponse(String repositoryUrl, String branch,
                                     String projectName, String appPackage,
-                                    String appActivity, boolean configured) {
+                                    String appActivity, boolean configured,
+                                    boolean networkMonitoringEnabled) {
             this.repositoryUrl = repositoryUrl != null ? repositoryUrl : "";
             this.branch        = branch        != null ? branch        : "main";
             this.projectName   = projectName   != null ? projectName   : "automation-project";
             this.appPackage    = appPackage    != null ? appPackage    : "";
             this.appActivity   = appActivity   != null ? appActivity   : "";
             this.configured    = configured;
+            this.networkMonitoringEnabled = networkMonitoringEnabled;
         }
         public boolean isConfigured() { return !repositoryUrl.isBlank(); }
     }
@@ -545,7 +552,9 @@ public class BackendClient {
             String appPkg     = str(data, "appPackage",  "");
             String appAct     = str(data, "appActivity", "");
             boolean configured = Boolean.TRUE.equals(data.get("configured"));
-            return new RunnerConfigResponse(url, branch, project, appPkg, appAct, configured);
+            boolean networkMonitoringEnabled = Boolean.TRUE.equals(data.get("networkMonitoringEnabled"));
+            return new RunnerConfigResponse(url, branch, project, appPkg, appAct, configured,
+                    networkMonitoringEnabled);
         } catch (Exception e) {
             System.err.println("[BackendClient] getRunnerConfig error: " + e.getMessage());
             return null;

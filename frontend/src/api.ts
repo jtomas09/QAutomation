@@ -527,6 +527,14 @@ export interface RunnerCentralConfig {
   branch:        string
   projectName:   string
   configured:    boolean
+  /**
+   * Captura de tráfico HTTP/HTTPS (Network Monitoring / mitmproxy) — opt-in,
+   * false por defecto para instalaciones nuevas Y existentes que aún no tengan
+   * esta propiedad. El Runner la relee fresca antes de cada Job (mismo mecanismo
+   * que repositoryUrl/branch/projectName), así que cambiarla aquí no requiere
+   * reiniciar ningún Runner.
+   */
+  networkMonitoringEnabled: boolean
 }
 
 /** GET /api/runner/config — fetched by Runner at startup and before each job */
@@ -539,8 +547,14 @@ export async function saveRunnerConfig(
   repositoryUrl: string,
   branch: string,
   projectName: string,
+  networkMonitoringEnabled?: boolean,
 ): Promise<void> {
-  await httpPost<unknown>('/api/runner/config', { repositoryUrl, branch, projectName })
+  await httpPost<unknown>('/api/runner/config', {
+    repositoryUrl,
+    branch,
+    projectName,
+    ...(networkMonitoringEnabled !== undefined ? { networkMonitoringEnabled } : {}),
+  })
 }
 
 // ─── Videos ───────────────────────────────────────────────────────────────────

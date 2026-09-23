@@ -1,6 +1,7 @@
 package qa.cinepolis.runner;
 
 import qa.cinepolis.runner.model.JobDto;
+import qa.cinepolis.runner.model.NetworkMonitoringConfig;
 import qa.cinepolis.runner.model.RunnerConfig;
 import qa.cinepolis.runner.model.TestCaseResult;
 
@@ -1019,26 +1020,51 @@ public class JobExecutor {
                         client, job.executionId, receivedUdid, videosDir) != null;
             }
 
-            // ── Network Monitoring (opt-in, networkMonitoring.enabled=false por defecto) ──
+            // ── Network Monitoring (opt-in, controlado por el toggle del Dashboard) ──
             // Arranca ANTES de construir `cmd`/`pb` para poder inyectar el puerto del
             // proxy y la ruta de evidencia como -D flags que la JVM de test (más abajo)
             // recibirá igual que cualquier otra capability (mismo mecanismo que
             // -DxcodeOrgId=/-DupdatedWDABundleId=/etc. ya usado en este método).
+            //
+            // FIX real (TAREA — hacer opcional la captura de tráfico vía Dashboard):
+            // `config.networkMonitoring.enabled` queda CONGELADO desde el arranque de
+            // la JVM del Runner (env/-D del plist), igual que antes de esta tarea —
+            // nunca se re-lee. `runnerCfg` (arriba, línea ~641) SÍ se obtiene fresco en
+            // CADA Job vía GET /api/runner/config, mismo mecanismo ya usado para
+            // repositoryUrl/branch/appPackage — así que el toggle del Dashboard se
+            // puede cambiar sin reiniciar ningún Runner, igual que esos otros campos.
+            // Se usa withEnabled(...) (copia, nunca muta el objeto compartido de
+            // RunnerConfig) para que SOLO el on/off venga del Dashboard; el resto del
+            // detalle (captureRequestBody, maxResponseBodySize, etc.) sigue viniendo
+            // del arranque de la JVM, sin cambios.
+            NetworkMonitoringConfig effectiveNetworkMonitoring =
+                    config.networkMonitoring.withEnabled(runnerCfg.networkMonitoringEnabled);
+            // Log obligatorio (TAREA): pocas líneas, claramente identificable
+            // enabled=true/false por corrida, sin repetirse en bucle.
+            if (effectiveNetworkMonitoring.enabled) {
+                client.sendLog(job.executionId, "INFO", "[NETWORK] Network Monitoring enabled by configuration");
+                client.sendLog(job.executionId, "INFO", "[NETWORK] Initializing network runtime");
+                client.sendLog(job.executionId, "INFO", "[NETWORK] Proxy initialization started");
+            } else {
+                client.sendLog(job.executionId, "INFO", "[NETWORK] Network Monitoring disabled by configuration");
+                client.sendLog(job.executionId, "INFO", "[NETWORK] Proxy initialization skipped");
+                client.sendLog(job.executionId, "INFO", "[NETWORK] Traffic capture skipped");
+            }
             networkSession = NetworkMonitoringManager.start(
-                    client, job.executionId, config.networkMonitoring,
+                    client, job.executionId, effectiveNetworkMonitoring,
                     java.nio.file.Path.of(config.agentDataDir), receivedUdid, isAndroid,
                     java.nio.file.Path.of(workDir, "build", "network-evidence"));
             if (networkSession.active()) {
                 cmd.add("-DnetworkMonitoringEnabled=true");
                 cmd.add("-DnetworkMonitoringEventsFile=" + networkSession.eventsFilePath());
                 cmd.add("-DnetworkMonitoringEvidenceDir=" + networkSession.evidenceBaseDir());
-                cmd.add("-DnetworkMonitoringCaptureRequestBody=" + config.networkMonitoring.captureRequestBody);
-                cmd.add("-DnetworkMonitoringCaptureResponseBody=" + config.networkMonitoring.captureResponseBody);
-                cmd.add("-DnetworkMonitoringMaxResponseBodySize=" + config.networkMonitoring.maxResponseBodySize);
-                cmd.add("-DnetworkMonitoringAttachToAllure=" + config.networkMonitoring.attachToAllure);
-                cmd.add("-DnetworkMonitoringSaveAllTraffic=" + config.networkMonitoring.saveAllTraffic);
-                cmd.add("-DnetworkMonitoringSaveErrors=" + config.networkMonitoring.saveErrors);
-                cmd.add("-DnetworkMonitoringRedact=" + config.networkMonitoring.redactSensitiveData);
+                cmd.add("-DnetworkMonitoringCaptureRequestBody=" + effectiveNetworkMonitoring.captureRequestBody);
+                cmd.add("-DnetworkMonitoringCaptureResponseBody=" + effectiveNetworkMonitoring.captureResponseBody);
+                cmd.add("-DnetworkMonitoringMaxResponseBodySize=" + effectiveNetworkMonitoring.maxResponseBodySize);
+                cmd.add("-DnetworkMonitoringAttachToAllure=" + effectiveNetworkMonitoring.attachToAllure);
+                cmd.add("-DnetworkMonitoringSaveAllTraffic=" + effectiveNetworkMonitoring.saveAllTraffic);
+                cmd.add("-DnetworkMonitoringSaveErrors=" + effectiveNetworkMonitoring.saveErrors);
+                cmd.add("-DnetworkMonitoringRedact=" + effectiveNetworkMonitoring.redactSensitiveData);
             }
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -1165,7 +1191,7 @@ public class JobExecutor {
             // detener el proxy, para poder persistir TRUSTED cuando corresponda.
             if (networkSession.active()) {
                 NetworkMonitoringManager.verifyAndPersistTrust(client, job.executionId,
-                        config.networkMonitoring, java.nio.file.Path.of(config.agentDataDir),
+                        effectiveNetworkMonitoring, java.nio.file.Path.of(config.agentDataDir),
                         receivedUdid, networkSession.caFingerprintSha256());
                 NetworkMonitoringManager.stop(client, job.executionId);
             }

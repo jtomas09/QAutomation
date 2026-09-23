@@ -258,6 +258,11 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
   const [adminProject,      setAdminProject]      = useState('QAutomation')
   const [adminSaving,       setAdminSaving]       = useState(false)
   const [adminSaved,        setAdminSaved]        = useState(false)
+  // TAREA — captura de tráfico de red opcional: toggle propio, persistido en el
+  // mismo backend/endpoint ya usado para repo/branch/proyecto (GET/POST
+  // /api/runner/config) — el Runner ya relee ese endpoint fresco antes de cada
+  // Job, así que este cambio se propaga sin reiniciar ningún Runner.
+  const [networkMonitoringSaving, setNetworkMonitoringSaving] = useState(false)
 
   useEffect(() => {
     getRunnerConfig().then(cfg => {
@@ -287,6 +292,22 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
       setTimeout(() => setAdminSaved(false), 2500)
     } catch { /* best-effort */ }
     finally { setAdminSaving(false) }
+  }
+
+  // TAREA — toggle de captura de tráfico: guardado inmediato (no requiere un botón
+  // "Aplicar" separado, a diferencia del repositorio/rama que son campos de texto
+  // libre) — reutiliza los valores YA conocidos de repo/branch/proyecto para no
+  // pisarlos, y refresca runnerCfg para reflejar el estado real confirmado por el
+  // backend, nunca un estado optimista sin confirmar.
+  async function handleNetworkMonitoringToggle(next: boolean) {
+    if (!runnerCfg) return
+    setNetworkMonitoringSaving(true)
+    try {
+      await saveRunnerConfig(runnerCfg.repositoryUrl, runnerCfg.branch, runnerCfg.projectName, next)
+      const fresh = await getRunnerConfig()
+      setRunnerCfg(fresh)
+    } catch { /* best-effort — el toggle refleja runnerCfg, así que un fallo aquí simplemente no cambia el estado mostrado */ }
+    finally { setNetworkMonitoringSaving(false) }
   }
 
   function set<K extends keyof SettingsState>(k: K, v: SettingsState[K]) {
@@ -650,6 +671,33 @@ export default function SettingsPage({ isDark, onToggleTheme }: Props) {
             El workspace se sincronizará al ejecutar la primera prueba.
           </div>
         )}
+      </Card>
+
+      {/* TAREA — Captura de tráfico de red (Network Monitoring), opt-in desde el Dashboard */}
+      <Card title="Captura de Tráfico de Red" icon={Wifi} accent="#0ea5e9">
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 14, lineHeight: 1.6 }}>
+          Captura solicitudes y respuestas HTTP/HTTPS durante la ejecución de las pruebas
+          para generar evidencia de red.
+        </div>
+        <SRow label="Capturar tráfico de red">
+          <Toggle
+            value={!!runnerCfg?.networkMonitoringEnabled}
+            onChange={handleNetworkMonitoringToggle}
+          />
+        </SRow>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, borderRadius: 10,
+          padding: '10px 14px', marginTop: 10, fontSize: 11,
+          background: runnerCfg?.networkMonitoringEnabled ? 'rgba(14,165,233,0.08)' : 'rgba(100,116,139,0.08)',
+          border: `1px solid ${runnerCfg?.networkMonitoringEnabled ? 'rgba(14,165,233,0.25)' : 'rgba(100,116,139,0.25)'}`,
+          color: runnerCfg?.networkMonitoringEnabled ? '#0ea5e9' : 'var(--text-dim)',
+        }}>
+          {networkMonitoringSaving
+            ? <><Loader2 size={12} className="animate-spin" /> Guardando…</>
+            : runnerCfg?.networkMonitoringEnabled
+              ? 'Se habilitará la captura HTTP/HTTPS durante la ejecución.'
+              : 'Las pruebas se ejecutarán sin proxy ni captura de tráfico.'}
+        </div>
       </Card>
 
       {/* Admin override — collapsed by default */}
