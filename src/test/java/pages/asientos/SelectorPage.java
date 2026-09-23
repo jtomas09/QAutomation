@@ -2037,10 +2037,60 @@ public class SelectorPage extends BasePage {
 
         int attempt = 0, idx = 0, relocalizedCount = 0, failedCount = 0, excludedAlreadyConfirmed = 0;
         boolean sourceRefreshed = false;
+        // FIX real (TAREA — corregir regresión introducida en esta misma sesión: el
+        // intento del 11º asiento vivía en un bloque SEPARADO, sin el sourceRefresh ni
+        // el presupuesto de reintentos del bucle principal, tomando candidatos de un
+        // pool que podía llevar minutos sin actualizarse. Evidencia real, Android
+        // físico, RUN con Network Monitoring OFF: el bucle principal llegó a 10
+        // (attempt=16) SIN usar su único sourceRefresh disponible, y los 5 intentos
+        // posteriores del bloque separado (attempt=17-21) fallaron los 5, sin
+        // aprovechar nunca ese refresh ya disponible. Se reintegra el intento del 11º
+        // al MISMO bucle/presupuesto/sourceRefresh que ya usa f788383 para alcanzar el
+        // objetivo — nunca un mecanismo nuevo. `objetivoAlcanzadoAlMenosUnaVez` marca
+        // el momento en que contadorActual llega a 10 real; a partir de ahí, CADA
+        // intento adicional (dentro del mismo presupuesto) es por definición un
+        // intento del 11º asiento, y se verifica la alerta inmediatamente después de
+        // cada uno — nunca se deja de intentar solo porque "ya llegamos a 10".
+        boolean objetivoAlcanzadoAlMenosUnaVez = false;
 
-        while (contadorActual < MAX_ASIENTOS_CONFIRMABLES) {
-            if (idx >= pool.size() || attempt >= maxIntentos) {
+        // FIX real (TAREA — causa raíz CONFIRMADA con evidencia real, Android físico,
+        // RUN-1015: tras el 1º asiento confirmado, los siguientes 19 intentos
+        // CONSECUTIVOS fallaron con revalidated=false — no por ocupación real (eso
+        // produciría revalidated=true/confirmed=false, ya visto en evidencia previa),
+        // sino porque reubicarAsientoPorNumero() SÍ encontraba el asiento (cero
+        // advertencias "SIN resultado usable" — fresco nunca fue null) pero su
+        // posición Y actual quedó fuera de TOLERANCIA_FILA_PX respecto al escaneo
+        // ORIGINAL. En cuanto se agotó el presupuesto y se disparó el único
+        // sourceRefresh (ya existente, sin cambios), los siguientes 5 intentos
+        // tuvieron éxito INMEDIATO (revalidated=true, confirmed=true, 5/5) — prueba
+        // de que el mapa completo se desplazó verticalmente una sola vez (evidencia:
+        // Y del escaneo original ~1451-1619, Y tras el refresh ~1234-1369 — un
+        // desplazamiento consistente, no una coincidencia por asiento), muy
+        // probablemente por la aparición de un resumen/footer tras la 1ª selección
+        // que no existía con 0 asientos elegidos. `revalidated=false` es la señal
+        // correcta y ya existente para esto — es distinta de `confirmed=false`
+        // (ocupación real) porque significa que ni siquiera se pudo re-ubicar el
+        // nodo dentro de tolerancia, no que se re-ubicó pero no se pudo seleccionar.
+        // Se reutiliza el ÚNICO sourceRefresh ya existente (mismo código, sin
+        // inventar un mecanismo nuevo) pero se dispara ANTES si se detectan varios
+        // fallos de relocalización SEGUIDOS, en vez de esperar a agotar todo el
+        // presupuesto (19 taps desperdiciados en RUN-1015). Nunca se dispara por un
+        // solo fallo aislado (eso sí puede ser ocupación real coincidiendo con una
+        // relocalización fallida) — el umbral exige una racha, la misma firma que
+        // demostró la evidencia real.
+        final int UMBRAL_REVALIDATED_FALSE_CONSECUTIVOS = 3;
+        int revalidatedFalseConsecutivos = 0;
+
+        while (true) {
+            boolean refrescoTempranoPorDesplazamiento = !sourceRefreshed
+                    && revalidatedFalseConsecutivos >= UMBRAL_REVALIDATED_FALSE_CONSECUTIVOS;
+            if (idx >= pool.size() || attempt >= maxIntentos || refrescoTempranoPorDesplazamiento) {
                 if (sourceRefreshed) break; // ya se usó el único re-scan permitido — se agotó de verdad
+                if (refrescoTempranoPorDesplazamiento) {
+                    log.info("[SeatLimit] sourceRefresh temprano — {} relocalizaciones consecutivas fuera de "
+                            + "tolerancia (revalidated=false), señal de desplazamiento del mapa, no de ocupación "
+                            + "real.", revalidatedFalseConsecutivos);
+                }
                 sourceRefreshed = true;
                 SeatMap freshMap = buildSeatMap();
                 List<CandidatoLimite> freshPool = construirPoolCandidatosLimite(freshMap);
@@ -2060,6 +2110,7 @@ public class SelectorPage extends BasePage {
                         MAX_ASIENTOS_CONFIRMABLES, freshPool.size(), antesDelFiltro - freshPool.size());
                 pool = freshPool;
                 idx = 0;
+                revalidatedFalseConsecutivos = 0;
                 maxIntentos = attempt + Math.min(pool.size(), SEGUNDA_OLA);
                 continue;
             }
@@ -2111,7 +2162,12 @@ public class SelectorPage extends BasePage {
             } catch (Exception ignored) {
                 // se conservan las coordenadas cacheadas del candidato
             }
-            if (revalidated) relocalizedCount++;
+            if (revalidated) {
+                relocalizedCount++;
+                revalidatedFalseConsecutivos = 0;
+            } else {
+                revalidatedFalseConsecutivos++;
+            }
 
             boolean tapOk;
             try {
@@ -2167,10 +2223,38 @@ public class SelectorPage extends BasePage {
 
             log.info("[SeatLimit] attempt={} beforeCount={} afterCount={} confirmed={} seatNumber={} rowIndex={} x={} y={} "
                     + "label={} candidateId={} matchedPrevious=false alreadyConfirmed=false candidateState={} "
-                    + "revalidated={} sourceRefresh={} availableCandidates={}",
+                    + "revalidated={} sourceRefresh={} availableCandidates={} note={}",
                     attempt, beforeCount, contadorActual, confirmed, c.number(), c.rowIndex(), tapX, tapY, c.label(),
                     c.candidateId(), confirmed ? "AVAILABLE_CANDIDATE" : "NOT_SELECTABLE",
-                    revalidated, sourceRefreshed, pool.size() - idx);
+                    revalidated, sourceRefreshed, pool.size() - idx,
+                    objetivoAlcanzadoAlMenosUnaVez ? "intentoUndecimoAsiento" : "alcanzandoObjetivo");
+
+            if (confirmed && contadorActual > MAX_ASIENTOS_CONFIRMABLES) {
+                log.warn("[SeatLimit] UNDECIMO_CONFIRMADO=true — un intento del 11º asiento SÍ incrementó el "
+                        + "contador (contadorActual={}), contradice el límite de 10 documentado en la alerta "
+                        + "('...10 por transacción...'). Se continúa verificando si además aparece la alerta.",
+                        contadorActual);
+            }
+
+            if (contadorActual >= MAX_ASIENTOS_CONFIRMABLES) {
+                objetivoAlcanzadoAlMenosUnaVez = true;
+                // Verificar la alerta INMEDIATAMENTE tras CUALQUIER intento a partir de
+                // aquí — tanto si este intento fue el que confirmó el 10º (evidencia
+                // visual real: la app puede mostrarla apenas se confirma el 10º) como si
+                // fue un intento adicional de un 11º asiento que no llegó a confirmarse.
+                // Nunca una consulta instantánea — smartWait acotado (contención real de
+                // WDA/Mirror ya documentada).
+                if (smartWait(this::estaVisibleAlertaLimiteAsientos, 5000, 200)) {
+                    validarAlertaLimiteAsientos();
+                    log.info("[SeatLimit] alertDetected=true tras attempt={} ({} asientos reales confirmados).",
+                            attempt, contadorActual);
+                    log.info("[SelectorPage] Alerta de límite detectada. Asientos confirmados: {}", seleccionados.size());
+                    takeScreenshot("Alerta limite asientos");
+                    return seleccionados;
+                }
+                // No apareció todavía — el mismo bucle continúa naturalmente al
+                // siguiente candidato, con el mismo presupuesto/sourceRefresh en curso.
+            }
         }
 
         // La única fuente de verdad del tamaño real de la selección es el contador
@@ -2188,7 +2272,14 @@ public class SelectorPage extends BasePage {
         // con la identidad física ya verificada (0 deselecciones esta corrida), una
         // tasa alta de fallo REAL es evidencia de asientos no disponibles en el
         // inventario en vivo, no de un bug de identidad/relocalización.
-        if (contadorActual < MAX_ASIENTOS_CONFIRMABLES) {
+        //
+        // El bucle de arriba solo llega aquí (sin haber retornado ya con la alerta
+        // detectada) cuando el presupuesto real de intentos —incluido el único
+        // sourceRefresh permitido— se agotó de verdad. Dos causas distintas, dos
+        // reportes distintos:
+        if (!objetivoAlcanzadoAlMenosUnaVez) {
+            // Nunca se alcanzaron ni los 10 asientos reales y alcanzables — mismo
+            // diagnóstico de disponibilidad ya existente, sin cambios.
             int unknownCandidates = Math.max(0, pool.size() - idx);
             double tasaFalloReal = attempt > 0 ? (double) failedCount / attempt : 0;
 
@@ -2230,136 +2321,13 @@ public class SelectorPage extends BasePage {
                     excludedAlreadyConfirmed, unknownCandidates));
         }
 
-        // FIX real (TAREA — corregir scope real de este test, ver comentario en
-        // MAX_ASIENTOS_CONFIRMABLES): se confirmaron los 10 asientos reales permitidos.
-        // El objetivo real de este método (ver su nombre) NUNCA fue confirmar un 11º
-        // asiento vía contador — eso es estructuralmente imposible si la app aplica su
-        // propio límite de negocio — sino INTENTAR un 11º asiento real y validar que la
-        // app responde con la alerta esperada. Se ejecuta EXACTAMENTE un intento real
-        // adicional (mismo mecanismo beforeCount->tap->afterCount ya usado en todo este
-        // método, nunca se asume el resultado) y se verifica la alerta inmediatamente
-        // después, sin importar si el contador avanzó o no — un 11º tap que SÍ
-        // incrementara el contador sería evidencia sorprendente que contradice el
-        // límite de 10 documentado en la propia alerta, y se registra como tal, nunca
-        // se descarta en silencio.
-        boolean intentoOnceEjecutado = false;
-        while (!intentoOnceEjecutado && idx < pool.size()) {
-            CandidatoLimite c = pool.get(idx++);
-            if (descartados.contains(c.candidateId())) continue;
-            boolean yaConfirmadoFisico = confirmados.stream()
-                    .anyMatch(cf -> cf.number() == c.number() && mismoAsientoFisico(cf.x(), cf.y(), c.x(), c.y()));
-            if (yaConfirmadoFisico) continue;
-
-            attempt++;
-            int beforeCount = contadorActual;
-            boolean revalidated = false;
-            int tapX = c.x(), tapY = c.y();
-            WebElement fresco = null;
-            try {
-                fresco = reubicarAsientoPorNumero(c.number(), c.y());
-                if (fresco != null) {
-                    org.openqa.selenium.Rectangle r = fresco.getRect();
-                    int freshY = r.getY() + r.getHeight() / 2;
-                    if (Math.abs(freshY - c.y()) <= TOLERANCIA_FILA_PX) {
-                        tapX = r.getX() + r.getWidth() / 2;
-                        tapY = freshY;
-                        revalidated = true;
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            if (revalidated) relocalizedCount++;
-
-            boolean tapOk;
-            try {
-                tapW3C(tapX, tapY);
-                tapOk = true;
-            } catch (Exception e) {
-                tapOk = false;
-            }
-
-            boolean confirmed = false;
-            if (tapOk) {
-                sleep(400);
-                contadorActual = contarAsientosSeleccionadosPorBotonContinuar();
-                confirmed = contadorActual == beforeCount + 1;
-                if (confirmed) {
-                    seleccionados.add("F" + c.rowIndex() + "A" + c.number());
-                    confirmados.add(new AsientoConfirmado(c.x(), c.y(), c.number()));
-                }
-            }
-            if (!confirmed) { descartados.add(c.candidateId()); failedCount++; }
-
-            // Ver comentario en el bucle principal: diferido a solo NOT_SELECTABLE
-            // (aquí solo se ejecuta una vez, pero se mantiene consistente).
-            String candLabel = "attributeUnavailable";
-            String candValue = "attributeUnavailable";
-            String candSelected = "attributeUnavailable";
-            String candEnabled = "attributeUnavailable";
-            String candVisible = "attributeUnavailable";
-            String candRect = "attributeUnavailable";
-            if (!confirmed && fresco != null) {
-                candLabel = attrOrUnavailable(fresco, "label");
-                candValue = attrOrUnavailable(fresco, "value");
-                candSelected = attrOrUnavailable(fresco, "selected");
-                try { candEnabled = String.valueOf(fresco.isEnabled()); } catch (Exception ignored) { }
-                try { candVisible = String.valueOf(fresco.isDisplayed()); } catch (Exception ignored) { }
-                try { candRect = fresco.getRect().toString(); } catch (Exception ignored) { }
-            }
-            if (!confirmed) {
-                log.info("[SeatCandidate] label={} value={} enabled={} selected={} visible={} rect={} beforeCount={} "
-                        + "tap={} afterCount={} confirmed={}",
-                        candLabel, candValue, candEnabled, candSelected, candVisible, candRect, beforeCount,
-                        tapOk, contadorActual, confirmed);
-            }
-            log.info("[SeatLimit] attempt={} beforeCount={} afterCount={} confirmed={} seatNumber={} rowIndex={} x={} y={} "
-                    + "label={} candidateId={} matchedPrevious=false alreadyConfirmed=false candidateState={} "
-                    + "revalidated={} sourceRefresh={} availableCandidates={} note=intentoUndecimoAsiento",
-                    attempt, beforeCount, contadorActual, confirmed, c.number(), c.rowIndex(), tapX, tapY, c.label(),
-                    c.candidateId(), confirmed ? "AVAILABLE_CANDIDATE" : "NOT_SELECTABLE",
-                    revalidated, sourceRefreshed, pool.size() - idx);
-
-            if (confirmed) {
-                log.warn("[SeatLimit] UNDECIMO_CONFIRMADO=true — el intento del 11º asiento SÍ incrementó el "
-                        + "contador (contadorActual={}), contradice el límite de 10 documentado en la alerta "
-                        + "('...10 por transacción...'). Se continúa verificando si además aparece la alerta.",
-                        contadorActual);
-            }
-            intentoOnceEjecutado = true;
-        }
-        if (!intentoOnceEjecutado) {
-            log.warn("[SeatLimit] No quedó ningún candidato disponible en el pool para intentar un 11º asiento "
-                    + "real tras confirmar los {} permitidos.", MAX_ASIENTOS_CONFIRMABLES);
-        }
-
-        // FIX real (TAREA — reporte del usuario: la alerta SÍ aparece en la app real,
-        // la automatización no la detectó). Causa raíz identificada: esta verificación
-        // era una consulta ÚNICA e instantánea, sin ninguna espera acotada — a
-        // diferencia de casi todas las demás transiciones de este archivo (que sí usan
-        // smartWait). Evidencia de por qué una consulta instantánea puede perderla:
-        // WDA es un único servidor HTTP compartido entre el driver real de Appium y el
-        // Mirror del Dashboard (IOSMirrorProvider golpea /screenshot hasta 20/seg en
-        // paralelo); el propio código del Mirror ya documenta que WDA prioriza al
-        // driver real y el Mirror queda relegado bajo contención — lo inverso también
-        // es cierto: una ráfaga de tráfico del Mirror puede introducir latencia
-        // suficiente para que una consulta instantánea (sin margen) llegue antes de que
-        // la alerta termine de renderizarse. Se corrige con un smartWait acotado —
-        // mismo patrón ya usado en continuar()/elementoHabilitado() — nunca un sleep
-        // fijo, solo sondeo real hasta que la condición sea verdadera o venza el tope.
-        boolean alertaVisible = smartWait(this::estaVisibleAlertaLimiteAsientos, 5000, 200);
-        if (alertaVisible) {
-            validarAlertaLimiteAsientos();
-            log.info("[SeatLimit] alertDetected=true tras confirmar {} asientos reales y un intento real adicional.",
-                    contadorActual);
-            log.info("[SelectorPage] Alerta de límite detectada. Asientos confirmados: {}", seleccionados.size());
-            takeScreenshot("Alerta limite asientos");
-            return seleccionados;
-        }
-
-        // La alerta no apareció pese al intento real del 11º asiento: se ejecuta
-        // ÚNICAMENTE la estrategia de diagnóstico ya definida (sin tocar el locator) —
-        // capturar el page source inmediatamente para determinar si la alerta existe
-        // en el árbol pero el locator no la detectó, o si realmente no se disparó.
+        // Se confirmaron los 10 asientos reales y se hicieron uno o más intentos
+        // reales de un 11º asiento (dentro del MISMO presupuesto/sourceRefresh de
+        // arriba — ver objetivoAlcanzadoAlMenosUnaVez), pero la alerta nunca apareció
+        // pese a agotar ese presupuesto por completo. Se ejecuta ÚNICAMENTE la
+        // estrategia de diagnóstico ya definida (sin tocar el locator) — capturar el
+        // page source inmediatamente para determinar si la alerta existe en el árbol
+        // pero el locator no la detectó, o si realmente no se disparó.
         String pageSourceTimestamp = java.time.Instant.now().toString();
         String pageSource = "";
         try { pageSource = driver.getPageSource(); } catch (Exception ignored) {}
@@ -2367,11 +2335,18 @@ public class SelectorPage extends BasePage {
                 || pageSource.contains("Aceptar y continuar");
         log.info("[SeatLimit] alertDetected=false alertPresentInSource={} alertLocatorMatch={} pageSourceTimestamp={}",
                 alertPresentInSource, false, pageSourceTimestamp);
-        takeScreenshot("Sin alerta tras intento real del 11º asiento");
+        // TAREA — diagnóstico temporal de la jerarquía real de Android View para la
+        // alerta de límite (Android ÚNICAMENTE; no decide nada del flujo del test,
+        // solo registra evidencia). Reutiliza el page source YA obtenido arriba —
+        // cero llamadas WDA nuevas.
+        if (!isIOS()) {
+            diagnosticarAlertaAndroid(pageSource);
+        }
+        takeScreenshot("Sin alerta tras agotar el presupuesto real de intentos");
 
-        throw new RuntimeException("No apareció la alerta de límite máximo de asientos tras intentar un 11º asiento "
-                + "real (" + contadorActual + " asientos reales confirmados por el contador; alertPresentInSource="
-                + alertPresentInSource + ").");
+        throw new RuntimeException("No apareció la alerta de límite máximo de asientos tras agotar el presupuesto "
+                + "real de intentos (" + attempt + " intentos totales, " + contadorActual + " asientos reales "
+                + "confirmados por el contador; alertPresentInSource=" + alertPresentInSource + ").");
     }
     // FIX real (causa ra\u00edz CONFIRMADA \u2014 "No apareci\u00f3 la alerta de l\u00edmite m\u00e1ximo de
     // asientos" en iOS): este locator usaba exclusivamente @text (atributo de
@@ -2380,6 +2355,79 @@ public class SelectorPage extends BasePage {
     // Mismo patr\u00f3n NSPredicate (label/value CONTAINS) ya validado en este archivo por
     // estaVisibleAlertaRestricciones()/aceptarYContinuarLocator(), mismo texto exacto
     // que ya usa la rama Android \u2014 sin cambio de comportamiento para Android.
+    // TAREA — investigar por qué alertPresentInSource=true (substring crudo) pero
+    // estaVisibleAlertaLimiteAsientos()=false (XPath @text) en Android, evidencia
+    // real RUN-1013 (captura de pantalla confirma la alerta visible en pantalla en
+    // ese instante exacto). Diagnóstico temporal, SOLO Android, SOLO lectura — nunca
+    // decide nada del flujo del test. Reutiliza SeatUiSnapshot (ya usado en este
+    // archivo para el mapa de asientos) para parsear el MISMO page source ya
+    // obtenido — cero llamadas WDA nuevas — y reportar, sin asumir estructura, TODOS
+    // los nodos cuyo text/content-desc contengan fragmentos reales de la alerta o
+    // del botón, con sus atributos crudos completos.
+    private void diagnosticarAlertaAndroid(String pageSource) {
+        try {
+            List<SeatUiSnapshot.Nodo> nodos = SeatUiSnapshot.capturar(pageSource).nodos;
+            List<SeatUiSnapshot.Nodo> candidatosAlerta = new ArrayList<>();
+            List<SeatUiSnapshot.Nodo> candidatosBoton = new ArrayList<>();
+            for (SeatUiSnapshot.Nodo n : nodos) {
+                String text = n.attrs.getOrDefault("text", "");
+                String desc = n.attrs.getOrDefault("content-desc", "");
+                String combinado = (text + " " + desc).toLowerCase();
+                if (combinado.contains("límite") || combinado.contains("alcanzaste")
+                        || combinado.contains("10 por transacción")) {
+                    candidatosAlerta.add(n);
+                }
+                if (combinado.contains("aceptar y continuar")) {
+                    candidatosBoton.add(n);
+                }
+            }
+            log.info("[AndroidSeatLimitAlert] sourceContains={} nodosParseados={} alertNodeFound={} "
+                    + "buttonFound={}",
+                    alertPresentInSourceCruda(pageSource), nodos.size(), !candidatosAlerta.isEmpty(),
+                    !candidatosBoton.isEmpty());
+            for (SeatUiSnapshot.Nodo n : candidatosAlerta) {
+                log.info("[AndroidSeatLimitAlert] alertClass={} alertText={} alertResourceId={} "
+                        + "alertContentDesc={} alertDisplayed={} alertEnabled={} alertClickable={} "
+                        + "alertBounds={} alertPackage={} alertDepth={} alertParentIndex={}",
+                        n.tag, n.attrs.get("text"), n.attrs.get("resource-id"), n.attrs.get("content-desc"),
+                        n.attrs.get("displayed"), n.attrs.get("enabled"), n.attrs.get("clickable"),
+                        n.attrs.get("bounds"), n.attrs.get("package"), n.depth, n.parentIndex);
+            }
+            for (SeatUiSnapshot.Nodo n : candidatosBoton) {
+                log.info("[AndroidSeatLimitAlert] buttonClass={} buttonText={} buttonResourceId={} "
+                        + "buttonContentDesc={} buttonDisplayed={} buttonClickable={} buttonEnabled={} "
+                        + "buttonBounds={}",
+                        n.tag, n.attrs.get("text"), n.attrs.get("resource-id"), n.attrs.get("content-desc"),
+                        n.attrs.get("displayed"), n.attrs.get("clickable"), n.attrs.get("enabled"),
+                        n.attrs.get("bounds"));
+            }
+            if (candidatosAlerta.isEmpty() && candidatosBoton.isEmpty()) {
+                // El texto existe en el string crudo pero SeatUiSnapshot (parseo DOM
+                // real) no encontró ningún nodo — puede indicar que el page source no
+                // es XML válido en esta captura, o que el fragmento cae fuera de
+                // cualquier atributo text/content-desc parseado. Se registra un
+                // fragmento crudo alrededor del match para inspección manual, sin
+                // inventar una causa.
+                int idx = pageSource.indexOf("límite");
+                if (idx < 0) idx = pageSource.indexOf("Aceptar y continuar");
+                if (idx >= 0) {
+                    int desde = Math.max(0, idx - 150);
+                    int hasta = Math.min(pageSource.length(), idx + 150);
+                    log.warn("[AndroidSeatLimitAlert] alertNodeFound=false buttonFound=false pese a sourceContains=true "
+                            + "— SeatUiSnapshot no encontró ningún nodo (nodosParseados={}). Fragmento crudo alrededor "
+                            + "del match: ...{}...",
+                            nodos.size(), pageSource.substring(desde, hasta));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[AndroidSeatLimitAlert] Error al diagnosticar: {}", e.getMessage());
+        }
+    }
+
+    private static boolean alertPresentInSourceCruda(String pageSource) {
+        return pageSource.contains("límite máximo de asientos") || pageSource.contains("Aceptar y continuar");
+    }
+
     private boolean estaVisibleAlertaLimiteAsientos() {
         try {
             By locator = isIOS()
