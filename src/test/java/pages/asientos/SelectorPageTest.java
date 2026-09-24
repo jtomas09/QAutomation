@@ -56,4 +56,46 @@ class SelectorPageTest {
         List<Integer> centrosY = List.of(190, 210);
         assertEquals(0, SelectorPage.indiceMasCercanoPorY(centrosY, 200));
     }
+
+    /**
+     * TAREA — corrección de falsos positivos "Banner en Asientos 3D"/"Banner en Sala
+     * Junior" (evidencia RUN-1001): prueba pura (sin Appium/WDA/hardware) de
+     * {@link SelectorPage#androidEsVocabularioOFrangoDeFiltro(String)} — la lista exacta
+     * de vocabulario del panel de filtros y la regex de rango horario que causaron que
+     * el panel de filtros fuera tratado como si fuera la cartelera de películas.
+     */
+    @Test
+    @DisplayName("6. Vocabulario exacto del panel de filtros (evidencia real RUN-1001) se reconoce")
+    void androidVocabularioPanelFiltros_reconoceEvidenciaReal() {
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("idiomas"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("original"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("experiencias"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("pluus"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("sala junior"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("screen x"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("formatos"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("limpiar filtros"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("aplicar"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("categorías"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("preventa"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("sala de arte"));
+    }
+
+    @Test
+    @DisplayName("7. Rango horario con guion (evidencia real RUN-1001) se reconoce, hora exacta ya cubierta no se duplica")
+    void androidRangoHorario_reconoceEvidenciaReal() {
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("2:01 pm - 6:00 pm"));
+        assertTrue(SelectorPage.androidEsVocabularioOFrangoDeFiltro("6:01 pm - 11:59 pm"));
+        assertFalse(SelectorPage.androidEsVocabularioOFrangoDeFiltro("7:30 pm")); // hora exacta: regla ya existente aparte
+    }
+
+    @Test
+    @DisplayName("8. Un título de película real (superset de una palabra del panel) NO se descarta por error")
+    void androidVocabularioPanelFiltros_noDescartaTituloRealPorSubcadena() {
+        // Exact-match, no CONTAINS: un título real que solo contenga alguna de estas
+        // palabras como subcadena (ej. una película llamada "Original Sin") no debe
+        // coincidir con la entrada exacta "original" del panel.
+        assertFalse(SelectorPage.androidEsVocabularioOFrangoDeFiltro("original sin"));
+        assertFalse(SelectorPage.androidEsVocabularioOFrangoDeFiltro("resident evil: noche cero"));
+    }
 }

@@ -1500,6 +1500,14 @@ public class SelectorPage extends BasePage {
         List<WebElement> primerLoteCrudo = null;
         int totalCandidatosCrudos = 0;
 
+        // Android ÚNICAMENTE — instrumentación TAREA (evidencia RUN-1001, Banner 3D/Sala
+        // Junior): contadores para el resumen [ANDROID][MovieDetection] final. No afecta
+        // ninguna decisión de aceptación/descarte — solo cuenta lo que el filtro Java ya
+        // decide por su cuenta.
+        int androidAceptados = 0;
+        int androidRechazados = 0;
+        boolean androidLog = !isIOS();
+
         for (By locator : candidatos) {
             try {
                 List<WebElement> elementos = driver.findElements(locator);
@@ -1513,40 +1521,78 @@ public class SelectorPage extends BasePage {
 
                         if (!visible) {
                             diagnostico.add("DESCARTADO (no visible)");
+                            if (androidLog) {
+                                androidRechazados++;
+                                log.info("[ANDROID][MovieCandidate] text=n/a isDisplayed=false "
+                                        + "belongsToFilterPanel=false isMovieCandidate=false reason=no_visible");
+                            }
                             continue;
                         }
 
                         String texto = obtenerTextoSeguro(el);
                         if (texto.isBlank()) {
                             diagnostico.add("DESCARTADO (texto vacío)");
+                            if (androidLog) {
+                                androidRechazados++;
+                                log.info("[ANDROID][MovieCandidate] text='' isDisplayed=true "
+                                        + "belongsToFilterPanel=false isMovieCandidate=false reason=texto_vacio");
+                            }
                             continue;
                         }
                         if (texto.length() < 5) {
                             diagnostico.add("DESCARTADO (longitud<5) texto='" + texto + "'");
+                            if (androidLog) {
+                                androidRechazados++;
+                                log.info("[ANDROID][MovieCandidate] text={} isDisplayed=true "
+                                        + "belongsToFilterPanel=false isMovieCandidate=false reason=longitud<5", texto);
+                            }
                             continue;
                         }
                         if (esTextoNoPelicula(texto)) {
                             diagnostico.add("DESCARTADO (esTextoNoPelicula) texto='" + texto + "'");
+                            if (androidLog) {
+                                androidRechazados++;
+                                boolean panel = androidEsVocabularioOFrangoDeFiltro(texto.trim().toLowerCase());
+                                log.info("[ANDROID][MovieCandidate] text={} isDisplayed=true belongsToFilterPanel={} "
+                                        + "isMovieCandidate=false reason=esTextoNoPelicula", texto, panel);
+                            }
                             continue;
                         }
 
                         // Evitar horarios
                         if (texto.matches("^([01]?\\d|2[0-3]):[0-5]\\d(\\s?(AM|PM|am|pm))?$")) {
                             diagnostico.add("DESCARTADO (es horario) texto='" + texto + "'");
+                            if (androidLog) {
+                                androidRechazados++;
+                                log.info("[ANDROID][MovieCandidate] text={} isDisplayed=true "
+                                        + "belongsToFilterPanel=false isMovieCandidate=false reason=es_horario", texto);
+                            }
                             continue;
                         }
 
                         // Evitar textos demasiado largos que no suelen ser títulos
                         if (texto.length() > 80) {
                             diagnostico.add("DESCARTADO (longitud>80) texto='" + texto.substring(0, 60) + "...'");
+                            if (androidLog) {
+                                androidRechazados++;
+                                log.info("[ANDROID][MovieCandidate] text={}... isDisplayed=true "
+                                        + "belongsToFilterPanel=false isMovieCandidate=false reason=longitud>80",
+                                        texto.substring(0, 60));
+                            }
                             continue;
                         }
 
                         diagnostico.add("ACEPTADO texto='" + texto + "'");
                         unicos.putIfAbsent(texto.trim(), el);
+                        if (androidLog) {
+                            androidAceptados++;
+                            log.info("[ANDROID][MovieCandidate] text={} isDisplayed=true belongsToFilterPanel=false "
+                                    + "isMovieCandidate=true reason=aceptado", texto);
+                        }
 
                     } catch (Exception e) {
                         diagnostico.add("DESCARTADO (excepción: " + e.getMessage() + ")");
+                        if (androidLog) androidRechazados++;
                     }
                 }
 
@@ -1584,6 +1630,18 @@ public class SelectorPage extends BasePage {
             }
         } else {
             log.info("[SelectorPage] Películas visibles detectadas: {}", resultado.size());
+        }
+
+        if (androidLog) {
+            // Android ÚNICAMENTE — resumen final requerido por TAREA. filterPanelVisible
+            // reutiliza el mismo XPath de "Aplicar" ya usado en
+            // seleccionarFiltroGenerico()/seleccionarFiltroSalaJunior() (ningún locator
+            // nuevo) — puramente diagnóstico, no cambia qué se devuelve.
+            boolean filterPanelVisible = androidHayElementoVisible(By.xpath("//*[contains(@text,'Aplicar')]"));
+            log.info("[ANDROID][MovieDetection] candidatesFound={} validMovieCandidates={} rejectedCandidates={} "
+                    + "filterPanelVisible={} detectionConfirmed={}",
+                    totalCandidatosCrudos, androidAceptados, androidRechazados, filterPanelVisible,
+                    !resultado.isEmpty());
         }
 
         return resultado;
@@ -3421,7 +3479,41 @@ public class SelectorPage extends BasePage {
             log.info("[SelectorPage] Aplicando filtros...");
             WebElement aplicar = waitAndGet(btnAplicar);
             if (!clicSeguroEnElemento(aplicar)) tapElementCenter(aplicar);
-            pausa(1500);
+
+            if (isIOS()) {
+                // iOS ÚNICAMENTE — sin cambios, se conserva el pausa(1500) original.
+                pausa(1500);
+            } else {
+                // Android ÚNICAMENTE (TAREA — causa raíz confirmada RUN-1001: el panel de
+                // filtros seguía visible cuando MovieDetection escaneaba la pantalla,
+                // devolviendo vocabulario del propio panel como si fueran películas). Se
+                // reemplaza el pausa(1500) ciego por una espera acotada y basada en
+                // condición real: el mismo botón "Aplicar" (btnAplicar, ya resuelto arriba,
+                // ningún locator nuevo) debe dejar de estar visible — no solo ausente del
+                // árbol, ver androidHayElementoVisible() — antes de continuar. Reutiliza
+                // smartWait(), ya usado en este archivo para el mismo propósito de espera
+                // acotada (ver estaVisibleAlertaLimiteAsientos()).
+                long tPanel0 = System.currentTimeMillis();
+                boolean visibleAntes = androidHayElementoVisible(btnAplicar);
+                boolean panelCerrado = smartWait(() -> !androidHayElementoVisible(btnAplicar), 5000, 200);
+                long elapsedMs = System.currentTimeMillis() - tPanel0;
+                log.info("[ANDROID][FilterApplied] filter={} applyTapped=true filterPanelVisibleBefore={} "
+                        + "filterPanelVisibleAfter={} panelClosed={} elapsedMs={}",
+                        textoFiltro, visibleAntes, !panelCerrado, panelCerrado, elapsedMs);
+
+                // TAREA — evidencia real RUN-1002 (capturas de pantalla): el panel de
+                // filtros NUNCA cierra cuando la opción no quedó realmente marcada (el
+                // checkbox de la opción permanece vacío, "Aplicar" queda deshabilitado).
+                // Mismo tratamiento que "opción no encontrada" (SKIP, ver más abajo en
+                // este mismo método) — no es un fallo de automatización nuevo, es el
+                // mismo caso "este filtro no está disponible/no se pudo usar en esta
+                // corrida", ya tratado como SKIP anteriormente.
+                if (!panelCerrado) {
+                    throw new org.opentest4j.TestAbortedException(
+                            "No se pudo aplicar el filtro '" + textoFiltro + "': el panel de filtros no se cerró "
+                            + "tras pulsar Aplicar (la opción no quedó marcada).");
+                }
+            }
 
             log.info("[SelectorPage] Filtro '{}' aplicado correctamente.", textoFiltro);
             takeScreenshot("Filtro " + textoFiltro + " aplicado");
@@ -3432,6 +3524,21 @@ public class SelectorPage extends BasePage {
             throw new AssertionError(
                     "❌ No fue posible seleccionar el filtro '" + textoFiltro + "'. Detalle: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Android ÚNICAMENTE — true si al menos un elemento que matchea el locator está
+     * REALMENTE visible (isDisplayed()==true), no solo presente en el árbol. Ausente o
+     * presente-pero-oculto (ej. durante la animación de cierre de un panel/bottom sheet)
+     * cuenta como "no visible" — mismo criterio ya usado en obtenerPeliculasVisibles().
+     */
+    private boolean androidHayElementoVisible(By locator) {
+        try {
+            for (WebElement el : driver.findElements(locator)) {
+                try { if (el.isDisplayed()) return true; } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
 
     private WebElement encontrarElementoFiltro(String textoFiltro) {
@@ -3669,7 +3776,30 @@ public class SelectorPage extends BasePage {
                 tapElementCenter(aplicar);
             }
 
-            pausa(1500);
+            if (isIOS()) {
+                // iOS ÚNICAMENTE — sin cambios, se conserva el pausa(1500) original.
+                pausa(1500);
+            } else {
+                // Android ÚNICAMENTE — mismo fix y misma justificación que en
+                // seleccionarFiltroGenerico() (ver su comentario): espera acotada por
+                // condición real (btnAplicar deja de estar visible) en vez de pausa fija.
+                long tPanel0 = System.currentTimeMillis();
+                boolean visibleAntes = androidHayElementoVisible(btnAplicar);
+                boolean panelCerrado = smartWait(() -> !androidHayElementoVisible(btnAplicar), 5000, 200);
+                long elapsedMs = System.currentTimeMillis() - tPanel0;
+                log.info("[ANDROID][FilterApplied] filter=SalaJunior applyTapped=true filterPanelVisibleBefore={} "
+                        + "filterPanelVisibleAfter={} panelClosed={} elapsedMs={}",
+                        visibleAntes, !panelCerrado, panelCerrado, elapsedMs);
+
+                // TAREA — mismo tratamiento que en seleccionarFiltroGenerico() (ver su
+                // comentario): panel que nunca cierra = opción no se marcó = mismo caso
+                // ya tratado como SKIP que "opción no encontrada" más arriba.
+                if (!panelCerrado) {
+                    throw new org.opentest4j.TestAbortedException(
+                            "No se pudo aplicar el filtro Sala Junior: el panel de filtros no se cerró tras "
+                            + "pulsar Aplicar (la opción no quedó marcada).");
+                }
+            }
 
             log.info("[SelectorPage] Filtro Sala Junior aplicado correctamente.");
             takeScreenshot("Filtro Sala Junior aplicado");
@@ -3852,12 +3982,52 @@ public class SelectorPage extends BasePage {
             "olvidé la contraseña", "olvide la contrasena",
     };
 
+    // Android ÚNICAMENTE — evidencia real RUN-1001 (Banner en Asientos 3D / Banner en
+    // Sala Junior): tras aplicar un filtro, el panel (todavía visible en ese momento —
+    // ver causa raíz real, corregida en seleccionarFiltroGenerico()/
+    // seleccionarFiltroSalaJunior()) exponía estas etiquetas exactas como si fueran
+    // "películas". Defensa SECUNDARIA únicamente — la corrección principal es esperar el
+    // cierre real del panel antes de escanear; esta lista NO sustituye esa espera, solo
+    // protege ante un residuo que sobreviva la espera acotada. Exact-match (no CONTAINS)
+    // para no descartar por error un título real que solo contenga alguna de estas
+    // palabras como subcadena.
+    // Ampliada con evidencia real RUN-1002 (validación de este mismo fix): la pantalla
+    // "Filtros" tiene una sección "Categorías" (Preventa/Sala de Arte) más abajo del
+    // scroll, no visible en la evidencia original de RUN-1001, que se detectó al validar
+    // en hardware real.
+    private static final java.util.Set<String> ANDROID_VOCABULARIO_PANEL_FILTROS = java.util.Set.of(
+            "idiomas", "original", "experiencias", "pluus", "sala junior", "screen x",
+            "formatos", "limpiar filtros", "aplicar", "categorías", "preventa", "sala de arte"
+    );
+
+    // Android ÚNICAMENTE — la regex previa (ver más abajo, dentro de esTextoNoPelicula)
+    // solo cubría una hora EXACTA ("7:30 PM"); un RANGO horario con guion ("2:01 PM -
+    // 6:00 PM", chip real del panel de filtros de horario) no calzaba y pasaba como
+    // candidato válido — evidencia real RUN-1001.
+    private static final java.util.regex.Pattern ANDROID_RANGO_HORARIO = java.util.regex.Pattern.compile(
+            "^([01]?\\d|2[0-3]):[0-5]\\d\\s?(am|pm)?\\s*-\\s*([01]?\\d|2[0-3]):[0-5]\\d\\s?(am|pm)?$");
+
+    /**
+     * Android ÚNICAMENTE — algoritmo puro (sin WDA, sin isIOS()) que decide si un texto
+     * ya normalizado (trim+lowercase) es vocabulario del panel de filtros o un rango
+     * horario con guion. Extraído para poder testearse sin dispositivo/instancia — mismo
+     * patrón ya usado por {@link #indiceMasCercanoPorY(List, int)}.
+     */
+    static boolean androidEsVocabularioOFrangoDeFiltro(String textoNormalizado) {
+        return ANDROID_VOCABULARIO_PANEL_FILTROS.contains(textoNormalizado)
+                || ANDROID_RANGO_HORARIO.matcher(textoNormalizado).matches();
+    }
+
     private boolean esTextoNoPelicula(String txt) {
         String t = txt == null ? "" : txt.trim().toLowerCase();
 
         if (t.contains("?") || t.contains("¿") || t.contains("...")) return true;
         for (String clave : PALABRAS_CLAVE_NO_PELICULA) {
             if (t.contains(clave)) return true;
+        }
+
+        if (!isIOS() && androidEsVocabularioOFrangoDeFiltro(t)) {
+            return true;
         }
 
         return t.isBlank()
