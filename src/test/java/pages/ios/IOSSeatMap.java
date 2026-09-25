@@ -66,13 +66,15 @@ public class IOSSeatMap extends IOSBasePage {
     }
 
     /**
-     * Intenta seleccionar más de 10 asientos y valida que aparezca la alerta de
-     * límite máximo. Lanza si la alerta nunca aparece (ver TAREA 29: el mapa de
-     * asientos — no este loop de tap — es el sospechoso principal cuando este método
-     * tarda ~180s sin encontrar la alerta).
+     * TAREA — portado a un motor exclusivo de iOS ({@link IOSSeatLimitEngine}), sin
+     * ninguna dependencia de {@link SelectorPage}/UiAutomator2 — único método de esta
+     * fachada que dejó de delegar en `legacy` (el resto de la clase permanece
+     * exactamente igual, ver comentario de la clase). Android sigue usando
+     * exclusivamente {@code SelectorPage.seleccionarMasDe10AsientosYValidarAlerta()},
+     * sin ningún cambio.
      */
     public List<String> seleccionarMasDe10AsientosYValidarAlerta() {
-        return legacy.seleccionarMasDe10AsientosYValidarAlerta();
+        return new IOSSeatLimitEngine(driver).seleccionarMasDe10AsientosYValidarAlerta();
     }
 
     /** Selecciona un asiento especial (discapacidad). Devuelve su identificador. */

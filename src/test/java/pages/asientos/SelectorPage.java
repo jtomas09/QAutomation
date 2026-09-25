@@ -1032,9 +1032,44 @@ public class SelectorPage extends BasePage {
                         // estaEnPantallaDeAsientos(), con los mismos indicadores ya usados y validados
                         // en verificarPantallaAsientosOSkip() de este mismo archivo (nunca aparecen en
                         // la pantalla de horarios).
+                        // TAREA — evidencia real RUN-1007 (iPhone físico, WDA/provisioning YA
+                        // confirmados READY antes de esta espera — ver [JobExecutor] ReadyForExecution:
+                        // YES en el log del Runner, distinto y anterior a este punto): los 3 horarios
+                        // disponibles fallaron con resultado=SIN-TRANSICION (nunca SKIP-ALERTA — no
+                        // hubo ninguna alerta real), es decir, estaEnPantallaDeAsientos() nunca se
+                        // confirmó dentro de la ventana de esta espera. Android NO se toca — conserva
+                        // exactamente su timeout de 1500ms (ya funciona correctamente, evidencia de
+                        // tareas previas). iOS ÚNICAMENTE recibe una ventana más tolerante — mismo
+                        // mecanismo de espera (smartWait, poll cada 150ms, nunca un sleep fijo), solo
+                        // el tope máximo cambia. Ruta separada explícita (if/else), nunca un timeout
+                        // "global" ni una variable compartida reasignada por plataforma.
                         long tTrans0 = System.currentTimeMillis();
-                        boolean transicionOk = smartWait(this::estaEnPantallaDeAsientos, 1500, 150);
-                        utils.PerfMetrics.stage("ScheduleSelection", "smartWait-transicion", System.currentTimeMillis() - tTrans0);
+                        long timeoutTransicionMs;
+                        if (isIOS()) {
+                            timeoutTransicionMs = 6000L;
+                            log.info("[IOS][NAVIGATION] esperando pantalla de asientos tras click en horario='{}' "
+                                    + "timeoutMs={}", hora, timeoutTransicionMs);
+                        } else {
+                            timeoutTransicionMs = 1500L; // Android — SIN CAMBIOS, valor original exacto
+                            log.debug("[ANDROID] esperando pantalla de asientos tras click en horario='{}' "
+                                    + "timeoutMs={}", hora, timeoutTransicionMs);
+                        }
+                        boolean transicionOk = smartWait(this::estaEnPantallaDeAsientos, timeoutTransicionMs, 150);
+                        long transicionDurationMs = System.currentTimeMillis() - tTrans0;
+                        utils.PerfMetrics.stage("ScheduleSelection", "smartWait-transicion", transicionDurationMs);
+                        if (isIOS()) {
+                            log.info("[IOS][NAVIGATION] pantallaAsientosDetectada={} tiempoRealMs={} "
+                                    + "timeoutUsadoMs={}", transicionOk, transicionDurationMs, timeoutTransicionMs);
+                            // TAREA — diagnóstico temporal de captura de page source (investigación de
+                            // pantallaAsientosLocator()) YA CUMPLIÓ SU PROPÓSITO Y SE RETIRA: evidencia
+                            // real (RUN-1009) confirmó que este locator SÍ detecta la transición
+                            // correctamente cuando ocurre (horario '5:40 PM', 589ms) — la causa de los
+                            // fallos previos era que ciertos horarios puntuales no navegan al tocarlos,
+                            // no un problema de detección. No se requiere ningún cambio de locator.
+                        } else {
+                            log.debug("[ANDROID] pantallaAsientosDetectada={} tiempoRealMs={} timeoutUsadoMs={}",
+                                    transicionOk, transicionDurationMs, timeoutTransicionMs);
+                        }
                         if (transicionOk) {
                             resultado = "OK";
                             return hora;
